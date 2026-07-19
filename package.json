@@ -1,0 +1,10 @@
+{
+  "name": "lumiverse-swarm-studio",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Metadata-aware SwarmUI studio for Lumiverse",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node tests/backend-contract.mjs"
+  }
+}

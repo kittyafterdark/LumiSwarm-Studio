@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Swarm Studio UI Harness</title>
+  <style>
+    :root {
+      --lumiverse-fill: #16191f;
+      --lumiverse-fill-subtle: #20242d;
+      --lumiverse-border: #363c49;
+      --lumiverse-text: #eef2f6;
+      --lumiverse-text-muted: #9da8b8;
+      --lumiverse-text-dim: #727d8c;
+      --lumiverse-accent: #72d6d0;
+      --lumiverse-accent-text: #061716;
+      --lumiverse-radius: 9px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #0e1116; color: var(--lumiverse-text); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    .host-modal { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 18px; background: rgba(4, 7, 10, .72); }
+    .host-dialog { width: min(1120px, calc(100vw - 36px)); max-height: calc(100vh - 36px); overflow: hidden; border: 1px solid #3c4452; border-radius: 13px; background: rgba(20, 23, 29, .97); box-shadow: 0 30px 90px rgba(0,0,0,.55); }
+    .host-header { height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--lumiverse-border); }
+    .host-header strong { font-size: 14px; }
+    .host-header button { border: 0; background: transparent; color: var(--lumiverse-text-muted); font-size: 22px; }
+    .host-body { padding: 13px; overflow: hidden; }
+    #drawer { display: none; }
+  </style>
+</head>
+<body>
+  <div id="drawer"></div>
+  <script type="module">
+    import { setup } from "../dist/frontend.js"
+
+    const handlers = []
+    const later = (payload) => setTimeout(() => handlers.forEach((handler) => handler(payload)), 0)
+    const svg = (label, a, b) => `data:image/svg+xml,${encodeURIComponent(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">
+        <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>
+        <rect width="640" height="640" fill="url(#g)"/>
+        <circle cx="320" cy="275" r="154" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="4"/>
+        <path d="M165 500c55-105 255-105 310 0" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="4"/>
+        <text x="320" y="580" text-anchor="middle" fill="white" font-family="system-ui" font-size="28">${label}</text>
+      </svg>
+    `)}`
+
+    const loras = [
+      { name: "styles/cinematic-ink.safetensors", title: "Cinematic Ink", author: "Nox Atelier", description: "Graphic inkwork with controlled cinematic lighting and confident line weight.", previewRef: "/preview/ink", architecture: "SDXL", className: "LoRA", compatClass: "SDXL", triggerPhrase: "cinematic ink style", tags: ["style", "ink"], defaultWeight: .8, local: true, timeModified: 8 },
+      { name: "characters/soft-portrait.safetensors", title: "Soft Portrait", author: "Mira", description: "Natural portrait rendering with soft skin detail and gentle falloff.", previewRef: "/preview/portrait", architecture: "Flux", className: "LoRA", compatClass: "Flux.1", triggerPhrase: "soft portrait lighting", tags: ["portrait"], defaultWeight: .65, local: true, timeModified: 7 },
+      { name: "lighting/neon-rim.safetensors", title: "Neon Rim Light", author: "Chromaforge", description: "High-contrast cyan and magenta rim lighting for dramatic subjects.", previewRef: "/preview/neon", architecture: "SDXL", className: "LoRA", compatClass: "SDXL", triggerPhrase: "neon rim lighting", tags: ["lighting"], defaultWeight: .55, local: true, timeModified: 9 },
+      { name: "styles/analog-editorial.safetensors", title: "Analog Editorial", author: "Frame 36", description: "Editorial film grain, warm halation, and restrained analog color.", previewRef: "/preview/analog", architecture: "SDXL", className: "LoRA", compatClass: "SDXL", triggerPhrase: "analog editorial photo", tags: ["photo"], defaultWeight: .7, local: true, timeModified: 5 },
+      { name: "concept/crystal-bloom.safetensors", title: "Crystal Bloom", author: "Arca", description: "Crystalline floral growth patterns with refractive highlights.", previewRef: "/preview/crystal", architecture: "Flux", className: "LoRA", compatClass: "Flux.1", triggerPhrase: "crystal bloom", tags: ["concept"], defaultWeight: .9, local: true, timeModified: 6 },
+    ]
+    const previewMap = {
+      "styles/cinematic-ink.safetensors": svg("Cinematic Ink", "#182437", "#9b5948"),
+      "characters/soft-portrait.safetensors": svg("Soft Portrait", "#bc7b78", "#4d3565"),
+      "lighting/neon-rim.safetensors": svg("Neon Rim", "#102847", "#b11a85"),
+      "styles/analog-editorial.safetensors": svg("Analog Editorial", "#806241", "#2d5049"),
+      "concept/crystal-bloom.safetensors": svg("Crystal Bloom", "#543f82", "#188f8b"),
+    }
+
+    const drawerRoot = document.querySelector("#drawer")
+    const ctx = {
+      dom: {
+        addStyle(css) {
+          const style = document.createElement("style")
+          style.textContent = css
+          document.head.appendChild(style)
+          return () => style.remove()
+        },
+      },
+      ui: {
+        showModal({ title }) {
+          const host = document.createElement("div")
+          host.className = "host-modal"
+          host.innerHTML = `<div class="host-dialog"><div class="host-header"><strong></strong><button aria-label="Close">×</button></div><div class="host-body"></div></div>`
+          host.querySelector("strong").textContent = title
+          document.body.appendChild(host)
+          const dismissHandlers = []
+          const handle = {
+            root: host.querySelector(".host-body"),
+            setTitle(value) { host.querySelector("strong").textContent = value },
+            onDismiss(handler) { dismissHandlers.push(handler); return () => {} },
+            dismiss() { host.remove(); dismissHandlers.forEach((handler) => handler()) },
+          }
+          host.querySelector("button").addEventListener("click", () => handle.dismiss())
+          return handle
+        },
+        registerDrawerTab() {
+          const root = document.createElement("div")
+          drawerRoot.appendChild(root)
+          return { root, destroy() {}, onActivate() { return () => {} } }
+        },
+        registerInputBarAction() {
+          let clickHandler = () => {}
+          return { onClick(handler) { clickHandler = handler; return () => { clickHandler = () => {} } }, destroy() {} }
+        },
+      },
+      onBackendMessage(handler) { handlers.push(handler); return () => {} },
+      events: { on() { return () => {} } },
+      sendToBackend(message) {
+        if (message.type === "bootstrap") {
+          later({ type: "bootstrap_result", requestId: message.requestId, data: {
+            permissions: { imageGen: true, metadata: true, images: true, chats: true },
+            connections: [{ id: "swarm-1", name: "Local SwarmUI", provider: "swarmui", api_url: "http://127.0.0.1:7801", model: "juggernaut-xl.safetensors", is_default: true, default_parameters: { width: 1024, height: 1024, steps: 28, cfgScale: 6.5, sampler: "dpmpp_2m", scheduler: "karras" } }],
+            outputs: [],
+            activeChat: { id: "chat-1", character_id: "char-1" },
+          }})
+        } else if (message.type === "load_connection") {
+          later({ type: "connection_result", requestId: message.requestId, data: {
+            connection: { id: "swarm-1", name: "Local SwarmUI", model: "juggernaut-xl.safetensors", default_parameters: { width: 1024, height: 1024, steps: 28, cfgScale: 6.5, sampler: "dpmpp_2m", scheduler: "karras" } },
+            models: [{ id: "juggernaut-xl.safetensors", label: "Juggernaut XL" }, { id: "flux-dev.safetensors", label: "Flux Dev" }],
+            loras,
+            metadataError: "",
+            hasMetadataToken: false,
+          }})
+        } else if (message.type === "preview") {
+          later({ type: "preview_result", requestId: message.requestId, name: message.name, dataUrl: previewMap[message.name] })
+        } else if (message.type === "generate") {
+          setTimeout(() => later({ type: "generation_result", requestId: message.requestId, data: {
+            result: { imageDataUrl: svg("Generated output", "#134e5e", "#6f3f78"), imageUrl: svg("Generated output", "#134e5e", "#6f3f78"), model: "juggernaut-xl.safetensors", provider: "swarmui" },
+            outputs: [],
+          }}), 350)
+        }
+      },
+    }
+
+    setup(ctx)
+    drawerRoot.querySelector("button").click()
+  </script>
+</body>
+</html>
