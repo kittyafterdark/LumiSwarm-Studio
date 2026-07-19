@@ -105,7 +105,10 @@
             permissions: { imageGen: true, metadata: true, images: true, chats: true },
             connections: [{ id: "swarm-1", name: "Local SwarmUI", provider: "swarmui", api_url: "http://127.0.0.1:7801", model: "anima-semi-v10.safetensors", is_default: true, default_parameters: { width: 768, height: 1152, steps: 28, cfgScale: 4.5, sampler: "dpmpp_2m", scheduler: "beta57" } }],
             outputs: [],
-            stackPresets: [],
+            stackPresets: [
+              { id: "portrait-stack", name: "Anima portrait", updatedAt: Date.now(), items: [{ name: "anima/soft-portrait.safetensors", title: "Soft Portrait · Anima", weight: .65, enabled: true, useTrigger: false }] },
+              { id: "ink-stack", name: "Ink + rim light", updatedAt: Date.now(), items: [{ name: "anima/cinematic-ink.safetensors", title: "Cinematic Ink · Anima", weight: .8, enabled: true, useTrigger: false }, { name: "anima/neon-rim.safetensors", title: "Neon Rim · Anima", weight: .55, enabled: true, useTrigger: false }] },
+            ],
             activeChat: { id: "chat-1", character_id: "char-1" },
           }})
         } else if (message.type === "load_connection") {

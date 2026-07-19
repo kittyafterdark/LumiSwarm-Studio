@@ -2,9 +2,13 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 
 const {
+  fitAspectWithin,
   inferModelFamily,
   modelSignalsCompatible,
 } = await import("../dist/frontend.js")
+
+assert.deepEqual(fitAspectWithin(2, 1000, 300), { width: 600, height: 300 })
+assert.deepEqual(fitAspectWithin(0.5, 200, 1000), { width: 200, height: 400 })
 
 assert.equal(inferModelFamily("BSSANIRLANIMASemi_v10"), "anima")
 assert.equal(inferModelFamily("Illustrious XL v1.5"), "illustrious")
@@ -42,8 +46,18 @@ assert.match(source, /useTrigger:\s*false/)
 assert.match(source, /data-tab="create"/)
 assert.match(source, /data-tab="loras"/)
 assert.match(source, /data-tab="history"/)
+assert.doesNotMatch(source, /data-tab="prompt"/)
 assert.match(source, /data-action="toggle-fullscreen"/)
 assert.match(source, /data-action="save-stack"/)
+assert.match(source, /data-role="mobile-stack-preset"/)
+assert.match(source, /data-mobile-panel="create-output"/)
+assert.match(source, /data-mobile-panel="create-prompt"/)
+assert.match(source, /data-resize="generation"/)
+assert.match(source, /data-resize="history"/)
+assert.match(source, /data-resize="dock"/)
+assert.match(source, /data-resize="lora-split"/)
+assert.match(source, /data-resize="prompt"/)
+assert.match(source, /fitPreviewToAspect/)
 assert.match(source, /data-role="inspector-positive"/)
 assert.match(source, /@media \(max-width: 720px\)/)
 

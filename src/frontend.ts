@@ -500,6 +500,11 @@ const STYLES = `
 const STUDIO_V3_STYLES = `
   .ss-shell {
     --ss-gap: 10px;
+    --ss-generation-width: 284px;
+    --ss-history-width: 244px;
+    --ss-dock-height: 282px;
+    --ss-prompt-height: 150px;
+    --ss-library-width: 60%;
     width: 100%;
     height: min(900px, calc(100dvh - 118px));
     min-height: min(650px, calc(100dvh - 118px));
@@ -530,21 +535,74 @@ const STUDIO_V3_STYLES = `
   .ss-workspace {
     min-height: 0;
     display: grid;
-    grid-template-columns: 284px minmax(300px, 1fr) 244px;
+    grid-template-columns: var(--ss-generation-width) minmax(300px, 1fr) var(--ss-history-width);
     gap: var(--ss-gap);
     flex: 1 1 0;
     overflow: hidden;
+    position: relative;
     transition: grid-template-columns .2s ease;
   }
   .ss-shell.ss-generation-collapsed .ss-workspace {
-    grid-template-columns: 42px minmax(300px, 1fr) 244px;
+    grid-template-columns: 42px minmax(300px, 1fr) var(--ss-history-width);
   }
   .ss-shell.ss-history-collapsed .ss-workspace {
-    grid-template-columns: 284px minmax(300px, 1fr) 42px;
+    grid-template-columns: var(--ss-generation-width) minmax(300px, 1fr) 42px;
   }
   .ss-shell.ss-generation-collapsed.ss-history-collapsed .ss-workspace {
     grid-template-columns: 42px minmax(300px, 1fr) 42px;
   }
+  .ss-resize-handle,
+  .ss-center-resizer,
+  .ss-dock-resizer,
+  .ss-lora-divider {
+    position: relative;
+    z-index: 12;
+    touch-action: none;
+  }
+  .ss-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 10px;
+    cursor: col-resize;
+  }
+  .ss-resize-generation { left: calc(var(--ss-generation-width) + (var(--ss-gap) / 2) - 5px); }
+  .ss-resize-history { right: calc(var(--ss-history-width) + (var(--ss-gap) / 2) - 5px); }
+  .ss-resize-handle::after,
+  .ss-center-resizer::after,
+  .ss-dock-resizer::after,
+  .ss-lora-divider::after {
+    content: "";
+    position: absolute;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 42%, var(--lumiverse-border));
+    opacity: .18;
+    transition: opacity .15s ease, box-shadow .15s ease;
+  }
+  .ss-resize-handle::after,
+  .ss-lora-divider::after {
+    top: 12px;
+    bottom: 12px;
+    left: 4px;
+    width: 2px;
+  }
+  .ss-center-resizer::after,
+  .ss-dock-resizer::after {
+    left: 18px;
+    right: 18px;
+    top: 3px;
+    height: 2px;
+  }
+  .ss-resize-handle:hover::after,
+  .ss-center-resizer:hover::after,
+  .ss-dock-resizer:hover::after,
+  .ss-lora-divider:hover::after,
+  .ss-shell.ss-is-resizing [data-resize]::after {
+    opacity: .95;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 45%, transparent);
+  }
+  .ss-shell.ss-generation-collapsed .ss-resize-generation,
+  .ss-shell.ss-history-collapsed .ss-resize-history { display: none; }
   .ss-generation-pane,
   .ss-history-pane,
   .ss-output-stage,
@@ -605,10 +663,11 @@ const STUDIO_V3_STYLES = `
     min-width: 0;
     min-height: 0;
     display: grid;
-    grid-template-rows: minmax(220px, 1fr) auto;
-    gap: var(--ss-gap);
+    grid-template-rows: minmax(180px, 1fr) 8px minmax(108px, var(--ss-prompt-height));
+    gap: 0;
     overflow: hidden;
   }
+  .ss-center-resizer { cursor: row-resize; min-height: 8px; }
   .ss-output-stage {
     min-height: 0;
     padding: 9px;
@@ -625,9 +684,10 @@ const STUDIO_V3_STYLES = `
   }
   .ss-output-stage-head .ss-output-actions { display: flex; }
   .ss-current-preview {
-    min-height: 190px;
+    min-height: 120px;
     max-height: none;
-    flex: 1 1 0;
+    flex: 0 0 auto;
+    align-self: center;
     cursor: zoom-in;
   }
   .ss-current-preview img { cursor: zoom-in; }
@@ -639,9 +699,23 @@ const STUDIO_V3_STYLES = `
   }
   .ss-output-label { flex: 1; }
   .ss-zoom-hint { color: var(--lumiverse-text-dim, var(--lumiverse-text-muted)); font-size: 9px; white-space: nowrap; }
-  .ss-prompt-panel { padding: 9px; min-height: 0; }
+  .ss-prompt-panel { padding: 8px 9px; min-height: 0; overflow-y: auto; }
   .ss-prompt-panel .ss-textarea { min-height: 70px; max-height: 150px; }
   .ss-prompt-grid { grid-template-columns: 1.25fr 1fr; }
+  .ss-prompt-head { min-height: 31px; margin-bottom: 5px; }
+  .ss-prompt-status {
+    min-width: 0;
+    max-width: 36%;
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--lumiverse-text-muted);
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ss-prompt-actions { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+  .ss-desktop-generate { min-width: 155px; min-height: 30px; height: 30px; padding-block: 4px; }
+  .ss-mobile-stack-picker { display: none; }
   .ss-history-pane .ss-history-grid {
     min-height: 0;
     display: grid;
@@ -668,17 +742,25 @@ const STUDIO_V3_STYLES = `
   .ss-history-item:hover::after { opacity: 1; }
   .ss-lora-dock {
     min-height: 0;
-    flex: 0 0 250px;
+    flex: 0 0 var(--ss-dock-height);
     overflow: hidden;
+    position: relative;
     transition: flex-basis .2s ease;
   }
-  .ss-lora-dock .ss-dock-head { min-height: 36px; }
+  .ss-dock-resizer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 8px;
+    cursor: row-resize;
+  }
   .ss-lora-dock-content {
-    height: calc(100% - 36px);
+    height: 100%;
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr);
-    gap: 10px;
-    padding: 9px;
+    grid-template-columns: minmax(220px, var(--ss-library-width)) 8px minmax(240px, 1fr);
+    gap: 0;
+    padding: 9px 8px 8px;
   }
   .ss-lora-library,
   .ss-stack-pane {
@@ -686,10 +768,25 @@ const STUDIO_V3_STYLES = `
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 5px;
     overflow: hidden;
   }
-  .ss-lora-library { padding-right: 9px; border-right: 1px solid var(--lumiverse-border); }
+  .ss-lora-library { padding-right: 6px; }
+  .ss-stack-pane { padding-left: 6px; }
+  .ss-lora-divider {
+    cursor: col-resize;
+    border-left: 1px solid color-mix(in srgb, var(--lumiverse-border) 70%, transparent);
+    border-right: 1px solid color-mix(in srgb, var(--lumiverse-border) 35%, transparent);
+  }
+  .ss-lora-titlebar {
+    min-height: 27px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .ss-lora-titlebar .ss-family-chip { margin-left: auto; }
+  .ss-lora-titlebar .ss-pane-toggle { flex: 0 0 auto; }
+  .ss-lora-dock .ss-section-head { min-height: 27px; margin-bottom: 0; }
   .ss-library-tools {
     grid-template-columns: minmax(140px, 1fr) 135px 100px auto;
   }
@@ -721,6 +818,31 @@ const STUDIO_V3_STYLES = `
     max-height: none;
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   }
+  .ss-lora-card {
+    position: relative;
+    min-height: 98px;
+    isolation: isolate;
+  }
+  .ss-lora-card:hover { z-index: 8; }
+  .ss-lora-body { gap: 2px; padding: 6px 7px 31px; }
+  .ss-lora-desc { -webkit-line-clamp: 1; min-height: 13px; }
+  .ss-badges { max-height: 17px; flex-wrap: nowrap; }
+  .ss-lora-footer {
+    position: absolute;
+    left: 79px;
+    right: 7px;
+    bottom: 6px;
+    min-height: 25px;
+    padding-right: 54px;
+  }
+  .ss-add-button {
+    position: absolute;
+    right: 7px;
+    bottom: 6px;
+    z-index: 20;
+    pointer-events: auto;
+    box-shadow: 0 3px 12px rgba(0,0,0,.36);
+  }
   .ss-stack-head-tools {
     display: grid;
     grid-template-columns: minmax(110px, 1fr) auto auto auto;
@@ -739,15 +861,24 @@ const STUDIO_V3_STYLES = `
     color: #e0a458;
     font-weight: 500;
   }
-  .ss-shell.ss-loras-collapsed .ss-lora-dock { flex-basis: 36px; }
-  .ss-shell.ss-loras-collapsed .ss-lora-dock-content { display: none; }
+  .ss-shell.ss-loras-collapsed .ss-lora-dock { flex-basis: 32px; }
+  .ss-shell.ss-loras-collapsed .ss-dock-resizer,
+  .ss-shell.ss-loras-collapsed .ss-library-tools,
+  .ss-shell.ss-loras-collapsed .ss-library-status,
+  .ss-shell.ss-loras-collapsed .ss-lora-grid,
+  .ss-shell.ss-loras-collapsed .ss-lora-divider,
+  .ss-shell.ss-loras-collapsed .ss-stack-pane,
+  .ss-shell.ss-loras-collapsed .ss-lora-titlebar > :not(.ss-pane-toggle) { display: none; }
+  .ss-shell.ss-loras-collapsed .ss-lora-dock-content { display: block; padding: 2px 5px; }
+  .ss-shell.ss-loras-collapsed .ss-lora-library { display: block; padding: 0; }
+  .ss-shell.ss-loras-collapsed .ss-lora-titlebar { justify-content: flex-end; min-height: 26px; }
   .ss-commandbar {
-    flex: 0 0 48px;
-    min-height: 48px;
-    display: flex;
+    flex: 0 0 30px;
+    min-height: 30px;
+    display: none;
     align-items: center;
     gap: 10px;
-    padding: 6px 7px 6px 10px;
+    padding: 3px 7px 3px 10px;
     border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 28%, var(--lumiverse-border));
     border-radius: calc(var(--lumiverse-radius, 8px) * 1.1);
     background:
@@ -761,6 +892,7 @@ const STUDIO_V3_STYLES = `
     min-height: 36px;
     margin-left: auto;
   }
+  .ss-mobile-generate { display: none; }
   .ss-command-summary {
     display: flex;
     align-items: center;
@@ -847,17 +979,17 @@ const STUDIO_V3_STYLES = `
   .ss-token-popover { z-index: 30; }
 
   @media (max-width: 1000px) and (min-width: 721px) {
-    .ss-workspace { grid-template-columns: 245px minmax(280px, 1fr) 205px; }
-    .ss-shell.ss-generation-collapsed .ss-workspace { grid-template-columns: 42px minmax(280px, 1fr) 205px; }
-    .ss-shell.ss-history-collapsed .ss-workspace { grid-template-columns: 245px minmax(280px, 1fr) 42px; }
-    .ss-shell.ss-generation-collapsed.ss-history-collapsed .ss-workspace { grid-template-columns: 42px minmax(280px, 1fr) 42px; }
-    .ss-lora-dock-content { grid-template-columns: minmax(0, 1fr) minmax(290px, .9fr); }
+    .ss-shell {
+      --ss-generation-width: 245px;
+      --ss-history-width: 205px;
+      --ss-library-width: 58%;
+    }
     .ss-library-tools { grid-template-columns: minmax(120px, 1fr) 125px auto; }
     .ss-library-tools [data-role="lora-sort"] { display: none; }
   }
 
   @media (max-height: 800px) and (min-width: 721px) {
-    .ss-lora-dock { flex-basis: 205px; }
+    .ss-shell { --ss-dock-height: 228px; --ss-prompt-height: 126px; }
     .ss-prompt-panel .ss-textarea { min-height: 56px; }
     .ss-pane-head { min-height: 35px; }
   }
@@ -875,6 +1007,9 @@ const STUDIO_V3_STYLES = `
       gap: 7px;
       background: var(--lumiverse-bg, var(--lumiverse-fill, #0d0d11));
     }
+    .ss-topbar,
+    .ss-mobile-tabs,
+    .ss-commandbar { flex-shrink: 0; }
     .ss-topbar {
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 6px;
@@ -902,6 +1037,8 @@ const STUDIO_V3_STYLES = `
     .ss-token-popover { top: 74px; right: 0; width: calc(100vw - 16px); }
     .ss-mobile-tabs {
       display: flex;
+      flex: 0 0 36px;
+      min-height: 36px;
       gap: 4px;
       overflow-x: auto;
       scrollbar-width: none;
@@ -928,10 +1065,14 @@ const STUDIO_V3_STYLES = `
     }
     .ss-center { display: contents; }
     .ss-workspace [data-mobile-panel] { display: none !important; }
-    .ss-shell[data-mobile-tab="create"] [data-mobile-panel="create"] { display: flex !important; min-height: 100%; }
-    .ss-shell[data-mobile-tab="prompt"] [data-mobile-panel="prompt"] { display: block !important; }
+    .ss-shell[data-mobile-tab="create"] [data-mobile-panel="create-output"] { display: flex !important; }
+    .ss-shell[data-mobile-tab="create"] [data-mobile-panel="create-prompt"] { display: block !important; }
     .ss-shell[data-mobile-tab="generation"] [data-mobile-panel="generation"] { display: flex !important; min-height: 100%; }
     .ss-shell[data-mobile-tab="history"] [data-mobile-panel="history"] { display: flex !important; min-height: 100%; }
+    .ss-resize-handle,
+    .ss-center-resizer,
+    .ss-dock-resizer,
+    .ss-lora-divider { display: none !important; }
     .ss-generation-pane .ss-pane-title,
     .ss-history-pane .ss-pane-title { display: block !important; }
     .ss-generation-pane .ss-pane-body,
@@ -944,10 +1085,23 @@ const STUDIO_V3_STYLES = `
       width: 100%;
       border-radius: 10px;
     }
-    .ss-current-preview { min-height: 280px; flex: 1 1 0; }
+    .ss-current-preview { min-height: 180px; flex: 0 0 auto; }
     .ss-output-stage-head .ss-output-actions { display: none; }
     .ss-prompt-grid { grid-template-columns: 1fr; }
-    .ss-prompt-panel .ss-textarea { min-height: 135px; max-height: none; }
+    .ss-prompt-panel { margin-top: 7px; overflow: visible; }
+    .ss-prompt-panel .ss-textarea { min-height: 112px; max-height: none; }
+    .ss-prompt-head { position: relative; min-height: 38px; }
+    .ss-prompt-status { display: none; }
+    .ss-desktop-generate { display: none; }
+    .ss-mobile-stack-picker {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--lumiverse-text-muted);
+      font-size: 9px;
+    }
+    .ss-mobile-stack-picker .ss-select { width: min(46vw, 210px); height: 30px; }
     .ss-generation-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ss-history-pane .ss-history-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .ss-lora-dock {
@@ -969,6 +1123,15 @@ const STUDIO_V3_STYLES = `
       display: block;
       padding: 9px;
     }
+    .ss-shell.ss-loras-collapsed .ss-lora-dock-content { display: block; padding: 9px; }
+    .ss-shell.ss-loras-collapsed .ss-lora-library { display: flex; padding: 0; }
+    .ss-shell.ss-loras-collapsed .ss-lora-titlebar > :not(.ss-pane-toggle) { display: flex; }
+    .ss-shell.ss-loras-collapsed .ss-library-tools,
+    .ss-shell.ss-loras-collapsed .ss-lora-grid { display: grid; }
+    .ss-shell.ss-loras-collapsed .ss-stack-pane { display: flex; }
+    .ss-lora-titlebar { min-height: 27px; gap: 5px; }
+    .ss-lora-titlebar .ss-pane-toggle { display: none; }
+    .ss-lora-titlebar .ss-family-chip { max-width: 42vw; }
     .ss-shell[data-mobile-tab="loras"] .ss-lora-library { display: flex; height: 100%; padding: 0; border: 0; }
     .ss-shell[data-mobile-tab="loras"] .ss-stack-pane { display: none; }
     .ss-shell[data-mobile-tab="stack"] .ss-lora-library { display: none; }
@@ -977,9 +1140,11 @@ const STUDIO_V3_STYLES = `
     .ss-library-tools [data-role="lora-sort"] { display: none; }
     .ss-lora-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ss-lora-card { grid-template-columns: 78px minmax(0, 1fr); min-height: 120px; }
-    .ss-commandbar { flex: 0 0 52px; min-height: 52px; }
+    .ss-lora-card .ss-lora-footer { left: 85px; }
+    .ss-commandbar { display: flex; flex: 0 0 52px; min-height: 52px; }
     .ss-stack-summary { display: none; }
     .ss-commandbar .ss-generate { min-width: 142px; }
+    .ss-mobile-generate { display: inline-flex; align-items: center; justify-content: center; }
     .ss-run-status { white-space: normal; line-height: 1.25; max-height: 30px; }
     .ss-inspector {
       grid-template-columns: 1fr;
@@ -995,6 +1160,7 @@ const STUDIO_V3_STYLES = `
     .ss-mobile-tab { padding-inline: 11px; }
     .ss-lora-grid { grid-template-columns: 1fr; }
     .ss-lora-card { grid-template-columns: 96px minmax(0, 1fr); }
+    .ss-lora-card .ss-lora-footer { left: 103px; }
     .ss-history-pane .ss-history-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ss-command-summary { max-width: 45%; }
     .ss-commandbar .ss-generate { min-width: 0; flex: 1; }
@@ -1023,6 +1189,21 @@ function numberValue(input: HTMLInputElement, fallback: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
+}
+
+export function fitAspectWithin(
+  aspect: number,
+  maxWidth: number,
+  maxHeight: number,
+): { width: number; height: number } {
+  const safeAspect = clamp(Number(aspect) || 1, 0.1, 10)
+  let width = Math.max(1, maxWidth)
+  let height = width / safeAspect
+  if (height > maxHeight) {
+    height = Math.max(1, maxHeight)
+    width = height * safeAspect
+  }
+  return { width, height }
 }
 
 function labelFromName(name: string): string {
@@ -1137,6 +1318,9 @@ class StudioController {
   private currentJobId = ""
   private pendingGeneration: GenerationDetails | null = null
   private imageScale = 1
+  private previewAspect = 1
+  private outputResizeObserver: ResizeObserver | null = null
+  private stopActiveResize: (() => void) | null = null
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return
@@ -1173,6 +1357,10 @@ class StudioController {
     }
     this.buildV3()
     this.bind()
+    if (typeof ResizeObserver !== "undefined") {
+      this.outputResizeObserver = new ResizeObserver(() => this.fitPreviewToAspect())
+      this.outputResizeObserver.observe(this.get<HTMLElement>('[data-role="output-stage"]'))
+    }
     document.addEventListener("keydown", this.handleKeyDown, true)
     this.setRunStatus("Loading Lumiverse connections…")
     this.send("bootstrap")
@@ -1182,6 +1370,10 @@ class StudioController {
     this.disposed = true
     this.previewObserver?.disconnect()
     this.previewObserver = null
+    this.outputResizeObserver?.disconnect()
+    this.outputResizeObserver = null
+    this.stopActiveResize?.()
+    this.stopActiveResize = null
     document.removeEventListener("keydown", this.handleKeyDown, true)
   }
 
@@ -1418,7 +1610,6 @@ class StudioController {
 
         <nav class="ss-mobile-tabs" aria-label="Studio sections">
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="create" data-active="true">Create</button>
-          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="prompt" data-active="false">Prompt</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="generation" data-active="false">Tune</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="loras" data-active="false">LoRAs</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="stack" data-active="false">Stack</button>
@@ -1517,8 +1708,10 @@ class StudioController {
             </div>
           </aside>
 
+          <div class="ss-resize-handle ss-resize-generation" data-resize="generation" role="separator" aria-orientation="vertical" title="Drag to resize generation controls"></div>
+
           <main class="ss-center">
-            <section class="ss-output-stage" data-mobile-panel="create">
+            <section class="ss-output-stage" data-role="output-stage" data-mobile-panel="create-output">
               <div class="ss-output-stage-head">
                 <div class="ss-section-title"><strong>Current output</strong><span class="ss-muted ss-tiny">Saved by Lumiverse</span></div>
                 <div class="ss-output-actions">
@@ -1537,9 +1730,21 @@ class StudioController {
               </div>
             </section>
 
-            <section class="ss-prompt-panel" data-mobile-panel="prompt">
-              <div class="ss-section-head">
+            <div class="ss-center-resizer" data-resize="prompt" role="separator" aria-orientation="horizontal" title="Drag to resize prompt area"></div>
+
+            <section class="ss-prompt-panel" data-mobile-panel="create-prompt">
+              <div class="ss-section-head ss-prompt-head">
                 <div class="ss-section-title"><strong>Prompt</strong><span class="ss-muted ss-tiny">LoRA triggers are opt-in</span></div>
+                <div class="ss-prompt-status" data-role="prompt-run-status">Waiting for SwarmUI.</div>
+                <div class="ss-prompt-actions">
+                  <label class="ss-mobile-stack-picker">
+                    <span>Stack</span>
+                    <select class="ss-select" data-role="mobile-stack-preset" aria-label="Load a saved LoRA stack">
+                      <option value="">Saved stacks…</option>
+                    </select>
+                  </label>
+                  <button class="ss-button ss-button-primary ss-generate ss-desktop-generate" data-action="generate" disabled>Generate image</button>
+                </div>
               </div>
               <div class="ss-prompt-grid">
                 <div class="ss-field">
@@ -1556,6 +1761,8 @@ class StudioController {
             </section>
           </main>
 
+          <div class="ss-resize-handle ss-resize-history" data-resize="history" role="separator" aria-orientation="vertical" title="Drag to resize history"></div>
+
           <aside class="ss-history-pane" data-mobile-panel="history">
             <div class="ss-pane-head">
               <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny"><span data-role="output-count">0</span> saved outputs</div></div>
@@ -1571,20 +1778,13 @@ class StudioController {
         </div>
 
         <section class="ss-lora-dock">
-          <div class="ss-dock-head">
-            <div class="ss-section-title">
-              <strong>LoRA workspace</strong>
-              <span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span>
-            </div>
-            <button class="ss-icon-button ss-pane-toggle" data-action="toggle-loras" title="Collapse LoRA workspace" aria-label="Collapse LoRA workspace">⌄</button>
-          </div>
+          <div class="ss-dock-resizer" data-resize="dock" role="separator" aria-orientation="horizontal" title="Drag to resize LoRA workspace"></div>
           <div class="ss-lora-dock-content">
             <section class="ss-lora-library">
-              <div class="ss-section-head">
-                <div>
-                  <div class="ss-section-title"><strong>Select LoRAs</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
-                  <div class="ss-family-note"><span>Base model:</span><span class="ss-family-chip" data-role="family-chip">Waiting for checkpoint</span></div>
-                </div>
+              <div class="ss-lora-titlebar">
+                <div class="ss-section-title"><strong>Select LoRAs</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
+                <span class="ss-family-chip" data-role="family-chip">Waiting for checkpoint</span>
+                <button class="ss-icon-button ss-pane-toggle" data-action="toggle-loras" title="Collapse LoRA workspace" aria-label="Collapse LoRA workspace">⌄</button>
               </div>
               <div class="ss-library-tools">
                 <input class="ss-input" data-role="lora-search" type="search" placeholder="Search LoRAs…" />
@@ -1604,6 +1804,8 @@ class StudioController {
                 <div class="ss-empty">Choose a SwarmUI connection to load its LoRA library.</div>
               </div>
             </section>
+
+            <div class="ss-lora-divider" data-resize="lora-split" role="separator" aria-orientation="vertical" title="Drag to resize LoRA library and stack"></div>
 
             <section class="ss-stack-pane">
               <div class="ss-section-head">
@@ -1630,7 +1832,7 @@ class StudioController {
             <div class="ss-run-status" data-role="run-status">Waiting for a SwarmUI connection.</div>
             <div class="ss-stack-summary" data-role="command-stack-summary">No LoRAs enabled</div>
           </div>
-          <button class="ss-button ss-button-primary ss-generate" data-action="generate" disabled>Generate image</button>
+          <button class="ss-button ss-button-primary ss-generate ss-mobile-generate" data-action="generate" disabled>Generate image</button>
         </div>
 
         <div class="ss-inspector" data-role="inspector" hidden>
@@ -1674,6 +1876,25 @@ class StudioController {
       this.renderStack()
     })
     this.get<HTMLSelectElement>('[data-role="stack-preset"]').addEventListener("change", () => this.updatePresetButtons())
+    this.get<HTMLSelectElement>('[data-role="mobile-stack-preset"]').addEventListener("change", (event) => {
+      const presetId = (event.currentTarget as HTMLSelectElement).value
+      if (presetId) this.loadStackPreset(presetId)
+    })
+    const updateRequestedAspect = () => this.updatePreviewAspect(
+      numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024),
+      numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024),
+    )
+    this.get<HTMLInputElement>('[data-role="width"]').addEventListener("input", updateRequestedAspect)
+    this.get<HTMLInputElement>('[data-role="height"]').addEventListener("input", updateRequestedAspect)
+
+    this.root.addEventListener("pointerdown", (event) => {
+      const handle = (event.target as HTMLElement).closest<HTMLElement>("[data-resize]")
+      if (handle) this.beginResize(handle.dataset.resize || "", event)
+    })
+    this.root.addEventListener("dblclick", (event) => {
+      const handle = (event.target as HTMLElement).closest<HTMLElement>("[data-resize]")
+      if (handle) this.resetResize(handle.dataset.resize || "")
+    })
 
     this.root.addEventListener("click", (event) => {
       const target = event.target as HTMLElement
@@ -1879,7 +2100,9 @@ class StudioController {
     this.previewCache.clear()
     this.setConnectionStatus("loading")
     this.setRunStatus(`Loading ${connection?.name || "SwarmUI"} models and LoRA metadata…`)
-    this.get<HTMLButtonElement>('[data-action="generate"]').disabled = true
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="generate"]')) {
+      button.disabled = true
+    }
     this.renderLoras()
     this.connectionRequestId = this.send("load_connection", { connectionId })
   }
@@ -1898,7 +2121,9 @@ class StudioController {
     this.renderStack()
     this.updateTokenStatus()
     this.setConnectionStatus(data.metadataError ? "warning" : "ready")
-    this.get<HTMLButtonElement>('[data-action="generate"]').disabled = !this.state.connection || !this.state.permissions.imageGen
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="generate"]')) {
+      button.disabled = !this.state.connection || !this.state.permissions.imageGen
+    }
   }
 
   private populateModels(): void {
@@ -1942,6 +2167,10 @@ class StudioController {
     assign("clip-l", "clipLModel", "")
     assign("clip-g", "clipGModel", "")
     assign("t5", "t5XXLModel", "")
+    this.updatePreviewAspect(
+      numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024),
+      numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024),
+    )
   }
 
   private refreshMetadata(): void {
@@ -2306,19 +2535,22 @@ class StudioController {
   }
 
   private renderStackPresets(): void {
-    const select = this.get<HTMLSelectElement>('[data-role="stack-preset"]')
-    const selected = select.value
-    select.replaceChildren()
-    const placeholder = element("option", "", this.state.stackPresets.length ? "Saved stacks…" : "No saved stacks")
-    placeholder.value = ""
-    select.appendChild(placeholder)
-    for (const preset of this.state.stackPresets) {
-      const option = element("option", "", `${preset.name} · ${preset.items.length}`)
-      option.value = preset.id
-      select.appendChild(option)
-    }
-    if (selected && this.state.stackPresets.some((preset) => preset.id === selected)) {
-      select.value = selected
+    for (const select of this.root.querySelectorAll<HTMLSelectElement>(
+      '[data-role="stack-preset"], [data-role="mobile-stack-preset"]',
+    )) {
+      const selected = select.value
+      select.replaceChildren()
+      const placeholder = element("option", "", this.state.stackPresets.length ? "Saved stacks…" : "No saved stacks")
+      placeholder.value = ""
+      select.appendChild(placeholder)
+      for (const preset of this.state.stackPresets) {
+        const option = element("option", "", `${preset.name} · ${preset.items.length}`)
+        option.value = preset.id
+        select.appendChild(option)
+      }
+      if (selected && this.state.stackPresets.some((preset) => preset.id === selected)) {
+        select.value = selected
+      }
     }
     this.updatePresetButtons()
   }
@@ -2354,8 +2586,8 @@ class StudioController {
     this.setRunStatus(`Saving LoRA stack “${name.trim()}”…`)
   }
 
-  private loadStackPreset(): void {
-    const presetId = this.get<HTMLSelectElement>('[data-role="stack-preset"]').value
+  private loadStackPreset(requestedPresetId?: string): void {
+    const presetId = requestedPresetId || this.get<HTMLSelectElement>('[data-role="stack-preset"]').value
     const preset = this.state.stackPresets.find((item) => item.id === presetId)
     if (!preset) return
     this.state.stack = preset.items.map((item) => {
@@ -2390,6 +2622,79 @@ class StudioController {
     if (pane === "history") button.textContent = collapsed ? "‹" : "›"
     if (pane === "loras") button.textContent = collapsed ? "⌃" : "⌄"
     button.setAttribute("aria-expanded", String(!collapsed))
+    requestAnimationFrame(() => this.fitPreviewToAspect())
+  }
+
+  private beginResize(kind: string, event: PointerEvent): void {
+    if (window.matchMedia("(max-width: 720px)").matches) return
+    if (!["generation", "history", "dock", "lora-split", "prompt"].includes(kind)) return
+    event.preventDefault()
+    this.stopActiveResize?.()
+    const shell = this.get<HTMLElement>(".ss-shell")
+    const previousUserSelect = document.body.style.userSelect
+    shell.classList.add("ss-is-resizing")
+    document.body.style.userSelect = "none"
+
+    const move = (moveEvent: PointerEvent) => {
+      this.applyResize(kind, moveEvent.clientX, moveEvent.clientY)
+    }
+    const stop = () => {
+      document.removeEventListener("pointermove", move, true)
+      document.removeEventListener("pointerup", stop, true)
+      document.removeEventListener("pointercancel", stop, true)
+      document.body.style.userSelect = previousUserSelect
+      shell.classList.remove("ss-is-resizing")
+      this.stopActiveResize = null
+    }
+    this.stopActiveResize = stop
+    document.addEventListener("pointermove", move, true)
+    document.addEventListener("pointerup", stop, true)
+    document.addEventListener("pointercancel", stop, true)
+  }
+
+  private applyResize(kind: string, clientX: number, clientY: number): void {
+    const shell = this.get<HTMLElement>(".ss-shell")
+    if (kind === "generation" || kind === "history") {
+      const bounds = this.get<HTMLElement>(".ss-workspace").getBoundingClientRect()
+      const max = Math.max(220, Math.min(520, bounds.width * 0.46))
+      const width = kind === "generation"
+        ? clamp(clientX - bounds.left, 180, max)
+        : clamp(bounds.right - clientX, 160, max)
+      shell.style.setProperty(
+        kind === "generation" ? "--ss-generation-width" : "--ss-history-width",
+        `${Math.round(width)}px`,
+      )
+    }
+    if (kind === "dock") {
+      const bounds = shell.getBoundingClientRect()
+      const max = Math.max(190, Math.min(540, bounds.height * 0.6))
+      shell.style.setProperty("--ss-dock-height", `${Math.round(clamp(bounds.bottom - clientY, 118, max))}px`)
+    }
+    if (kind === "lora-split") {
+      const bounds = this.get<HTMLElement>(".ss-lora-dock-content").getBoundingClientRect()
+      const width = clamp(clientX - bounds.left, 220, Math.max(220, bounds.width - 250))
+      shell.style.setProperty("--ss-library-width", `${Math.round(width)}px`)
+    }
+    if (kind === "prompt") {
+      const bounds = this.get<HTMLElement>(".ss-center").getBoundingClientRect()
+      const max = Math.max(130, bounds.height - 180)
+      shell.style.setProperty("--ss-prompt-height", `${Math.round(clamp(bounds.bottom - clientY, 105, max))}px`)
+    }
+    this.fitPreviewToAspect()
+  }
+
+  private resetResize(kind: string): void {
+    const shell = this.get<HTMLElement>(".ss-shell")
+    const properties: Record<string, string> = {
+      generation: "--ss-generation-width",
+      history: "--ss-history-width",
+      dock: "--ss-dock-height",
+      "lora-split": "--ss-library-width",
+      prompt: "--ss-prompt-height",
+    }
+    const property = properties[kind]
+    if (property) shell.style.removeProperty(property)
+    this.fitPreviewToAspect()
   }
 
   private toggleFullscreen(force?: boolean): void {
@@ -2399,10 +2704,11 @@ class StudioController {
     const button = this.get<HTMLButtonElement>('[data-action="toggle-fullscreen"]')
     button.textContent = shouldEnter ? "🗗" : "⛶"
     button.title = shouldEnter ? "Exit fullscreen studio" : "Enter fullscreen studio"
+    requestAnimationFrame(() => this.fitPreviewToAspect())
   }
 
   private setMobileTab(tab: string): void {
-    const allowed = new Set(["create", "prompt", "generation", "loras", "stack", "history"])
+    const allowed = new Set(["create", "generation", "loras", "stack", "history"])
     const selected = allowed.has(tab) ? tab : "create"
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.mobileTab = selected
@@ -2411,6 +2717,7 @@ class StudioController {
       button.dataset.active = String(active)
       button.setAttribute("aria-current", active ? "page" : "false")
     }
+    requestAnimationFrame(() => this.fitPreviewToAspect())
   }
 
   private openInspector(): void {
@@ -2560,10 +2867,52 @@ class StudioController {
     })
   }
 
+  private updatePreviewAspect(width: number, height: number): void {
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      this.previewAspect = clamp(width / height, 0.1, 10)
+    }
+    this.get<HTMLElement>('[data-role="current-preview"]').style.setProperty(
+      "--ss-preview-aspect",
+      String(this.previewAspect),
+    )
+    requestAnimationFrame(() => this.fitPreviewToAspect())
+  }
+
+  private fitPreviewToAspect(): void {
+    if (this.disposed) return
+    const stage = this.root.querySelector<HTMLElement>('[data-role="output-stage"]')
+    const preview = this.root.querySelector<HTMLElement>('[data-role="current-preview"]')
+    if (!stage || !preview || stage.clientWidth <= 0) return
+    const availableWidth = Math.max(120, stage.clientWidth - 18)
+    let maximumHeight: number
+
+    if (window.matchMedia("(max-width: 720px)").matches) {
+      maximumHeight = Math.max(190, window.innerHeight * 0.52)
+    } else {
+      const head = stage.querySelector<HTMLElement>(".ss-output-stage-head")
+      const meta = stage.querySelector<HTMLElement>(".ss-output-meta")
+      maximumHeight = Math.max(
+        150,
+        stage.clientHeight - (head?.offsetHeight || 0) - (meta?.offsetHeight || 0) - 34,
+      )
+    }
+
+    const fitted = fitAspectWithin(this.previewAspect, availableWidth, maximumHeight)
+    preview.style.width = `${Math.round(fitted.width)}px`
+    preview.style.height = `${Math.round(fitted.height)}px`
+  }
+
   private setGenerating(value: boolean): void {
-    const button = this.get<HTMLButtonElement>('[data-action="generate"]')
-    button.disabled = value || !this.state.connection || !this.state.permissions.imageGen
-    button.textContent = value ? "Generating…" : "Generate image"
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="generate"]')) {
+      button.disabled = value || !this.state.connection || !this.state.permissions.imageGen
+      button.textContent = value ? "Generating…" : "Generate image"
+    }
+    if (value) {
+      this.updatePreviewAspect(
+        numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024),
+        numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024),
+      )
+    }
     this.get<HTMLElement>('[data-role="preview-loading"]').dataset.visible = String(value)
   }
 
@@ -2577,6 +2926,11 @@ class StudioController {
       details: this.pendingGeneration,
     }
     const preview = this.get<HTMLImageElement>('[data-role="preview-image"]')
+    preview.onload = () => {
+      if (preview.naturalWidth && preview.naturalHeight) {
+        this.updatePreviewAspect(preview.naturalWidth, preview.naturalHeight)
+      }
+    }
     preview.src = src
     preview.hidden = false
     this.get<HTMLElement>('[data-role="preview-empty"]').hidden = true
@@ -2618,6 +2972,14 @@ class StudioController {
   private setCurrentImage(image: CurrentImage): void {
     this.state.currentImage = image
     const preview = this.get<HTMLImageElement>('[data-role="preview-image"]')
+    const width = Number(image.details?.parameters?.width)
+    const height = Number(image.details?.parameters?.height)
+    if (width > 0 && height > 0) this.updatePreviewAspect(width, height)
+    preview.onload = () => {
+      if (preview.naturalWidth && preview.naturalHeight) {
+        this.updatePreviewAspect(preview.naturalWidth, preview.naturalHeight)
+      }
+    }
     preview.src = image.src
     preview.hidden = false
     this.get<HTMLElement>('[data-role="preview-empty"]').hidden = true
@@ -2654,6 +3016,7 @@ class StudioController {
     const oldWidth = width.value
     width.value = height.value
     height.value = oldWidth
+    this.updatePreviewAspect(numberValue(width, 1024), numberValue(height, 1024))
   }
 
   private setConnectionStatus(status: "loading" | "ready" | "warning" | "error"): void {
@@ -2667,9 +3030,12 @@ class StudioController {
   }
 
   private setRunStatus(message: string, error = false): void {
-    const status = this.get<HTMLElement>('[data-role="run-status"]')
-    status.textContent = message
-    status.style.color = error ? "#ef7777" : ""
+    for (const status of this.root.querySelectorAll<HTMLElement>(
+      '[data-role="run-status"], [data-role="prompt-run-status"]',
+    )) {
+      status.textContent = message
+      status.style.color = error ? "#ef7777" : ""
+    }
   }
 }
 
