@@ -37,6 +37,40 @@ interface LoraMetadata {
   hash: string
 }
 
+interface CheckpointMetadata {
+  name: string
+  title: string
+  architecture: string
+  className: string
+  compatClass: string
+}
+
+interface StackPresetItem {
+  name: string
+  title: string
+  weight: number
+  enabled: boolean
+  useTrigger: boolean
+}
+
+interface StackPreset {
+  id: string
+  name: string
+  items: StackPresetItem[]
+  updatedAt: number
+}
+
+interface GenerationRecord {
+  imageId: string
+  imageUrl: string
+  prompt: string
+  negativePrompt: string
+  model: string
+  parameters: JsonObject
+  loras: Array<{ name: string; weight: number }>
+  createdAt: number
+}
+
 interface SessionCacheEntry {
   sessionId: string
   expiresAt: number
@@ -45,6 +79,10 @@ interface SessionCacheEntry {
 const SESSION_TTL_MS = 20 * 60 * 1000
 const SESSION_CACHE_LIMIT = 64
 const PREVIEW_CACHE_LIMIT = 64
+const STACK_PRESETS_FILE = "lora-stack-presets.json"
+const GENERATION_RECORDS_FILE = "generation-records.json"
+const STACK_PRESET_LIMIT = 40
+const GENERATION_RECORD_LIMIT = 100
 const sessions = new Map<string, SessionCacheEntry>()
 const previewCache = new Map<string, string>()
 
@@ -231,12 +269,26 @@ function parseLora(value: unknown): LoraMetadata | null {
   }
 }
 
-async function listLoras(
+function parseCheckpoint(value: unknown): CheckpointMetadata | null {
+  const item = asRecord(value)
+  const name = asString(item.name).trim()
+  if (!name) return null
+  return {
+    name,
+    title: asString(item.title).trim() || name.split("/").pop() || name,
+    architecture: asString(item.architecture).trim(),
+    className: asString(item.class).trim(),
+    compatClass: asString(item.compat_class).trim(),
+  }
+}
+
+async function listModelFiles(
   connection: SwarmConnection,
   token: string | null,
+  subtype: "LoRA" | "Stable-Diffusion",
   userId?: string,
   forceSession = false,
-): Promise<LoraMetadata[]> {
+): Promise<unknown[]> {
   const baseUrl = normalizeBaseUrl(connection.api_url)
   let sessionId = await getSession(connection, token, userId, forceSession)
 
@@ -246,14 +298,14 @@ async function listLoras(
       session_id: sessionId,
       path: "",
       depth: 10,
-      subtype: "LoRA",
+      subtype,
       sortBy: "Name",
       allowRemote: true,
       sortReverse: false,
       dataImages: false,
     },
     token,
-    "LoRA metadata request",
+    `${subtype} metadata request`,
   )
 
   let data: JsonObject
@@ -265,10 +317,132 @@ async function listLoras(
     sessionId = await getSession(connection, token, userId, true)
     data = await request()
   }
+  return Array.isArray(data.files) ? data.files : []
+}
 
-  return (Array.isArray(data.files) ? data.files : [])
+async function listLoras(
+  connection: SwarmConnection,
+  token: string | null,
+  userId?: string,
+  forceSession = false,
+): Promise<LoraMetadata[]> {
+  return (await listModelFiles(connection, token, "LoRA", userId, forceSession))
     .map(parseLora)
     .filter((item): item is LoraMetadata => Boolean(item))
+}
+
+async function listCheckpoints(
+  connection: SwarmConnection,
+  token: string | null,
+  userId?: string,
+): Promise<CheckpointMetadata[]> {
+  return (await listModelFiles(connection, token, "Stable-Diffusion", userId))
+    .map(parseCheckpoint)
+    .filter((item): item is CheckpointMetadata => Boolean(item))
+}
+
+async function loadStackPresets(userId?: string): Promise<StackPreset[]> {
+  const value = await spindle.userStorage.getJson(STACK_PRESETS_FILE, {
+    fallback: [],
+    userId,
+  })
+  return Array.isArray(value) ? value.slice(0, STACK_PRESET_LIMIT) : []
+}
+
+function cleanStackPreset(value: unknown, existingId = ""): StackPreset {
+  const input = asRecord(value)
+  const name = asString(input.name).trim().slice(0, 80)
+  if (!name) throw new Error("Give this LoRA stack a name.")
+  const rawItems = Array.isArray(input.items) ? input.items : []
+  if (!rawItems.length) throw new Error("Add at least one LoRA before saving a stack.")
+  const items = rawItems.slice(0, 64).map((raw): StackPresetItem => {
+    const item = asRecord(raw)
+    const modelName = asString(item.name).trim().slice(0, 500)
+    if (!modelName) throw new Error("A saved stack item is missing its LoRA filename.")
+    const weight = Number(item.weight)
+    return {
+      name: modelName,
+      title: asString(item.title).trim().slice(0, 200),
+      weight: Number.isFinite(weight) ? Math.max(-10, Math.min(10, weight)) : 1,
+      enabled: asBoolean(item.enabled, true),
+      useTrigger: asBoolean(item.useTrigger, false),
+    }
+  })
+  return {
+    id: existingId || crypto.randomUUID(),
+    name,
+    items,
+    updatedAt: Date.now(),
+  }
+}
+
+async function saveStackPreset(value: unknown, userId?: string): Promise<StackPreset[]> {
+  const input = asRecord(value)
+  const requestedId = asString(input.id).trim()
+  const presets = await loadStackPresets(userId)
+  const existingIndex = requestedId
+    ? presets.findIndex((preset) => preset.id === requestedId)
+    : presets.findIndex((preset) => preset.name.toLowerCase() === asString(input.name).trim().toLowerCase())
+  const preset = cleanStackPreset(input, existingIndex >= 0 ? presets[existingIndex].id : "")
+  if (existingIndex >= 0) presets.splice(existingIndex, 1)
+  presets.unshift(preset)
+  await spindle.userStorage.setJson(STACK_PRESETS_FILE, presets.slice(0, STACK_PRESET_LIMIT), {
+    indent: 2,
+    userId,
+  })
+  return presets.slice(0, STACK_PRESET_LIMIT)
+}
+
+async function deleteStackPreset(presetId: string, userId?: string): Promise<StackPreset[]> {
+  const presets = (await loadStackPresets(userId)).filter((preset) => preset.id !== presetId)
+  await spindle.userStorage.setJson(STACK_PRESETS_FILE, presets, { indent: 2, userId })
+  return presets
+}
+
+async function loadGenerationRecords(userId?: string): Promise<GenerationRecord[]> {
+  const value = await spindle.userStorage.getJson(GENERATION_RECORDS_FILE, {
+    fallback: [],
+    userId,
+  })
+  return Array.isArray(value) ? value.slice(0, GENERATION_RECORD_LIMIT) : []
+}
+
+async function saveGenerationRecord(
+  result: any,
+  input: JsonObject,
+  userId?: string,
+): Promise<GenerationRecord> {
+  const parameters = asRecord(input.parameters)
+  const loraNames = Array.isArray(parameters.loras)
+    ? parameters.loras.map(asString).filter(Boolean).slice(0, 64)
+    : []
+  const loraWeights = Array.isArray(parameters.loraWeights)
+    ? parameters.loraWeights.map(Number)
+    : []
+  const record: GenerationRecord = {
+    imageId: asString(result?.imageId),
+    imageUrl: asString(result?.imageUrl),
+    prompt: asString(input.prompt),
+    negativePrompt: asString(input.negativePrompt),
+    model: asString(input.model) || asString(result?.model),
+    parameters,
+    loras: loraNames.map((name, index) => ({
+      name,
+      weight: Number.isFinite(loraWeights[index]) ? loraWeights[index] : 1,
+    })),
+    createdAt: Date.now(),
+  }
+  const records = await loadGenerationRecords(userId)
+  const deduped = records.filter((item) =>
+    !record.imageId || item.imageId !== record.imageId
+  )
+  deduped.unshift(record)
+  await spindle.userStorage.setJson(
+    GENERATION_RECORDS_FILE,
+    deduped.slice(0, GENERATION_RECORD_LIMIT),
+    { userId },
+  )
+  return record
 }
 
 function headerValue(headers: unknown, name: string): string {
@@ -343,7 +517,13 @@ async function listOutputs(userId?: string, activeChat?: any): Promise<any[]> {
   }
   if (activeChat?.id) options.chatId = activeChat.id
   const response = await spindle.images.list(options)
-  return Array.isArray(response?.data) ? response.data : []
+  const outputs = Array.isArray(response?.data) ? response.data : []
+  const records = await loadGenerationRecords(userId)
+  const byId = new Map(records.filter((record) => record.imageId).map((record) => [record.imageId, record]))
+  return outputs.map((output: any) => ({
+    ...output,
+    studioMetadata: byId.get(asString(output?.id)) || null,
+  }))
 }
 
 async function bootstrap(userId?: string): Promise<JsonObject> {
@@ -363,6 +543,7 @@ async function bootstrap(userId?: string): Promise<JsonObject> {
     connections,
     activeChat,
     outputs: await listOutputs(userId, activeChat),
+    stackPresets: await loadStackPresets(userId),
   }
 }
 
@@ -372,22 +553,30 @@ async function loadConnection(connectionId: string, userId?: string): Promise<Js
   const hasMetadataToken = await spindle.enclave.has(tokenKey(connectionId), userId)
 
   let loras: LoraMetadata[] = []
-  let metadataError = ""
+  let checkpoints: CheckpointMetadata[] = []
+  const metadataErrors: string[] = []
   if (spindle.permissions.has("cors_proxy")) {
+    const token = await getMetadataToken(connectionId, userId)
     try {
-      loras = await listLoras(connection, await getMetadataToken(connectionId, userId), userId)
+      loras = await listLoras(connection, token, userId)
     } catch (error) {
-      metadataError = error instanceof Error ? error.message : String(error)
+      metadataErrors.push(error instanceof Error ? error.message : String(error))
+    }
+    try {
+      checkpoints = await listCheckpoints(connection, token, userId)
+    } catch (error) {
+      metadataErrors.push(error instanceof Error ? error.message : String(error))
     }
   } else {
-    metadataError = "Grant the CORS Proxy permission to load SwarmUI LoRA metadata and previews."
+    metadataErrors.push("Grant the CORS Proxy permission to load SwarmUI model metadata and previews.")
   }
 
   return {
     connection,
     models: Array.isArray(models) ? models : [],
     loras,
-    metadataError,
+    checkpoints,
+    metadataError: metadataErrors.join(" "),
     hasMetadataToken,
   }
 }
@@ -420,11 +609,14 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         const token = await getMetadataToken(connectionId, userId)
         const key = sessionKey(userId, connectionId, Boolean(token))
         sessions.delete(key)
+        const loras = await listLoras(connection, token, userId, true)
+        const checkpoints = await listCheckpoints(connection, token, userId)
         spindle.sendToFrontend({
           type: "metadata_result",
           requestId,
           data: {
-            loras: await listLoras(connection, token, userId, true),
+            loras,
+            checkpoints,
             metadataError: "",
           },
         }, userId)
@@ -488,13 +680,36 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           owner_character_id: activeChat?.character_id || undefined,
           userId,
         })
+        let record: GenerationRecord | null = null
+        try {
+          record = await saveGenerationRecord(result, input, userId)
+        } catch (error) {
+          spindle.log.warn(`Could not persist Swarm Studio generation details: ${error instanceof Error ? error.message : String(error)}`)
+        }
         spindle.sendToFrontend({
           type: "generation_result",
           requestId,
           data: {
             result,
+            record,
             outputs: await listOutputs(userId, activeChat),
           },
+        }, userId)
+        return
+      }
+      case "save_stack_preset": {
+        spindle.sendToFrontend({
+          type: "stack_presets_result",
+          requestId,
+          data: await saveStackPreset(payload?.preset, userId),
+        }, userId)
+        return
+      }
+      case "delete_stack_preset": {
+        spindle.sendToFrontend({
+          type: "stack_presets_result",
+          requestId,
+          data: await deleteStackPreset(asString(payload?.presetId), userId),
         }, userId)
         return
       }

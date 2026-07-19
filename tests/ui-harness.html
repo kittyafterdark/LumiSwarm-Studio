@@ -45,18 +45,19 @@
     `)}`
 
     const loras = [
-      { name: "styles/cinematic-ink.safetensors", title: "Cinematic Ink", author: "Nox Atelier", description: "Graphic inkwork with controlled cinematic lighting and confident line weight.", previewRef: "/preview/ink", architecture: "SDXL", className: "LoRA", compatClass: "SDXL", triggerPhrase: "cinematic ink style", tags: ["style", "ink"], defaultWeight: .8, local: true, timeModified: 8 },
-      { name: "characters/soft-portrait.safetensors", title: "Soft Portrait", author: "Mira", description: "Natural portrait rendering with soft skin detail and gentle falloff.", previewRef: "/preview/portrait", architecture: "Flux", className: "LoRA", compatClass: "Flux.1", triggerPhrase: "soft portrait lighting", tags: ["portrait"], defaultWeight: .65, local: true, timeModified: 7 },
-      { name: "lighting/neon-rim.safetensors", title: "Neon Rim Light", author: "Chromaforge", description: "High-contrast cyan and magenta rim lighting for dramatic subjects.", previewRef: "/preview/neon", architecture: "SDXL", className: "LoRA", compatClass: "SDXL", triggerPhrase: "neon rim lighting", tags: ["lighting"], defaultWeight: .55, local: true, timeModified: 9 },
-      { name: "styles/analog-editorial.safetensors", title: "Analog Editorial", author: "Frame 36", description: "Editorial film grain, warm halation, and restrained analog color.", previewRef: "/preview/analog", architecture: "SDXL", className: "LoRA", compatClass: "SDXL", triggerPhrase: "analog editorial photo", tags: ["photo"], defaultWeight: .7, local: true, timeModified: 5 },
-      { name: "concept/crystal-bloom.safetensors", title: "Crystal Bloom", author: "Arca", description: "Crystalline floral growth patterns with refractive highlights.", previewRef: "/preview/crystal", architecture: "Flux", className: "LoRA", compatClass: "Flux.1", triggerPhrase: "crystal bloom", tags: ["concept"], defaultWeight: .9, local: true, timeModified: 6 },
+      { name: "anima/cinematic-ink.safetensors", title: "Cinematic Ink · Anima", author: "Nox Atelier", description: "Graphic inkwork trained for Anima with controlled lighting and confident line weight.", previewRef: "/preview/ink", architecture: "anima-v1/lora", className: "LoRA", compatClass: "anima-v1", triggerPhrase: "cinematic ink style", tags: ["anima", "style"], defaultWeight: .8, local: true, timeModified: 8 },
+      { name: "anima/soft-portrait.safetensors", title: "Soft Portrait · Anima", author: "Mira", description: "Natural portrait rendering with soft detail and gentle falloff.", previewRef: "/preview/portrait", architecture: "anima-v1/lora", className: "LoRA", compatClass: "anima-v1", triggerPhrase: "soft portrait lighting", tags: ["anima", "portrait"], defaultWeight: .65, local: true, timeModified: 7 },
+      { name: "anima/neon-rim.safetensors", title: "Neon Rim · Anima", author: "Chromaforge", description: "Cyan and magenta rim lighting tuned for Anima checkpoints.", previewRef: "/preview/neon", architecture: "anima-v1/lora", className: "LoRA", compatClass: "anima-v1", triggerPhrase: "neon rim lighting", tags: ["anima", "lighting"], defaultWeight: .55, local: true, timeModified: 9 },
+      { name: "illustrious/analog-editorial.safetensors", title: "Analog Editorial · Illustrious", author: "Frame 36", description: "An Illustrious-only editorial film style.", previewRef: "/preview/analog", architecture: "illustrious/lora", className: "LoRA", compatClass: "illustrious-v1", triggerPhrase: "analog editorial photo", tags: ["illustrious", "photo"], defaultWeight: .7, local: true, timeModified: 5 },
+      { name: "illustrious/crystal-bloom.safetensors", title: "Crystal Bloom · Illustrious", author: "Arca", description: "Illustrious crystalline floral growth patterns.", previewRef: "/preview/crystal", architecture: "illustrious/lora", className: "LoRA", compatClass: "illustrious-v1", triggerPhrase: "crystal bloom", tags: ["illustrious", "concept"], defaultWeight: .9, local: true, timeModified: 6 },
+      { name: "utility/detail-helper.safetensors", title: "Unclassified Detail Helper", author: "Local", description: "No compatibility metadata, so it remains visible as an unclassified model.", previewRef: null, architecture: "", className: "LoRA", compatClass: "", triggerPhrase: "", tags: ["utility"], defaultWeight: .4, local: true, timeModified: 4 },
     ]
     const previewMap = {
-      "styles/cinematic-ink.safetensors": svg("Cinematic Ink", "#182437", "#9b5948"),
-      "characters/soft-portrait.safetensors": svg("Soft Portrait", "#bc7b78", "#4d3565"),
-      "lighting/neon-rim.safetensors": svg("Neon Rim", "#102847", "#b11a85"),
-      "styles/analog-editorial.safetensors": svg("Analog Editorial", "#806241", "#2d5049"),
-      "concept/crystal-bloom.safetensors": svg("Crystal Bloom", "#543f82", "#188f8b"),
+      "anima/cinematic-ink.safetensors": svg("Cinematic Ink", "#182437", "#9b5948"),
+      "anima/soft-portrait.safetensors": svg("Soft Portrait", "#bc7b78", "#4d3565"),
+      "anima/neon-rim.safetensors": svg("Neon Rim", "#102847", "#b11a85"),
+      "illustrious/analog-editorial.safetensors": svg("Analog Editorial", "#806241", "#2d5049"),
+      "illustrious/crystal-bloom.safetensors": svg("Crystal Bloom", "#543f82", "#188f8b"),
     }
 
     const drawerRoot = document.querySelector("#drawer")
@@ -102,14 +103,19 @@
         if (message.type === "bootstrap") {
           later({ type: "bootstrap_result", requestId: message.requestId, data: {
             permissions: { imageGen: true, metadata: true, images: true, chats: true },
-            connections: [{ id: "swarm-1", name: "Local SwarmUI", provider: "swarmui", api_url: "http://127.0.0.1:7801", model: "juggernaut-xl.safetensors", is_default: true, default_parameters: { width: 1024, height: 1024, steps: 28, cfgScale: 6.5, sampler: "dpmpp_2m", scheduler: "karras" } }],
+            connections: [{ id: "swarm-1", name: "Local SwarmUI", provider: "swarmui", api_url: "http://127.0.0.1:7801", model: "anima-semi-v10.safetensors", is_default: true, default_parameters: { width: 768, height: 1152, steps: 28, cfgScale: 4.5, sampler: "dpmpp_2m", scheduler: "beta57" } }],
             outputs: [],
+            stackPresets: [],
             activeChat: { id: "chat-1", character_id: "char-1" },
           }})
         } else if (message.type === "load_connection") {
           later({ type: "connection_result", requestId: message.requestId, data: {
-            connection: { id: "swarm-1", name: "Local SwarmUI", model: "juggernaut-xl.safetensors", default_parameters: { width: 1024, height: 1024, steps: 28, cfgScale: 6.5, sampler: "dpmpp_2m", scheduler: "karras" } },
-            models: [{ id: "juggernaut-xl.safetensors", label: "Juggernaut XL" }, { id: "flux-dev.safetensors", label: "Flux Dev" }],
+            connection: { id: "swarm-1", name: "Local SwarmUI", model: "anima-semi-v10.safetensors", default_parameters: { width: 768, height: 1152, steps: 28, cfgScale: 4.5, sampler: "dpmpp_2m", scheduler: "beta57" } },
+            models: [{ id: "anima-semi-v10.safetensors", label: "Anima Semi v1.0" }, { id: "illustrious-xl-v15.safetensors", label: "Illustrious XL v1.5" }],
+            checkpoints: [
+              { name: "anima-semi-v10.safetensors", title: "Anima Semi v1.0", architecture: "anima-v1/base", className: "checkpoint", compatClass: "anima-v1" },
+              { name: "illustrious-xl-v15.safetensors", title: "Illustrious XL v1.5", architecture: "illustrious/base", className: "checkpoint", compatClass: "illustrious-v1" },
+            ],
             loras,
             metadataError: "",
             hasMetadataToken: false,
@@ -118,7 +124,8 @@
           later({ type: "preview_result", requestId: message.requestId, name: message.name, dataUrl: previewMap[message.name] })
         } else if (message.type === "generate") {
           setTimeout(() => later({ type: "generation_result", requestId: message.requestId, data: {
-            result: { imageDataUrl: svg("Generated output", "#134e5e", "#6f3f78"), imageUrl: svg("Generated output", "#134e5e", "#6f3f78"), model: "juggernaut-xl.safetensors", provider: "swarmui" },
+            result: { imageDataUrl: svg("Generated output", "#134e5e", "#6f3f78"), imageUrl: svg("Generated output", "#134e5e", "#6f3f78"), model: "anima-semi-v10.safetensors", provider: "swarmui" },
+            record: { prompt: message.input.prompt, negativePrompt: message.input.negativePrompt || "", model: message.input.model, parameters: message.input.parameters, loras: message.input.parameters.loras.map((name, index) => ({ name, weight: message.input.parameters.loraWeights[index] })), createdAt: Date.now() },
             outputs: [],
           }}), 350)
         }

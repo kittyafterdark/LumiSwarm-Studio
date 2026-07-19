@@ -1,11 +1,11 @@
 {
-  "version": "0.2.1",
+  "version": "0.3.0",
   "name": "Swarm Studio",
   "identifier": "swarm_studio",
   "author": "kittyafterdark",
   "github": "https://github.com/kittyafterdark/LumiSwarm-Studio",
   "homepage": "https://github.com/kittyafterdark/LumiSwarm-Studio",
-  "description": "A metadata-aware SwarmUI prompting studio with LoRA previews, trigger inheritance, weighted stacking, advanced controls, and an output gallery.",
+  "description": "A responsive SwarmUI workspace with model-compatible LoRA browsing, saved stacks, fullscreen output inspection, advanced prompting, and live previews.",
   "permissions": [
     "image_gen",
     "cors_proxy",

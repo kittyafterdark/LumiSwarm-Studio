@@ -32,18 +32,72 @@ interface StackItem {
   useTrigger: boolean
 }
 
+interface CheckpointMetadata {
+  name: string
+  title: string
+  architecture: string
+  className: string
+  compatClass: string
+}
+
+interface StackPresetItem {
+  name: string
+  title: string
+  weight: number
+  enabled: boolean
+  useTrigger: boolean
+}
+
+interface StackPreset {
+  id: string
+  name: string
+  items: StackPresetItem[]
+  updatedAt: number
+}
+
+interface GenerationDetails {
+  prompt: string
+  negativePrompt: string
+  model: string
+  parameters: Record<string, unknown>
+  loras: Array<{ name: string; weight: number }>
+  createdAt: number
+}
+
+interface CurrentImage {
+  src: string
+  url?: string
+  label: string
+  details?: GenerationDetails | null
+}
+
 interface StudioState {
   connections: any[]
   connection: any | null
   models: Array<{ id: string; label: string }>
+  checkpoints: CheckpointMetadata[]
   loras: LoraMetadata[]
   stack: StackItem[]
+  stackPresets: StackPreset[]
   outputs: any[]
   activeChat: any | null
   permissions: Record<string, boolean>
   hasMetadataToken: boolean
-  currentImage: { src: string; url?: string; label: string } | null
+  currentImage: CurrentImage | null
 }
+
+type ModelFamily =
+  | "anima"
+  | "illustrious"
+  | "pony"
+  | "sdxl"
+  | "sd15"
+  | "flux"
+  | "sd3"
+  | "chroma"
+  | "qwen"
+  | "hunyuan"
+  | "unknown"
 
 const STUDIO_ICON = `
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -443,6 +497,514 @@ const STYLES = `
   }
 `
 
+const STUDIO_V3_STYLES = `
+  .ss-shell {
+    --ss-gap: 10px;
+    width: 100%;
+    height: min(900px, calc(100dvh - 118px));
+    min-height: min(650px, calc(100dvh - 118px));
+    gap: var(--ss-gap);
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+  .ss-topbar {
+    display: grid;
+    grid-template-columns: auto minmax(240px, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .ss-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: max-content;
+    font-size: 13px;
+    font-weight: 750;
+  }
+  .ss-brand svg { width: 20px; height: 20px; color: var(--lumiverse-accent, #7dd3fc); }
+  .ss-top-actions { display: flex; align-items: center; gap: 6px; }
+  .ss-top-actions .ss-button { white-space: nowrap; }
+  .ss-close-studio { display: none; }
+  .ss-mobile-tabs { display: none; }
+  .ss-workspace {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 284px minmax(300px, 1fr) 244px;
+    gap: var(--ss-gap);
+    flex: 1 1 0;
+    overflow: hidden;
+    transition: grid-template-columns .2s ease;
+  }
+  .ss-shell.ss-generation-collapsed .ss-workspace {
+    grid-template-columns: 42px minmax(300px, 1fr) 244px;
+  }
+  .ss-shell.ss-history-collapsed .ss-workspace {
+    grid-template-columns: 284px minmax(300px, 1fr) 42px;
+  }
+  .ss-shell.ss-generation-collapsed.ss-history-collapsed .ss-workspace {
+    grid-template-columns: 42px minmax(300px, 1fr) 42px;
+  }
+  .ss-generation-pane,
+  .ss-history-pane,
+  .ss-output-stage,
+  .ss-prompt-panel,
+  .ss-lora-dock {
+    border: 1px solid var(--lumiverse-border);
+    background: color-mix(in srgb, var(--lumiverse-fill-subtle) 88%, transparent);
+    border-radius: calc(var(--lumiverse-radius, 8px) * 1.1);
+  }
+  .ss-generation-pane,
+  .ss-history-pane {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .ss-pane-head,
+  .ss-dock-head {
+    min-height: 39px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--lumiverse-border);
+  }
+  .ss-pane-head strong,
+  .ss-dock-head strong { font-size: 11px; }
+  .ss-pane-toggle { min-width: 27px; min-height: 27px; height: 27px; padding: 2px 6px; }
+  .ss-pane-body {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 9px;
+  }
+  .ss-shell.ss-generation-collapsed .ss-generation-pane .ss-pane-body,
+  .ss-shell.ss-history-collapsed .ss-history-pane .ss-pane-body,
+  .ss-shell.ss-generation-collapsed .ss-generation-pane .ss-pane-title,
+  .ss-shell.ss-history-collapsed .ss-history-pane .ss-pane-title {
+    display: none;
+  }
+  .ss-shell.ss-generation-collapsed .ss-generation-pane .ss-pane-head,
+  .ss-shell.ss-history-collapsed .ss-history-pane .ss-pane-head {
+    justify-content: center;
+    padding-inline: 5px;
+    border-bottom: 0;
+  }
+  .ss-generation-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .ss-generation-controls .ss-wide { grid-column: 1 / -1; }
+  .ss-generation-controls .ss-inline-actions { align-items: center; }
+  .ss-generation-controls .ss-inline-actions .ss-button { flex: 1; }
+  .ss-center {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(220px, 1fr) auto;
+    gap: var(--ss-gap);
+    overflow: hidden;
+  }
+  .ss-output-stage {
+    min-height: 0;
+    padding: 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    overflow: hidden;
+  }
+  .ss-output-stage-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .ss-output-stage-head .ss-output-actions { display: flex; }
+  .ss-current-preview {
+    min-height: 190px;
+    max-height: none;
+    flex: 1 1 0;
+    cursor: zoom-in;
+  }
+  .ss-current-preview img { cursor: zoom-in; }
+  .ss-output-meta {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 20px;
+  }
+  .ss-output-label { flex: 1; }
+  .ss-zoom-hint { color: var(--lumiverse-text-dim, var(--lumiverse-text-muted)); font-size: 9px; white-space: nowrap; }
+  .ss-prompt-panel { padding: 9px; min-height: 0; }
+  .ss-prompt-panel .ss-textarea { min-height: 70px; max-height: 150px; }
+  .ss-prompt-grid { grid-template-columns: 1.25fr 1fr; }
+  .ss-history-pane .ss-history-grid {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    overflow-y: auto;
+  }
+  .ss-history-item { position: relative; }
+  .ss-history-item::after {
+    content: "↗";
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    border-radius: 5px;
+    color: white;
+    background: rgba(0,0,0,.6);
+    opacity: 0;
+    transition: opacity .15s ease;
+  }
+  .ss-history-item:hover::after { opacity: 1; }
+  .ss-lora-dock {
+    min-height: 0;
+    flex: 0 0 250px;
+    overflow: hidden;
+    transition: flex-basis .2s ease;
+  }
+  .ss-lora-dock .ss-dock-head { min-height: 36px; }
+  .ss-lora-dock-content {
+    height: calc(100% - 36px);
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr);
+    gap: 10px;
+    padding: 9px;
+  }
+  .ss-lora-library,
+  .ss-stack-pane {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    overflow: hidden;
+  }
+  .ss-lora-library { padding-right: 9px; border-right: 1px solid var(--lumiverse-border); }
+  .ss-library-tools {
+    grid-template-columns: minmax(140px, 1fr) 135px 100px auto;
+  }
+  .ss-lora-filter {
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 38%, var(--lumiverse-border));
+  }
+  .ss-badge-warning { color: #e0a458; background: color-mix(in srgb, #e0a458 12%, transparent); }
+  .ss-family-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--lumiverse-text-muted);
+    font-size: 9px;
+  }
+  .ss-family-chip {
+    max-width: 230px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 6px;
+    border-radius: 999px;
+    color: var(--lumiverse-accent, #7dd3fc);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 10%, transparent);
+  }
+  .ss-lora-grid {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  }
+  .ss-stack-head-tools {
+    display: grid;
+    grid-template-columns: minmax(110px, 1fr) auto auto auto;
+    gap: 5px;
+  }
+  .ss-stack-list {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .ss-stack-row[data-incompatible="true"] {
+    border-color: color-mix(in srgb, #e0a458 55%, var(--lumiverse-border));
+  }
+  .ss-stack-row[data-incompatible="true"] .ss-stack-name strong::after {
+    content: " · model mismatch";
+    color: #e0a458;
+    font-weight: 500;
+  }
+  .ss-shell.ss-loras-collapsed .ss-lora-dock { flex-basis: 36px; }
+  .ss-shell.ss-loras-collapsed .ss-lora-dock-content { display: none; }
+  .ss-commandbar {
+    flex: 0 0 48px;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 7px 6px 10px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 28%, var(--lumiverse-border));
+    border-radius: calc(var(--lumiverse-radius, 8px) * 1.1);
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 8%, transparent), transparent 45%),
+      var(--lumiverse-fill-subtle);
+    box-shadow: 0 -8px 28px rgba(0,0,0,.12);
+    z-index: 5;
+  }
+  .ss-commandbar .ss-generate {
+    min-width: 190px;
+    min-height: 36px;
+    margin-left: auto;
+  }
+  .ss-command-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+  .ss-run-status { flex: 1; }
+  .ss-stack-summary { color: var(--lumiverse-text-dim, var(--lumiverse-text-muted)); font-size: 9px; white-space: nowrap; }
+  .ss-fullscreen-layer {
+    position: fixed !important;
+    inset: 0 !important;
+    width: auto !important;
+    height: 100dvh !important;
+    min-height: 0 !important;
+    z-index: 2147483001;
+    padding: 12px;
+    background: var(--lumiverse-bg, var(--lumiverse-fill, #0d0d11));
+  }
+  .ss-fullscreen-layer .ss-close-studio { display: inline-flex; }
+  .ss-inspector {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483010;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+    background: rgba(4, 5, 8, .97);
+    backdrop-filter: blur(12px);
+  }
+  .ss-inspector[hidden] { display: none; }
+  .ss-inspector-stage {
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+    overflow: auto;
+    display: grid;
+    place-items: center;
+    padding: 58px 28px 28px;
+  }
+  .ss-inspector-image {
+    max-width: 100%;
+    max-height: calc(100dvh - 92px);
+    object-fit: contain;
+    transform: scale(var(--ss-image-scale, 1));
+    transform-origin: center;
+    transition: transform .12s ease;
+  }
+  .ss-inspector-toolbar {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--lumiverse-fill) 90%, transparent);
+  }
+  .ss-inspector-details {
+    min-width: 0;
+    overflow-y: auto;
+    border-left: 1px solid var(--lumiverse-border);
+    padding: 18px;
+    background: var(--lumiverse-fill-subtle);
+  }
+  .ss-inspector-details h3 { margin: 0 0 4px; font-size: 15px; }
+  .ss-inspector-details h4 { margin: 18px 0 6px; font-size: 10px; color: var(--lumiverse-text-muted); text-transform: uppercase; letter-spacing: .06em; }
+  .ss-inspector-copy {
+    margin: 0;
+    padding: 9px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: 8px;
+    background: var(--lumiverse-fill);
+    color: var(--lumiverse-text);
+    font: inherit;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .ss-inspector-facts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+  .ss-inspector-close { position: absolute; top: 12px; right: 12px; z-index: 2; }
+  .ss-token-popover { z-index: 30; }
+
+  @media (max-width: 1000px) and (min-width: 721px) {
+    .ss-workspace { grid-template-columns: 245px minmax(280px, 1fr) 205px; }
+    .ss-shell.ss-generation-collapsed .ss-workspace { grid-template-columns: 42px minmax(280px, 1fr) 205px; }
+    .ss-shell.ss-history-collapsed .ss-workspace { grid-template-columns: 245px minmax(280px, 1fr) 42px; }
+    .ss-shell.ss-generation-collapsed.ss-history-collapsed .ss-workspace { grid-template-columns: 42px minmax(280px, 1fr) 42px; }
+    .ss-lora-dock-content { grid-template-columns: minmax(0, 1fr) minmax(290px, .9fr); }
+    .ss-library-tools { grid-template-columns: minmax(120px, 1fr) 125px auto; }
+    .ss-library-tools [data-role="lora-sort"] { display: none; }
+  }
+
+  @media (max-height: 800px) and (min-width: 721px) {
+    .ss-lora-dock { flex-basis: 205px; }
+    .ss-prompt-panel .ss-textarea { min-height: 56px; }
+    .ss-pane-head { min-height: 35px; }
+  }
+
+  @media (max-width: 720px) {
+    .ss-shell,
+    .ss-shell.ss-fullscreen-layer {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 2147483001;
+      width: auto !important;
+      height: 100dvh !important;
+      min-height: 0 !important;
+      padding: max(8px, env(safe-area-inset-top)) 8px max(7px, env(safe-area-inset-bottom));
+      gap: 7px;
+      background: var(--lumiverse-bg, var(--lumiverse-fill, #0d0d11));
+    }
+    .ss-topbar {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+    }
+    .ss-brand { font-size: 12px; }
+    .ss-connection-wrap { grid-column: 1 / -1; grid-row: 2; }
+    .ss-top-actions { grid-column: 2; grid-row: 1; }
+    .ss-top-actions [data-action="refresh-metadata"],
+    .ss-top-actions [data-action="toggle-token"] {
+      width: 32px;
+      min-width: 32px;
+      padding-inline: 0;
+      overflow: hidden;
+      color: transparent;
+      position: relative;
+    }
+    .ss-top-actions [data-action="refresh-metadata"]::after {
+      content: "↻"; color: var(--lumiverse-text); position: absolute; inset: 0; display: grid; place-items: center;
+    }
+    .ss-top-actions [data-action="toggle-token"]::after {
+      content: "⌁"; color: var(--lumiverse-text); position: absolute; inset: 0; display: grid; place-items: center;
+    }
+    .ss-top-actions [data-action="toggle-fullscreen"] { display: none; }
+    .ss-close-studio { display: inline-flex; }
+    .ss-token-popover { top: 74px; right: 0; width: calc(100vw - 16px); }
+    .ss-mobile-tabs {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding-bottom: 1px;
+    }
+    .ss-mobile-tabs::-webkit-scrollbar { display: none; }
+    .ss-mobile-tab {
+      min-height: 34px;
+      flex: 0 0 auto;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 10px;
+    }
+    .ss-mobile-tab[data-active="true"] {
+      color: var(--lumiverse-accent-text, #06131d);
+      background: var(--lumiverse-accent, #7dd3fc);
+      border-color: transparent;
+    }
+    .ss-workspace {
+      display: block !important;
+      min-height: 0;
+      flex: 1 1 0;
+      overflow-y: auto;
+    }
+    .ss-center { display: contents; }
+    .ss-workspace [data-mobile-panel] { display: none !important; }
+    .ss-shell[data-mobile-tab="create"] [data-mobile-panel="create"] { display: flex !important; min-height: 100%; }
+    .ss-shell[data-mobile-tab="prompt"] [data-mobile-panel="prompt"] { display: block !important; }
+    .ss-shell[data-mobile-tab="generation"] [data-mobile-panel="generation"] { display: flex !important; min-height: 100%; }
+    .ss-shell[data-mobile-tab="history"] [data-mobile-panel="history"] { display: flex !important; min-height: 100%; }
+    .ss-generation-pane .ss-pane-title,
+    .ss-history-pane .ss-pane-title { display: block !important; }
+    .ss-generation-pane .ss-pane-body,
+    .ss-history-pane .ss-pane-body { display: block !important; }
+    .ss-pane-toggle { display: none; }
+    .ss-output-stage,
+    .ss-prompt-panel,
+    .ss-generation-pane,
+    .ss-history-pane {
+      width: 100%;
+      border-radius: 10px;
+    }
+    .ss-current-preview { min-height: 280px; flex: 1 1 0; }
+    .ss-output-stage-head .ss-output-actions { display: none; }
+    .ss-prompt-grid { grid-template-columns: 1fr; }
+    .ss-prompt-panel .ss-textarea { min-height: 135px; max-height: none; }
+    .ss-generation-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ss-history-pane .ss-history-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .ss-lora-dock {
+      display: none;
+      min-height: 0;
+      flex: 1 1 0;
+      border-radius: 10px;
+    }
+    .ss-shell[data-mobile-tab="loras"] .ss-workspace,
+    .ss-shell[data-mobile-tab="stack"] .ss-workspace { display: none !important; }
+    .ss-shell[data-mobile-tab="loras"] .ss-lora-dock,
+    .ss-shell[data-mobile-tab="stack"] .ss-lora-dock {
+      display: block;
+      flex-basis: auto;
+    }
+    .ss-lora-dock .ss-dock-head { display: none; }
+    .ss-lora-dock-content {
+      height: 100%;
+      display: block;
+      padding: 9px;
+    }
+    .ss-shell[data-mobile-tab="loras"] .ss-lora-library { display: flex; height: 100%; padding: 0; border: 0; }
+    .ss-shell[data-mobile-tab="loras"] .ss-stack-pane { display: none; }
+    .ss-shell[data-mobile-tab="stack"] .ss-lora-library { display: none; }
+    .ss-shell[data-mobile-tab="stack"] .ss-stack-pane { display: flex; height: 100%; }
+    .ss-library-tools { grid-template-columns: minmax(0, 1fr) 120px auto; }
+    .ss-library-tools [data-role="lora-sort"] { display: none; }
+    .ss-lora-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ss-lora-card { grid-template-columns: 78px minmax(0, 1fr); min-height: 120px; }
+    .ss-commandbar { flex: 0 0 52px; min-height: 52px; }
+    .ss-stack-summary { display: none; }
+    .ss-commandbar .ss-generate { min-width: 142px; }
+    .ss-run-status { white-space: normal; line-height: 1.25; max-height: 30px; }
+    .ss-inspector {
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(45dvh, 1fr) minmax(210px, 40dvh);
+    }
+    .ss-inspector-stage { padding: 52px 12px 16px; }
+    .ss-inspector-image { max-height: calc(60dvh - 70px); }
+    .ss-inspector-details { border-left: 0; border-top: 1px solid var(--lumiverse-border); padding: 13px; }
+  }
+
+  @media (max-width: 470px) {
+    .ss-brand span { display: none; }
+    .ss-mobile-tab { padding-inline: 11px; }
+    .ss-lora-grid { grid-template-columns: 1fr; }
+    .ss-lora-card { grid-template-columns: 96px minmax(0, 1fr); }
+    .ss-history-pane .ss-history-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ss-command-summary { max-width: 45%; }
+    .ss-commandbar .ss-generate { min-width: 0; flex: 1; }
+    .ss-stack-row {
+      grid-template-columns: auto minmax(90px, 1fr) 67px auto;
+    }
+    .ss-stack-row .ss-trigger-toggle { grid-column: 2 / -1; }
+  }
+`
+
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className?: string,
@@ -468,6 +1030,100 @@ function labelFromName(name: string): string {
   return leaf.replace(/\.(safetensors|ckpt|pt)$/i, "")
 }
 
+function normalizeModelName(value: string): string {
+  return String(value || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .pop()!
+    .replace(/\.(safetensors|ckpt|pt)$/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+}
+
+function normalizeCompat(value: string): string {
+  return String(value || "").trim().toLowerCase().replace(/[\s_.]+/g, "-")
+}
+
+export function inferModelFamily(...values: string[]): ModelFamily {
+  const text = values.join(" ").toLowerCase().replace(/[_./\\-]+/g, " ")
+  const compact = text.replace(/[^a-z0-9]+/g, "")
+  if (/\banima\b|\banima1\b/.test(text) || (compact.includes("anima") && !compact.includes("animation"))) return "anima"
+  if (/\billustrious\b|\bnoob\s*ai\b|\bwai\s*(?:nsfw|ani|illustrious)\b/.test(text)) return "illustrious"
+  if (/\bpony\b|\bpdxl\b/.test(text)) return "pony"
+  if (/\bflux\b/.test(text)) return "flux"
+  if (/\bchroma\b/.test(text)) return "chroma"
+  if (/\bstable diffusion 3\b|\bsd3\b/.test(text)) return "sd3"
+  if (/\bqwen\b/.test(text)) return "qwen"
+  if (/\bhunyuan\b/.test(text)) return "hunyuan"
+  if (/\bsdxl\b|\bstable diffusion xl\b|\bxl 1\b/.test(text)) return "sdxl"
+  if (/\bsd ?1[ ._-]?5\b|\bstable diffusion v?1\b/.test(text)) return "sd15"
+  return "unknown"
+}
+
+export function modelSignalsCompatible(
+  checkpointCompatValue: string,
+  loraCompatValue: string,
+  checkpointSignals: string[],
+  loraSignals: string[],
+): boolean {
+  const checkpointCompat = normalizeCompat(checkpointCompatValue)
+  const loraCompat = normalizeCompat(loraCompatValue)
+  if (checkpointCompat && loraCompat) {
+    if (checkpointCompat === loraCompat) return true
+    if (checkpointCompat.startsWith("stable-diffusion-v3") && loraCompat.startsWith("stable-diffusion-v3")) return true
+    if (checkpointCompat.startsWith("chroma") && loraCompat.startsWith("flux-1")) return true
+    return false
+  }
+  const checkpointFamily = inferModelFamily(...checkpointSignals)
+  const loraFamily = inferModelFamily(...loraSignals)
+  if (checkpointFamily === "unknown" || loraFamily === "unknown") return true
+  return checkpointFamily === loraFamily
+}
+
+function familyLabel(family: ModelFamily): string {
+  const labels: Record<ModelFamily, string> = {
+    anima: "Anima",
+    illustrious: "Illustrious",
+    pony: "Pony",
+    sdxl: "SDXL",
+    sd15: "SD 1.5",
+    flux: "Flux",
+    sd3: "SD3",
+    chroma: "Chroma",
+    qwen: "Qwen",
+    hunyuan: "Hunyuan",
+    unknown: "Unknown family",
+  }
+  return labels[family]
+}
+
+function manualLora(name: string, title = ""): LoraMetadata {
+  return {
+    name,
+    title: title || labelFromName(name),
+    author: "",
+    description: "Manually added without SwarmUI metadata.",
+    previewRef: null,
+    architecture: "",
+    className: "",
+    compatClass: "",
+    resolution: "",
+    standardWidth: null,
+    standardHeight: null,
+    license: "",
+    date: "",
+    usageHint: "",
+    triggerPhrase: "",
+    tags: [],
+    defaultWeight: 1,
+    defaultConfinement: null,
+    local: true,
+    timeCreated: null,
+    timeModified: null,
+    hash: "",
+  }
+}
+
 class StudioController {
   private readonly ctx: FrontendContext
   private readonly modal: any
@@ -479,7 +1135,23 @@ class StudioController {
   private connectionRequestId = ""
   private generating = false
   private currentJobId = ""
+  private pendingGeneration: GenerationDetails | null = null
+  private imageScale = 1
   private disposed = false
+  private readonly handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return
+    const inspector = this.root.querySelector<HTMLElement>('[data-role="inspector"]')
+    if (inspector && !inspector.hidden) {
+      this.closeInspector()
+      event.stopPropagation()
+      return
+    }
+    const shell = this.root.querySelector<HTMLElement>(".ss-shell")
+    if (shell?.classList.contains("ss-fullscreen-layer")) {
+      this.toggleFullscreen(false)
+      event.stopPropagation()
+    }
+  }
 
   constructor(ctx: FrontendContext, modal: any) {
     this.ctx = ctx
@@ -489,16 +1161,19 @@ class StudioController {
       connections: [],
       connection: null,
       models: [],
+      checkpoints: [],
       loras: [],
       stack: [],
+      stackPresets: [],
       outputs: [],
       activeChat: null,
       permissions: {},
       hasMetadataToken: false,
       currentImage: null,
     }
-    this.build()
+    this.buildV3()
     this.bind()
+    document.addEventListener("keydown", this.handleKeyDown, true)
     this.setRunStatus("Loading Lumiverse connections…")
     this.send("bootstrap")
   }
@@ -507,6 +1182,7 @@ class StudioController {
     this.disposed = true
     this.previewObserver?.disconnect()
     this.previewObserver = null
+    document.removeEventListener("keydown", this.handleKeyDown, true)
   }
 
   private get<T extends HTMLElement>(selector: string): T {
@@ -709,6 +1385,281 @@ class StudioController {
     `
   }
 
+  private buildV3(): void {
+    this.root.innerHTML = `
+      <div class="ss-shell" data-mobile-tab="create">
+        <div class="ss-topbar">
+          <div class="ss-brand">${STUDIO_ICON}<span>Swarm Studio</span></div>
+          <div class="ss-connection-wrap">
+            <select class="ss-select ss-connection" data-role="connection" aria-label="SwarmUI connection">
+              <option value="">Loading SwarmUI connections…</option>
+            </select>
+          </div>
+          <div class="ss-top-actions">
+            <button class="ss-button" data-action="refresh-metadata" title="Rescan model and LoRA metadata">Refresh metadata</button>
+            <div class="ss-token-wrap">
+              <button class="ss-button" data-action="toggle-token" aria-expanded="false" title="Metadata token">Metadata token</button>
+              <div class="ss-token-popover" data-role="token-popover" hidden>
+                <p>Lumiverse keeps the connection secret private from extensions. If SwarmUI authentication is enabled, save the same <code>swarm_token</code> here for metadata and preview requests only. It is stored in Lumiverse's encrypted enclave.</p>
+                <div class="ss-token-row">
+                  <input class="ss-input" data-role="metadata-token" type="password" autocomplete="off" placeholder="swarm_token value" />
+                  <button class="ss-button ss-button-primary" data-action="save-token">Save</button>
+                  <button class="ss-button ss-button-danger" data-action="clear-token">Clear</button>
+                </div>
+                <div class="ss-field-help" data-role="token-status">No extension metadata token saved.</div>
+              </div>
+            </div>
+            <button class="ss-icon-button" data-action="toggle-fullscreen" title="Toggle fullscreen studio" aria-label="Toggle fullscreen studio">⛶</button>
+            <button class="ss-icon-button ss-close-studio" data-action="close-studio" title="Close studio" aria-label="Close studio">×</button>
+          </div>
+        </div>
+
+        <div class="ss-permission-banner" data-role="permission-banner"></div>
+
+        <nav class="ss-mobile-tabs" aria-label="Studio sections">
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="create" data-active="true">Create</button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="prompt" data-active="false">Prompt</button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="generation" data-active="false">Tune</button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="loras" data-active="false">LoRAs</button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="stack" data-active="false">Stack</button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="history" data-active="false">History</button>
+        </nav>
+
+        <div class="ss-workspace">
+          <aside class="ss-generation-pane" data-mobile-panel="generation">
+            <div class="ss-pane-head">
+              <div class="ss-pane-title"><strong>Generation</strong><div class="ss-muted ss-tiny">Model and render controls</div></div>
+              <button class="ss-icon-button ss-pane-toggle" data-action="toggle-generation" title="Collapse generation sidebar" aria-label="Collapse generation sidebar">‹</button>
+            </div>
+            <div class="ss-pane-body">
+              <div class="ss-generation-controls">
+                <div class="ss-field ss-wide">
+                  <label>Checkpoint</label>
+                  <select class="ss-select" data-role="model"><option value="">Select a connection first</option></select>
+                </div>
+                <div class="ss-field">
+                  <label>Width</label>
+                  <input class="ss-input" data-role="width" type="number" min="64" max="4096" step="64" value="1024" />
+                </div>
+                <div class="ss-field">
+                  <label>Height</label>
+                  <input class="ss-input" data-role="height" type="number" min="64" max="4096" step="64" value="1024" />
+                </div>
+                <div class="ss-field">
+                  <label>Steps</label>
+                  <input class="ss-input" data-role="steps" type="number" min="1" max="150" step="1" value="20" />
+                </div>
+                <div class="ss-field">
+                  <label>CFG</label>
+                  <input class="ss-input" data-role="cfg" type="number" min="1" max="30" step="0.5" value="7" />
+                </div>
+                <div class="ss-field ss-wide">
+                  <label>Seed</label>
+                  <input class="ss-input" data-role="seed" type="number" step="1" value="-1" title="-1 uses a random seed" />
+                </div>
+                <div class="ss-field ss-wide">
+                  <label>Sampler</label>
+                  <input class="ss-input" data-role="sampler" list="ss-samplers" placeholder="Connection default" />
+                  <datalist id="ss-samplers">
+                    <option value="euler"></option><option value="euler_ancestral"></option>
+                    <option value="dpmpp_2m"></option><option value="dpmpp_2m_sde"></option>
+                    <option value="dpmpp_3m_sde"></option><option value="uni_pc"></option>
+                  </datalist>
+                </div>
+                <div class="ss-field ss-wide">
+                  <label>Scheduler</label>
+                  <input class="ss-input" data-role="scheduler" list="ss-schedulers" placeholder="Connection default" />
+                  <datalist id="ss-schedulers">
+                    <option value="normal"></option><option value="karras"></option>
+                    <option value="exponential"></option><option value="sgm_uniform"></option>
+                    <option value="simple"></option><option value="ddim_uniform"></option>
+                  </datalist>
+                </div>
+                <div class="ss-inline-actions ss-wide">
+                  <button class="ss-button" data-action="swap-size" title="Swap width and height">↔ Swap</button>
+                  <button class="ss-button" data-action="random-seed" title="Use a random seed">✦ Random seed</button>
+                </div>
+              </div>
+              <details class="ss-advanced">
+                <summary>Advanced Swarm controls</summary>
+                <div class="ss-advanced-grid">
+                  <div class="ss-field ss-wide">
+                    <label>Swarm preset(s)</label>
+                    <input class="ss-input" data-role="presets" placeholder="portrait, cinematic" />
+                  </div>
+                  <div class="ss-field">
+                    <label>VAE override</label>
+                    <input class="ss-input" data-role="vae" placeholder="Built-in/default" />
+                  </div>
+                  <div class="ss-field">
+                    <label>UNet override</label>
+                    <input class="ss-input" data-role="unet" placeholder="Use checkpoint" />
+                  </div>
+                  <div class="ss-field">
+                    <label>CLIP-L</label>
+                    <input class="ss-input" data-role="clip-l" placeholder="Optional" />
+                  </div>
+                  <div class="ss-field">
+                    <label>CLIP-G</label>
+                    <input class="ss-input" data-role="clip-g" placeholder="Optional" />
+                  </div>
+                  <div class="ss-field">
+                    <label>T5-XXL</label>
+                    <input class="ss-input" data-role="t5" placeholder="Optional" />
+                  </div>
+                  <div class="ss-field ss-wide">
+                    <label>Raw request override (JSON)</label>
+                    <textarea class="ss-textarea" data-role="raw-override" spellcheck="false" placeholder='{"refinerupscale": 1.25}'></textarea>
+                    <div class="ss-field-help">Merged after these controls. Protected connection, model, and authentication fields stay protected.</div>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </aside>
+
+          <main class="ss-center">
+            <section class="ss-output-stage" data-mobile-panel="create">
+              <div class="ss-output-stage-head">
+                <div class="ss-section-title"><strong>Current output</strong><span class="ss-muted ss-tiny">Saved by Lumiverse</span></div>
+                <div class="ss-output-actions">
+                  <button class="ss-button" data-action="download-output" disabled>Download</button>
+                  <button class="ss-button" data-action="copy-output" disabled>Copy URL</button>
+                </div>
+              </div>
+              <div class="ss-current-preview" data-role="current-preview" data-action="inspect-output" title="Open full-size image and generation details">
+                <div class="ss-preview-empty" data-role="preview-empty"><strong>No output yet</strong>Generate an image or open one from History.</div>
+                <img data-role="preview-image" alt="Generated image preview" hidden />
+                <div class="ss-preview-loading" data-role="preview-loading"><div class="ss-spinner" aria-label="Generating"></div></div>
+              </div>
+              <div class="ss-output-meta">
+                <div class="ss-output-label" data-role="output-label">Nothing selected</div>
+                <span class="ss-zoom-hint">Click image for full size + prompts</span>
+              </div>
+            </section>
+
+            <section class="ss-prompt-panel" data-mobile-panel="prompt">
+              <div class="ss-section-head">
+                <div class="ss-section-title"><strong>Prompt</strong><span class="ss-muted ss-tiny">LoRA triggers are opt-in</span></div>
+              </div>
+              <div class="ss-prompt-grid">
+                <div class="ss-field">
+                  <label for="ss-positive-v3">Positive</label>
+                  <textarea id="ss-positive-v3" class="ss-textarea" data-role="positive" placeholder="Describe the image…"></textarea>
+                  <div class="ss-field-help" data-role="trigger-summary">No inherited trigger phrases.</div>
+                </div>
+                <div class="ss-field">
+                  <label for="ss-negative-v3">Negative</label>
+                  <textarea id="ss-negative-v3" class="ss-textarea" data-role="negative" placeholder="What should not appear…"></textarea>
+                  <div class="ss-field-help">Passed through Lumiverse's SwarmUI provider.</div>
+                </div>
+              </div>
+            </section>
+          </main>
+
+          <aside class="ss-history-pane" data-mobile-panel="history">
+            <div class="ss-pane-head">
+              <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny"><span data-role="output-count">0</span> saved outputs</div></div>
+              <div>
+                <button class="ss-icon-button ss-pane-toggle" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
+                <button class="ss-icon-button ss-pane-toggle" data-action="toggle-history" title="Collapse history sidebar" aria-label="Collapse history sidebar">›</button>
+              </div>
+            </div>
+            <div class="ss-pane-body ss-history-grid" data-role="history-grid">
+              <div class="ss-empty">Outputs created in this chat will appear here.</div>
+            </div>
+          </aside>
+        </div>
+
+        <section class="ss-lora-dock">
+          <div class="ss-dock-head">
+            <div class="ss-section-title">
+              <strong>LoRA workspace</strong>
+              <span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span>
+            </div>
+            <button class="ss-icon-button ss-pane-toggle" data-action="toggle-loras" title="Collapse LoRA workspace" aria-label="Collapse LoRA workspace">⌄</button>
+          </div>
+          <div class="ss-lora-dock-content">
+            <section class="ss-lora-library">
+              <div class="ss-section-head">
+                <div>
+                  <div class="ss-section-title"><strong>Select LoRAs</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
+                  <div class="ss-family-note"><span>Base model:</span><span class="ss-family-chip" data-role="family-chip">Waiting for checkpoint</span></div>
+                </div>
+              </div>
+              <div class="ss-library-tools">
+                <input class="ss-input" data-role="lora-search" type="search" placeholder="Search LoRAs…" />
+                <select class="ss-select ss-lora-filter" data-role="lora-filter" aria-label="LoRA compatibility filter">
+                  <option value="compatible">Compatible only</option>
+                  <option value="all">All model families</option>
+                </select>
+                <select class="ss-select" data-role="lora-sort" aria-label="Sort LoRAs">
+                  <option value="title">Title</option>
+                  <option value="name">Filename</option>
+                  <option value="newest">Newest</option>
+                </select>
+                <button class="ss-button" data-action="manual-lora">Add filename</button>
+              </div>
+              <div class="ss-library-status" data-role="metadata-error" hidden></div>
+              <div class="ss-lora-grid" data-role="lora-grid">
+                <div class="ss-empty">Choose a SwarmUI connection to load its LoRA library.</div>
+              </div>
+            </section>
+
+            <section class="ss-stack-pane">
+              <div class="ss-section-head">
+                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
+                <button class="ss-button ss-button-danger" data-action="clear-stack" disabled>Clear</button>
+              </div>
+              <div class="ss-stack-head-tools">
+                <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
+                  <option value="">Saved stacks…</option>
+                </select>
+                <button class="ss-button" data-action="load-stack" disabled>Load</button>
+                <button class="ss-button ss-button-primary" data-action="save-stack">Save</button>
+                <button class="ss-button ss-button-danger" data-action="delete-stack" disabled>Delete</button>
+              </div>
+              <div class="ss-stack-list" data-role="stack-list">
+                <div class="ss-empty">Add LoRAs from the library. Metadata triggers stay off until you enable them.</div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <div class="ss-commandbar">
+          <div class="ss-command-summary">
+            <div class="ss-run-status" data-role="run-status">Waiting for a SwarmUI connection.</div>
+            <div class="ss-stack-summary" data-role="command-stack-summary">No LoRAs enabled</div>
+          </div>
+          <button class="ss-button ss-button-primary ss-generate" data-action="generate" disabled>Generate image</button>
+        </div>
+
+        <div class="ss-inspector" data-role="inspector" hidden>
+          <button class="ss-icon-button ss-inspector-close" data-action="close-inspector" aria-label="Close full-size image">×</button>
+          <div class="ss-inspector-stage" data-role="inspector-stage">
+            <div class="ss-inspector-toolbar">
+              <button class="ss-icon-button" data-action="zoom-out" aria-label="Zoom out">−</button>
+              <button class="ss-button" data-action="zoom-reset" data-role="zoom-label">100%</button>
+              <button class="ss-icon-button" data-action="zoom-in" aria-label="Zoom in">+</button>
+              <button class="ss-button" data-action="download-output">Download</button>
+            </div>
+            <img class="ss-inspector-image" data-role="inspector-image" alt="Full-size generated output" />
+          </div>
+          <aside class="ss-inspector-details">
+            <h3 data-role="inspector-title">Generated output</h3>
+            <div class="ss-muted ss-tiny">Full-size image and recorded generation settings</div>
+            <div class="ss-inspector-facts" data-role="inspector-facts"></div>
+            <h4>Positive prompt</h4>
+            <p class="ss-inspector-copy" data-role="inspector-positive">Prompt metadata is unavailable for this older output.</p>
+            <h4>Negative prompt</h4>
+            <p class="ss-inspector-copy" data-role="inspector-negative">No negative prompt recorded.</p>
+            <h4>LoRA stack</h4>
+            <p class="ss-inspector-copy" data-role="inspector-loras">No LoRAs recorded.</p>
+          </aside>
+        </div>
+      </div>
+    `
+  }
+
   private bind(): void {
     this.get<HTMLSelectElement>('[data-role="connection"]').addEventListener("change", (event) => {
       const connectionId = (event.currentTarget as HTMLSelectElement).value
@@ -716,6 +1667,13 @@ class StudioController {
     })
     this.get<HTMLInputElement>('[data-role="lora-search"]').addEventListener("input", () => this.renderLoras())
     this.get<HTMLSelectElement>('[data-role="lora-sort"]').addEventListener("change", () => this.renderLoras())
+    this.get<HTMLSelectElement>('[data-role="lora-filter"]').addEventListener("change", () => this.renderLoras())
+    this.get<HTMLSelectElement>('[data-role="model"]').addEventListener("change", () => {
+      this.updateFamilyChip()
+      this.renderLoras()
+      this.renderStack()
+    })
+    this.get<HTMLSelectElement>('[data-role="stack-preset"]').addEventListener("change", () => this.updatePresetButtons())
 
     this.root.addEventListener("click", (event) => {
       const target = event.target as HTMLElement
@@ -726,18 +1684,32 @@ class StudioController {
       if (action === "toggle-token") this.toggleTokenPopover(button)
       if (action === "save-token") this.saveToken()
       if (action === "clear-token") this.clearToken()
+      if (action === "close-studio") this.modal.dismiss()
       if (action === "swap-size") this.swapSize()
       if (action === "random-seed") this.get<HTMLInputElement>('[data-role="seed"]').value = "-1"
       if (action === "manual-lora") this.addManualLora()
+      if (action === "toggle-generation") this.togglePane("generation")
+      if (action === "toggle-history") this.togglePane("history")
+      if (action === "toggle-loras") this.togglePane("loras")
+      if (action === "toggle-fullscreen") this.toggleFullscreen()
+      if (action === "mobile-tab") this.setMobileTab(button.dataset.tab || "create")
       if (action === "clear-stack") {
         this.state.stack = []
         this.renderStack()
         this.renderLoras()
       }
+      if (action === "save-stack") this.saveStackPreset()
+      if (action === "load-stack") this.loadStackPreset()
+      if (action === "delete-stack") this.deleteStackPreset()
       if (action === "generate") this.generate()
       if (action === "refresh-outputs") this.send("refresh_outputs")
       if (action === "download-output") this.downloadCurrent()
       if (action === "copy-output") void this.copyCurrentUrl()
+      if (action === "inspect-output") this.openInspector()
+      if (action === "close-inspector") this.closeInspector()
+      if (action === "zoom-in") this.setInspectorZoom(this.imageScale + 0.25)
+      if (action === "zoom-out") this.setInspectorZoom(this.imageScale - 0.25)
+      if (action === "zoom-reset") this.setInspectorZoom(1)
     })
   }
 
@@ -754,11 +1726,13 @@ class StudioController {
       case "bootstrap_result":
         this.state.connections = Array.isArray(data.connections) ? data.connections : []
         this.state.outputs = Array.isArray(data.outputs) ? data.outputs : []
+        this.state.stackPresets = Array.isArray(data.stackPresets) ? data.stackPresets : []
         this.state.activeChat = data.activeChat || null
         this.state.permissions = data.permissions || {}
         this.renderPermissions()
         this.populateConnections()
         this.renderOutputs()
+        this.renderStackPresets()
         break
       case "connection_result":
         if (payload.requestId !== this.connectionRequestId) return
@@ -767,8 +1741,11 @@ class StudioController {
         break
       case "metadata_result":
         this.state.loras = Array.isArray(data.loras) ? data.loras : []
+        this.state.checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints : this.state.checkpoints
         this.showMetadataError(data.metadataError || "")
+        this.updateFamilyChip()
         this.renderLoras()
+        this.renderStack()
         this.setRunStatus(`Metadata refreshed: ${this.state.loras.length} LoRAs.`)
         this.setConnectionStatus("ready")
         break
@@ -794,8 +1771,10 @@ class StudioController {
             src: data.result.imageDataUrl,
             url: data.result.imageUrl || data.result.imageDataUrl,
             label: `${data.result.model || "SwarmUI"} · just generated`,
+            details: data.record || this.pendingGeneration,
           })
         }
+        this.pendingGeneration = null
         this.renderOutputs()
         this.setRunStatus("Generation complete. Output saved to Lumiverse.")
         break
@@ -804,10 +1783,16 @@ class StudioController {
         this.renderOutputs()
         this.setRunStatus(`History refreshed: ${this.state.outputs.length} outputs.`)
         break
+      case "stack_presets_result":
+        this.state.stackPresets = Array.isArray(data) ? data : []
+        this.renderStackPresets()
+        this.setRunStatus("Saved LoRA stacks updated.")
+        break
       case "studio_error":
         if (payload.operation === "generate") {
           this.generating = false
           this.currentJobId = ""
+          this.pendingGeneration = null
           this.setGenerating(false)
         }
         this.setConnectionStatus("error")
@@ -887,6 +1872,7 @@ class StudioController {
     const connection = this.state.connections.find((item) => item.id === connectionId) || null
     this.state.connection = connection
     this.state.models = []
+    this.state.checkpoints = []
     this.state.loras = []
     this.previewObserver?.disconnect()
     this.requestedPreviews.clear()
@@ -901,12 +1887,15 @@ class StudioController {
   private acceptConnectionData(data: any): void {
     this.state.connection = data.connection || this.state.connection
     this.state.models = Array.isArray(data.models) ? data.models : []
+    this.state.checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints : []
     this.state.loras = Array.isArray(data.loras) ? data.loras : []
     this.state.hasMetadataToken = Boolean(data.hasMetadataToken)
     this.populateModels()
     this.applyConnectionDefaults()
+    this.updateFamilyChip()
     this.showMetadataError(data.metadataError || "")
     this.renderLoras()
+    this.renderStack()
     this.updateTokenStatus()
     this.setConnectionStatus(data.metadataError ? "warning" : "ready")
     this.get<HTMLButtonElement>('[data-action="generate"]').disabled = !this.state.connection || !this.state.permissions.imageGen
@@ -958,6 +1947,7 @@ class StudioController {
   private refreshMetadata(): void {
     if (!this.state.connection) return
     this.state.loras = []
+    this.state.checkpoints = []
     this.previewObserver?.disconnect()
     this.requestedPreviews.clear()
     this.previewCache.clear()
@@ -1003,10 +1993,75 @@ class StudioController {
     status.textContent = message
   }
 
+  private selectedCheckpointMetadata(): CheckpointMetadata | null {
+    const select = this.get<HTMLSelectElement>('[data-role="model"]')
+    const selected = normalizeModelName(select.value)
+    if (!selected) return null
+    return this.state.checkpoints.find((item) => normalizeModelName(item.name) === selected)
+      || this.state.checkpoints.find((item) => {
+        const candidate = normalizeModelName(item.name)
+        return candidate.endsWith(selected) || selected.endsWith(candidate)
+      })
+      || null
+  }
+
+  private selectedModelFamily(): ModelFamily {
+    const select = this.get<HTMLSelectElement>('[data-role="model"]')
+    const option = select.selectedOptions[0]
+    const checkpoint = this.selectedCheckpointMetadata()
+    return inferModelFamily(
+      checkpoint?.compatClass || "",
+      checkpoint?.architecture || "",
+      checkpoint?.title || "",
+      checkpoint?.name || "",
+      select.value,
+      option?.textContent || "",
+    )
+  }
+
+  private loraFamily(lora: LoraMetadata): ModelFamily {
+    return inferModelFamily(
+      lora.compatClass,
+      lora.architecture,
+      lora.name,
+      lora.title,
+      ...lora.tags,
+    )
+  }
+
+  private isLoraCompatible(lora: LoraMetadata): boolean {
+    const checkpoint = this.selectedCheckpointMetadata()
+    const select = this.get<HTMLSelectElement>('[data-role="model"]')
+    return modelSignalsCompatible(
+      checkpoint?.compatClass || "",
+      lora.compatClass,
+      [
+        checkpoint?.compatClass || "",
+        checkpoint?.architecture || "",
+        checkpoint?.title || "",
+        checkpoint?.name || "",
+        select.value,
+        select.selectedOptions[0]?.textContent || "",
+      ],
+      [lora.compatClass, lora.architecture, lora.name, lora.title, ...lora.tags],
+    )
+  }
+
+  private updateFamilyChip(): void {
+    const checkpoint = this.selectedCheckpointMetadata()
+    const family = this.selectedModelFamily()
+    const exact = checkpoint?.compatClass || checkpoint?.architecture || ""
+    this.get<HTMLElement>('[data-role="family-chip"]').textContent = exact
+      ? `${familyLabel(family)} · ${exact}`
+      : `${familyLabel(family)} · inferred`
+  }
+
   private filteredLoras(): LoraMetadata[] {
     const query = this.get<HTMLInputElement>('[data-role="lora-search"]').value.trim().toLowerCase()
     const sort = this.get<HTMLSelectElement>('[data-role="lora-sort"]').value
+    const compatibility = this.get<HTMLSelectElement>('[data-role="lora-filter"]').value
     const items = this.state.loras.filter((lora) => {
+      if (compatibility === "compatible" && !this.isLoraCompatible(lora)) return false
       if (!query) return true
       return [
         lora.name,
@@ -1034,14 +2089,18 @@ class StudioController {
     const items = this.filteredLoras()
     this.get<HTMLElement>('[data-role="lora-count"]').textContent =
       `${items.length}${items.length !== this.state.loras.length ? ` of ${this.state.loras.length}` : ""} model${items.length === 1 ? "" : "s"}`
+    this.updateDockSummary()
 
     if (!this.state.connection) {
       grid.appendChild(element("div", "ss-empty", "Choose a SwarmUI connection to load its LoRA library."))
       return
     }
     if (!items.length) {
+      const compatibleOnly = this.get<HTMLSelectElement>('[data-role="lora-filter"]').value === "compatible"
       const text = this.state.loras.length
-        ? "No LoRAs match this search."
+        ? compatibleOnly
+          ? `No compatible LoRAs match ${familyLabel(this.selectedModelFamily())}. Switch to “All model families” to inspect everything.`
+          : "No LoRAs match this search."
         : "No LoRA metadata was returned. You can still add a model by filename."
       grid.appendChild(element("div", "ss-empty", text))
       return
@@ -1108,6 +2167,9 @@ class StudioController {
       ...lora.tags.slice(0, 1),
     ].filter(Boolean).slice(0, 3)
     for (const value of badgeValues) badges.appendChild(element("span", "ss-badge", value))
+    if (!this.isLoraCompatible(lora)) {
+      badges.appendChild(element("span", "ss-badge ss-badge-warning", "model mismatch"))
+    }
     body.appendChild(badges)
 
     const footer = element("div", "ss-lora-footer")
@@ -1135,7 +2197,7 @@ class StudioController {
       lora,
       weight: clamp(Number(lora.defaultWeight) || 1, -10, 10),
       enabled: true,
-      useTrigger: Boolean(lora.triggerPhrase),
+      useTrigger: false,
     })
     this.renderStack()
     this.renderLoras()
@@ -1145,49 +2207,31 @@ class StudioController {
     const filename = window.prompt("Exact SwarmUI LoRA filename/path")
     if (!filename?.trim()) return
     const name = filename.trim()
-    this.addLora({
-      name,
-      title: labelFromName(name),
-      author: "",
-      description: "Manually added without SwarmUI metadata.",
-      previewRef: null,
-      architecture: "",
-      className: "",
-      compatClass: "",
-      resolution: "",
-      standardWidth: null,
-      standardHeight: null,
-      license: "",
-      date: "",
-      usageHint: "",
-      triggerPhrase: "",
-      tags: [],
-      defaultWeight: 1,
-      defaultConfinement: null,
-      local: true,
-      timeCreated: null,
-      timeModified: null,
-      hash: "",
-    })
+    this.addLora(manualLora(name))
   }
 
   private renderStack(): void {
     const list = this.get<HTMLElement>('[data-role="stack-list"]')
     list.replaceChildren()
     if (!this.state.stack.length) {
-      list.appendChild(element("div", "ss-empty", "Add LoRAs above. Their metadata default weight and trigger phrase are inherited automatically."))
+      list.appendChild(element("div", "ss-empty", "Add LoRAs from the library. Metadata triggers stay off until you enable them."))
     } else {
       this.state.stack.forEach((item, index) => list.appendChild(this.makeStackRow(item, index)))
     }
     const enabled = this.state.stack.filter((item) => item.enabled).length
     this.get<HTMLElement>('[data-role="stack-count"]').textContent = `${enabled} enabled · ${this.state.stack.length} stacked`
     this.get<HTMLButtonElement>('[data-action="clear-stack"]').disabled = this.state.stack.length === 0
+    this.get<HTMLElement>('[data-role="command-stack-summary"]').textContent = enabled
+      ? `${enabled} LoRA${enabled === 1 ? "" : "s"} enabled`
+      : "No LoRAs enabled"
+    this.updateDockSummary()
     this.updateTriggerSummary()
   }
 
   private makeStackRow(item: StackItem, index: number): HTMLElement {
     const row = element("div", "ss-stack-row")
     row.dataset.disabled = String(!item.enabled)
+    row.dataset.incompatible = String(!this.isLoraCompatible(item.lora))
 
     const enabled = element("input") as HTMLInputElement
     enabled.type = "checkbox"
@@ -1253,6 +2297,158 @@ class StudioController {
     const [item] = this.state.stack.splice(index, 1)
     this.state.stack.splice(target, 0, item)
     this.renderStack()
+  }
+
+  private updateDockSummary(): void {
+    const target = this.root.querySelector<HTMLElement>('[data-role="dock-summary"]')
+    if (!target) return
+    target.textContent = `${this.state.loras.length} models · ${this.state.stack.length} stacked`
+  }
+
+  private renderStackPresets(): void {
+    const select = this.get<HTMLSelectElement>('[data-role="stack-preset"]')
+    const selected = select.value
+    select.replaceChildren()
+    const placeholder = element("option", "", this.state.stackPresets.length ? "Saved stacks…" : "No saved stacks")
+    placeholder.value = ""
+    select.appendChild(placeholder)
+    for (const preset of this.state.stackPresets) {
+      const option = element("option", "", `${preset.name} · ${preset.items.length}`)
+      option.value = preset.id
+      select.appendChild(option)
+    }
+    if (selected && this.state.stackPresets.some((preset) => preset.id === selected)) {
+      select.value = selected
+    }
+    this.updatePresetButtons()
+  }
+
+  private updatePresetButtons(): void {
+    const selected = Boolean(this.get<HTMLSelectElement>('[data-role="stack-preset"]').value)
+    this.get<HTMLButtonElement>('[data-action="load-stack"]').disabled = !selected
+    this.get<HTMLButtonElement>('[data-action="delete-stack"]').disabled = !selected
+  }
+
+  private saveStackPreset(): void {
+    if (!this.state.stack.length) {
+      this.setRunStatus("Add at least one LoRA before saving a stack.", true)
+      return
+    }
+    const select = this.get<HTMLSelectElement>('[data-role="stack-preset"]')
+    const existing = this.state.stackPresets.find((preset) => preset.id === select.value)
+    const name = window.prompt("Save LoRA stack as", existing?.name || "")
+    if (!name?.trim()) return
+    this.send("save_stack_preset", {
+      preset: {
+        id: existing?.id || "",
+        name: name.trim(),
+        items: this.state.stack.map((item) => ({
+          name: item.lora.name,
+          title: item.lora.title,
+          weight: item.weight,
+          enabled: item.enabled,
+          useTrigger: item.useTrigger,
+        })),
+      },
+    })
+    this.setRunStatus(`Saving LoRA stack “${name.trim()}”…`)
+  }
+
+  private loadStackPreset(): void {
+    const presetId = this.get<HTMLSelectElement>('[data-role="stack-preset"]').value
+    const preset = this.state.stackPresets.find((item) => item.id === presetId)
+    if (!preset) return
+    this.state.stack = preset.items.map((item) => {
+      const lora = this.state.loras.find((candidate) => candidate.name === item.name)
+        || manualLora(item.name, item.title)
+      return {
+        lora,
+        weight: clamp(Number(item.weight) || 1, -10, 10),
+        enabled: item.enabled !== false,
+        useTrigger: Boolean(item.useTrigger && lora.triggerPhrase),
+      }
+    })
+    this.renderStack()
+    this.renderLoras()
+    this.setRunStatus(`Loaded LoRA stack “${preset.name}”.`)
+  }
+
+  private deleteStackPreset(): void {
+    const select = this.get<HTMLSelectElement>('[data-role="stack-preset"]')
+    const preset = this.state.stackPresets.find((item) => item.id === select.value)
+    if (!preset || !window.confirm(`Delete saved LoRA stack “${preset.name}”?`)) return
+    this.send("delete_stack_preset", { presetId: preset.id })
+    this.setRunStatus(`Deleting LoRA stack “${preset.name}”…`)
+  }
+
+  private togglePane(pane: "generation" | "history" | "loras"): void {
+    const shell = this.get<HTMLElement>(".ss-shell")
+    const className = `ss-${pane}-collapsed`
+    const collapsed = shell.classList.toggle(className)
+    const button = this.get<HTMLButtonElement>(`[data-action="toggle-${pane}"]`)
+    if (pane === "generation") button.textContent = collapsed ? "›" : "‹"
+    if (pane === "history") button.textContent = collapsed ? "‹" : "›"
+    if (pane === "loras") button.textContent = collapsed ? "⌃" : "⌄"
+    button.setAttribute("aria-expanded", String(!collapsed))
+  }
+
+  private toggleFullscreen(force?: boolean): void {
+    const shell = this.get<HTMLElement>(".ss-shell")
+    const shouldEnter = force ?? !shell.classList.contains("ss-fullscreen-layer")
+    shell.classList.toggle("ss-fullscreen-layer", shouldEnter)
+    const button = this.get<HTMLButtonElement>('[data-action="toggle-fullscreen"]')
+    button.textContent = shouldEnter ? "🗗" : "⛶"
+    button.title = shouldEnter ? "Exit fullscreen studio" : "Enter fullscreen studio"
+  }
+
+  private setMobileTab(tab: string): void {
+    const allowed = new Set(["create", "prompt", "generation", "loras", "stack", "history"])
+    const selected = allowed.has(tab) ? tab : "create"
+    const shell = this.get<HTMLElement>(".ss-shell")
+    shell.dataset.mobileTab = selected
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>(".ss-mobile-tab")) {
+      const active = button.dataset.tab === selected
+      button.dataset.active = String(active)
+      button.setAttribute("aria-current", active ? "page" : "false")
+    }
+  }
+
+  private openInspector(): void {
+    const image = this.state.currentImage
+    if (!image) return
+    const inspector = this.get<HTMLElement>('[data-role="inspector"]')
+    this.get<HTMLImageElement>('[data-role="inspector-image"]').src = image.url || image.src
+    this.get<HTMLElement>('[data-role="inspector-title"]').textContent = image.label
+    const details = image.details || null
+    const parameters = details?.parameters || {}
+    const facts = this.get<HTMLElement>('[data-role="inspector-facts"]')
+    facts.replaceChildren()
+    const factValues = [
+      details?.model,
+      parameters.width && parameters.height ? `${parameters.width} × ${parameters.height}` : "",
+      parameters.steps ? `${parameters.steps} steps` : "",
+      parameters.seed !== undefined ? `seed ${parameters.seed}` : "",
+    ].filter(Boolean)
+    for (const value of factValues) facts.appendChild(element("span", "ss-badge", String(value)))
+    this.get<HTMLElement>('[data-role="inspector-positive"]').textContent =
+      details?.prompt || "Prompt metadata is unavailable for this older output."
+    this.get<HTMLElement>('[data-role="inspector-negative"]').textContent =
+      details?.negativePrompt || "No negative prompt recorded."
+    this.get<HTMLElement>('[data-role="inspector-loras"]').textContent = details?.loras?.length
+      ? details.loras.map((lora) => `${lora.name} · ${lora.weight}`).join("\n")
+      : "No LoRAs recorded."
+    inspector.hidden = false
+    this.setInspectorZoom(1)
+  }
+
+  private closeInspector(): void {
+    this.get<HTMLElement>('[data-role="inspector"]').hidden = true
+  }
+
+  private setInspectorZoom(value: number): void {
+    this.imageScale = clamp(value, 0.5, 4)
+    this.get<HTMLImageElement>('[data-role="inspector-image"]').style.setProperty("--ss-image-scale", String(this.imageScale))
+    this.get<HTMLElement>('[data-role="zoom-label"]').textContent = `${Math.round(this.imageScale * 100)}%`
   }
 
   private inheritedTriggers(): string[] {
@@ -1337,16 +2533,27 @@ class StudioController {
     }
 
     const clientJobId = crypto.randomUUID()
+    const negativePrompt = this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim()
+    const model = this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
+    this.pendingGeneration = {
+      prompt,
+      negativePrompt,
+      model,
+      parameters,
+      loras: enabled.map((item) => ({ name: item.lora.name, weight: item.weight })),
+      createdAt: Date.now(),
+    }
     this.generating = true
     this.currentJobId = clientJobId
     this.setGenerating(true)
     this.setRunStatus(`Generating with ${enabled.length} LoRA${enabled.length === 1 ? "" : "s"}…`)
+    if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create")
     this.send("generate", {
       input: {
         prompt,
-        negativePrompt: this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim() || undefined,
+        negativePrompt: negativePrompt || undefined,
         connection_id: this.state.connection.id,
-        model: this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model,
+        model,
         clientJobId,
         parameters,
       },
@@ -1361,14 +2568,20 @@ class StudioController {
   }
 
   private showLivePreview(src: string, step: number, totalSteps: number): void {
+    const label = totalSteps > 0
+      ? `Live SwarmUI preview · ${step} / ${totalSteps}`
+      : "Live SwarmUI preview"
+    this.state.currentImage = {
+      src,
+      label,
+      details: this.pendingGeneration,
+    }
     const preview = this.get<HTMLImageElement>('[data-role="preview-image"]')
     preview.src = src
     preview.hidden = false
     this.get<HTMLElement>('[data-role="preview-empty"]').hidden = true
     this.get<HTMLElement>('[data-role="preview-loading"]').dataset.visible = "false"
-    this.get<HTMLElement>('[data-role="output-label"]').textContent = totalSteps > 0
-      ? `Live SwarmUI preview · ${step} / ${totalSteps}`
-      : "Live SwarmUI preview"
+    this.get<HTMLElement>('[data-role="output-label"]').textContent = label
     this.get<HTMLButtonElement>('[data-action="download-output"]').disabled = true
     this.get<HTMLButtonElement>('[data-action="copy-output"]').disabled = true
   }
@@ -1394,13 +2607,15 @@ class StudioController {
           src: output.url,
           url: fullUrl || output.url,
           label: output.original_filename || `Output ${output.id}`,
+          details: output.studioMetadata || null,
         })
+        this.openInspector()
       })
       grid.appendChild(button)
     }
   }
 
-  private setCurrentImage(image: { src: string; url?: string; label: string }): void {
+  private setCurrentImage(image: CurrentImage): void {
     this.state.currentImage = image
     const preview = this.get<HTMLImageElement>('[data-role="preview-image"]')
     preview.src = image.src
@@ -1462,14 +2677,14 @@ let activeStudio: StudioController | null = null
 let activeModal: any | null = null
 
 export function setup(ctx: FrontendContext): () => void {
-  const removeStyle = ctx.dom.addStyle(STYLES)
+  const removeStyle = ctx.dom.addStyle(`${STYLES}\n${STUDIO_V3_STYLES}`)
 
   const openStudio = () => {
     if (activeModal) return
     const modal = ctx.ui.showModal({
       title: "Swarm Studio",
-      width: 1120,
-      maxHeight: 880,
+      width: 1440,
+      maxHeight: 980,
       persistent: false,
     })
     activeModal = modal

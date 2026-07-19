@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 let frontendHandler
 const sent = []
 const secrets = new Map()
+const userFiles = new Map()
 const permissions = new Set(["image_gen", "cors_proxy", "images", "chats"])
 
 globalThis.spindle = {
@@ -84,6 +85,14 @@ globalThis.spindle = {
       return secrets.delete(key)
     },
   },
+  userStorage: {
+    async getJson(path, options = {}) {
+      return userFiles.has(path) ? structuredClone(userFiles.get(path)) : structuredClone(options.fallback)
+    },
+    async setJson(path, value) {
+      userFiles.set(path, structuredClone(value))
+    },
+  },
   async cors(url, options) {
     if (url.endsWith("/API/GetNewSession")) {
       return {
@@ -95,8 +104,24 @@ globalThis.spindle = {
     }
     if (url.endsWith("/API/ListModels")) {
       const body = JSON.parse(options.body)
-      assert.equal(body.subtype, "LoRA")
       assert.equal(body.dataImages, false)
+      if (body.subtype === "Stable-Diffusion") {
+        return {
+          status: 200,
+          statusText: "OK",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            files: [{
+              name: "base.safetensors",
+              title: "Base",
+              architecture: "stable-diffusion-xl-v1/base",
+              compat_class: "stable-diffusion-xl-v1",
+              class: "checkpoint",
+            }],
+          }),
+        }
+      }
+      assert.equal(body.subtype, "LoRA")
       return {
         status: 200,
         statusText: "OK",
@@ -157,11 +182,28 @@ const bootstrap = await request("bootstrap")
 assert.equal(bootstrap.data.connections.length, 1)
 assert.equal(bootstrap.data.connections[0].provider, "swarmui")
 assert.equal(bootstrap.data.outputs.length, 1)
+assert.deepEqual(bootstrap.data.stackPresets, [])
 
 const connection = await request("load_connection", { connectionId: "swarm-1" })
 assert.equal(connection.data.loras.length, 1)
 assert.equal(connection.data.loras[0].triggerPhrase, "ink style")
 assert.equal(connection.data.loras[0].defaultWeight, 0.75)
+assert.equal(connection.data.checkpoints[0].compatClass, "stable-diffusion-xl-v1")
+
+const savedStack = await request("save_stack_preset", {
+  preset: {
+    name: "Ink stack",
+    items: [{
+      name: "styles/ink.safetensors",
+      title: "Ink Style",
+      weight: 0.75,
+      enabled: true,
+      useTrigger: false,
+    }],
+  },
+})
+assert.equal(savedStack.data.length, 1)
+assert.equal(savedStack.data[0].items[0].useTrigger, false)
 
 const preview = await request("preview", {
   connectionId: "swarm-1",
@@ -184,5 +226,7 @@ const generated = await request("generate", {
 })
 assert.equal(generated.data.result.provider, "swarmui")
 assert.equal(generated.data.outputs.length, 1)
+assert.equal(generated.data.record.prompt, "ink style, portrait")
+assert.equal(generated.data.outputs[0].studioMetadata.imageId, "image-1")
 
 console.log("backend contract: ok")
