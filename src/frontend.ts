@@ -1,5 +1,5 @@
 type FrontendContext = any
-type StudioTheme = "lumiverse" | "moonbloom" | "sakura" | "verdant"
+type StudioTheme = "lumiverse" | "custom"
 type AppearanceColorKey = "accent" | "canvas" | "panel" | "header" | "outline" | "button" | "text"
 
 interface StudioAppearance {
@@ -202,13 +202,21 @@ const SETTINGS_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.82 2.82-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.36a1.7 1.7 0 0 0-1.88.34l-.06.06-2.82-2.82.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3v-4h.04A1.7 1.7 0 0 0 4.6 8.92a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.82-2.82.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3V3h4v.08a1.7 1.7 0 0 0 1.04 1.48 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.82 2.82-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z"/></svg>
 `
 
+const FRAME_WALL_ICON = `
+  <svg viewBox="0 0 457.667 457.667" aria-hidden="true">
+    <path d="M116.352 141.241h108.759v-38.686H116.352v38.686Zm7-31.686h94.759v24.686h-94.759v-24.686ZM348.908 102.555v38.686h108.759v-38.686H348.908Zm101.759 31.686h-94.759v-24.686h94.759v24.686ZM348.908 277.929h108.759V149.746H348.908v128.183Zm7-121.183h94.759V270.93h-94.759V156.746ZM116.352 355.111h108.759v-38.686H116.352v38.686Zm7-31.685h94.759v24.686h-94.759v-24.686ZM232.704 355.111h224.962v-70.11H232.704v70.11Zm7-63.11h210.962v56.11H239.704v-56.11ZM0 186.087h108.759v-83.531H0v83.531Zm7-76.532h94.759v69.531H7v-69.531ZM341.463 102.555H232.704v83.531h108.759v-83.531Zm-7 76.532h-94.759v-69.531h94.759v69.531ZM341.463 194.398H232.704v83.531h108.759v-83.531Zm-7 76.531h-94.759v-69.531h94.759v69.531ZM0 355.111h108.759V194.398H0v160.713Zm7-153.713h94.759v146.713H7V201.398ZM116.352 309.189h108.759V148.476H116.352v160.713Zm7-153.713h94.759v146.713h-94.759V155.476Z"/>
+  </svg>
+`
+
+const SPARKLE_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.7 5.2 2.8 8.3 8 9-5.2.7-7.3 3.8-8 9-.7-5.2-2.8-8.3-8-9 5.2-.7 7.3-3.8 8-9Z"/><path d="M19 2.5c.2 1.7.8 2.7 2.5 3-1.7.3-2.3 1.3-2.5 3-.2-1.7-.8-2.7-2.5-3 1.7-.3 2.3-1.3 2.5-3Z"/></svg>
+`
+
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1"
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1"
 const STUDIO_THEMES: Array<{ id: StudioTheme; label: string; color: string }> = [
   { id: "lumiverse", label: "Lumiverse", color: "var(--lumiverse-primary, #7dd3fc)" },
-  { id: "moonbloom", label: "Moonbloom", color: "#b789ff" },
-  { id: "sakura", label: "Sakura", color: "#ff7fa8" },
-  { id: "verdant", label: "Verdant", color: "#71dda5" },
+  { id: "custom", label: "Custom", color: "var(--lumiverse-accent, #7dd3fc)" },
 ]
 const APPEARANCE_COLORS: Array<{ key: AppearanceColorKey; label: string; cssProperty: string }> = [
   { key: "accent", label: "Accent", cssProperty: "--lumiverse-accent" },
@@ -268,164 +276,75 @@ const STYLES = `
     box-shadow: 0 0 0 18px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 4%, transparent);
     pointer-events: none;
   }
-  .ss-launcher-top { display: flex; align-items: center; gap: 11px; }
-  .ss-launcher-mark {
-    width: 42px;
-    height: 42px;
+  .ss-launcher-corner {
+    position: absolute;
+    z-index: 1;
+    width: 68px;
+    height: 56px;
+    color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 70%, var(--ss-outline));
+    opacity: .72;
+    background:
+      linear-gradient(currentColor, currentColor) 0 0 / 28px 1px no-repeat,
+      linear-gradient(currentColor, currentColor) 41px 0 / 18px 1px no-repeat,
+      linear-gradient(currentColor, currentColor) 0 0 / 1px 20px no-repeat,
+      linear-gradient(currentColor, currentColor) 0 33px / 1px 15px no-repeat;
+    pointer-events: none;
+  }
+  .ss-launcher-corner[data-corner="tl"] { top: 18px; left: 18px; }
+  .ss-launcher-corner[data-corner="tr"] { top: 18px; right: 18px; transform: rotate(90deg); }
+  .ss-launcher-corner[data-corner="br"] { right: 18px; bottom: 18px; transform: rotate(180deg); }
+  .ss-launcher-corner[data-corner="bl"] { bottom: 18px; left: 18px; transform: rotate(270deg); }
+  .ss-launcher-center {
+    width: min(430px, calc(100% - 36px));
     display: grid;
-    place-items: center;
-    border-radius: 12px;
+    justify-items: center;
+    margin: clamp(70px, 14dvh, 150px) auto 0;
+    text-align: center;
+  }
+  .ss-launcher-emblem {
+    width: clamp(112px, 25vw, 176px);
     color: var(--lumiverse-accent, #7dd3fc);
-    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 13%, transparent);
-    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 35%, var(--lumiverse-border));
+    filter: drop-shadow(0 12px 32px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 20%, transparent));
   }
-  .ss-launcher-mark svg { width: 23px; height: 23px; }
-  .ss-launcher-eyebrow {
-    color: var(--lumiverse-accent, #7dd3fc);
-    font-size: 8px;
-    font-weight: 800;
-    letter-spacing: .15em;
-    text-transform: uppercase;
+  .ss-launcher-emblem svg { width: 100%; height: auto; display: block; fill: currentColor; }
+  .ss-launcher-wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 25px;
+    color: var(--lumiverse-text);
+    font-family: Georgia, Cambria, "Times New Roman", serif;
+    font-size: clamp(25px, 5vw, 34px);
+    font-weight: 400;
+    letter-spacing: .015em;
+    line-height: 1;
   }
-  .ss-launcher h3 { margin: 2px 0 0; font-size: 16px; }
-  .ss-launcher p { margin: 13px 0 12px; color: var(--lumiverse-text-muted); font-size: 11px; line-height: 1.55; }
-  .ss-launcher-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 14px; }
-  .ss-launcher-chip {
-    padding: 3px 7px;
-    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 22%, var(--lumiverse-border));
-    border-radius: 999px;
-    color: var(--lumiverse-text-muted);
-    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 6%, transparent);
-    font-size: 8.5px;
+  .ss-launcher-wordmark svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: var(--lumiverse-accent, #7dd3fc);
+    stroke-width: 1.35;
+    stroke-linejoin: round;
   }
-  .ss-launcher-actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .ss-launcher-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 28px;
+  }
   .ss-launcher-actions .ss-button {
     min-width: 0;
-    min-height: 62px;
-    display: grid;
-    grid-template-columns: 34px minmax(0, 1fr) auto;
-    align-items: center;
-    justify-content: stretch;
-    gap: 10px;
-    padding: 10px 12px;
-    text-align: left;
+    min-height: 40px;
+    padding-inline: 10px;
+    font-family: Georgia, Cambria, "Times New Roman", serif;
+    font-size: 10px;
+    letter-spacing: .025em;
   }
-  .ss-launcher-actions svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-  .ss-launcher-action-copy { min-width: 0; display: grid; gap: 2px; }
-  .ss-launcher-action-copy strong { font-size: 11px; }
-  .ss-launcher-action-copy span { overflow: hidden; color: var(--lumiverse-text-muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
-  .ss-launcher-arrow { color: var(--lumiverse-text-muted); font-size: 17px; }
-  .ss-launcher-flow {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 7px;
-    margin-top: 16px;
-  }
-  .ss-launcher-flow-item {
-    display: grid;
-    grid-template-columns: 24px minmax(0, 1fr);
-    gap: 9px;
-    padding: 9px 10px;
-    border-left: 2px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 55%, var(--ss-outline));
-    border-radius: var(--ss-control-radius, var(--lumiverse-radius, 8px));
-    background: color-mix(in srgb, var(--ss-header-bg) 72%, transparent);
-  }
-  .ss-launcher-flow-item > span {
-    width: 22px;
-    height: 22px;
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-    color: var(--lumiverse-accent, #7dd3fc);
-    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 13%, transparent);
-    font-size: 9px;
-    font-weight: 800;
-  }
-  .ss-launcher-flow-item strong { display: block; font-size: 9.5px; }
-  .ss-launcher-flow-item small { display: block; margin-top: 2px; color: var(--lumiverse-text-muted); font-size: 8.5px; line-height: 1.4; }
-  .ss-launcher-theme-row {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin-top: auto;
-    padding-top: 11px;
-    border-top: 1px solid color-mix(in srgb, var(--lumiverse-border) 72%, transparent);
-  }
-  .ss-launcher-theme-row > span { margin-right: auto; color: var(--lumiverse-text-muted); font-size: 9px; }
-  .ss-theme-swatch {
-    width: 22px;
-    height: 22px;
-    min-width: 22px;
-    min-height: 22px;
-    padding: 0;
-    border: 1px solid var(--lumiverse-border);
-    border-radius: 50%;
-    background: var(--ss-swatch);
-    box-shadow: inset 0 0 0 4px var(--lumiverse-fill-subtle);
-  }
-  .ss-theme-swatch[data-active="true"] {
-    border-color: var(--ss-swatch);
-    box-shadow: inset 0 0 0 3px var(--lumiverse-fill-subtle), 0 0 0 2px color-mix(in srgb, var(--ss-swatch) 42%, transparent);
-  }
-  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="lumiverse"] {
+  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="lumiverse"],
+  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="custom"] {
     --lumiverse-accent: var(--lumiverse-primary, #7dd3fc);
-  }
-  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="moonbloom"] {
-    --lumiverse-accent: #b789ff;
-    --lumiverse-bg: #08050e;
-    --lumiverse-fill: #120b1b;
-    --lumiverse-fill-subtle: #21112f;
-    --lumiverse-border: #684589;
-    --lumiverse-text: #fff9ff;
-    --lumiverse-text-muted: #c6b4d8;
-    --ss-canvas-bg: #08050e;
-    --ss-panel-bg: #150b20;
-    --ss-header-bg: #2a123d;
-    --ss-outline: #684589;
-    --ss-button-bg: #32164a;
-    --ss-control-radius: 12px;
-    --ss-panel-radius: 17px;
-    --ss-slider-radius: 999px;
-    --ss-theme-pattern: radial-gradient(circle at 82% 12%, rgba(196,167,255,.10), transparent 28%), radial-gradient(circle, rgba(196,167,255,.13) 1px, transparent 1.3px);
-    --ss-theme-pattern-size: auto, 25px 25px;
-  }
-  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="sakura"] {
-    --lumiverse-accent: #ff7fa8;
-    --lumiverse-bg: #12060b;
-    --lumiverse-fill: #1d0c13;
-    --lumiverse-fill-subtle: #31101d;
-    --lumiverse-border: #7d334d;
-    --lumiverse-text: #fff7f9;
-    --lumiverse-text-muted: #d4afba;
-    --ss-canvas-bg: #12060b;
-    --ss-panel-bg: #210c15;
-    --ss-header-bg: #3a1222;
-    --ss-outline: #7d334d;
-    --ss-button-bg: #49152a;
-    --ss-control-radius: 16px;
-    --ss-panel-radius: 20px;
-    --ss-slider-radius: 999px;
-    --ss-theme-pattern: radial-gradient(ellipse at 8% 8%, rgba(255,159,186,.10), transparent 26%), repeating-linear-gradient(135deg, transparent 0 28px, rgba(255,159,186,.035) 28px 29px);
-    --ss-theme-pattern-size: auto;
-  }
-  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="verdant"] {
-    --lumiverse-accent: #71dda5;
-    --lumiverse-bg: #06100b;
-    --lumiverse-fill: #0b1a12;
-    --lumiverse-fill-subtle: #123020;
-    --lumiverse-border: #397b58;
-    --lumiverse-text: #f2fff8;
-    --lumiverse-text-muted: #a8c9b8;
-    --ss-canvas-bg: #06100b;
-    --ss-panel-bg: #0c1e14;
-    --ss-header-bg: #153d28;
-    --ss-outline: #397b58;
-    --ss-button-bg: #184b30;
-    --ss-control-radius: 6px;
-    --ss-panel-radius: 10px;
-    --ss-slider-radius: 3px;
-    --ss-theme-pattern: linear-gradient(120deg, rgba(154,215,180,.04) 25%, transparent 25% 75%, rgba(154,215,180,.04) 75%), linear-gradient(30deg, rgba(154,215,180,.04) 25%, transparent 25% 75%, rgba(154,215,180,.04) 75%);
-    --ss-theme-pattern-size: 34px 58px;
   }
   .ss-shell {
     --ss-gap: 12px;
@@ -2101,6 +2020,14 @@ function defaultStudioAppearance(): StudioAppearance {
   }
 }
 
+function studioAppearanceIsCustom(appearance: StudioAppearance): boolean {
+  return Object.keys(appearance.colors).length > 0
+    || appearance.radius !== null
+    || Math.round(appearance.opacity) !== 96
+    || Math.round(appearance.blur) !== 12
+    || Boolean(appearance.customCss.trim())
+}
+
 function normalizeHexColor(value: unknown): string | null {
   const color = String(value || "").trim()
   if (/^#[0-9a-f]{6}$/i.test(color)) return color.toLowerCase()
@@ -2799,7 +2726,7 @@ class StudioController {
                   </div>
                 </section>
                 <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>Base profile</strong><span>Loads a distinct design language</span></div>
+                  <div class="ss-config-section-head"><strong>Profile</strong><span>Editing below activates Custom</span></div>
                   <div class="ss-config-theme-grid">
                     ${STUDIO_THEMES.map((theme) => `<button class="ss-button ss-config-theme" data-action="set-theme" data-theme-value="${theme.id}" style="--ss-swatch:${theme.color}">${theme.label}</button>`).join("")}
                   </div>
@@ -2841,7 +2768,7 @@ class StudioController {
                     <summary>Stylesheet guide</summary>
                     <pre>Useful roots
 .ss-shell                 whole Studio
-.ss-launcher              drawer dashboard
+.ss-launcher              drawer composition
 .ss-generation-pane       generation sidebar
 .ss-output-stage          current image
 .ss-prompt-panel          prompt editor
@@ -5596,14 +5523,23 @@ export function setup(ctx: FrontendContext): () => void {
   let currentTheme = storedStudioTheme()
   let appearance = storedStudioAppearance()
   appearance.customCss = sanitizeCustomCss(appearance.customCss)
+  if (studioAppearanceIsCustom(appearance)) currentTheme = "custom"
   let launcher: HTMLElement | null = null
   let removeCustomStyle: (() => void) | null = appearance.customCss
     ? ctx.dom.addStyle(appearance.customCss)
     : null
 
+  const setThemeState = (theme: StudioTheme) => {
+    currentTheme = theme
+    persistStudioTheme(theme)
+    if (launcher) launcher.dataset.theme = theme
+    activeStudio?.setTheme(theme)
+  }
+
   const updateAppearance = (next: StudioAppearance) => {
     appearance = cloneStudioAppearance(next)
     appearance.customCss = sanitizeCustomCss(appearance.customCss)
+    setThemeState(studioAppearanceIsCustom(appearance) ? "custom" : "lumiverse")
     persistStudioAppearance(appearance)
     if (launcher) applyAppearanceVariables(launcher, appearance)
     activeStudio?.setAppearance(appearance)
@@ -5612,17 +5548,8 @@ export function setup(ctx: FrontendContext): () => void {
   }
 
   const selectTheme = (theme: StudioTheme) => {
-    currentTheme = theme
-    persistStudioTheme(theme)
-    appearance.colors = {}
-    appearance.radius = null
-    if (launcher) {
-      launcher.dataset.theme = theme
-      for (const swatch of launcher.querySelectorAll<HTMLElement>("[data-theme-choice]")) {
-        swatch.dataset.active = String(swatch.dataset.themeChoice === theme)
-      }
-    }
-    activeStudio?.setTheme(theme)
+    if (theme === "lumiverse") appearance = defaultStudioAppearance()
+    setThemeState(theme)
     updateAppearance(appearance)
   }
 
@@ -5661,58 +5588,27 @@ export function setup(ctx: FrontendContext): () => void {
   launcher = element("div", "ss-launcher")
   launcher.dataset.theme = currentTheme
   applyAppearanceVariables(launcher, appearance)
-  const launcherTop = element("div", "ss-launcher-top")
-  const mark = element("div", "ss-launcher-mark")
-  mark.innerHTML = STUDIO_ICON
-  const launcherTitle = element("div")
-  launcherTitle.append(
-    element("div", "ss-launcher-eyebrow", "Local image atelier"),
-    element("h3", "", "Imagine with SwarmUI"),
-  )
-  launcherTop.append(mark, launcherTitle)
-  launcher.appendChild(launcherTop)
-  launcher.appendChild(element("p", "", "Prompt, stack LoRAs, inspect live generations, and organize every Lumiverse-owned output from one quiet little workspace."))
-  const chips = element("div", "ss-launcher-chips")
-  for (const label of ["Prompt studio", "LoRA stacks", "Output folders"]) {
-    chips.appendChild(element("span", "ss-launcher-chip", label))
+  for (const corner of ["tl", "tr", "br", "bl"]) {
+    const ornament = element("span", "ss-launcher-corner")
+    ornament.dataset.corner = corner
+    launcher.appendChild(ornament)
   }
-  launcher.appendChild(chips)
+  const launcherCenter = element("div", "ss-launcher-center")
+  const emblem = element("div", "ss-launcher-emblem")
+  emblem.innerHTML = FRAME_WALL_ICON
+  const wordmark = element("div", "ss-launcher-wordmark")
+  wordmark.appendChild(document.createTextNode("Swarm Studio"))
+  const sparkle = element("span")
+  sparkle.innerHTML = SPARKLE_ICON
+  wordmark.appendChild(sparkle)
   const launcherActions = element("div", "ss-launcher-actions")
-  const launchButton = element("button", "ss-button ss-button-primary")
-  launchButton.innerHTML = `${STUDIO_ICON}<span class="ss-launcher-action-copy"><strong>Open Studio</strong><span>Compose, tune, stack, and generate</span></span><span class="ss-launcher-arrow">›</span>`
+  const launchButton = element("button", "ss-button ss-button-primary", "Open Studio")
   launchButton.addEventListener("click", () => openStudio("studio"))
-  const libraryButton = element("button", "ss-button")
-  libraryButton.innerHTML = `${LIBRARY_ICON}<span class="ss-launcher-action-copy"><strong>Output Library</strong><span>Search metadata, folders, reuse, and cleanup</span></span><span class="ss-launcher-arrow">›</span>`
+  const libraryButton = element("button", "ss-button", "Open Library")
   libraryButton.addEventListener("click", () => openStudio("library"))
   launcherActions.append(launchButton, libraryButton)
-  launcher.appendChild(launcherActions)
-  const flow = element("div", "ss-launcher-flow")
-  const flowItems = [
-    ["01", "Compose", "Prompt with presets, img2img, and model-aware controls."],
-    ["02", "Layer", "Browse visual metadata and build reusable LoRA stacks."],
-    ["03", "Keep", "Inspect, reuse, search, folder, or delete Lumiverse outputs."],
-  ]
-  for (const [number, title, copy] of flowItems) {
-    const item = element("div", "ss-launcher-flow-item")
-    const body = element("div")
-    body.append(element("strong", "", title), element("small", "", copy))
-    item.append(element("span", "", number), body)
-    flow.appendChild(item)
-  }
-  launcher.appendChild(flow)
-  const themeRow = element("div", "ss-launcher-theme-row")
-  themeRow.appendChild(element("span", "", "Workspace mood"))
-  for (const theme of STUDIO_THEMES) {
-    const swatch = element("button", "ss-theme-swatch")
-    swatch.dataset.themeChoice = theme.id
-    swatch.dataset.active = String(theme.id === currentTheme)
-    swatch.style.setProperty("--ss-swatch", theme.color)
-    swatch.title = theme.label
-    swatch.setAttribute("aria-label", `Use ${theme.label} theme`)
-    swatch.addEventListener("click", () => selectTheme(theme.id))
-    themeRow.appendChild(swatch)
-  }
-  launcher.appendChild(themeRow)
+  launcherCenter.append(emblem, wordmark, launcherActions)
+  launcher.appendChild(launcherCenter)
   drawer.root.appendChild(launcher)
 
   const inputAction = ctx.ui.registerInputBarAction({

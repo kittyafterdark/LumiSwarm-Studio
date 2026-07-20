@@ -6,7 +6,7 @@ It adds:
 
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
-- Four persistent, high-contrast workspace profiles—Lumiverse, Moonbloom, Sakura, and Verdant—with distinct colors, panel geometry, controls, sliders, and static low-cost textures
+- A Lumiverse-native profile plus an automatic Custom state for component colors, panel geometry, opacity, blur, and CSS overrides
 - A full appearance editor with native component color pickers, border-radius, surface-opacity and backdrop-blur sliders, plus persisted custom CSS
 - A compact opaque settings panel containing appearance controls, metadata refresh, and the encrypted metadata token
 - Positive and negative prompting, checkpoint selection, chain-linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, model-component overrides, and raw request JSON
@@ -21,7 +21,7 @@ It adds:
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Delete menus
 - A fullscreen searchable Lumiverse output library with reusable virtual folders, 30 images per desktop page, 15 per mobile page, and bulk folder/delete actions
-- A full-height vertical drawer dashboard with direct **Open Studio** and **Output Library** destinations, workflow hints, and quick profile swatches
+- A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
 
@@ -136,23 +136,25 @@ reference.
 
 ## Themes and settings
 
-The drawer's profile swatches and the Studio gear menu select the same
-persisted base profile. The Lumiverse profile inherits the host's
-`--lumiverse-primary` value. The other profiles intentionally use more distinct,
-higher-contrast canvases, panels, headers, outlines, buttons, and accents.
+The Lumiverse profile inherits the host's `--lumiverse-primary` value. Changing
+any component color, border radius, panel opacity, backdrop blur, or custom CSS
+automatically changes the profile indicator to **Custom**. Selecting
+**Lumiverse** again resets those appearance overrides to the host-native
+defaults.
 
-Every profile can be overridden component-by-component with native browser
-color pickers. Radius, panel opacity, and backdrop blur are adjustable with
-sliders and apply throughout the modal—including the output library and
-inspector. Appearance preferences are kept in browser-local storage.
+Component colors use native browser color pickers. Radius, panel opacity, and
+backdrop blur are adjustable with sliders and apply throughout the
+modal—including the output library and inspector. Appearance preferences are
+kept in browser-local storage.
 
 The settings panel also includes a persisted custom CSS editor and a compact
 guide to useful selectors and variables. CSS is inserted as stylesheet text,
 not HTML; `@import` rules are removed. Prefix selectors with `.ss-shell` to
 keep overrides inside the Studio, or use `.ss-launcher` to style its drawer
-dashboard. Profiles and their static CSS motifs use no animations or image
-assets. Metadata refresh and the optional encrypted `swarm_token` live in this
-same opaque gear panel.
+composition. Its dot field, broken corner ornaments, picture-frame glyph, and
+sparkle are static CSS or inline SVG, with no animated or fetched assets.
+Metadata refresh and the optional encrypted `swarm_token` live in this same
+opaque gear panel.
 
 ## Live generation previews and interruption
 
