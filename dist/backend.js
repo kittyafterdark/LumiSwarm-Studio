@@ -9,6 +9,7 @@ const STACK_PRESET_LIMIT = 40;
 const GENERATION_RECORD_LIMIT = 100;
 const OUTPUT_FOLDER_LIMIT = 80;
 const HISTORY_PAGE_SIZE = 12;
+const DEFAULT_SWARMUI_URL = "http://localhost:7801";
 const sessions = new Map();
 const previewCache = new Map();
 function asRecord(value) {
@@ -25,8 +26,7 @@ function asBoolean(value, fallback = false) {
     return typeof value === "boolean" ? value : fallback;
 }
 function normalizeBaseUrl(value) {
-    const trimmed = String(value || "").trim().replace(/\/+$/, "");
-    if (!trimmed) throw new Error("This SwarmUI connection has no API URL.");
+    const trimmed = String(value || "").trim().replace(/\/+$/, "") || DEFAULT_SWARMUI_URL;
     let parsed;
     try {
         parsed = new URL(trimmed);
@@ -347,14 +347,23 @@ async function deleteOutputFolder(folderId, userId) {
     return persistOutputFolders((await loadOutputFolders(userId)).filter((folder)=>folder.id !== folderId), userId);
 }
 async function moveOutputToFolder(imageId, folderId, userId) {
-    if (!imageId) throw new Error("Choose an output before assigning a folder.");
+    return moveOutputsToFolder([
+        imageId
+    ], folderId, userId);
+}
+async function moveOutputsToFolder(imageIds, folderId, userId) {
+    const cleanIds = [
+        ...new Set(imageIds.map((id)=>id.trim()).filter(Boolean))
+    ].slice(0, 200);
+    if (!cleanIds.length) throw new Error("Choose at least one output before assigning a folder.");
     const folders = await loadOutputFolders(userId);
     if (folderId && !folders.some((folder)=>folder.id === folderId)) {
         throw new Error("That output folder no longer exists.");
     }
+    const moved = new Set(cleanIds);
     for (const folder of folders){
-        folder.imageIds = folder.imageIds.filter((id)=>id !== imageId);
-        if (folder.id === folderId) folder.imageIds.unshift(imageId);
+        folder.imageIds = folder.imageIds.filter((id)=>!moved.has(id));
+        if (folder.id === folderId) folder.imageIds.unshift(...cleanIds);
         folder.updatedAt = Date.now();
     }
     return persistOutputFolders(folders, userId);
@@ -369,6 +378,9 @@ async function loadGenerationRecords(userId) {
 async function saveGenerationRecord(result, input, hints, timing, userId) {
     const rawParameters = asRecord(input.parameters);
     const { referenceImages: _referenceImages, resolvedSourceImages: _resolvedSourceImages, resolvedReferenceImages: _resolvedReferenceImages, ...parameters } = rawParameters;
+    if (timing.resolvedSeed !== null && timing.resolvedSeed >= 0) {
+        parameters.seed = Math.trunc(timing.resolvedSeed);
+    }
     const loraNames = Array.isArray(parameters.loras) ? parameters.loras.map(asString).filter(Boolean).slice(0, 64) : [];
     const loraWeights = Array.isArray(parameters.loraWeights) ? parameters.loraWeights.map(Number) : [];
     const record = {
@@ -405,7 +417,13 @@ async function saveGenerationRecord(result, input, hints, timing, userId) {
     return record;
 }
 async function deleteGenerationRecord(imageId, userId) {
-    const records = (await loadGenerationRecords(userId)).filter((record)=>record.imageId !== imageId);
+    return deleteGenerationRecords([
+        imageId
+    ], userId);
+}
+async function deleteGenerationRecords(imageIds, userId) {
+    const deleted = new Set(imageIds);
+    const records = (await loadGenerationRecords(userId)).filter((record)=>!deleted.has(record.imageId));
     await spindle.userStorage.setJson(GENERATION_RECORDS_FILE, records, {
         userId
     });
@@ -427,7 +445,15 @@ function metadataString(record, ...keys) {
     }
     return "";
 }
+function metadataNumber(record, ...keys) {
+    for (const key of keys){
+        const value = Number(record[key]);
+        if (Number.isFinite(value)) return value;
+    }
+    return null;
+}
 async function loadLatestSwarmGenerationMetadata(connection, token, input, totalMs, userId) {
+    const inputParameters = asRecord(input.parameters);
     const fallback = {
         totalMs,
         prep: "",
@@ -436,7 +462,8 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
         resolvedPrompt: asString(input.prompt),
         resolvedNegativePrompt: asString(input.negativePrompt),
         presets: [],
-        swarmPath: ""
+        swarmPath: "",
+        resolvedSeed: metadataNumber(inputParameters, "seed")
     };
     if (!spindle.permissions.has("cors_proxy")) return fallback;
     try {
@@ -482,7 +509,8 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
             resolvedPrompt: metadataString(params, "prompt") || metadataString(extra, "original_prompt", "originalprompt") || fallback.resolvedPrompt,
             resolvedNegativePrompt: metadataString(params, "negativeprompt", "negative_prompt") || metadataString(extra, "original_negative_prompt", "originalnegativeprompt") || fallback.resolvedNegativePrompt,
             presets,
-            swarmPath: asString(matched.file.src)
+            swarmPath: asString(matched.file.src),
+            resolvedSeed: metadataNumber(params, "seed") ?? fallback.resolvedSeed
         };
     } catch (error) {
         spindle.log.warn(`Could not read SwarmUI generation metadata: ${error instanceof Error ? error.message : String(error)}`);
@@ -835,6 +863,16 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
+            case "bulk_move_outputs":
+                {
+                    const folders = await moveOutputsToFolder(stringList(payload?.imageIds, 200), asString(payload?.folderId), userId);
+                    spindle.sendToFrontend({
+                        type: "output_folders_result",
+                        requestId,
+                        data: folders
+                    }, userId);
+                    return;
+                }
             case "delete_output":
                 {
                     if (!spindle.permissions.has("images")) {
@@ -858,23 +896,35 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
-            case "open_swarm_folder":
+            case "bulk_delete_outputs":
                 {
-                    if (!spindle.permissions.has("cors_proxy")) {
-                        throw new Error("Grant CORS Proxy permission to ask SwarmUI to open its output folder.");
+                    if (!spindle.permissions.has("images")) {
+                        throw new Error("Grant the Images permission to delete Lumiverse outputs.");
                     }
-                    const connection = await getConnection(asString(payload?.connectionId), userId);
-                    const token = await getMetadataToken(connection.id, userId);
-                    const path = asString(payload?.path);
-                    if (!path) throw new Error("This output predates Swarm path tracking.");
-                    const data = await corsJson(`${normalizeBaseUrl(connection.api_url)}/API/OpenImageFolder`, {
-                        session_id: await getSession(connection, token, userId),
-                        path
-                    }, token, "open output folder request");
+                    const imageIds = stringList(payload?.imageIds, 200);
+                    if (!imageIds.length) throw new Error("Select at least one output to delete.");
+                    const deletedIds = [];
+                    const failedIds = [];
+                    for (const imageId of imageIds){
+                        try {
+                            if (await spindle.images.delete(imageId, userId)) deletedIds.push(imageId);
+                            else failedIds.push(imageId);
+                        } catch  {
+                            failedIds.push(imageId);
+                        }
+                    }
+                    if (deletedIds.length) await deleteGenerationRecords(deletedIds, userId);
+                    const folders = deletedIds.length ? await moveOutputsToFolder(deletedIds, "", userId) : await loadOutputFolders(userId);
+                    const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
                     spindle.sendToFrontend({
-                        type: "swarm_folder_opened",
+                        type: "outputs_bulk_deleted",
                         requestId,
-                        data
+                        data: {
+                            deletedIds,
+                            failedIds,
+                            folders,
+                            ...await listOutputs(userId, activeChat)
+                        }
                     }, userId);
                     return;
                 }

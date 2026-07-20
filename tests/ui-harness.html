@@ -188,7 +188,7 @@
             resolvedPrompt: message.recordHints.resolvedPrompt,
             resolvedNegativePrompt: message.recordHints.resolvedNegativePrompt,
             model: message.input.model,
-            parameters: message.input.parameters,
+            parameters: { ...message.input.parameters, seed: 123456789 },
             loras: message.input.parameters.loras.map((name, index) => ({ name, weight: message.input.parameters.loraWeights[index] })),
             presets: message.recordHints.presets,
             timing: { totalMs: 2340, prep: "0.27 sec", generation: "2.07 sec", source: "swarm" },
@@ -246,6 +246,15 @@
               : folder.imageIds.filter((id) => id !== message.imageId),
           }))
           later({ type: "output_folders_result", requestId: message.requestId, data: outputFolders })
+        } else if (message.type === "bulk_move_outputs") {
+          const selected = Array.isArray(message.imageIds) ? message.imageIds : []
+          outputFolders = outputFolders.map((folder) => ({
+            ...folder,
+            imageIds: folder.id === message.folderId
+              ? [...selected, ...folder.imageIds.filter((id) => !selected.includes(id))]
+              : folder.imageIds.filter((id) => !selected.includes(id)),
+          }))
+          later({ type: "output_folders_result", requestId: message.requestId, data: outputFolders })
         } else if (message.type === "delete_output") {
           historyOutputs = historyOutputs.filter((output) => output.id !== message.imageId)
           outputFolders = outputFolders.map((folder) => ({
@@ -260,8 +269,22 @@
             offset: 0,
             limit: 12,
           }})
-        } else if (message.type === "open_swarm_folder") {
-          later({ type: "swarm_folder_opened", requestId: message.requestId, data: { success: true } })
+        } else if (message.type === "bulk_delete_outputs") {
+          const selected = Array.isArray(message.imageIds) ? message.imageIds : []
+          historyOutputs = historyOutputs.filter((output) => !selected.includes(output.id))
+          outputFolders = outputFolders.map((folder) => ({
+            ...folder,
+            imageIds: folder.imageIds.filter((id) => !selected.includes(id)),
+          }))
+          later({ type: "outputs_bulk_deleted", requestId: message.requestId, data: {
+            deletedIds: selected,
+            failedIds: [],
+            folders: outputFolders,
+            outputs: historyOutputs.slice(0, 12),
+            total: historyOutputs.length,
+            offset: 0,
+            limit: 12,
+          }})
         }
       },
     }

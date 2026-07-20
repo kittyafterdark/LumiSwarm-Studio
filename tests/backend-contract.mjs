@@ -6,7 +6,6 @@ const secrets = new Map()
 const userFiles = new Map()
 const permissions = new Set(["image_gen", "cors_proxy", "images", "chats"])
 let imageDeleted = false
-let openedSwarmPath = ""
 
 globalThis.spindle = {
   permissions: {
@@ -21,7 +20,7 @@ globalThis.spindle = {
           id: "swarm-1",
           name: "Local Swarm",
           provider: "swarmui",
-          api_url: "http://127.0.0.1:7801",
+          api_url: "",
           model: "base.safetensors",
           is_default: true,
           default_parameters: { width: 768 },
@@ -35,7 +34,7 @@ globalThis.spindle = {
         id,
         name: "Local Swarm",
         provider: "swarmui",
-        api_url: "http://127.0.0.1:7801",
+        api_url: "",
         model: "base.safetensors",
         is_default: true,
         default_parameters: { width: 768 },
@@ -107,6 +106,7 @@ globalThis.spindle = {
     },
   },
   async cors(url, options) {
+    assert.equal(new URL(url).origin, "http://localhost:7801")
     if (url.endsWith("/API/GetNewSession")) {
       return {
         status: 200,
@@ -199,6 +199,7 @@ globalThis.spindle = {
               sui_image_params: {
                 prompt: "cinematic lighting, ink style, portrait",
                 negativeprompt: "blurry, flat lighting",
+                seed: 987654321,
               },
               sui_extra_data: {
                 prep_time: "0.22 sec",
@@ -208,16 +209,6 @@ globalThis.spindle = {
             }),
           }],
         }),
-      }
-    }
-    if (url.endsWith("/API/OpenImageFolder")) {
-      const body = JSON.parse(options.body)
-      openedSwarmPath = body.path
-      return {
-        status: 200,
-        statusText: "OK",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ success: true }),
       }
     }
     if (url.includes("/ViewSpecial/")) {
@@ -306,6 +297,7 @@ const generated = await request("generate", {
     parameters: {
       loras: ["styles/ink.safetensors"],
       loraWeights: [0.75],
+      seed: -1,
       referenceImages: [{ data: "QUJD", mimeType: "image/png" }],
       denoise: 0.55,
     },
@@ -330,6 +322,7 @@ assert.equal(generated.data.record.timing.source, "swarm")
 assert.equal(generated.data.record.swarmPath, "2026-07-19/image-1.png")
 assert.equal(generated.data.record.initImageId, "image-source")
 assert.equal(generated.data.record.initImageLabel, "source.png")
+assert.equal(generated.data.record.parameters.seed, 987654321)
 assert.equal("referenceImages" in generated.data.record.parameters, false)
 assert.equal(generated.data.outputs[0].studioMetadata.imageId, "image-1")
 
@@ -351,15 +344,15 @@ const library = await request("list_library_outputs")
 assert.equal(library.data.outputs.length, 1)
 assert.equal(library.data.folders[0].name, "Favorites")
 
-const opened = await request("open_swarm_folder", {
-  connectionId: "swarm-1",
-  path: "2026-07-19/image-1.png",
+const bulkMoved = await request("bulk_move_outputs", {
+  imageIds: ["image-1"],
+  folderId,
 })
-assert.equal(opened.data.success, true)
-assert.equal(openedSwarmPath, "2026-07-19/image-1.png")
+assert.deepEqual(bulkMoved.data[0].imageIds, ["image-1"])
 
-const deleted = await request("delete_output", { imageId: "image-1" })
-assert.equal(deleted.data.imageId, "image-1")
+const deleted = await request("bulk_delete_outputs", { imageIds: ["image-1"] })
+assert.deepEqual(deleted.data.deletedIds, ["image-1"])
+assert.deepEqual(deleted.data.failedIds, [])
 assert.equal(deleted.data.outputs.length, 0)
 assert.deepEqual(deleted.data.folders[0].imageIds, [])
 

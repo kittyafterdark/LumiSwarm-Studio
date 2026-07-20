@@ -621,6 +621,26 @@ const STUDIO_V3_STYLES = `
   .ss-init-actions { display: flex; flex-wrap: wrap; gap: 5px; }
   .ss-init-actions .ss-button { min-height: 27px; padding: 4px 7px; }
   .ss-creativity-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 30px; gap: 6px; align-items: center; font-size: 9px; color: var(--lumiverse-text-muted); }
+  .ss-preset-stack {
+    display: grid;
+    gap: 5px;
+    margin-top: 2px;
+  }
+  .ss-preset-empty { min-height: 42px; padding: 8px; }
+  .ss-preset-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    gap: 5px;
+    align-items: center;
+    padding: 5px 6px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--lumiverse-fill) 72%, transparent);
+  }
+  .ss-preset-row input { accent-color: var(--lumiverse-accent, #7dd3fc); }
+  .ss-preset-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+  .ss-preset-row .ss-icon-button { min-width: 25px; min-height: 25px; height: 25px; padding: 2px 5px; }
   .ss-center {
     min-width: 0;
     min-height: 0;
@@ -686,23 +706,46 @@ const STUDIO_V3_STYLES = `
     gap: 7px;
     overflow-y: auto;
   }
-  .ss-history-item { position: relative; height: auto; aspect-ratio: 1; }
-  .ss-history-item::after {
-    content: "↗";
+  .ss-history-card { position: relative; min-width: 0; aspect-ratio: 1; }
+  .ss-history-item { width: 100%; height: 100%; aspect-ratio: auto; }
+  .ss-history-menu-toggle {
     position: absolute;
+    top: 4px;
     right: 4px;
-    bottom: 4px;
-    width: 18px;
-    height: 18px;
+    z-index: 9;
+    width: 25px;
+    height: 25px;
+    min-width: 25px;
+    min-height: 25px;
+    padding: 0;
     display: grid;
     place-items: center;
-    border-radius: 5px;
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 7px;
     color: white;
-    background: rgba(0,0,0,.6);
-    opacity: 0;
+    background: rgba(0,0,0,.72);
+    opacity: .72;
     transition: opacity .15s ease;
   }
-  .ss-history-item:hover::after { opacity: 1; }
+  .ss-history-card:hover .ss-history-menu-toggle,
+  .ss-history-menu-toggle[aria-expanded="true"] { opacity: 1; }
+  .ss-history-menu {
+    position: absolute;
+    top: 32px;
+    right: 4px;
+    z-index: 30;
+    min-width: 112px;
+    display: grid;
+    gap: 3px;
+    padding: 4px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--lumiverse-fill) 94%, black);
+    box-shadow: 0 12px 28px rgba(0,0,0,.55);
+  }
+  .ss-history-menu[hidden] { display: none; }
+  .ss-history-menu .ss-button { min-height: 27px; padding: 4px 7px; text-align: left; font-size: 9px; }
+  .ss-history-menu .ss-button-danger { color: #ef7777; }
   .ss-history-pagination {
     min-height: 34px;
     display: flex;
@@ -956,6 +999,18 @@ const STUDIO_V3_STYLES = `
     margin-top: 12px;
   }
   .ss-inspector-actions .ss-button-danger { grid-column: 1 / -1; }
+  .ss-inspector-path {
+    margin-top: 10px;
+    padding: 8px 9px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: 8px;
+    color: var(--lumiverse-text-muted);
+    background: var(--lumiverse-fill);
+    font-size: 9px;
+    overflow-wrap: anywhere;
+  }
+  .ss-inspector-path[hidden] { display: none; }
+  .ss-inspector-path code { color: var(--lumiverse-text); font: inherit; }
   .ss-inspector-close { position: absolute; top: 12px; right: 12px; z-index: 2; }
   .ss-output-library {
     position: fixed;
@@ -1025,6 +1080,18 @@ const STUDIO_V3_STYLES = `
     border-bottom: 1px solid var(--lumiverse-border);
   }
   .ss-library-toolbar .ss-muted { flex: 1; }
+  .ss-library-bulkbar {
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--lumiverse-border);
+    background: color-mix(in srgb, var(--lumiverse-fill-subtle) 80%, transparent);
+  }
+  .ss-library-bulkbar .ss-select { width: min(230px, 28vw); height: 30px; }
+  .ss-library-bulkbar .ss-button { min-height: 30px; padding-block: 4px; }
+  .ss-library-selection-count { min-width: 72px; color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-output-library-grid {
     min-height: 0;
     flex: 1;
@@ -1036,12 +1103,31 @@ const STUDIO_V3_STYLES = `
     padding: 10px;
   }
   .ss-library-output {
+    position: relative;
     min-width: 0;
     overflow: hidden;
     border: 1px solid var(--lumiverse-border);
     border-radius: 9px;
     background: var(--lumiverse-fill);
   }
+  .ss-library-output[data-selected="true"] {
+    border-color: var(--lumiverse-accent, #7dd3fc);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 20%, transparent);
+  }
+  .ss-library-output-check {
+    position: absolute;
+    top: 7px;
+    left: 7px;
+    z-index: 5;
+    width: 21px;
+    height: 21px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    background: rgba(0,0,0,.72);
+    box-shadow: 0 3px 10px rgba(0,0,0,.35);
+  }
+  .ss-library-output-check input { width: 14px; height: 14px; accent-color: var(--lumiverse-accent, #7dd3fc); }
   .ss-library-output-button {
     width: 100%;
     aspect-ratio: 1;
@@ -1254,6 +1340,12 @@ const STUDIO_V3_STYLES = `
     }
     .ss-library-folder { width: auto; min-width: max-content; margin: 0; }
     .ss-library-folder-tools { min-width: max-content; margin: 0; }
+    .ss-library-bulkbar {
+      overflow-x: auto;
+      padding-inline: 2.2vw;
+    }
+    .ss-library-bulkbar > * { flex: 0 0 auto; }
+    .ss-library-bulkbar .ss-select { width: 42vw; }
     .ss-output-library-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 2.2vw;
@@ -1356,6 +1448,20 @@ export function applyPresetPrompt(base, update) {
     const resolved = cleanUpdate.includes("{value}") ? cleanUpdate.replaceAll("{value}", base) : cleanUpdate;
     return resolved.replace(/^[\s,;|]+|[\s,;|]+$/g, "").trim();
 }
+export function applyPresetStackPrompts(prompt, negativePrompt, titles, presets) {
+    let resolvedPrompt = prompt;
+    let resolvedNegative = negativePrompt;
+    for (const title of titles){
+        const preset = presets.find((item)=>item.title === title);
+        if (!preset) continue;
+        resolvedPrompt = applyPresetPrompt(resolvedPrompt, preset.paramMap.prompt || "");
+        resolvedNegative = applyPresetPrompt(resolvedNegative, preset.paramMap.negativeprompt || preset.paramMap.negative_prompt || "");
+    }
+    return {
+        prompt: resolvedPrompt,
+        negativePrompt: resolvedNegative
+    };
+}
 function labelFromName(name) {
     const leaf = name.split("/").pop() || name;
     return leaf.replace(/\.(safetensors|ckpt|pt)$/i, "");
@@ -1453,7 +1559,8 @@ class StudioController {
     previewAspect = 1;
     libraryFolderId = "";
     libraryPage = 0;
-    libraryPageSize = 20;
+    libraryPageSize = 30;
+    librarySelection = new Set();
     outputResizeObserver = null;
     stopActiveResize = null;
     disposed = false;
@@ -1490,6 +1597,7 @@ class StudioController {
             stack: [],
             stackPresets: [],
             swarmPresets: [],
+            selectedPresets: [],
             samplers: [],
             schedulers: [],
             outputs: [],
@@ -1842,9 +1950,12 @@ class StudioController {
                 <summary>Advanced Swarm controls</summary>
                 <div class="ss-advanced-grid">
                   <div class="ss-field ss-wide">
-                    <label>Swarm preset</label>
-                    <select class="ss-select" data-role="presets"><option value="">No preset</option></select>
-                    <div class="ss-field-help" data-role="preset-resolved">The selected Swarm preset’s resolved prompts appear in output details.</div>
+                    <label>Swarm preset stack</label>
+                    <select class="ss-select" data-role="presets"><option value="">Add a preset…</option></select>
+                    <div class="ss-preset-stack" data-role="preset-stack">
+                      <div class="ss-empty ss-preset-empty">No presets selected.</div>
+                    </div>
+                    <div class="ss-field-help" data-role="preset-resolved">Enabled presets are applied from top to bottom.</div>
                   </div>
                   <div class="ss-field">
                     <label>VAE override</label>
@@ -2027,7 +2138,6 @@ class StudioController {
             <div class="ss-inspector-actions">
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
               <button class="ss-button" data-action="use-as-init">Use as init image</button>
-              <button class="ss-button" data-action="open-swarm-folder" disabled>Open Swarm folder</button>
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
             </div>
@@ -2037,6 +2147,7 @@ class StudioController {
             <p class="ss-inspector-copy" data-role="inspector-negative">No negative prompt recorded.</p>
             <h4>LoRA stack</h4>
             <p class="ss-inspector-copy" data-role="inspector-loras">No LoRAs recorded.</p>
+            <div class="ss-inspector-path" data-role="inspector-path" hidden>Saved by SwarmUI to <code data-role="inspector-path-value"></code></div>
           </aside>
         </div>
 
@@ -2056,6 +2167,15 @@ class StudioController {
               <button class="ss-button" data-action="library-prev" disabled>‹</button>
               <span class="ss-history-page-label" data-role="library-page">1 / 1</span>
               <button class="ss-button" data-action="library-next" disabled>›</button>
+            </div>
+            <div class="ss-library-bulkbar">
+              <button class="ss-button" data-action="select-library-page">Select page</button>
+              <span class="ss-library-selection-count" data-role="library-selection-count">0 selected</span>
+              <select class="ss-select" data-role="bulk-folder" aria-label="Folder for selected outputs">
+                <option value="">Move to Unfiled</option>
+              </select>
+              <button class="ss-button" data-action="bulk-move-outputs" disabled>Move selected</button>
+              <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs" disabled>Delete selected</button>
             </div>
             <div class="ss-output-library-grid" data-role="library-grid">
               <div class="ss-empty">Loading outputs…</div>
@@ -2089,7 +2209,11 @@ class StudioController {
         this.get('[data-role="denoise"]').addEventListener("input", (event)=>{
             this.get('[data-role="denoise-label"]').textContent = Number(event.currentTarget.value).toFixed(2);
         });
-        this.get('[data-role="presets"]').addEventListener("change", ()=>this.updateResolvedPresetSummary());
+        this.get('[data-role="presets"]').addEventListener("change", (event)=>{
+            const select = event.currentTarget;
+            if (select.value) this.addSelectedPreset(select.value);
+            select.value = "";
+        });
         const updateRequestedAspect = ()=>this.updatePreviewAspect(numberValue(this.get('[data-role="width"]'), 1024), numberValue(this.get('[data-role="height"]'), 1024));
         this.get('[data-role="width"]').addEventListener("input", (event)=>{
             this.updateLinkedCustomDimension("width", Number(event.currentTarget.value));
@@ -2108,6 +2232,24 @@ class StudioController {
             if (file) void this.setInitFromBlob(file, file.name, "");
         });
         this.root.addEventListener("change", (event)=>{
+            const target = event.target;
+            const presetToggle = target.closest('[data-role="preset-enabled"]');
+            if (presetToggle?.dataset.presetIndex) {
+                const index = Number(presetToggle.dataset.presetIndex);
+                if (this.state.selectedPresets[index]) {
+                    this.state.selectedPresets[index].enabled = presetToggle.checked;
+                    this.updateResolvedPresetSummary();
+                }
+                return;
+            }
+            const libraryToggle = target.closest('[data-role="library-output-check"]');
+            if (libraryToggle?.dataset.imageId) {
+                if (libraryToggle.checked) this.librarySelection.add(libraryToggle.dataset.imageId);
+                else this.librarySelection.delete(libraryToggle.dataset.imageId);
+                this.updateLibrarySelectionControls();
+                libraryToggle.closest(".ss-library-output").dataset.selected = String(libraryToggle.checked);
+                return;
+            }
             const select = event.target.closest('[data-role="library-folder-select"]');
             if (select?.dataset.imageId) {
                 this.send("move_output_to_folder", {
@@ -2126,6 +2268,7 @@ class StudioController {
         });
         this.root.addEventListener("click", (event)=>{
             const target = event.target;
+            if (!target.closest(".ss-history-card")) this.closeHistoryMenus();
             const button = target.closest("[data-action]");
             if (!button) return;
             const action = button.dataset.action;
@@ -2163,13 +2306,18 @@ class StudioController {
             if (action === "close-inspector") this.closeInspector();
             if (action === "reuse-parameters") this.reuseCurrentParameters();
             if (action === "delete-output") this.deleteCurrentOutput();
-            if (action === "open-swarm-folder") this.openSwarmFolder();
             if (action === "open-output-library") this.openOutputLibrary();
             if (action === "close-output-library") this.closeOutputLibrary();
             if (action === "create-output-folder") this.createOutputFolder();
             if (action === "delete-output-folder") this.deleteSelectedOutputFolder();
             if (action === "library-prev") this.changeLibraryPage(-1);
             if (action === "library-next") this.changeLibraryPage(1);
+            if (action === "select-library-page") this.toggleLibraryPageSelection();
+            if (action === "bulk-move-outputs") this.bulkMoveOutputs();
+            if (action === "bulk-delete-outputs") this.bulkDeleteOutputs();
+            if (action === "preset-up") this.moveSelectedPreset(Number(button.dataset.presetIndex), -1);
+            if (action === "preset-down") this.moveSelectedPreset(Number(button.dataset.presetIndex), 1);
+            if (action === "preset-remove") this.removeSelectedPreset(Number(button.dataset.presetIndex));
             if (action === "library-folder") {
                 this.libraryFolderId = button.dataset.folderId || "";
                 this.libraryPage = 0;
@@ -2259,26 +2407,46 @@ class StudioController {
             case "library_outputs_result":
                 this.state.libraryOutputs = Array.isArray(data.outputs) ? data.outputs : [];
                 this.state.outputFolders = Array.isArray(data.folders) ? data.folders : this.state.outputFolders;
+                {
+                    const available = new Set(this.state.libraryOutputs.map((output)=>String(output.id)));
+                    for (const imageId of this.librarySelection){
+                        if (!available.has(imageId)) this.librarySelection.delete(imageId);
+                    }
+                }
                 this.renderOutputLibrary();
                 break;
             case "output_folders_result":
                 this.state.outputFolders = Array.isArray(data) ? data : [];
+                this.librarySelection.clear();
                 this.renderOutputLibrary();
                 this.setRunStatus("Output folders updated.");
                 break;
             case "output_deleted":
                 this.acceptOutputPage(data);
                 this.state.outputFolders = Array.isArray(data.folders) ? data.folders : this.state.outputFolders;
-                this.state.libraryOutputs = this.state.libraryOutputs.filter((output)=>output.id !== data.imageId);
+                this.state.libraryOutputs = this.state.libraryOutputs.filter((output)=>String(output.id) !== String(data.imageId));
+                this.librarySelection.delete(String(data.imageId));
                 if (this.state.currentImage?.id === data.imageId) this.clearCurrentImage();
                 this.closeInspector();
                 this.renderOutputs();
                 this.renderOutputLibrary();
                 this.setRunStatus("Output deleted from Lumiverse.");
                 break;
-            case "swarm_folder_opened":
-                this.setRunStatus("Asked SwarmUI to reveal the output in its host file explorer.");
-                break;
+            case "outputs_bulk_deleted":
+                {
+                    this.acceptOutputPage(data);
+                    const deleted = new Set(Array.isArray(data.deletedIds) ? data.deletedIds : []);
+                    this.state.outputFolders = Array.isArray(data.folders) ? data.folders : this.state.outputFolders;
+                    this.state.libraryOutputs = this.state.libraryOutputs.filter((output)=>!deleted.has(String(output.id)));
+                    this.librarySelection.clear();
+                    if (this.state.currentImage?.id && deleted.has(this.state.currentImage.id)) this.clearCurrentImage();
+                    this.closeInspector();
+                    this.renderOutputs();
+                    this.renderOutputLibrary();
+                    const failedCount = Array.isArray(data.failedIds) ? data.failedIds.length : 0;
+                    this.setRunStatus(failedCount ? `Deleted ${deleted.size} outputs; ${failedCount} could not be deleted.` : `Deleted ${deleted.size} outputs from Lumiverse.`, failedCount > 0);
+                    break;
+                }
             case "stack_presets_result":
                 this.state.stackPresets = Array.isArray(data) ? data : [];
                 this.renderStackPresets();
@@ -2359,6 +2527,7 @@ class StudioController {
         this.state.checkpoints = [];
         this.state.loras = [];
         this.state.swarmPresets = [];
+        this.state.selectedPresets = [];
         this.state.samplers = [];
         this.state.schedulers = [];
         this.previewObserver?.disconnect();
@@ -2402,7 +2571,6 @@ class StudioController {
     acceptSwarmOptions(value) {
         const previousSampler = this.root.querySelector('[data-role="sampler"]')?.value || "";
         const previousScheduler = this.root.querySelector('[data-role="scheduler"]')?.value || "";
-        const previousPreset = this.root.querySelector('[data-role="presets"]')?.value || "";
         const fallbackSamplers = [
             "euler",
             "euler_ancestral",
@@ -2426,7 +2594,7 @@ class StudioController {
         this.populateSimpleSelect("scheduler", "Connection default", this.state.schedulers, previousScheduler);
         const presetSelect = this.get('[data-role="presets"]');
         presetSelect.replaceChildren();
-        const blank = element("option", "", "No preset");
+        const blank = element("option", "", "Add a preset…");
         blank.value = "";
         presetSelect.appendChild(blank);
         for (const preset of this.state.swarmPresets){
@@ -2435,7 +2603,66 @@ class StudioController {
             option.title = preset.description;
             presetSelect.appendChild(option);
         }
-        presetSelect.value = this.state.swarmPresets.some((preset)=>preset.title === previousPreset) ? previousPreset : "";
+        presetSelect.value = "";
+        this.renderPresetStack();
+    }
+    addSelectedPreset(title) {
+        if (!title || this.state.selectedPresets.some((preset)=>preset.title === title)) return;
+        this.state.selectedPresets.push({
+            title,
+            enabled: true
+        });
+        this.renderPresetStack();
+    }
+    moveSelectedPreset(index, delta) {
+        if (!Number.isInteger(index)) return;
+        const target = index + delta;
+        if (index < 0 || target < 0 || index >= this.state.selectedPresets.length || target >= this.state.selectedPresets.length) return;
+        const [preset] = this.state.selectedPresets.splice(index, 1);
+        this.state.selectedPresets.splice(target, 0, preset);
+        this.renderPresetStack();
+    }
+    removeSelectedPreset(index) {
+        if (!Number.isInteger(index) || index < 0 || index >= this.state.selectedPresets.length) return;
+        this.state.selectedPresets.splice(index, 1);
+        this.renderPresetStack();
+    }
+    renderPresetStack() {
+        const root = this.get('[data-role="preset-stack"]');
+        root.replaceChildren();
+        if (!this.state.selectedPresets.length) {
+            root.appendChild(element("div", "ss-empty ss-preset-empty", "No presets selected."));
+            this.updateResolvedPresetSummary();
+            return;
+        }
+        this.state.selectedPresets.forEach((selected, index)=>{
+            const row = element("div", "ss-preset-row");
+            const toggle = element("input");
+            toggle.type = "checkbox";
+            toggle.checked = selected.enabled;
+            toggle.dataset.role = "preset-enabled";
+            toggle.dataset.presetIndex = String(index);
+            toggle.setAttribute("aria-label", `Enable ${selected.title}`);
+            const name = element("span", "ss-preset-name", selected.title);
+            const metadata = this.state.swarmPresets.find((preset)=>preset.title === selected.title);
+            name.title = metadata?.description || selected.title;
+            const up = element("button", "ss-icon-button", "↑");
+            up.dataset.action = "preset-up";
+            up.dataset.presetIndex = String(index);
+            up.disabled = index === 0;
+            up.title = "Apply earlier";
+            const down = element("button", "ss-icon-button", "↓");
+            down.dataset.action = "preset-down";
+            down.dataset.presetIndex = String(index);
+            down.disabled = index === this.state.selectedPresets.length - 1;
+            down.title = "Apply later";
+            const remove = element("button", "ss-icon-button ss-button-danger", "×");
+            remove.dataset.action = "preset-remove";
+            remove.dataset.presetIndex = String(index);
+            remove.title = "Remove preset";
+            row.append(toggle, name, up, down, remove);
+            root.appendChild(row);
+        });
         this.updateResolvedPresetSummary();
     }
     populateSimpleSelect(role, blankLabel, values, selected) {
@@ -2569,35 +2796,22 @@ class StudioController {
         this.get('[data-role="size-readout"]').textContent = `${width} × ${height}`;
     }
     resolvedPrompts() {
-        const prompt = this.finalPrompt();
-        const negativePrompt = this.get('[data-role="negative"]').value.trim();
-        const presetName = this.get('[data-role="presets"]').value;
-        const preset = this.state.swarmPresets.find((item)=>item.title === presetName);
-        if (!preset) return {
-            prompt,
-            negativePrompt,
-            presets: []
-        };
+        const presets = this.state.selectedPresets.filter((selected)=>selected.enabled);
+        const titles = presets.map((preset)=>preset.title);
+        const resolved = applyPresetStackPrompts(this.finalPrompt(), this.get('[data-role="negative"]').value.trim(), titles, this.state.swarmPresets);
         return {
-            prompt: applyPresetPrompt(prompt, preset.paramMap.prompt || ""),
-            negativePrompt: applyPresetPrompt(negativePrompt, preset.paramMap.negativeprompt || preset.paramMap.negative_prompt || ""),
-            presets: [
-                preset.title
-            ]
+            ...resolved,
+            presets: titles
         };
     }
     updateResolvedPresetSummary() {
         const status = this.get('[data-role="preset-resolved"]');
-        const presetName = this.get('[data-role="presets"]').value;
-        const preset = this.state.swarmPresets.find((item)=>item.title === presetName);
-        if (!preset) {
-            status.textContent = "No Swarm preset; prompts pass through unchanged.";
+        const enabled = this.state.selectedPresets.filter((preset)=>preset.enabled);
+        if (!enabled.length) {
+            status.textContent = "No enabled Swarm presets; prompts pass through unchanged.";
             return;
         }
-        const changes = [];
-        if (preset.paramMap.prompt) changes.push("positive");
-        if (preset.paramMap.negativeprompt || preset.paramMap.negative_prompt) changes.push("negative");
-        status.textContent = changes.length ? `${preset.title} resolves ${changes.join(" + ")} prompt text; the resolved values are recorded with the output.` : `${preset.title} changes render parameters without replacing prompt text.`;
+        status.textContent = `${enabled.length} preset${enabled.length === 1 ? "" : "s"} applied top to bottom: ${enabled.map((preset)=>preset.title).join(" → ")}. Resolved prompts are recorded with the output.`;
     }
     refreshMetadata() {
         if (!this.state.connection) return;
@@ -3115,17 +3329,19 @@ class StudioController {
             details?.timing?.prep ? `${details.timing.prep} prep` : "",
             details?.timing?.generation ? `${details.timing.generation} gen` : "",
             !details?.timing?.prep && details?.timing?.totalMs ? `${(details.timing.totalMs / 1000).toFixed(2)} sec total` : "",
-            details?.presets?.length ? `preset · ${details.presets.join(", ")}` : "",
+            details?.presets?.length ? `presets · ${details.presets.join(" → ")}` : "",
             details?.initImageLabel ? `img2img · ${details.initImageLabel}` : ""
         ].filter(Boolean);
         for (const value of factValues)facts.appendChild(element("span", "ss-badge", String(value)));
         this.get('[data-role="inspector-positive"]').textContent = details?.resolvedPrompt || details?.prompt || "Prompt metadata is unavailable for this older output.";
         this.get('[data-role="inspector-negative"]').textContent = details?.resolvedNegativePrompt || details?.negativePrompt || "No negative prompt recorded.";
         this.get('[data-role="inspector-loras"]').textContent = details?.loras?.length ? details.loras.map((lora)=>`${lora.name} · ${lora.weight}`).join("\n") : "No LoRAs recorded.";
+        const path = details?.swarmPath || "";
+        this.get('[data-role="inspector-path"]').hidden = !path;
+        this.get('[data-role="inspector-path-value"]').textContent = path;
         this.get('[data-action="reuse-parameters"]').disabled = !details;
         this.get('[data-action="use-as-init"]').disabled = !image.src;
         this.get('[data-action="delete-output"]').disabled = !image.id;
-        this.get('[data-action="open-swarm-folder"]').disabled = !details?.swarmPath || !this.state.connection;
         inspector.hidden = false;
         this.setInspectorZoom(1);
     }
@@ -3178,8 +3394,10 @@ class StudioController {
         assign("clip-g", parameters.clipGModel);
         assign("t5", parameters.t5XXLModel);
         assign("raw-override", parameters.rawRequestOverride);
-        const preset = details.presets?.[0] || "";
-        this.get('[data-role="presets"]').value = this.state.swarmPresets.some((item)=>item.title === preset) ? preset : "";
+        this.state.selectedPresets = (details.presets || []).map((title)=>({
+                title,
+                enabled: true
+            }));
         this.state.stack = (details.loras || []).map((saved)=>({
                 lora: this.state.loras.find((item)=>item.name === saved.name) || manualLora(saved.name),
                 weight: clamp(Number(saved.weight) || 1, -10, 10),
@@ -3188,10 +3406,11 @@ class StudioController {
             }));
         this.renderStack();
         this.renderLoras();
-        this.updateResolvedPresetSummary();
+        this.renderPresetStack();
         this.closeInspector();
+        this.closeOutputLibrary();
         if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create");
-        this.setRunStatus("Reused prompts, preset, render settings, and LoRA stack.");
+        this.setRunStatus(`Reused prompts, locked seed ${parameters.seed ?? "as recorded"}, presets, render settings, and LoRA stack.`);
     }
     deleteCurrentOutput() {
         const image = this.state.currentImage;
@@ -3201,15 +3420,6 @@ class StudioController {
             imageId: image.id
         });
         this.setRunStatus(`Deleting “${image.label}”…`);
-    }
-    openSwarmFolder() {
-        const path = this.state.currentImage?.details?.swarmPath;
-        if (!path || !this.state.connection) return;
-        this.send("open_swarm_folder", {
-            connectionId: this.state.connection.id,
-            path
-        });
-        this.setRunStatus("Asking SwarmUI to reveal the original output…");
     }
     async useCurrentAsInit() {
         const image = this.state.currentImage;
@@ -3222,6 +3432,7 @@ class StudioController {
             if (!response.ok) throw new Error(`Image request failed (${response.status}).`);
             await this.setInitFromBlob(await response.blob(), image.label, image.id || "");
             this.closeInspector();
+            this.closeOutputLibrary();
             if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("generation");
             this.setRunStatus(`Init image ready · creativity ${this.get('[data-role="denoise"]').value}.`);
         } catch (error) {
@@ -3294,6 +3505,7 @@ class StudioController {
     }
     closeOutputLibrary() {
         this.get('[data-role="output-library"]').hidden = true;
+        this.librarySelection.clear();
     }
     createOutputFolder() {
         const name = window.prompt("Name this output folder:");
@@ -3316,6 +3528,50 @@ class StudioController {
         const pages = Math.max(1, Math.ceil(filtered.length / this.libraryPageSize));
         this.libraryPage = clamp(this.libraryPage + delta, 0, pages - 1);
         this.renderOutputLibrary();
+    }
+    libraryPageOutputs() {
+        const filtered = this.filteredLibraryOutputs();
+        return filtered.slice(this.libraryPage * this.libraryPageSize, (this.libraryPage + 1) * this.libraryPageSize);
+    }
+    toggleLibraryPageSelection() {
+        const ids = this.libraryPageOutputs().map((output)=>String(output.id));
+        const allSelected = ids.length > 0 && ids.every((id)=>this.librarySelection.has(id));
+        for (const id of ids){
+            if (allSelected) this.librarySelection.delete(id);
+            else this.librarySelection.add(id);
+        }
+        this.renderOutputLibrary();
+    }
+    updateLibrarySelectionControls() {
+        const selected = this.librarySelection.size;
+        this.get('[data-role="library-selection-count"]').textContent = `${selected} selected`;
+        this.get('[data-action="bulk-move-outputs"]').disabled = selected === 0;
+        this.get('[data-action="bulk-delete-outputs"]').disabled = selected === 0;
+        const pageIds = this.libraryPageOutputs().map((output)=>String(output.id));
+        const allPageSelected = pageIds.length > 0 && pageIds.every((id)=>this.librarySelection.has(id));
+        this.get('[data-action="select-library-page"]').textContent = allPageSelected ? "Clear page" : "Select page";
+    }
+    bulkMoveOutputs() {
+        const imageIds = [
+            ...this.librarySelection
+        ];
+        if (!imageIds.length) return;
+        this.send("bulk_move_outputs", {
+            imageIds,
+            folderId: this.get('[data-role="bulk-folder"]').value
+        });
+        this.setRunStatus(`Moving ${imageIds.length} selected output${imageIds.length === 1 ? "" : "s"}…`);
+    }
+    bulkDeleteOutputs() {
+        const imageIds = [
+            ...this.librarySelection
+        ];
+        if (!imageIds.length) return;
+        if (!window.confirm(`Delete ${imageIds.length} selected Lumiverse output${imageIds.length === 1 ? "" : "s"}? This cannot be undone.`)) return;
+        this.send("bulk_delete_outputs", {
+            imageIds
+        });
+        this.setRunStatus(`Deleting ${imageIds.length} selected output${imageIds.length === 1 ? "" : "s"}…`);
     }
     filteredLibraryOutputs() {
         if (!this.libraryFolderId) return this.state.libraryOutputs;
@@ -3362,15 +3618,39 @@ class StudioController {
         this.get('[data-role="library-page"]').textContent = `${this.libraryPage + 1} / ${pages}`;
         this.get('[data-action="library-prev"]').disabled = this.libraryPage <= 0;
         this.get('[data-action="library-next"]').disabled = this.libraryPage >= pages - 1;
+        const bulkFolder = this.get('[data-role="bulk-folder"]');
+        const previousBulkFolder = bulkFolder.value;
+        bulkFolder.replaceChildren();
+        const unfiledBulk = element("option", "", "Move to Unfiled");
+        unfiledBulk.value = "";
+        bulkFolder.appendChild(unfiledBulk);
+        for (const folder of this.state.outputFolders){
+            const option = element("option", "", `Move to ${folder.name}`);
+            option.value = folder.id;
+            bulkFolder.appendChild(option);
+        }
+        bulkFolder.value = this.state.outputFolders.some((folder)=>folder.id === previousBulkFolder) ? previousBulkFolder : "";
         const grid = this.get('[data-role="library-grid"]');
         grid.replaceChildren();
-        const page = filtered.slice(this.libraryPage * this.libraryPageSize, (this.libraryPage + 1) * this.libraryPageSize);
+        const page = this.libraryPageOutputs();
         if (!page.length) {
             grid.appendChild(element("div", "ss-empty", "No outputs in this folder yet."));
+            this.updateLibrarySelectionControls();
             return;
         }
         for (const output of page){
             const card = element("article", "ss-library-output");
+            const imageId = String(output.id);
+            const selected = this.librarySelection.has(imageId);
+            card.dataset.selected = String(selected);
+            const checkLabel = element("label", "ss-library-output-check");
+            const check = element("input");
+            check.type = "checkbox";
+            check.checked = selected;
+            check.dataset.role = "library-output-check";
+            check.dataset.imageId = imageId;
+            check.setAttribute("aria-label", `Select ${output.original_filename || `output ${imageId}`}`);
+            checkLabel.appendChild(check);
             const open = element("button", "ss-library-output-button");
             const image = element("img");
             image.src = output.url;
@@ -3395,9 +3675,10 @@ class StudioController {
             }
             folderSelect.value = this.state.outputFolders.find((folder)=>folder.imageIds.includes(String(output.id)))?.id || "";
             meta.appendChild(folderSelect);
-            card.append(open, meta);
+            card.append(checkLabel, open, meta);
             grid.appendChild(card);
         }
+        this.updateLibrarySelectionControls();
     }
     inheritedTriggers() {
         const seen = new Set();
@@ -3434,10 +3715,9 @@ class StudioController {
             }
             parsed = value;
         }
-        const preset = this.get('[data-role="presets"]').value.trim();
-        if (preset) parsed.presets = [
-            preset
-        ];
+        const presets = this.state.selectedPresets.filter((preset)=>preset.enabled).map((preset)=>preset.title);
+        if (presets.length) parsed.presets = presets;
+        else delete parsed.presets;
         return Object.keys(parsed).length ? JSON.stringify(parsed) : undefined;
     }
     generate() {
@@ -3595,6 +3875,8 @@ class StudioController {
             return;
         }
         for (const output of this.state.outputs){
+            const current = this.outputToCurrentImage(output);
+            const card = element("div", "ss-history-card");
             const button = element("button", "ss-history-item");
             button.title = output.original_filename || "Generated image";
             const image = element("img");
@@ -3602,10 +3884,46 @@ class StudioController {
             image.alt = output.original_filename || "Generated image";
             button.appendChild(image);
             button.addEventListener("click", ()=>{
-                this.setCurrentImage(this.outputToCurrentImage(output));
+                this.closeHistoryMenus();
+                this.setCurrentImage(current);
                 this.openInspector();
             });
-            grid.appendChild(button);
+            const menuToggle = element("button", "ss-history-menu-toggle", "⋮");
+            menuToggle.type = "button";
+            menuToggle.setAttribute("aria-label", `Actions for ${current.label}`);
+            menuToggle.setAttribute("aria-expanded", "false");
+            const menu = element("div", "ss-history-menu");
+            menu.hidden = true;
+            const menuAction = (label, className, handler, disabled = false)=>{
+                const action = element("button", `ss-button ${className}`, label);
+                action.type = "button";
+                action.disabled = disabled;
+                action.addEventListener("click", (event)=>{
+                    event.stopPropagation();
+                    this.closeHistoryMenus();
+                    this.setCurrentImage(current);
+                    handler();
+                });
+                menu.appendChild(action);
+            };
+            menuAction("Reuse", "", ()=>this.reuseCurrentParameters(), !current.details);
+            menuAction("Use as init", "", ()=>void this.useCurrentAsInit(), !current.src);
+            menuAction("Delete", "ss-button-danger", ()=>this.deleteCurrentOutput(), !current.id);
+            menuToggle.addEventListener("click", (event)=>{
+                event.stopPropagation();
+                const shouldOpen = menu.hidden;
+                this.closeHistoryMenus();
+                menu.hidden = !shouldOpen;
+                menuToggle.setAttribute("aria-expanded", String(shouldOpen));
+            });
+            card.append(button, menuToggle, menu);
+            grid.appendChild(card);
+        }
+    }
+    closeHistoryMenus() {
+        for (const menu of this.root.querySelectorAll(".ss-history-menu"))menu.hidden = true;
+        for (const toggle of this.root.querySelectorAll(".ss-history-menu-toggle")){
+            toggle.setAttribute("aria-expanded", "false");
         }
     }
     refreshOutputs(offset = this.state.outputOffset) {

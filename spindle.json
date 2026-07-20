@@ -1,0 +1,18 @@
+{
+  "version": "0.6.0",
+  "name": "Swarm Studio",
+  "identifier": "swarm_studio",
+  "author": "kittyafterdark",
+  "github": "https://github.com/kittyafterdark/LumiSwarm-Studio",
+  "homepage": "https://github.com/kittyafterdark/LumiSwarm-Studio",
+  "description": "A responsive SwarmUI workspace with reproducible metadata reuse, img2img, preset and LoRA stacks, bulk-organized output folders, compatible model browsing, and fullscreen inspection.",
+  "permissions": [
+    "image_gen",
+    "cors_proxy",
+    "images",
+    "chats"
+  ],
+  "entry_backend": "dist/backend.js",
+  "entry_frontend": "dist/frontend.js",
+  "minimum_lumiverse_version": "0.1.0"
+}

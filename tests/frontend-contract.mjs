@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 
 const {
   applyPresetPrompt,
+  applyPresetStackPrompts,
   dimensionsForAspect,
   fitAspectWithin,
   inferModelFamily,
@@ -13,6 +14,18 @@ assert.deepEqual(dimensionsForAspect("1:1", 1024), { width: 1024, height: 1024 }
 assert.deepEqual(dimensionsForAspect("16:9", 1024), { width: 1344, height: 768 })
 assert.equal(applyPresetPrompt("portrait", "cinematic, {value}"), "cinematic, portrait")
 assert.equal(applyPresetPrompt("", "{value}, flat lighting"), "flat lighting")
+assert.deepEqual(
+  applyPresetStackPrompts(
+    "portrait",
+    "blurry",
+    ["Cinematic", "Polish"],
+    [
+      { title: "Cinematic", paramMap: { prompt: "cinematic, {value}", negativeprompt: "{value}, flat" } },
+      { title: "Polish", paramMap: { prompt: "{value}, detailed", negativeprompt: "messy, {value}" } },
+    ],
+  ),
+  { prompt: "cinematic, portrait, detailed", negativePrompt: "messy, blurry, flat" },
+)
 assert.deepEqual(fitAspectWithin(2, 1000, 300), { width: 600, height: 300 })
 assert.deepEqual(fitAspectWithin(0.5, 200, 1000), { width: 200, height: 400 })
 
@@ -58,8 +71,18 @@ assert.match(source, /data-action="save-stack"/)
 assert.match(source, /data-action="reuse-parameters"/)
 assert.match(source, /data-action="use-as-init"/)
 assert.match(source, /data-action="delete-output"/)
-assert.match(source, /data-action="open-swarm-folder"/)
+assert.doesNotMatch(source, /data-action="open-swarm-folder"/)
 assert.match(source, /data-action="open-output-library"/)
+assert.match(source, /data-action="select-library-page"/)
+assert.match(source, /data-action="bulk-move-outputs"/)
+assert.match(source, /data-action="bulk-delete-outputs"/)
+assert.match(source, /data-role="library-output-check"/)
+assert.match(source, /ss-history-menu-toggle/)
+assert.match(source, /data-role="preset-stack"/)
+assert.match(source, /dataset\.action = "preset-up"/)
+assert.match(source, /dataset\.action = "preset-down"/)
+assert.match(source, /data-role="inspector-path"/)
+assert.match(source, /libraryPageSize = 30/)
 assert.match(source, /createOutputFolder/)
 assert.match(source, /data-role="aspect"/)
 assert.match(source, /data-role="size-slider"/)
