@@ -29,13 +29,9 @@ Generation itself goes through `spindle.imageGen.generate()`. That means it cont
 
 ## Install
 
-1. Build the extension if you are installing from source (Node.js 23.6+):
+1. Copy this Repo's url
 
-   ```sh
-   npm run build
-   ```
-
-2. In Lumiverse, open **Extensions / Spindle**, install the extension folder or packaged archive, and enable it.
+2. In Lumiverse, open **Extensions**, install the extension install, and enable it.
 3. Grant these permissions:
 
    - `image_gen` — connections, checkpoints, and generation
@@ -51,9 +47,6 @@ Lumiverse's SwarmUI default: `http://localhost:7801`. Any explicit connection
 URL still takes precedence.
 
 ## Authentication
-
-Lumiverse correctly does not expose the saved connection secret to extensions. Swarm Studio therefore:
-
 - Uses Lumiverse's saved secret for actual generation.
 - Tries anonymous SwarmUI metadata access first.
 - If SwarmUI requires authentication for model metadata, accepts a metadata-only `swarm_token` from the modal. The token is stored per user in Lumiverse's AES-256-GCM secure enclave and is only sent to the configured SwarmUI origin.
@@ -156,46 +149,3 @@ sparkle are static CSS or inline SVG, with no animated or fetched assets.
 Metadata refresh and the optional encrypted `swarm_token` live in this same
 opaque gear panel.
 
-## Live generation previews and interruption
-
-Swarm Studio prefers Lumiverse's `spindle.imageGen.generateStream()` API. It
-consumes each provider progress chunk (`step`, `totalSteps`, and `preview`) and
-uses the async generator's return value as the normal persisted result. The
-Generate button becomes **Interrupt generation** while a job is active; its
-AbortSignal stops the exact Spindle stream. On legacy no-stream Lumiverse
-builds, SwarmUI's user-scoped `InterruptAll` route is the compatibility
-fallback and may also stop another SwarmUI job running for the same user.
-
-Older Lumiverse builds without `spindle.imageGen.generateStream()` still work
-through `spindle.imageGen.generate()`. The included
-`patches/lumiverse-spindle-live-preview.patch` remains available only for those
-legacy builds; it emits the job-scoped events Studio already understands:
-
-```sh
-git apply /path/to/swarm-studio/patches/lumiverse-spindle-live-preview.patch
-```
-
-Then rebuild/restart Lumiverse normally. Do not apply the patch when the native
-Spindle stream hook is already present.
-
-## GitHub source installation
-
-Keep `package.json` as valid JSON at the repository root and commit the compiled
-`dist/backend.js` and `dist/frontend.js` files. Lumiverse will install the
-dependency-free package and use the tracked prebuilt bundle.
-
-If an earlier source install failed during dependency installation, stop
-Lumiverse and remove its incomplete `data/extensions/swarm_studio` directory
-before retrying. The failed clone may otherwise leave stale files behind.
-
-## Development
-
-The project intentionally has no runtime dependencies. Its build script uses
-Node's built-in TypeScript type stripper, so it does not need a package install.
-
-```sh
-npm run build
-```
-
-The repository metadata in `spindle.json` points to
-`kittyafterdark/LumiSwarm-Studio`.
