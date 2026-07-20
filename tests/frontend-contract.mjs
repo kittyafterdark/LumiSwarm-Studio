@@ -10,6 +10,7 @@ const {
   matchesKeywordQuery,
   modelSignalsCompatible,
   outputLibraryPageSize,
+  sanitizeCustomCss,
 } = await import("../dist/frontend.js")
 
 assert.deepEqual(dimensionsForAspect("1:1", 1024), { width: 1024, height: 1024 })
@@ -36,6 +37,8 @@ assert.equal(matchesKeywordQuery("illustrious portrait", ["Anima model", "soft p
 assert.equal(outputLibraryPageSize(390), 15)
 assert.equal(outputLibraryPageSize(720), 15)
 assert.equal(outputLibraryPageSize(721), 30)
+assert.doesNotMatch(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /@import\s+"/)
+assert.match(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /\.ss-shell/)
 
 assert.equal(inferModelFamily("BSSANIRLANIMASemi_v10"), "anima")
 assert.equal(inferModelFamily("Illustrious XL v1.5"), "illustrious")
@@ -125,6 +128,14 @@ assert.match(source, /ss-stack-preview/)
 assert.match(source, /data-action="toggle-config"/)
 assert.match(source, /data-action="set-theme"/)
 assert.match(source, /data-theme-choice/)
+assert.match(source, /data-role="appearance-color"/)
+assert.match(source, /data-role="appearance-radius"/)
+assert.match(source, /data-role="appearance-opacity"/)
+assert.match(source, /data-role="appearance-blur"/)
+assert.match(source, /data-role="custom-css"/)
+assert.match(source, /data-action="apply-custom-css"/)
+assert.match(source, /data-action="reset-appearance"/)
+assert.match(source, /--lumiverse-primary/)
 assert.match(source, /@media \(max-width: 720px\)/)
 
 console.log("frontend behavior contract: ok")

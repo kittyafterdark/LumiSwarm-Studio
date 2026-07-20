@@ -1,5 +1,14 @@
 type FrontendContext = any
 type StudioTheme = "lumiverse" | "moonbloom" | "sakura" | "verdant"
+type AppearanceColorKey = "accent" | "canvas" | "panel" | "header" | "outline" | "button" | "text"
+
+interface StudioAppearance {
+  colors: Partial<Record<AppearanceColorKey, string>>
+  radius: number | null
+  opacity: number
+  blur: number
+  customCss: string
+}
 
 interface LoraMetadata {
   name: string
@@ -194,26 +203,45 @@ const SETTINGS_ICON = `
 `
 
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1"
+const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1"
 const STUDIO_THEMES: Array<{ id: StudioTheme; label: string; color: string }> = [
-  { id: "lumiverse", label: "Lumiverse", color: "#7dd3fc" },
-  { id: "moonbloom", label: "Moonbloom", color: "#c4a7ff" },
-  { id: "sakura", label: "Sakura", color: "#ff9fba" },
-  { id: "verdant", label: "Verdant", color: "#9ad7b4" },
+  { id: "lumiverse", label: "Lumiverse", color: "var(--lumiverse-primary, #7dd3fc)" },
+  { id: "moonbloom", label: "Moonbloom", color: "#b789ff" },
+  { id: "sakura", label: "Sakura", color: "#ff7fa8" },
+  { id: "verdant", label: "Verdant", color: "#71dda5" },
+]
+const APPEARANCE_COLORS: Array<{ key: AppearanceColorKey; label: string; cssProperty: string }> = [
+  { key: "accent", label: "Accent", cssProperty: "--lumiverse-accent" },
+  { key: "button", label: "Buttons", cssProperty: "--ss-button-bg" },
+  { key: "header", label: "Headers", cssProperty: "--ss-header-bg" },
+  { key: "panel", label: "Panels", cssProperty: "--ss-panel-bg" },
+  { key: "outline", label: "Outlines", cssProperty: "--ss-outline" },
+  { key: "canvas", label: "Background", cssProperty: "--ss-canvas-bg" },
+  { key: "text", label: "Text", cssProperty: "--lumiverse-text" },
 ]
 
 const STYLES = `
   .ss-launcher {
+    --ss-canvas-bg: var(--lumiverse-bg, #090a0d);
+    --ss-panel-bg: var(--lumiverse-fill-subtle, #14151a);
+    --ss-header-bg: color-mix(in srgb, var(--lumiverse-primary, #7dd3fc) 9%, var(--ss-panel-bg));
+    --ss-outline: var(--lumiverse-border, #30323a);
+    --ss-button-bg: var(--lumiverse-fill-subtle, #17181e);
     position: relative;
     isolation: isolate;
     overflow: hidden;
+    min-height: clamp(520px, calc(100dvh - 118px), 920px);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
     margin: 12px;
     padding: 18px;
-    border: 1px solid var(--lumiverse-border);
-    border-radius: calc(var(--lumiverse-radius, 10px) * 1.25);
+    border: 1px solid var(--ss-outline);
+    border-radius: var(--ss-panel-radius, calc(var(--lumiverse-radius, 10px) * 1.25));
     background:
       radial-gradient(circle at 88% 2%, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 22%, transparent), transparent 38%),
       linear-gradient(145deg, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 8%, transparent), transparent 48%),
-      var(--lumiverse-fill-subtle);
+      var(--ss-canvas-bg);
     color: var(--lumiverse-text);
   }
   .ss-launcher::before {
@@ -270,14 +298,56 @@ const STYLES = `
     background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 6%, transparent);
     font-size: 8.5px;
   }
-  .ss-launcher-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-  .ss-launcher-actions .ss-button { min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-  .ss-launcher-actions svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .ss-launcher-actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .ss-launcher-actions .ss-button {
+    min-width: 0;
+    min-height: 62px;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    align-items: center;
+    justify-content: stretch;
+    gap: 10px;
+    padding: 10px 12px;
+    text-align: left;
+  }
+  .ss-launcher-actions svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .ss-launcher-action-copy { min-width: 0; display: grid; gap: 2px; }
+  .ss-launcher-action-copy strong { font-size: 11px; }
+  .ss-launcher-action-copy span { overflow: hidden; color: var(--lumiverse-text-muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-launcher-arrow { color: var(--lumiverse-text-muted); font-size: 17px; }
+  .ss-launcher-flow {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    margin-top: 16px;
+  }
+  .ss-launcher-flow-item {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    gap: 9px;
+    padding: 9px 10px;
+    border-left: 2px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 55%, var(--ss-outline));
+    border-radius: var(--ss-control-radius, var(--lumiverse-radius, 8px));
+    background: color-mix(in srgb, var(--ss-header-bg) 72%, transparent);
+  }
+  .ss-launcher-flow-item > span {
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    color: var(--lumiverse-accent, #7dd3fc);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 13%, transparent);
+    font-size: 9px;
+    font-weight: 800;
+  }
+  .ss-launcher-flow-item strong { display: block; font-size: 9.5px; }
+  .ss-launcher-flow-item small { display: block; margin-top: 2px; color: var(--lumiverse-text-muted); font-size: 8.5px; line-height: 1.4; }
   .ss-launcher-theme-row {
     display: flex;
     align-items: center;
     gap: 7px;
-    margin-top: 13px;
+    margin-top: auto;
     padding-top: 11px;
     border-top: 1px solid color-mix(in srgb, var(--lumiverse-border) 72%, transparent);
   }
@@ -297,14 +367,22 @@ const STYLES = `
     border-color: var(--ss-swatch);
     box-shadow: inset 0 0 0 3px var(--lumiverse-fill-subtle), 0 0 0 2px color-mix(in srgb, var(--ss-swatch) 42%, transparent);
   }
+  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="lumiverse"] {
+    --lumiverse-accent: var(--lumiverse-primary, #7dd3fc);
+  }
   :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="moonbloom"] {
-    --lumiverse-accent: #c4a7ff;
-    --lumiverse-bg: #0b0810;
-    --lumiverse-fill: #100c17;
-    --lumiverse-fill-subtle: #171020;
-    --lumiverse-border: #352945;
-    --lumiverse-text: #f7f2ff;
-    --lumiverse-text-muted: #b5a9c3;
+    --lumiverse-accent: #b789ff;
+    --lumiverse-bg: #08050e;
+    --lumiverse-fill: #120b1b;
+    --lumiverse-fill-subtle: #21112f;
+    --lumiverse-border: #684589;
+    --lumiverse-text: #fff9ff;
+    --lumiverse-text-muted: #c6b4d8;
+    --ss-canvas-bg: #08050e;
+    --ss-panel-bg: #150b20;
+    --ss-header-bg: #2a123d;
+    --ss-outline: #684589;
+    --ss-button-bg: #32164a;
     --ss-control-radius: 12px;
     --ss-panel-radius: 17px;
     --ss-slider-radius: 999px;
@@ -312,13 +390,18 @@ const STYLES = `
     --ss-theme-pattern-size: auto, 25px 25px;
   }
   :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="sakura"] {
-    --lumiverse-accent: #ff9fba;
-    --lumiverse-bg: #10080d;
-    --lumiverse-fill: #150c12;
-    --lumiverse-fill-subtle: #201018;
-    --lumiverse-border: #472837;
-    --lumiverse-text: #fff3f7;
-    --lumiverse-text-muted: #c5a7b1;
+    --lumiverse-accent: #ff7fa8;
+    --lumiverse-bg: #12060b;
+    --lumiverse-fill: #1d0c13;
+    --lumiverse-fill-subtle: #31101d;
+    --lumiverse-border: #7d334d;
+    --lumiverse-text: #fff7f9;
+    --lumiverse-text-muted: #d4afba;
+    --ss-canvas-bg: #12060b;
+    --ss-panel-bg: #210c15;
+    --ss-header-bg: #3a1222;
+    --ss-outline: #7d334d;
+    --ss-button-bg: #49152a;
     --ss-control-radius: 16px;
     --ss-panel-radius: 20px;
     --ss-slider-radius: 999px;
@@ -326,13 +409,18 @@ const STYLES = `
     --ss-theme-pattern-size: auto;
   }
   :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="verdant"] {
-    --lumiverse-accent: #9ad7b4;
-    --lumiverse-bg: #08100d;
-    --lumiverse-fill: #0b1411;
-    --lumiverse-fill-subtle: #101c17;
-    --lumiverse-border: #294338;
-    --lumiverse-text: #effbf4;
-    --lumiverse-text-muted: #a2bcb0;
+    --lumiverse-accent: #71dda5;
+    --lumiverse-bg: #06100b;
+    --lumiverse-fill: #0b1a12;
+    --lumiverse-fill-subtle: #123020;
+    --lumiverse-border: #397b58;
+    --lumiverse-text: #f2fff8;
+    --lumiverse-text-muted: #a8c9b8;
+    --ss-canvas-bg: #06100b;
+    --ss-panel-bg: #0c1e14;
+    --ss-header-bg: #153d28;
+    --ss-outline: #397b58;
+    --ss-button-bg: #184b30;
     --ss-control-radius: 6px;
     --ss-panel-radius: 10px;
     --ss-slider-radius: 3px;
@@ -374,8 +462,8 @@ const STYLES = `
   .ss-button,
   .ss-icon-button {
     appearance: none;
-    border: 1px solid var(--lumiverse-border);
-    background: var(--lumiverse-fill-subtle);
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    background: var(--ss-button-bg, var(--lumiverse-fill-subtle));
     color: var(--lumiverse-text);
     border-radius: var(--lumiverse-radius, 8px);
     min-height: 34px;
@@ -386,14 +474,14 @@ const STYLES = `
     transition: border-color .15s ease, background .15s ease, transform .15s ease, opacity .15s ease;
   }
   .ss-button:hover:not(:disabled), .ss-icon-button:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 60%, var(--lumiverse-border));
-    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 8%, var(--lumiverse-fill-subtle));
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 68%, var(--ss-outline, var(--lumiverse-border)));
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 14%, var(--ss-button-bg, var(--lumiverse-fill-subtle)));
   }
   .ss-button:active:not(:disabled), .ss-icon-button:active:not(:disabled) { transform: translateY(1px); }
   .ss-button:disabled, .ss-icon-button:disabled { cursor: not-allowed; opacity: .48; }
   .ss-button-primary {
-    color: var(--lumiverse-accent-text, #06131d);
-    background: var(--lumiverse-accent, #7dd3fc);
+    color: #08090d;
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 78%, white);
     border-color: transparent;
   }
   .ss-button-primary:hover:not(:disabled) {
@@ -414,9 +502,9 @@ const STYLES = `
   .ss-input, .ss-select, .ss-textarea {
     width: 100%;
     box-sizing: border-box;
-    border: 1px solid var(--lumiverse-border);
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
     border-radius: var(--lumiverse-radius, 8px);
-    background: var(--lumiverse-fill);
+    background: color-mix(in srgb, var(--ss-panel-bg, var(--lumiverse-fill)) 82%, #050608);
     color: var(--lumiverse-text);
     font: inherit;
     outline: none;
@@ -747,18 +835,23 @@ const STYLES = `
     right: 0;
     top: 40px;
     z-index: 40;
-    width: min(390px, calc(100vw - 28px));
+    width: min(460px, calc(100vw - 28px));
+    max-height: min(780px, calc(100dvh - 72px));
+    overflow-y: auto;
     display: grid;
     gap: 11px;
     padding: 12px;
-    border: 1px solid var(--lumiverse-border);
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
     border-radius: var(--ss-panel-radius, var(--lumiverse-radius, 10px));
-    background: var(--lumiverse-fill);
-    box-shadow: 0 16px 44px rgba(0,0,0,.44);
+    background:
+      linear-gradient(var(--ss-panel-bg, rgba(20,21,26,.98)), var(--ss-panel-bg, rgba(20,21,26,.98))),
+      #0a0a0e;
+    box-shadow: 0 18px 54px rgba(0,0,0,.68), inset 0 1px rgba(255,255,255,.035);
+    backdrop-filter: blur(max(14px, var(--ss-backdrop-blur, 10px)));
   }
   .ss-config-popover[hidden] { display: none; }
   .ss-config-section { display: grid; gap: 7px; }
-  .ss-config-section + .ss-config-section { padding-top: 10px; border-top: 1px solid var(--lumiverse-border); }
+  .ss-config-section + .ss-config-section { padding-top: 10px; border-top: 1px solid var(--ss-outline, var(--lumiverse-border)); }
   .ss-config-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 7px; }
   .ss-config-section-head strong { font-size: 10px; }
   .ss-config-section-head span { color: var(--lumiverse-text-muted); font-size: 8.5px; }
@@ -784,6 +877,60 @@ const STYLES = `
     color: var(--lumiverse-accent, #7dd3fc);
     border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 55%, var(--lumiverse-border));
     background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 9%, var(--lumiverse-fill-subtle));
+  }
+  .ss-appearance-colors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .ss-color-control {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--ss-header-bg, var(--lumiverse-fill-subtle)) 58%, transparent);
+    color: var(--lumiverse-text);
+    font-size: 9px;
+    cursor: pointer;
+  }
+  .ss-color-control input[type="color"] {
+    appearance: none;
+    width: 22px;
+    height: 22px;
+    flex: 0 0 auto;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, white 22%, var(--ss-outline, var(--lumiverse-border)));
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+  }
+  .ss-color-control input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+  .ss-color-control input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 50%; }
+  .ss-color-control input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
+  .ss-color-control span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-appearance-range { display: grid; grid-template-columns: 90px minmax(0, 1fr) 42px; align-items: center; gap: 8px; }
+  .ss-appearance-range label { color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-appearance-range output { color: var(--lumiverse-text); font-size: 9px; text-align: right; font-variant-numeric: tabular-nums; }
+  .ss-css-override {
+    min-height: 126px;
+    resize: vertical;
+    font: 9px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+    tab-size: 2;
+  }
+  .ss-config-actions { display: flex; justify-content: flex-end; gap: 6px; }
+  .ss-css-guide {
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--ss-header-bg, var(--lumiverse-fill-subtle)) 48%, transparent);
+  }
+  .ss-css-guide summary { padding: 8px 9px; color: var(--lumiverse-text-muted); font-size: 9px; cursor: pointer; }
+  .ss-css-guide pre {
+    margin: 0;
+    padding: 0 9px 9px;
+    overflow-x: auto;
+    color: var(--lumiverse-text-muted);
+    font: 8px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+    white-space: pre-wrap;
   }
   .ss-token-popover p { margin: 0 0 8px; color: var(--lumiverse-text-muted); line-height: 1.45; font-size: 10px; }
   .ss-token-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
@@ -842,6 +989,13 @@ const STUDIO_V3_STYLES = `
     --ss-slider-radius: 999px;
     --ss-theme-pattern: none;
     --ss-theme-pattern-size: auto;
+    --ss-canvas-bg: var(--lumiverse-bg, var(--lumiverse-fill, #090a0d));
+    --ss-panel-bg: var(--lumiverse-fill-subtle, #14151a);
+    --ss-header-bg: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 9%, var(--ss-panel-bg));
+    --ss-outline: var(--lumiverse-border, #30323a);
+    --ss-button-bg: var(--lumiverse-fill-subtle, #17181e);
+    --ss-surface-opacity: 96%;
+    --ss-backdrop-blur: 12px;
     width: 100%;
     height: min(900px, calc(100dvh - 118px));
     min-height: min(650px, calc(100dvh - 118px));
@@ -849,7 +1003,7 @@ const STUDIO_V3_STYLES = `
     position: relative;
     isolation: isolate;
     overflow: hidden;
-    background-color: var(--lumiverse-fill, transparent);
+    background-color: var(--ss-canvas-bg);
     background-image: var(--ss-theme-pattern);
     background-size: var(--ss-theme-pattern-size);
   }
@@ -899,6 +1053,11 @@ const STUDIO_V3_STYLES = `
     grid-template-columns: auto minmax(240px, 1fr) auto;
     gap: 8px;
     align-items: center;
+    padding: 5px 6px;
+    border: 1px solid var(--ss-outline);
+    border-radius: var(--ss-control-radius);
+    background: color-mix(in srgb, var(--ss-header-bg) var(--ss-surface-opacity), transparent);
+    backdrop-filter: blur(var(--ss-backdrop-blur));
   }
   .ss-brand {
     display: flex;
@@ -989,8 +1148,9 @@ const STUDIO_V3_STYLES = `
   .ss-output-stage,
   .ss-prompt-panel,
   .ss-lora-dock {
-    border: 1px solid var(--lumiverse-border);
-    background: color-mix(in srgb, var(--lumiverse-fill-subtle) 88%, transparent);
+    border: 1px solid var(--ss-outline);
+    background: color-mix(in srgb, var(--ss-panel-bg) var(--ss-surface-opacity), transparent);
+    backdrop-filter: blur(var(--ss-backdrop-blur));
     border-radius: calc(var(--lumiverse-radius, 8px) * 1.1);
   }
   .ss-generation-pane,
@@ -1009,7 +1169,8 @@ const STUDIO_V3_STYLES = `
     justify-content: space-between;
     gap: 8px;
     padding: 7px 9px;
-    border-bottom: 1px solid var(--lumiverse-border);
+    border-bottom: 1px solid var(--ss-outline);
+    background: color-mix(in srgb, var(--ss-header-bg) var(--ss-surface-opacity), transparent);
   }
   .ss-pane-head strong,
   .ss-dock-head strong { font-size: 11px; }
@@ -1196,7 +1357,13 @@ const STUDIO_V3_STYLES = `
   .ss-prompt-panel { padding: 8px 9px; min-height: 0; overflow-y: auto; }
   .ss-prompt-panel .ss-textarea { min-height: 70px; max-height: 150px; }
   .ss-prompt-grid { grid-template-columns: 1.25fr 1fr; }
-  .ss-prompt-head { min-height: 31px; margin-bottom: 5px; }
+  .ss-prompt-head {
+    min-height: 31px;
+    margin: -8px -9px 7px;
+    padding: 6px 9px;
+    border-bottom: 1px solid var(--ss-outline);
+    background: color-mix(in srgb, var(--ss-header-bg) var(--ss-surface-opacity), transparent);
+  }
   .ss-prompt-status {
     min-width: 0;
     max-width: 36%;
@@ -1448,7 +1615,7 @@ const STUDIO_V3_STYLES = `
     z-index: 2147483010;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-    background: color-mix(in srgb, var(--lumiverse-bg, var(--lumiverse-fill, #050608)) 97%, transparent);
+    background: color-mix(in srgb, var(--ss-canvas-bg, var(--lumiverse-bg, #050608)) 97%, transparent);
     backdrop-filter: blur(12px);
   }
   .ss-inspector[hidden] { display: none; }
@@ -1543,7 +1710,7 @@ const STUDIO_V3_STYLES = `
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr);
     grid-template-rows: 52px minmax(0, 1fr);
-    background: color-mix(in srgb, var(--lumiverse-bg, var(--lumiverse-fill, #050608)) 98%, transparent);
+    background: color-mix(in srgb, var(--ss-canvas-bg, var(--lumiverse-bg, #050608)) 98%, transparent);
     backdrop-filter: blur(12px);
   }
   .ss-output-library[hidden] { display: none; }
@@ -1553,8 +1720,8 @@ const STUDIO_V3_STYLES = `
     align-items: center;
     gap: 8px;
     padding: 9px 12px;
-    border-bottom: 1px solid var(--lumiverse-border);
-    background: var(--lumiverse-fill-subtle);
+    border-bottom: 1px solid var(--ss-outline, var(--lumiverse-border));
+    background: var(--ss-header-bg, var(--lumiverse-fill-subtle));
   }
   .ss-library-head strong { font-size: 14px; }
   .ss-library-head .ss-muted { flex: 1; }
@@ -1921,6 +2088,101 @@ function persistStudioTheme(theme: StudioTheme): void {
   }
 }
 
+function defaultStudioAppearance(): StudioAppearance {
+  return {
+    colors: {},
+    radius: null,
+    opacity: 96,
+    blur: 12,
+    customCss: "",
+  }
+}
+
+function normalizeHexColor(value: unknown): string | null {
+  const color = String(value || "").trim()
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color.toLowerCase()
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    return `#${color.slice(1).split("").map((part) => `${part}${part}`).join("")}`.toLowerCase()
+  }
+  const rgb = color.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i)
+  if (!rgb) return null
+  return `#${rgb.slice(1, 4)
+    .map((part) => clamp(Math.round(Number(part)), 0, 255).toString(16).padStart(2, "0"))
+    .join("")}`
+}
+
+function storedStudioAppearance(): StudioAppearance {
+  const fallback = defaultStudioAppearance()
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(APPEARANCE_STORAGE_KEY) || "{}")
+    const colors: StudioAppearance["colors"] = {}
+    for (const { key } of APPEARANCE_COLORS) {
+      const color = normalizeHexColor(parsed?.colors?.[key])
+      if (color) colors[key] = color
+    }
+    return {
+      colors,
+      radius: Number.isFinite(parsed?.radius) ? clamp(Number(parsed.radius), 0, 28) : null,
+      opacity: Number.isFinite(parsed?.opacity) ? clamp(Number(parsed.opacity), 45, 100) : fallback.opacity,
+      blur: Number.isFinite(parsed?.blur) ? clamp(Number(parsed.blur), 0, 30) : fallback.blur,
+      customCss: String(parsed?.customCss || "").slice(0, 32768),
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function persistStudioAppearance(appearance: StudioAppearance): void {
+  try {
+    window.localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance))
+  } catch {
+    // The appearance still applies for the active session.
+  }
+}
+
+function cloneStudioAppearance(appearance: StudioAppearance): StudioAppearance {
+  return {
+    ...appearance,
+    colors: { ...appearance.colors },
+  }
+}
+
+export function sanitizeCustomCss(value: unknown): string {
+  return String(value || "")
+    .slice(0, 32768)
+    .replace(/@import\s+(?:url\()?[^;]+;?/gi, "/* @import removed by Swarm Studio */")
+    .replace(/expression\s*\(/gi, "/* expression removed */(")
+}
+
+function applyAppearanceVariables(target: HTMLElement, appearance: StudioAppearance): void {
+  for (const { key, cssProperty } of APPEARANCE_COLORS) {
+    const color = appearance.colors[key]
+    const properties = [
+      cssProperty,
+      ...(key === "canvas" ? ["--lumiverse-bg"] : []),
+      ...(key === "panel" ? ["--lumiverse-fill"] : []),
+      ...(key === "header" ? ["--lumiverse-fill-subtle"] : []),
+      ...(key === "outline" ? ["--lumiverse-border"] : []),
+    ]
+    for (const property of properties) {
+      if (color) target.style.setProperty(property, color)
+      else target.style.removeProperty(property)
+    }
+  }
+  target.style.setProperty("--ss-surface-opacity", `${clamp(appearance.opacity, 45, 100)}%`)
+  target.style.setProperty("--ss-backdrop-blur", `${clamp(appearance.blur, 0, 30)}px`)
+  if (appearance.radius === null) {
+    target.style.removeProperty("--ss-control-radius")
+    target.style.removeProperty("--ss-panel-radius")
+    target.style.removeProperty("--ss-slider-radius")
+  } else {
+    const radius = clamp(appearance.radius, 0, 28)
+    target.style.setProperty("--ss-control-radius", `${radius}px`)
+    target.style.setProperty("--ss-panel-radius", `${Math.min(36, radius + 5)}px`)
+    target.style.setProperty("--ss-slider-radius", `${radius}px`)
+  }
+}
+
 function numberValue(input: HTMLInputElement, fallback: number): number {
   const value = Number(input.value)
   return Number.isFinite(value) ? value : fallback
@@ -2117,6 +2379,9 @@ class StudioController {
   private readonly modal: any
   private readonly root: HTMLElement
   private readonly onThemeChange: (theme: StudioTheme) => void
+  private readonly onAppearanceChange: (appearance: StudioAppearance) => void
+  private appearance = defaultStudioAppearance()
+  private appearanceControlsInitialized = false
   private readonly state: StudioState
   private previewObserver: IntersectionObserver | null = null
   private readonly previewCache = new Map<string, string>()
@@ -2162,11 +2427,17 @@ class StudioController {
     }
   }
 
-  constructor(ctx: FrontendContext, modal: any, onThemeChange: (theme: StudioTheme) => void) {
+  constructor(
+    ctx: FrontendContext,
+    modal: any,
+    onThemeChange: (theme: StudioTheme) => void,
+    onAppearanceChange: (appearance: StudioAppearance) => void,
+  ) {
     this.ctx = ctx
     this.modal = modal
     this.root = modal.root
     this.onThemeChange = onThemeChange
+    this.onAppearanceChange = onAppearanceChange
     this.state = {
       connections: [],
       connection: null,
@@ -2226,6 +2497,65 @@ class StudioController {
     if (shell) shell.dataset.theme = theme
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="set-theme"]')) {
       button.dataset.active = String(button.dataset.themeValue === theme)
+    }
+    this.syncAppearanceControls()
+  }
+
+  setAppearance(appearance: StudioAppearance): void {
+    this.appearance = cloneStudioAppearance(appearance)
+    applyAppearanceVariables(this.root, appearance)
+    const shell = this.root.querySelector<HTMLElement>(".ss-shell")
+    if (shell) applyAppearanceVariables(shell, appearance)
+    this.syncAppearanceControls()
+  }
+
+  private syncAppearanceControls(): void {
+    const shell = this.root.querySelector<HTMLElement>(".ss-shell")
+    if (!shell) return
+    const panel = this.root.querySelector<HTMLElement>(".ss-generation-pane")
+    const header = this.root.querySelector<HTMLElement>(".ss-pane-head")
+    const button = this.root.querySelector<HTMLElement>(".ss-button:not(.ss-button-primary)")
+    const fallbackColors: Record<AppearanceColorKey, string> = {
+      accent: "#7dd3fc",
+      canvas: "#090a0d",
+      panel: "#14151a",
+      header: "#1b1d24",
+      outline: "#343640",
+      button: "#191b21",
+      text: "#f4f5f7",
+    }
+    const sampledColors: Record<AppearanceColorKey, string | null> = {
+      accent: normalizeHexColor(getComputedStyle(shell).getPropertyValue("--lumiverse-accent")),
+      canvas: normalizeHexColor(getComputedStyle(shell).backgroundColor),
+      panel: panel ? normalizeHexColor(getComputedStyle(panel).backgroundColor) : null,
+      header: header ? normalizeHexColor(getComputedStyle(header).backgroundColor) : null,
+      outline: panel ? normalizeHexColor(getComputedStyle(panel).borderTopColor) : null,
+      button: button ? normalizeHexColor(getComputedStyle(button).backgroundColor) : null,
+      text: normalizeHexColor(getComputedStyle(shell).color),
+    }
+    for (const input of this.root.querySelectorAll<HTMLInputElement>('[data-role="appearance-color"]')) {
+      const key = input.dataset.colorKey as AppearanceColorKey
+      input.value = this.appearance.colors[key] || sampledColors[key] || fallbackColors[key]
+      input.dataset.overridden = String(Boolean(this.appearance.colors[key]))
+      input.closest<HTMLElement>(".ss-color-control")!.title = this.appearance.colors[key]
+        ? `${key} override · ${input.value}`
+        : `${key} inherited from the active profile · ${input.value}`
+    }
+
+    const radius = this.get<HTMLInputElement>('[data-role="appearance-radius"]')
+    const inheritedRadius = Number.parseFloat(getComputedStyle(button || shell).borderRadius) || 8
+    radius.value = String(this.appearance.radius ?? clamp(inheritedRadius, 0, 28))
+    this.get<HTMLOutputElement>('[data-role="appearance-radius-output"]').value =
+      this.appearance.radius === null ? `${Math.round(inheritedRadius)}px*` : `${Math.round(this.appearance.radius)}px`
+    const opacity = this.get<HTMLInputElement>('[data-role="appearance-opacity"]')
+    opacity.value = String(this.appearance.opacity)
+    this.get<HTMLOutputElement>('[data-role="appearance-opacity-output"]').value = `${Math.round(this.appearance.opacity)}%`
+    const blur = this.get<HTMLInputElement>('[data-role="appearance-blur"]')
+    blur.value = String(this.appearance.blur)
+    this.get<HTMLOutputElement>('[data-role="appearance-blur-output"]').value = `${Math.round(this.appearance.blur)}px`
+    if (!this.appearanceControlsInitialized) {
+      this.get<HTMLTextAreaElement>('[data-role="custom-css"]').value = this.appearance.customCss
+      this.appearanceControlsInitialized = true
     }
   }
 
@@ -2466,10 +2796,74 @@ class StudioController {
                   </div>
                 </section>
                 <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>Studio theme</strong><span>Color, shape and texture</span></div>
+                  <div class="ss-config-section-head"><strong>Base profile</strong><span>Loads a distinct design language</span></div>
                   <div class="ss-config-theme-grid">
                     ${STUDIO_THEMES.map((theme) => `<button class="ss-button ss-config-theme" data-action="set-theme" data-theme-value="${theme.id}" style="--ss-swatch:${theme.color}">${theme.label}</button>`).join("")}
                   </div>
+                </section>
+                <section class="ss-config-section">
+                  <div class="ss-config-section-head"><strong>Component colors</strong><button class="ss-button ss-tiny" data-action="reset-appearance">Reset overrides</button></div>
+                  <div class="ss-appearance-colors">
+                    ${APPEARANCE_COLORS.map((color) => `<label class="ss-color-control"><input type="color" data-role="appearance-color" data-color-key="${color.key}" value="#7dd3fc" /><span>${color.label}</span></label>`).join("")}
+                  </div>
+                </section>
+                <section class="ss-config-section">
+                  <div class="ss-config-section-head"><strong>Shape and glass</strong><span>Applied across the modal</span></div>
+                  <div class="ss-appearance-range">
+                    <label for="ss-radius-control">Border radius</label>
+                    <input id="ss-radius-control" data-role="appearance-radius" type="range" min="0" max="28" step="1" value="8" />
+                    <output data-role="appearance-radius-output">8px</output>
+                  </div>
+                  <div class="ss-appearance-range">
+                    <label for="ss-opacity-control">Surface opacity</label>
+                    <input id="ss-opacity-control" data-role="appearance-opacity" type="range" min="45" max="100" step="1" value="96" />
+                    <output data-role="appearance-opacity-output">96%</output>
+                  </div>
+                  <div class="ss-appearance-range">
+                    <label for="ss-blur-control">Backdrop blur</label>
+                    <input id="ss-blur-control" data-role="appearance-blur" type="range" min="0" max="30" step="1" value="12" />
+                    <output data-role="appearance-blur-output">12px</output>
+                  </div>
+                </section>
+                <section class="ss-config-section">
+                  <div class="ss-config-section-head"><strong>Custom CSS</strong><span>Persisted locally · apply when ready</span></div>
+                  <textarea class="ss-textarea ss-css-override" data-role="custom-css" spellcheck="false" placeholder="/* Example */
+.ss-current-preview { box-shadow: 0 0 28px color-mix(in srgb, var(--lumiverse-accent) 28%, transparent); }
+.ss-stack-row { border-style: dashed; }"></textarea>
+                  <div class="ss-config-actions">
+                    <button class="ss-button ss-button-danger" data-action="clear-custom-css">Clear</button>
+                    <button class="ss-button ss-button-primary" data-action="apply-custom-css">Apply CSS</button>
+                  </div>
+                  <details class="ss-css-guide">
+                    <summary>Stylesheet guide</summary>
+                    <pre>Useful roots
+.ss-shell                 whole Studio
+.ss-launcher              drawer dashboard
+.ss-generation-pane       generation sidebar
+.ss-output-stage          current image
+.ss-prompt-panel          prompt editor
+.ss-lora-dock             LoRA workspace
+.ss-stack-row             stacked LoRA
+.ss-history-card          history image
+.ss-output-library        fullscreen library
+.ss-inspector             image inspector
+
+Theme variables
+--lumiverse-accent        active accent
+--ss-canvas-bg            modal background
+--ss-panel-bg             panel surfaces
+--ss-header-bg            section headers
+--ss-outline              borders
+--ss-button-bg            button surfaces
+--ss-control-radius       controls
+--ss-panel-radius         panels
+--ss-surface-opacity      panel alpha
+--ss-backdrop-blur        panel blur
+
+Use .ss-shell before a selector to keep
+an override inside Studio. @import rules
+are removed when CSS is applied.</pre>
+                  </details>
                 </section>
               </div>
             </div>
@@ -2833,6 +3227,30 @@ class StudioController {
       this.libraryPage = 0
       this.renderOutputLibrary()
     })
+    for (const input of this.root.querySelectorAll<HTMLInputElement>('[data-role="appearance-color"]')) {
+      input.addEventListener("input", () => {
+        const key = input.dataset.colorKey as AppearanceColorKey
+        if (!APPEARANCE_COLORS.some((color) => color.key === key)) return
+        const next = cloneStudioAppearance(this.appearance)
+        next.colors[key] = input.value
+        this.onAppearanceChange(next)
+      })
+    }
+    this.get<HTMLInputElement>('[data-role="appearance-radius"]').addEventListener("input", (event) => {
+      const next = cloneStudioAppearance(this.appearance)
+      next.radius = numberValue(event.currentTarget as HTMLInputElement, 8)
+      this.onAppearanceChange(next)
+    })
+    this.get<HTMLInputElement>('[data-role="appearance-opacity"]').addEventListener("input", (event) => {
+      const next = cloneStudioAppearance(this.appearance)
+      next.opacity = numberValue(event.currentTarget as HTMLInputElement, 96)
+      this.onAppearanceChange(next)
+    })
+    this.get<HTMLInputElement>('[data-role="appearance-blur"]').addEventListener("input", (event) => {
+      const next = cloneStudioAppearance(this.appearance)
+      next.blur = numberValue(event.currentTarget as HTMLInputElement, 12)
+      this.onAppearanceChange(next)
+    })
     this.get<HTMLSelectElement>('[data-role="lora-sort"]').addEventListener("change", () => this.renderLoras())
     this.get<HTMLSelectElement>('[data-role="lora-filter"]').addEventListener("change", () => this.renderLoras())
     this.get<HTMLSelectElement>('[data-role="model"]').addEventListener("change", () => {
@@ -2933,6 +3351,28 @@ class StudioController {
       if (action === "set-theme") {
         const theme = button.dataset.themeValue
         if (STUDIO_THEMES.some((item) => item.id === theme)) this.onThemeChange(theme as StudioTheme)
+      }
+      if (action === "reset-appearance") {
+        const next = cloneStudioAppearance(this.appearance)
+        next.colors = {}
+        next.radius = null
+        next.opacity = 96
+        next.blur = 12
+        this.onAppearanceChange(next)
+      }
+      if (action === "apply-custom-css") {
+        const next = cloneStudioAppearance(this.appearance)
+        next.customCss = sanitizeCustomCss(this.get<HTMLTextAreaElement>('[data-role="custom-css"]').value)
+        this.get<HTMLTextAreaElement>('[data-role="custom-css"]').value = next.customCss
+        this.onAppearanceChange(next)
+        this.setRunStatus("Custom Studio CSS applied.")
+      }
+      if (action === "clear-custom-css") {
+        const next = cloneStudioAppearance(this.appearance)
+        next.customCss = ""
+        this.get<HTMLTextAreaElement>('[data-role="custom-css"]').value = ""
+        this.onAppearanceChange(next)
+        this.setRunStatus("Custom Studio CSS cleared.")
       }
       if (action === "save-token") this.saveToken()
       if (action === "clear-token") this.clearToken()
@@ -5151,11 +5591,28 @@ let activeModal: any | null = null
 export function setup(ctx: FrontendContext): () => void {
   const removeStyle = ctx.dom.addStyle(`${STYLES}\n${STUDIO_V3_STYLES}`)
   let currentTheme = storedStudioTheme()
+  let appearance = storedStudioAppearance()
+  appearance.customCss = sanitizeCustomCss(appearance.customCss)
   let launcher: HTMLElement | null = null
+  let removeCustomStyle: (() => void) | null = appearance.customCss
+    ? ctx.dom.addStyle(appearance.customCss)
+    : null
+
+  const updateAppearance = (next: StudioAppearance) => {
+    appearance = cloneStudioAppearance(next)
+    appearance.customCss = sanitizeCustomCss(appearance.customCss)
+    persistStudioAppearance(appearance)
+    if (launcher) applyAppearanceVariables(launcher, appearance)
+    activeStudio?.setAppearance(appearance)
+    removeCustomStyle?.()
+    removeCustomStyle = appearance.customCss ? ctx.dom.addStyle(appearance.customCss) : null
+  }
 
   const selectTheme = (theme: StudioTheme) => {
     currentTheme = theme
     persistStudioTheme(theme)
+    appearance.colors = {}
+    appearance.radius = null
     if (launcher) {
       launcher.dataset.theme = theme
       for (const swatch of launcher.querySelectorAll<HTMLElement>("[data-theme-choice]")) {
@@ -5163,6 +5620,7 @@ export function setup(ctx: FrontendContext): () => void {
       }
     }
     activeStudio?.setTheme(theme)
+    updateAppearance(appearance)
   }
 
   const openStudio = (initialView: "studio" | "library" = "studio") => {
@@ -5177,7 +5635,8 @@ export function setup(ctx: FrontendContext): () => void {
       persistent: false,
     })
     activeModal = modal
-    activeStudio = new StudioController(ctx, modal, selectTheme)
+    activeStudio = new StudioController(ctx, modal, selectTheme, updateAppearance)
+    activeStudio.setAppearance(appearance)
     activeStudio.setTheme(currentTheme)
     if (initialView === "library") activeStudio.openLibrary()
     modal.onDismiss(() => {
@@ -5198,6 +5657,7 @@ export function setup(ctx: FrontendContext): () => void {
   })
   launcher = element("div", "ss-launcher")
   launcher.dataset.theme = currentTheme
+  applyAppearanceVariables(launcher, appearance)
   const launcherTop = element("div", "ss-launcher-top")
   const mark = element("div", "ss-launcher-mark")
   mark.innerHTML = STUDIO_ICON
@@ -5216,13 +5676,27 @@ export function setup(ctx: FrontendContext): () => void {
   launcher.appendChild(chips)
   const launcherActions = element("div", "ss-launcher-actions")
   const launchButton = element("button", "ss-button ss-button-primary")
-  launchButton.innerHTML = `${STUDIO_ICON}<span>Open Studio</span>`
+  launchButton.innerHTML = `${STUDIO_ICON}<span class="ss-launcher-action-copy"><strong>Open Studio</strong><span>Compose, tune, stack, and generate</span></span><span class="ss-launcher-arrow">›</span>`
   launchButton.addEventListener("click", () => openStudio("studio"))
   const libraryButton = element("button", "ss-button")
-  libraryButton.innerHTML = `${LIBRARY_ICON}<span>Library</span>`
+  libraryButton.innerHTML = `${LIBRARY_ICON}<span class="ss-launcher-action-copy"><strong>Output Library</strong><span>Search metadata, folders, reuse, and cleanup</span></span><span class="ss-launcher-arrow">›</span>`
   libraryButton.addEventListener("click", () => openStudio("library"))
   launcherActions.append(launchButton, libraryButton)
   launcher.appendChild(launcherActions)
+  const flow = element("div", "ss-launcher-flow")
+  const flowItems = [
+    ["01", "Compose", "Prompt with presets, img2img, and model-aware controls."],
+    ["02", "Layer", "Browse visual metadata and build reusable LoRA stacks."],
+    ["03", "Keep", "Inspect, reuse, search, folder, or delete Lumiverse outputs."],
+  ]
+  for (const [number, title, copy] of flowItems) {
+    const item = element("div", "ss-launcher-flow-item")
+    const body = element("div")
+    body.append(element("strong", "", title), element("small", "", copy))
+    item.append(element("span", "", number), body)
+    flow.appendChild(item)
+  }
+  launcher.appendChild(flow)
   const themeRow = element("div", "ss-launcher-theme-row")
   themeRow.appendChild(element("span", "", "Workspace mood"))
   for (const theme of STUDIO_THEMES) {
@@ -5262,6 +5736,7 @@ export function setup(ctx: FrontendContext): () => void {
     removeActionClick()
     inputAction.destroy()
     drawer.destroy()
+    removeCustomStyle?.()
     removeStyle()
   }
 }
