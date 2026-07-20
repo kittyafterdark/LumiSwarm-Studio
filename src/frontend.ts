@@ -1,4 +1,5 @@
 type FrontendContext = any
+type StudioTheme = "lumiverse" | "moonbloom" | "sakura" | "verdant"
 
 interface LoraMetadata {
   name: string
@@ -184,17 +185,62 @@ const LINK_SIZE_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5"/><path d="M7.2 16.8 5.7 18.3a3.5 3.5 0 0 1-5-5l3.1-3.1a3.5 3.5 0 0 1 5 0"/><path d="m16.8 7.2 1.5-1.5a3.5 3.5 0 1 1 5 5l-3.1 3.1a3.5 3.5 0 0 1-5 0"/></svg>
 `
 
+const LIBRARY_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/><path d="m7 17 3-3 2 2 2.5-3 2.5 4"/></svg>
+`
+
+const SETTINGS_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.82 2.82-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.36a1.7 1.7 0 0 0-1.88.34l-.06.06-2.82-2.82.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3v-4h.04A1.7 1.7 0 0 0 4.6 8.92a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.82-2.82.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3V3h4v.08a1.7 1.7 0 0 0 1.04 1.48 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.82 2.82-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+`
+
+const THEME_STORAGE_KEY = "swarm-studio-theme-v1"
+const STUDIO_THEMES: Array<{ id: StudioTheme; label: string; color: string }> = [
+  { id: "lumiverse", label: "Lumiverse", color: "#7dd3fc" },
+  { id: "moonbloom", label: "Moonbloom", color: "#c4a7ff" },
+  { id: "sakura", label: "Sakura", color: "#ff9fba" },
+  { id: "verdant", label: "Verdant", color: "#9ad7b4" },
+]
+
 const STYLES = `
   .ss-launcher {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
     margin: 12px;
     padding: 18px;
     border: 1px solid var(--lumiverse-border);
     border-radius: calc(var(--lumiverse-radius, 10px) * 1.25);
     background:
-      radial-gradient(circle at 85% 0%, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 18%, transparent), transparent 42%),
+      radial-gradient(circle at 88% 2%, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 22%, transparent), transparent 38%),
+      linear-gradient(145deg, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 8%, transparent), transparent 48%),
       var(--lumiverse-fill-subtle);
     color: var(--lumiverse-text);
   }
+  .ss-launcher::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    opacity: .28;
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 58%, transparent) 1px, transparent 1.4px);
+    background-size: 22px 22px;
+    mask-image: linear-gradient(115deg, transparent 8%, black 62%, transparent);
+    pointer-events: none;
+  }
+  .ss-launcher::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    width: 126px;
+    height: 126px;
+    right: -48px;
+    top: -54px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 35%, transparent);
+    border-radius: 50%;
+    box-shadow: 0 0 0 18px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 4%, transparent);
+    pointer-events: none;
+  }
+  .ss-launcher-top { display: flex; align-items: center; gap: 11px; }
   .ss-launcher-mark {
     width: 42px;
     height: 42px;
@@ -206,8 +252,93 @@ const STYLES = `
     border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 35%, var(--lumiverse-border));
   }
   .ss-launcher-mark svg { width: 23px; height: 23px; }
-  .ss-launcher h3 { margin: 13px 0 5px; font-size: 15px; }
-  .ss-launcher p { margin: 0 0 14px; color: var(--lumiverse-text-muted); font-size: 12px; line-height: 1.55; }
+  .ss-launcher-eyebrow {
+    color: var(--lumiverse-accent, #7dd3fc);
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+  }
+  .ss-launcher h3 { margin: 2px 0 0; font-size: 16px; }
+  .ss-launcher p { margin: 13px 0 12px; color: var(--lumiverse-text-muted); font-size: 11px; line-height: 1.55; }
+  .ss-launcher-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 14px; }
+  .ss-launcher-chip {
+    padding: 3px 7px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 22%, var(--lumiverse-border));
+    border-radius: 999px;
+    color: var(--lumiverse-text-muted);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 6%, transparent);
+    font-size: 8.5px;
+  }
+  .ss-launcher-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .ss-launcher-actions .ss-button { min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .ss-launcher-actions svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .ss-launcher-theme-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 13px;
+    padding-top: 11px;
+    border-top: 1px solid color-mix(in srgb, var(--lumiverse-border) 72%, transparent);
+  }
+  .ss-launcher-theme-row > span { margin-right: auto; color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-theme-swatch {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: 50%;
+    background: var(--ss-swatch);
+    box-shadow: inset 0 0 0 4px var(--lumiverse-fill-subtle);
+  }
+  .ss-theme-swatch[data-active="true"] {
+    border-color: var(--ss-swatch);
+    box-shadow: inset 0 0 0 3px var(--lumiverse-fill-subtle), 0 0 0 2px color-mix(in srgb, var(--ss-swatch) 42%, transparent);
+  }
+  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="moonbloom"] {
+    --lumiverse-accent: #c4a7ff;
+    --lumiverse-bg: #0b0810;
+    --lumiverse-fill: #100c17;
+    --lumiverse-fill-subtle: #171020;
+    --lumiverse-border: #352945;
+    --lumiverse-text: #f7f2ff;
+    --lumiverse-text-muted: #b5a9c3;
+    --ss-control-radius: 12px;
+    --ss-panel-radius: 17px;
+    --ss-slider-radius: 999px;
+    --ss-theme-pattern: radial-gradient(circle at 82% 12%, rgba(196,167,255,.10), transparent 28%), radial-gradient(circle, rgba(196,167,255,.13) 1px, transparent 1.3px);
+    --ss-theme-pattern-size: auto, 25px 25px;
+  }
+  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="sakura"] {
+    --lumiverse-accent: #ff9fba;
+    --lumiverse-bg: #10080d;
+    --lumiverse-fill: #150c12;
+    --lumiverse-fill-subtle: #201018;
+    --lumiverse-border: #472837;
+    --lumiverse-text: #fff3f7;
+    --lumiverse-text-muted: #c5a7b1;
+    --ss-control-radius: 16px;
+    --ss-panel-radius: 20px;
+    --ss-slider-radius: 999px;
+    --ss-theme-pattern: radial-gradient(ellipse at 8% 8%, rgba(255,159,186,.10), transparent 26%), repeating-linear-gradient(135deg, transparent 0 28px, rgba(255,159,186,.035) 28px 29px);
+    --ss-theme-pattern-size: auto;
+  }
+  :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="verdant"] {
+    --lumiverse-accent: #9ad7b4;
+    --lumiverse-bg: #08100d;
+    --lumiverse-fill: #0b1411;
+    --lumiverse-fill-subtle: #101c17;
+    --lumiverse-border: #294338;
+    --lumiverse-text: #effbf4;
+    --lumiverse-text-muted: #a2bcb0;
+    --ss-control-radius: 6px;
+    --ss-panel-radius: 10px;
+    --ss-slider-radius: 3px;
+    --ss-theme-pattern: linear-gradient(120deg, rgba(154,215,180,.04) 25%, transparent 25% 75%, rgba(154,215,180,.04) 75%), linear-gradient(30deg, rgba(154,215,180,.04) 25%, transparent 25% 75%, rgba(154,215,180,.04) 75%);
+    --ss-theme-pattern-size: 34px 58px;
+  }
   .ss-shell {
     --ss-gap: 12px;
     width: 100%;
@@ -457,7 +588,7 @@ const STYLES = `
   .ss-stack-list { display: flex; flex-direction: column; gap: 6px; }
   .ss-stack-row {
     display: grid;
-    grid-template-columns: auto minmax(125px, 1fr) 75px auto auto;
+    grid-template-columns: auto 34px minmax(125px, 1fr) 75px auto auto;
     align-items: center;
     gap: 7px;
     padding: 6px 7px;
@@ -466,6 +597,19 @@ const STYLES = `
     background: var(--lumiverse-fill);
   }
   .ss-stack-row[data-disabled="true"] { opacity: .58; }
+  .ss-stack-preview {
+    width: 34px;
+    height: 34px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: calc(var(--ss-control-radius, var(--lumiverse-radius, 8px)) * .8);
+    color: var(--lumiverse-text-muted);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 8%, var(--lumiverse-fill-subtle));
+    font-size: 12px;
+  }
+  .ss-stack-preview img { width: 100%; height: 100%; display: block; object-fit: cover; }
   .ss-stack-name { min-width: 0; }
   .ss-stack-name strong { display: block; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ss-stack-name span { display: block; margin-top: 2px; color: var(--lumiverse-text-muted); font-size: 8.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -588,6 +732,59 @@ const STYLES = `
     background: var(--lumiverse-fill);
     box-shadow: 0 12px 38px rgba(0,0,0,.3);
   }
+  .ss-config-wrap { position: relative; }
+  .ss-config-button svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .ss-config-popover {
+    position: absolute;
+    right: 0;
+    top: 40px;
+    z-index: 40;
+    width: min(390px, calc(100vw - 28px));
+    display: grid;
+    gap: 11px;
+    padding: 12px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: var(--ss-panel-radius, var(--lumiverse-radius, 10px));
+    background: var(--lumiverse-fill);
+    box-shadow: 0 16px 44px rgba(0,0,0,.44);
+  }
+  .ss-config-popover[hidden] { display: none; }
+  .ss-config-section { display: grid; gap: 7px; }
+  .ss-config-section + .ss-config-section { padding-top: 10px; border-top: 1px solid var(--lumiverse-border); }
+  .ss-config-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 7px; }
+  .ss-config-section-head strong { font-size: 10px; }
+  .ss-config-section-head span { color: var(--lumiverse-text-muted); font-size: 8.5px; }
+  .ss-config-theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .ss-config-theme {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 7px;
+    min-width: 0;
+    font-size: 9.5px;
+  }
+  .ss-config-theme::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--ss-swatch);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-swatch) 22%, transparent);
+  }
+  .ss-config-theme[data-active="true"] {
+    color: var(--lumiverse-accent, #7dd3fc);
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 55%, var(--lumiverse-border));
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 9%, var(--lumiverse-fill-subtle));
+  }
   .ss-token-popover p { margin: 0 0 8px; color: var(--lumiverse-text-muted); line-height: 1.45; font-size: 10px; }
   .ss-token-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
   .ss-token-wrap { position: relative; }
@@ -618,12 +815,21 @@ const STYLES = `
     .ss-advanced-grid .ss-wide { grid-column: 1; }
     .ss-library-tools { grid-template-columns: 1fr auto; }
     .ss-library-tools .ss-select { grid-row: 2; }
-    .ss-stack-row { grid-template-columns: auto minmax(90px, 1fr) 68px auto; }
-    .ss-stack-row .ss-trigger-toggle { grid-column: 2 / -1; }
+    .ss-stack-row { grid-template-columns: auto 34px minmax(90px, 1fr) 68px auto; }
+    .ss-stack-row > input:first-child { grid-column: 1; grid-row: 1; }
+    .ss-stack-row .ss-stack-preview { grid-column: 2; grid-row: 1; }
+    .ss-stack-row .ss-stack-name { grid-column: 3; grid-row: 1; }
+    .ss-stack-row .ss-stack-weight { grid-column: 4; grid-row: 1; }
+    .ss-stack-row .ss-stack-actions { grid-column: 5; grid-row: 1; }
+    .ss-stack-row .ss-trigger-toggle { grid-column: 3 / -1; grid-row: 2; }
   }
 `
 
 const STUDIO_V3_STYLES = `
+  .ss-modal-theme {
+    color: var(--lumiverse-text);
+    background-color: var(--lumiverse-bg, var(--lumiverse-fill)) !important;
+  }
   .ss-shell {
     --ss-gap: 10px;
     --ss-generation-width: 284px;
@@ -631,6 +837,11 @@ const STUDIO_V3_STYLES = `
     --ss-dock-height: 282px;
     --ss-prompt-height: 150px;
     --ss-library-width: 60%;
+    --ss-control-radius: var(--lumiverse-radius, 8px);
+    --ss-panel-radius: calc(var(--lumiverse-radius, 8px) * 1.1);
+    --ss-slider-radius: 999px;
+    --ss-theme-pattern: none;
+    --ss-theme-pattern-size: auto;
     width: 100%;
     height: min(900px, calc(100dvh - 118px));
     min-height: min(650px, calc(100dvh - 118px));
@@ -638,6 +849,50 @@ const STUDIO_V3_STYLES = `
     position: relative;
     isolation: isolate;
     overflow: hidden;
+    background-color: var(--lumiverse-fill, transparent);
+    background-image: var(--ss-theme-pattern);
+    background-size: var(--ss-theme-pattern-size);
+  }
+  .ss-shell :is(.ss-button, .ss-icon-button, .ss-input, .ss-select, .ss-textarea) {
+    border-radius: var(--ss-control-radius);
+  }
+  .ss-shell :is(.ss-generation-pane, .ss-history-pane, .ss-output-stage, .ss-prompt-panel, .ss-lora-dock, .ss-output-library, .ss-inspector-details) {
+    border-radius: var(--ss-panel-radius);
+  }
+  .ss-shell input[type="range"] {
+    appearance: none;
+    height: 18px;
+    border-radius: var(--ss-slider-radius);
+    background: transparent;
+  }
+  .ss-shell input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 22%, var(--lumiverse-border));
+    border-radius: var(--ss-slider-radius);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 10%, var(--lumiverse-fill-subtle));
+  }
+  .ss-shell input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -5px;
+    border: 2px solid var(--lumiverse-fill);
+    border-radius: var(--ss-slider-radius);
+    background: var(--lumiverse-accent, #7dd3fc);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 58%, transparent);
+  }
+  .ss-shell input[type="range"]::-moz-range-track {
+    height: 6px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 22%, var(--lumiverse-border));
+    border-radius: var(--ss-slider-radius);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 10%, var(--lumiverse-fill-subtle));
+  }
+  .ss-shell input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--lumiverse-fill);
+    border-radius: var(--ss-slider-radius);
+    background: var(--lumiverse-accent, #7dd3fc);
   }
   .ss-topbar {
     display: grid;
@@ -1184,7 +1439,7 @@ const STUDIO_V3_STYLES = `
     min-height: 0 !important;
     z-index: 2147483001;
     padding: 12px;
-    background: var(--lumiverse-bg, var(--lumiverse-fill, #0d0d11));
+    background-color: var(--lumiverse-bg, var(--lumiverse-fill, #0d0d11));
   }
   .ss-fullscreen-layer .ss-close-studio { display: inline-flex; }
   .ss-inspector {
@@ -1193,7 +1448,7 @@ const STUDIO_V3_STYLES = `
     z-index: 2147483010;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-    background: rgba(4, 5, 8, .97);
+    background: color-mix(in srgb, var(--lumiverse-bg, var(--lumiverse-fill, #050608)) 97%, transparent);
     backdrop-filter: blur(12px);
   }
   .ss-inspector[hidden] { display: none; }
@@ -1288,7 +1543,7 @@ const STUDIO_V3_STYLES = `
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr);
     grid-template-rows: 52px minmax(0, 1fr);
-    background: rgba(4, 5, 8, .98);
+    background: color-mix(in srgb, var(--lumiverse-bg, var(--lumiverse-fill, #050608)) 98%, transparent);
     backdrop-filter: blur(12px);
   }
   .ss-output-library[hidden] { display: none; }
@@ -1332,7 +1587,7 @@ const STUDIO_V3_STYLES = `
   }
   .ss-library-folder span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ss-library-folder-tools { display: flex; gap: 5px; margin: 10px 0; }
-  .ss-library-folder-tools .ss-button { flex: 1; }
+  .ss-library-folder-tools .ss-button { flex: 1; min-width: max-content; white-space: nowrap; }
   .ss-library-main {
     min-width: 0;
     min-height: 0;
@@ -1348,7 +1603,14 @@ const STUDIO_V3_STYLES = `
     padding: 7px 10px;
     border-bottom: 1px solid var(--lumiverse-border);
   }
-  .ss-library-toolbar .ss-muted { flex: 1; }
+  .ss-library-toolbar .ss-muted { flex: 0 0 auto; }
+  .ss-library-search {
+    min-width: 150px;
+    max-width: 360px;
+    flex: 1 1 260px;
+    margin-left: auto;
+  }
+  .ss-library-search .ss-input { width: 100%; height: 30px; padding-block: 4px; font-size: 9.5px; }
   .ss-library-bulkbar {
     min-height: 40px;
     display: flex;
@@ -1366,6 +1628,7 @@ const STUDIO_V3_STYLES = `
     flex: 1;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-auto-rows: max-content;
     align-content: start;
     gap: 9px;
     overflow-y: auto;
@@ -1378,6 +1641,7 @@ const STUDIO_V3_STYLES = `
     border: 1px solid var(--lumiverse-border);
     border-radius: 9px;
     background: var(--lumiverse-fill);
+    align-self: start;
   }
   .ss-library-output[data-selected="true"] {
     border-color: var(--lumiverse-accent, #7dd3fc);
@@ -1438,7 +1702,7 @@ const STUDIO_V3_STYLES = `
       min-height: 0 !important;
       padding: max(8px, env(safe-area-inset-top)) 8px max(7px, env(safe-area-inset-bottom));
       gap: 7px;
-      background: var(--lumiverse-bg, var(--lumiverse-fill, #0d0d11));
+      background-color: var(--lumiverse-bg, var(--lumiverse-fill, #0d0d11));
     }
     .ss-topbar,
     .ss-mobile-tabs,
@@ -1450,24 +1714,9 @@ const STUDIO_V3_STYLES = `
     .ss-brand { font-size: 12px; }
     .ss-connection-wrap { grid-column: 1 / -1; grid-row: 2; }
     .ss-top-actions { grid-column: 2; grid-row: 1; }
-    .ss-top-actions [data-action="refresh-metadata"],
-    .ss-top-actions [data-action="toggle-token"] {
-      width: 32px;
-      min-width: 32px;
-      padding-inline: 0;
-      overflow: hidden;
-      color: transparent;
-      position: relative;
-    }
-    .ss-top-actions [data-action="refresh-metadata"]::after {
-      content: "↻"; color: var(--lumiverse-text); position: absolute; inset: 0; display: grid; place-items: center;
-    }
-    .ss-top-actions [data-action="toggle-token"]::after {
-      content: "⌁"; color: var(--lumiverse-text); position: absolute; inset: 0; display: grid; place-items: center;
-    }
     .ss-top-actions [data-action="toggle-fullscreen"] { display: none; }
     .ss-close-studio { display: inline-flex; }
-    .ss-token-popover { top: 74px; right: 0; width: calc(100vw - 16px); }
+    .ss-config-popover { position: fixed; top: 54px; right: 8px; width: calc(100vw - 16px); }
     .ss-mobile-tabs {
       display: flex;
       flex: 0 0 36px;
@@ -1486,9 +1735,10 @@ const STUDIO_V3_STYLES = `
       font-size: 10px;
     }
     .ss-mobile-tab[data-active="true"] {
-      color: var(--lumiverse-accent-text, #06131d);
-      background: var(--lumiverse-accent, #7dd3fc);
-      border-color: transparent;
+      color: var(--lumiverse-text);
+      background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 18%, var(--lumiverse-fill-subtle));
+      border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 58%, var(--lumiverse-border));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 18%, transparent);
     }
     .ss-workspace {
       display: block !important;
@@ -1539,6 +1789,7 @@ const STUDIO_V3_STYLES = `
     .ss-aspect-controls { grid-template-columns: 1fr; }
     .ss-custom-size { grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr); }
     .ss-history-pane .ss-history-grid {
+      display: grid !important;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 2.2vw;
       padding: 2.2vw;
@@ -1607,7 +1858,10 @@ const STUDIO_V3_STYLES = `
       border-bottom: 1px solid var(--lumiverse-border);
     }
     .ss-library-folder { width: auto; min-width: max-content; margin: 0; }
-    .ss-library-folder-tools { min-width: max-content; margin: 0; }
+    .ss-library-folder-tools { min-width: max-content; flex: 0 0 auto; margin: 0; }
+    .ss-library-folder-tools .ss-button { min-width: 92px; }
+    .ss-library-toolbar { flex-wrap: wrap; }
+    .ss-library-search { order: 5; min-width: 100%; max-width: none; flex-basis: 100%; margin-left: 0; }
     .ss-library-bulkbar {
       overflow-x: auto;
       padding-inline: 2.2vw;
@@ -1616,6 +1870,7 @@ const STUDIO_V3_STYLES = `
     .ss-library-bulkbar .ss-select { width: 42vw; }
     .ss-output-library-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-rows: max-content;
       gap: 2.2vw;
       padding: 2.2vw;
     }
@@ -1627,13 +1882,13 @@ const STUDIO_V3_STYLES = `
     .ss-lora-grid { grid-template-columns: 1fr; }
     .ss-lora-card { grid-template-columns: 96px minmax(0, 1fr); }
     .ss-lora-card .ss-lora-footer { left: 103px; }
-    .ss-history-pane .ss-history-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ss-history-pane .ss-history-grid { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ss-command-summary { max-width: 45%; }
     .ss-commandbar .ss-generate { min-width: 0; flex: 1; }
     .ss-stack-row {
-      grid-template-columns: auto minmax(90px, 1fr) 67px auto;
+      grid-template-columns: auto 34px minmax(90px, 1fr) 67px auto;
     }
-    .ss-stack-row .ss-trigger-toggle { grid-column: 2 / -1; }
+    .ss-stack-row .ss-trigger-toggle { grid-column: 3 / -1; }
   }
 `
 
@@ -1646,6 +1901,24 @@ function element<K extends keyof HTMLElementTagNameMap>(
   if (className) node.className = className
   if (text !== undefined) node.textContent = text
   return node
+}
+
+function storedStudioTheme(): StudioTheme {
+  try {
+    const value = window.localStorage.getItem(THEME_STORAGE_KEY)
+    if (STUDIO_THEMES.some((theme) => theme.id === value)) return value as StudioTheme
+  } catch {
+    // Storage can be disabled in hardened browser contexts.
+  }
+  return "lumiverse"
+}
+
+function persistStudioTheme(theme: StudioTheme): void {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme)
+  } catch {
+    // The active session can still use the selected theme.
+  }
 }
 
 function numberValue(input: HTMLInputElement, fallback: number): number {
@@ -1682,6 +1955,10 @@ export function matchesKeywordQuery(query: string, values: unknown[]): boolean {
     .map((value) => String(value ?? "").toLowerCase())
     .join(" ")
   return keywords.every((keyword) => haystack.includes(keyword))
+}
+
+export function outputLibraryPageSize(viewportWidth: number): number {
+  return viewportWidth <= 720 ? 15 : 30
 }
 
 const ASPECT_PRESETS: Record<string, { label: string; width: number; height: number }> = {
@@ -1839,6 +2116,7 @@ class StudioController {
   private readonly ctx: FrontendContext
   private readonly modal: any
   private readonly root: HTMLElement
+  private readonly onThemeChange: (theme: StudioTheme) => void
   private readonly state: StudioState
   private previewObserver: IntersectionObserver | null = null
   private readonly previewCache = new Map<string, string>()
@@ -1852,7 +2130,6 @@ class StudioController {
   private previewAspect = 1
   private libraryFolderId = ""
   private libraryPage = 0
-  private readonly libraryPageSize = 30
   private readonly librarySelection = new Set<string>()
   private outputResizeObserver: ResizeObserver | null = null
   private inspectorResizeObserver: ResizeObserver | null = null
@@ -1860,6 +2137,12 @@ class StudioController {
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return
+    const config = this.root.querySelector<HTMLElement>('[data-role="config-popover"]')
+    if (config && !config.hidden) {
+      this.closeConfigPopover()
+      event.stopPropagation()
+      return
+    }
     const inspector = this.root.querySelector<HTMLElement>('[data-role="inspector"]')
     if (inspector && !inspector.hidden) {
       this.closeInspector()
@@ -1879,10 +2162,11 @@ class StudioController {
     }
   }
 
-  constructor(ctx: FrontendContext, modal: any) {
+  constructor(ctx: FrontendContext, modal: any, onThemeChange: (theme: StudioTheme) => void) {
     this.ctx = ctx
     this.modal = modal
     this.root = modal.root
+    this.onThemeChange = onThemeChange
     this.state = {
       connections: [],
       connection: null,
@@ -1933,6 +2217,20 @@ class StudioController {
     this.stopActiveResize?.()
     this.stopActiveResize = null
     document.removeEventListener("keydown", this.handleKeyDown, true)
+  }
+
+  setTheme(theme: StudioTheme): void {
+    this.root.classList.add("ss-modal-theme")
+    this.root.dataset.theme = theme
+    const shell = this.root.querySelector<HTMLElement>(".ss-shell")
+    if (shell) shell.dataset.theme = theme
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="set-theme"]')) {
+      button.dataset.active = String(button.dataset.themeValue === theme)
+    }
+  }
+
+  openLibrary(): void {
+    this.openOutputLibrary()
   }
 
   private get<T extends HTMLElement>(selector: string): T {
@@ -2151,17 +2449,28 @@ class StudioController {
             </select>
           </div>
           <div class="ss-top-actions">
-            <button class="ss-button" data-action="refresh-metadata" title="Rescan model and LoRA metadata">Refresh metadata</button>
-            <div class="ss-token-wrap">
-              <button class="ss-button" data-action="toggle-token" aria-expanded="false" title="Metadata token">Metadata token</button>
-              <div class="ss-token-popover" data-role="token-popover" hidden>
-                <p>Lumiverse keeps the connection secret private from extensions. If SwarmUI authentication is enabled, save the same <code>swarm_token</code> here for metadata and preview requests only. It is stored in Lumiverse's encrypted enclave.</p>
-                <div class="ss-token-row">
-                  <input class="ss-input" data-role="metadata-token" type="password" autocomplete="off" placeholder="swarm_token value" />
-                  <button class="ss-button ss-button-primary" data-action="save-token">Save</button>
-                  <button class="ss-button ss-button-danger" data-action="clear-token">Clear</button>
-                </div>
-                <div class="ss-field-help" data-role="token-status">No extension metadata token saved.</div>
+            <div class="ss-config-wrap">
+              <button class="ss-icon-button ss-config-button" data-action="toggle-config" aria-expanded="false" title="Studio settings" aria-label="Studio settings">${SETTINGS_ICON}</button>
+              <div class="ss-config-popover" data-role="config-popover" hidden>
+                <section class="ss-config-section">
+                  <div class="ss-config-section-head"><strong>Swarm metadata</strong><span>Models, LoRAs and previews</span></div>
+                  <button class="ss-button" data-action="refresh-metadata">Refresh metadata</button>
+                </section>
+                <section class="ss-config-section">
+                  <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
+                  <p class="ss-muted ss-tiny">Only needed when SwarmUI blocks anonymous metadata access. Lumiverse stores it encrypted.</p>
+                  <div class="ss-token-row">
+                    <input class="ss-input" data-role="metadata-token" type="password" autocomplete="off" placeholder="swarm_token value" />
+                    <button class="ss-button ss-button-primary" data-action="save-token">Save</button>
+                    <button class="ss-button ss-button-danger" data-action="clear-token">Clear</button>
+                  </div>
+                </section>
+                <section class="ss-config-section">
+                  <div class="ss-config-section-head"><strong>Studio theme</strong><span>Color, shape and texture</span></div>
+                  <div class="ss-config-theme-grid">
+                    ${STUDIO_THEMES.map((theme) => `<button class="ss-button ss-config-theme" data-action="set-theme" data-theme-value="${theme.id}" style="--ss-swatch:${theme.color}">${theme.label}</button>`).join("")}
+                  </div>
+                </section>
               </div>
             </div>
             <button class="ss-icon-button" data-action="toggle-fullscreen" title="Toggle fullscreen studio" aria-label="Toggle fullscreen studio">⛶</button>
@@ -2489,6 +2798,9 @@ class StudioController {
             <div class="ss-library-toolbar">
               <strong class="ss-tiny" data-role="library-title">All outputs</strong>
               <span class="ss-muted ss-tiny" data-role="library-count">0 images</span>
+              <label class="ss-library-search">
+                <input class="ss-input" data-role="library-search" type="search" placeholder="Search prompts, model, LoRAs, presets…" aria-label="Search output metadata" />
+              </label>
               <button class="ss-button" data-action="library-prev" disabled>‹</button>
               <span class="ss-history-page-label" data-role="library-page">1 / 1</span>
               <button class="ss-button" data-action="library-next" disabled>›</button>
@@ -2517,6 +2829,10 @@ class StudioController {
       if (connectionId) this.loadConnection(connectionId)
     })
     this.get<HTMLInputElement>('[data-role="lora-search"]').addEventListener("input", () => this.renderLoras())
+    this.get<HTMLInputElement>('[data-role="library-search"]').addEventListener("input", () => {
+      this.libraryPage = 0
+      this.renderOutputLibrary()
+    })
     this.get<HTMLSelectElement>('[data-role="lora-sort"]').addEventListener("change", () => this.renderLoras())
     this.get<HTMLSelectElement>('[data-role="lora-filter"]').addEventListener("change", () => this.renderLoras())
     this.get<HTMLSelectElement>('[data-role="model"]').addEventListener("change", () => {
@@ -2607,12 +2923,17 @@ class StudioController {
 
     this.root.addEventListener("click", (event) => {
       const target = event.target as HTMLElement
+      if (!target.closest(".ss-config-wrap")) this.closeConfigPopover()
       if (!target.closest(".ss-history-card")) this.closeHistoryMenus()
       const button = target.closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
       if (action === "refresh-metadata") this.refreshMetadata()
-      if (action === "toggle-token") this.toggleTokenPopover(button)
+      if (action === "toggle-config") this.toggleConfigPopover(button)
+      if (action === "set-theme") {
+        const theme = button.dataset.themeValue
+        if (STUDIO_THEMES.some((item) => item.id === theme)) this.onThemeChange(theme as StudioTheme)
+      }
       if (action === "save-token") this.saveToken()
       if (action === "clear-token") this.clearToken()
       if (action === "close-studio") this.modal.dismiss()
@@ -3316,11 +3637,18 @@ class StudioController {
     this.send("refresh_metadata", { connectionId: this.state.connection.id })
   }
 
-  private toggleTokenPopover(button: HTMLElement): void {
-    const popover = this.get<HTMLElement>('[data-role="token-popover"]')
+  private toggleConfigPopover(button: HTMLElement): void {
+    const popover = this.get<HTMLElement>('[data-role="config-popover"]')
     popover.hidden = !popover.hidden
     button.setAttribute("aria-expanded", String(!popover.hidden))
-    if (!popover.hidden) this.get<HTMLInputElement>('[data-role="metadata-token"]').focus()
+  }
+
+  private closeConfigPopover(): void {
+    const popover = this.root.querySelector<HTMLElement>('[data-role="config-popover"]')
+    if (!popover) return
+    popover.hidden = true
+    this.root.querySelector<HTMLElement>('[data-action="toggle-config"]')
+      ?.setAttribute("aria-expanded", "false")
   }
 
   private saveToken(): void {
@@ -3342,8 +3670,8 @@ class StudioController {
 
   private updateTokenStatus(): void {
     this.get<HTMLElement>('[data-role="token-status"]').textContent = this.state.hasMetadataToken
-      ? "An encrypted metadata token is saved for this connection."
-      : "No extension metadata token saved; metadata requests are anonymous."
+      ? "Encrypted token saved"
+      : "Anonymous metadata"
   }
 
   private showMetadataError(message: string): void {
@@ -3607,6 +3935,31 @@ class StudioController {
       this.renderStack()
     })
 
+    const preview = element("div", "ss-stack-preview")
+    const cachedPreview = this.previewCache.get(item.lora.name)
+    if (cachedPreview || item.lora.previewRef) {
+      const image = element("img")
+      image.alt = cachedPreview ? `${item.lora.title || labelFromName(item.lora.name)} preview` : ""
+      image.dataset.loraImage = item.lora.name
+      if (cachedPreview) {
+        image.src = cachedPreview
+      } else if (item.lora.previewRef) {
+        image.dataset.name = item.lora.name
+        image.dataset.previewRef = item.lora.previewRef
+        if (!this.requestedPreviews.has(item.lora.name)) {
+          this.requestedPreviews.add(item.lora.name)
+          this.send("preview", {
+            connectionId: this.state.connection?.id,
+            name: item.lora.name,
+            previewRef: item.lora.previewRef,
+          })
+        }
+      }
+      preview.appendChild(image)
+    } else {
+      preview.textContent = "◇"
+    }
+
     const name = element("div", "ss-stack-name")
     name.appendChild(element("strong", "", item.lora.title || labelFromName(item.lora.name)))
     name.appendChild(element("span", "", item.lora.name))
@@ -3652,7 +4005,7 @@ class StudioController {
       this.renderLoras()
     })
     actions.append(up, down, remove)
-    row.append(enabled, name, weight, trigger, actions)
+    row.append(enabled, preview, name, weight, trigger, actions)
     return row
   }
 
@@ -4114,16 +4467,21 @@ class StudioController {
 
   private changeLibraryPage(delta: number): void {
     const filtered = this.filteredLibraryOutputs()
-    const pages = Math.max(1, Math.ceil(filtered.length / this.libraryPageSize))
+    const pages = Math.max(1, Math.ceil(filtered.length / this.currentLibraryPageSize()))
     this.libraryPage = clamp(this.libraryPage + delta, 0, pages - 1)
     this.renderOutputLibrary()
   }
 
+  private currentLibraryPageSize(): number {
+    return outputLibraryPageSize(window.innerWidth)
+  }
+
   private libraryPageOutputs(): any[] {
     const filtered = this.filteredLibraryOutputs()
+    const pageSize = this.currentLibraryPageSize()
     return filtered.slice(
-      this.libraryPage * this.libraryPageSize,
-      (this.libraryPage + 1) * this.libraryPageSize,
+      this.libraryPage * pageSize,
+      (this.libraryPage + 1) * pageSize,
     )
   }
 
@@ -4168,14 +4526,41 @@ class StudioController {
   }
 
   private filteredLibraryOutputs(): any[] {
-    if (!this.libraryFolderId) return this.state.libraryOutputs
-    const assigned = new Set(this.state.outputFolders.flatMap((folder) => folder.imageIds))
-    if (this.libraryFolderId === "__unfiled__") {
-      return this.state.libraryOutputs.filter((output) => !assigned.has(String(output.id)))
+    let outputs = this.state.libraryOutputs
+    if (this.libraryFolderId) {
+      const assigned = new Set(this.state.outputFolders.flatMap((folder) => folder.imageIds))
+      if (this.libraryFolderId === "__unfiled__") {
+        outputs = outputs.filter((output) => !assigned.has(String(output.id)))
+      } else {
+        const folder = this.state.outputFolders.find((item) => item.id === this.libraryFolderId)
+        const ids = new Set(folder?.imageIds || [])
+        outputs = outputs.filter((output) => ids.has(String(output.id)))
+      }
     }
-    const folder = this.state.outputFolders.find((item) => item.id === this.libraryFolderId)
-    const ids = new Set(folder?.imageIds || [])
-    return this.state.libraryOutputs.filter((output) => ids.has(String(output.id)))
+    const query = this.root.querySelector<HTMLInputElement>('[data-role="library-search"]')?.value || ""
+    if (!query.trim()) return outputs
+    return outputs.filter((output) => {
+      const details = output?.studioMetadata || {}
+      const parameters = details?.parameters || {}
+      return matchesKeywordQuery(query, [
+        output?.original_filename,
+        output?.id,
+        details?.prompt,
+        details?.negativePrompt,
+        details?.model,
+        details?.presets,
+        details?.loras?.flatMap((lora: any) => [lora?.name, lora?.title, lora?.weight]),
+        details?.initImageLabel,
+        details?.swarmPath,
+        parameters?.seed,
+        parameters?.sampler,
+        parameters?.scheduler,
+        parameters?.width,
+        parameters?.height,
+        parameters?.steps,
+        parameters?.cfg,
+      ])
+    })
   }
 
   private renderOutputLibrary(): void {
@@ -4210,7 +4595,7 @@ class StudioController {
     folderPane.appendChild(tools)
 
     const filtered = this.filteredLibraryOutputs()
-    const pages = Math.max(1, Math.ceil(filtered.length / this.libraryPageSize))
+    const pages = Math.max(1, Math.ceil(filtered.length / this.currentLibraryPageSize()))
     this.libraryPage = clamp(this.libraryPage, 0, pages - 1)
     const selectedFolder = this.state.outputFolders.find((folder) => folder.id === this.libraryFolderId)
     this.get<HTMLElement>('[data-role="library-title"]').textContent =
@@ -4238,7 +4623,8 @@ class StudioController {
     grid.replaceChildren()
     const page = this.libraryPageOutputs()
     if (!page.length) {
-      grid.appendChild(element("div", "ss-empty", "No outputs in this folder yet."))
+      const query = this.get<HTMLInputElement>('[data-role="library-search"]').value.trim()
+      grid.appendChild(element("div", "ss-empty", query ? "No outputs match those keywords." : "No outputs in this folder yet."))
       this.updateLibrarySelectionControls()
       return
     }
@@ -4764,9 +5150,26 @@ let activeModal: any | null = null
 
 export function setup(ctx: FrontendContext): () => void {
   const removeStyle = ctx.dom.addStyle(`${STYLES}\n${STUDIO_V3_STYLES}`)
+  let currentTheme = storedStudioTheme()
+  let launcher: HTMLElement | null = null
 
-  const openStudio = () => {
-    if (activeModal) return
+  const selectTheme = (theme: StudioTheme) => {
+    currentTheme = theme
+    persistStudioTheme(theme)
+    if (launcher) {
+      launcher.dataset.theme = theme
+      for (const swatch of launcher.querySelectorAll<HTMLElement>("[data-theme-choice]")) {
+        swatch.dataset.active = String(swatch.dataset.themeChoice === theme)
+      }
+    }
+    activeStudio?.setTheme(theme)
+  }
+
+  const openStudio = (initialView: "studio" | "library" = "studio") => {
+    if (activeModal) {
+      if (initialView === "library") activeStudio?.openLibrary()
+      return
+    }
     const modal = ctx.ui.showModal({
       title: "Swarm Studio",
       width: 1440,
@@ -4774,7 +5177,9 @@ export function setup(ctx: FrontendContext): () => void {
       persistent: false,
     })
     activeModal = modal
-    activeStudio = new StudioController(ctx, modal)
+    activeStudio = new StudioController(ctx, modal, selectTheme)
+    activeStudio.setTheme(currentTheme)
+    if (initialView === "library") activeStudio.openLibrary()
     modal.onDismiss(() => {
       activeStudio?.dispose()
       activeStudio = null
@@ -4791,15 +5196,46 @@ export function setup(ctx: FrontendContext): () => void {
     keywords: ["image", "generation", "lora", "swarmui", "prompt", "studio"],
     iconSvg: STUDIO_ICON,
   })
-  const launcher = element("div", "ss-launcher")
+  launcher = element("div", "ss-launcher")
+  launcher.dataset.theme = currentTheme
+  const launcherTop = element("div", "ss-launcher-top")
   const mark = element("div", "ss-launcher-mark")
   mark.innerHTML = STUDIO_ICON
-  launcher.appendChild(mark)
-  launcher.appendChild(element("h3", "", "Swarm Studio"))
-  launcher.appendChild(element("p", "", "Build a complete SwarmUI request with metadata-aware LoRA previews, inherited triggers, weighted stacking, advanced parameters, and saved outputs."))
-  const launchButton = element("button", "ss-button ss-button-primary", "Open prompting studio")
-  launchButton.addEventListener("click", openStudio)
-  launcher.appendChild(launchButton)
+  const launcherTitle = element("div")
+  launcherTitle.append(
+    element("div", "ss-launcher-eyebrow", "Local image atelier"),
+    element("h3", "", "Imagine with SwarmUI"),
+  )
+  launcherTop.append(mark, launcherTitle)
+  launcher.appendChild(launcherTop)
+  launcher.appendChild(element("p", "", "Prompt, stack LoRAs, inspect live generations, and organize every Lumiverse-owned output from one quiet little workspace."))
+  const chips = element("div", "ss-launcher-chips")
+  for (const label of ["Prompt studio", "LoRA stacks", "Output folders"]) {
+    chips.appendChild(element("span", "ss-launcher-chip", label))
+  }
+  launcher.appendChild(chips)
+  const launcherActions = element("div", "ss-launcher-actions")
+  const launchButton = element("button", "ss-button ss-button-primary")
+  launchButton.innerHTML = `${STUDIO_ICON}<span>Open Studio</span>`
+  launchButton.addEventListener("click", () => openStudio("studio"))
+  const libraryButton = element("button", "ss-button")
+  libraryButton.innerHTML = `${LIBRARY_ICON}<span>Library</span>`
+  libraryButton.addEventListener("click", () => openStudio("library"))
+  launcherActions.append(launchButton, libraryButton)
+  launcher.appendChild(launcherActions)
+  const themeRow = element("div", "ss-launcher-theme-row")
+  themeRow.appendChild(element("span", "", "Workspace mood"))
+  for (const theme of STUDIO_THEMES) {
+    const swatch = element("button", "ss-theme-swatch")
+    swatch.dataset.themeChoice = theme.id
+    swatch.dataset.active = String(theme.id === currentTheme)
+    swatch.style.setProperty("--ss-swatch", theme.color)
+    swatch.title = theme.label
+    swatch.setAttribute("aria-label", `Use ${theme.label} theme`)
+    swatch.addEventListener("click", () => selectTheme(theme.id))
+    themeRow.appendChild(swatch)
+  }
+  launcher.appendChild(themeRow)
   drawer.root.appendChild(launcher)
 
   const inputAction = ctx.ui.registerInputBarAction({
@@ -4808,7 +5244,7 @@ export function setup(ctx: FrontendContext): () => void {
     iconSvg: STUDIO_ICON,
     enabled: true,
   })
-  const removeActionClick = inputAction.onClick(openStudio)
+  const removeActionClick = inputAction.onClick(() => openStudio("studio"))
   const unsubscribeMessages = ctx.onBackendMessage((payload: any) => activeStudio?.onMessage(payload))
   const unsubscribeProgress = ctx.events.on("IMAGE_GEN_PROGRESS", (payload: any) => activeStudio?.onImageGenerationEvent("progress", payload))
   const unsubscribeComplete = ctx.events.on("IMAGE_GEN_COMPLETE", (payload: any) => activeStudio?.onImageGenerationEvent("complete", payload))

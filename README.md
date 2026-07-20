@@ -6,18 +6,21 @@ It adds:
 
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
+- Four persistent whole-workspace themes—Lumiverse, Moonbloom, Sakura, and Verdant—with distinct colors, panel geometry, controls, sliders, and static low-cost textures
+- A compact settings panel for metadata refresh, the encrypted metadata token, and theme selection
 - Positive and negative prompting, checkpoint selection, chain-linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, model-component overrides, and raw request JSON
 - Context-aware orientation and seed actions that flip to the useful next state, with fixed-seed reuse from the selected output
 - A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
-- Ordered LoRA stacking with per-item enable/disable, weights, opt-in trigger phrases, reorder controls, and reusable saved stack presets
+- Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, and reusable saved stack presets
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, and **Use as init image**
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
-- A paged, chat-scoped two-column history with per-image Reuse / Use as init / Delete menus
-- A fullscreen Lumiverse output library with reusable virtual folders, 30 images per page, and bulk folder/delete actions
+- A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Delete menus
+- A fullscreen searchable Lumiverse output library with reusable virtual folders, 30 images per desktop page, 15 per mobile page, and bulk folder/delete actions
+- A decorated drawer launcher with direct **Open Studio** and **Library** shortcuts plus quick theme swatches
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
 
@@ -114,10 +117,13 @@ image itself is deliberately excluded from stored generation metadata.
 ## Output library and folders
 
 History is scoped to the active chat and paged in groups of 12. The output
-library, opened with the grid button in History or from the inspector, can show
-up to 200 recent extension-owned Lumiverse images across chats, paged in groups
-of 30. Select a page or individual cards to move many outputs into a virtual
-folder or delete them together.
+library, opened from the drawer, History, or inspector, can show up to 200
+recent extension-owned Lumiverse images across chats, paged in groups of 30 on
+desktop and 15 on mobile. Search matches every entered keyword across submitted
+positive and negative prompts, model, LoRAs, presets, render parameters,
+filename, and Swarm path; quoted phrases stay together. Select a page or
+individual cards to move many outputs into a virtual folder or delete them
+together.
 
 Folders are lightweight per-user collections stored by the extension; moving
 an output into one does not move or duplicate Lumiverse's underlying image
@@ -126,6 +132,15 @@ deletes the actual owned image and removes its Swarm Studio metadata and folder
 assignment. When Swarm exposes the generated file path in image metadata, the
 inspector displays it below the recorded LoRA stack as a read-only saved-path
 reference.
+
+## Themes and settings
+
+The drawer's mood swatches and the Studio gear menu select the same persisted
+theme. Themes apply across the full modal—including the output library and
+inspector—and change the palette, panel/control radius, slider treatment, and a
+static CSS background motif. They use no animated effects or image assets. The
+gear menu also contains metadata refresh and the optional encrypted
+`swarm_token` control.
 
 ## Live generation previews and interruption
 
