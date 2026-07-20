@@ -440,6 +440,9 @@ const STYLES = `
     font-size: 12px;
   }
   .ss-topbar {
+    position: relative;
+    z-index: 60;
+    overflow: visible;
     display: grid;
     grid-template-columns: minmax(220px, 1fr) auto auto;
     gap: 8px;

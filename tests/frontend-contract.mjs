@@ -136,6 +136,7 @@ assert.match(source, /data-role="custom-css"/)
 assert.match(source, /data-action="apply-custom-css"/)
 assert.match(source, /data-action="reset-appearance"/)
 assert.match(source, /--lumiverse-primary/)
+assert.match(source, /\.ss-topbar\s*\{[\s\S]*?z-index:\s*60/)
 assert.match(source, /@media \(max-width: 720px\)/)
 
 console.log("frontend behavior contract: ok")
