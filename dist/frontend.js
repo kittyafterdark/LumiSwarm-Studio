@@ -17,6 +17,9 @@ const RANDOM_SEED_ICON = `
 const CURRENT_SEED_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/><path d="M17.5 3.5 20 1m-1 4h3"/></svg>
 `;
+const LINK_SIZE_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5"/><path d="M7.2 16.8 5.7 18.3a3.5 3.5 0 0 1-5-5l3.1-3.1a3.5 3.5 0 0 1 5 0"/><path d="m16.8 7.2 1.5-1.5a3.5 3.5 0 1 1 5 5l-3.1 3.1a3.5 3.5 0 0 1-5 0"/></svg>
+`;
 const STYLES = `
   .ss-launcher {
     margin: 12px;
@@ -203,8 +206,14 @@ const STYLES = `
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 7px;
     margin-top: 9px;
+    align-items: start;
   }
   .ss-advanced-grid .ss-wide { grid-column: 1 / -1; }
+  .ss-advanced-grid > .ss-field:not(.ss-wide) > label {
+    min-height: 24px;
+    display: flex;
+    align-items: flex-end;
+  }
   .ss-library-tools {
     display: grid;
     grid-template-columns: minmax(150px, 1fr) 120px auto;
@@ -334,20 +343,52 @@ const STYLES = `
     position: absolute;
     inset: 0;
     display: none;
-    place-items: center;
-    background: color-mix(in srgb, var(--lumiverse-fill) 70%, transparent);
-    backdrop-filter: blur(4px);
+    place-items: end center;
+    padding: 0 10% 16px;
+    pointer-events: none;
+    background: linear-gradient(transparent 58%, color-mix(in srgb, var(--lumiverse-fill) 78%, transparent));
   }
   .ss-preview-loading[data-visible="true"] { display: grid; }
-  .ss-spinner {
-    width: 25px;
-    height: 25px;
-    border: 2px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 24%, transparent);
-    border-top-color: var(--lumiverse-accent, #7dd3fc);
-    border-radius: 50%;
-    animation: ss-spin .8s linear infinite;
+  .ss-generation-progress {
+    width: min(360px, 100%);
+    display: grid;
+    gap: 6px;
+    padding: 9px 11px 8px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 35%, var(--lumiverse-border));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--lumiverse-fill) 91%, transparent);
+    box-shadow: 0 8px 28px rgba(0,0,0,.38);
+    backdrop-filter: blur(8px);
   }
-  @keyframes ss-spin { to { transform: rotate(360deg); } }
+  .ss-progress-track {
+    height: 5px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 13%, var(--lumiverse-fill-subtle));
+  }
+  .ss-progress-fill {
+    display: block;
+    width: var(--ss-progress, 0%);
+    height: 100%;
+    border-radius: inherit;
+    background: var(--lumiverse-accent, #7dd3fc);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 55%, transparent);
+    transition: width .18s ease;
+  }
+  .ss-generation-progress[data-indeterminate="true"] .ss-progress-fill {
+    width: 32%;
+    animation: ss-progress-indeterminate 1.1s ease-in-out infinite;
+  }
+  .ss-progress-label {
+    color: var(--lumiverse-text);
+    font-size: 9.5px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  @keyframes ss-progress-indeterminate {
+    0% { transform: translateX(-115%); }
+    100% { transform: translateX(315%); }
+  }
   .ss-output-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .ss-output-label { min-height: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; color: var(--lumiverse-text-muted); }
   .ss-history-head { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
@@ -619,19 +660,30 @@ const STUDIO_V3_STYLES = `
   .ss-custom-size {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: 1fr 1fr auto;
+    grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr);
     gap: 7px;
     align-items: end;
   }
   .ss-custom-size[hidden] { display: none; }
-  .ss-link-size {
-    min-height: 31px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    color: var(--lumiverse-text-muted);
-    font-size: 9px;
-    white-space: nowrap;
+  .ss-size-link {
+    width: 30px;
+    min-width: 30px;
+    height: 34px;
+    min-height: 34px;
+    padding: 5px;
+    align-self: end;
+    color: var(--lumiverse-accent, #7dd3fc);
+    opacity: .34;
+  }
+  .ss-size-link[data-linked="true"] { opacity: 1; }
+  .ss-size-link svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .ss-init-panel {
     grid-column: 1 / -1;
@@ -1320,8 +1372,7 @@ const STUDIO_V3_STYLES = `
     .ss-mobile-stack-picker .ss-select { width: min(46vw, 210px); height: 30px; }
     .ss-generation-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ss-aspect-controls { grid-template-columns: 1fr; }
-    .ss-custom-size { grid-template-columns: 1fr 1fr; }
-    .ss-link-size { grid-column: 1 / -1; min-height: 24px; }
+    .ss-custom-size { grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr); }
     .ss-history-pane .ss-history-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 2.2vw;
@@ -1445,6 +1496,14 @@ export function fitAspectWithin(aspect, maxWidth, maxHeight) {
         width,
         height
     };
+}
+export function matchesKeywordQuery(query, values) {
+    const keywords = (String(query || "").toLowerCase().match(/"[^"]+"|\S+/g) || []).map((keyword)=>keyword.replace(/^"|"$/g, "").trim()).filter(Boolean);
+    if (!keywords.length) return true;
+    const haystack = values.flatMap((value)=>Array.isArray(value) ? value : [
+            value
+        ]).map((value)=>String(value ?? "").toLowerCase()).join(" ");
+    return keywords.every((keyword)=>haystack.includes(keyword));
 }
 const ASPECT_PRESETS = {
     "1:1": {
@@ -1870,7 +1929,12 @@ class StudioController {
             <div class="ss-current-preview" data-role="current-preview">
               <div class="ss-preview-empty" data-role="preview-empty"><strong>No output yet</strong>Generate an image or choose one from this extension's history.</div>
               <img data-role="preview-image" alt="Generated image preview" hidden />
-              <div class="ss-preview-loading" data-role="preview-loading"><div class="ss-spinner" aria-label="Generating"></div></div>
+              <div class="ss-preview-loading" data-role="preview-loading">
+                <div class="ss-generation-progress" data-role="generation-progress" data-indeterminate="true">
+                  <div class="ss-progress-track"><span class="ss-progress-fill" data-role="progress-fill"></span></div>
+                  <div class="ss-progress-label" data-role="progress-label">Preparing…</div>
+                </div>
+              </div>
             </div>
             <div class="ss-output-label" data-role="output-label">Nothing selected</div>
             <div class="ss-output-actions">
@@ -1960,11 +2024,12 @@ class StudioController {
                       <label>Width</label>
                       <input class="ss-input" data-role="width" type="number" min="64" max="4096" step="64" value="1024" />
                     </div>
+                    <button class="ss-icon-button ss-size-link" data-action="toggle-size-link" data-role="size-link" data-linked="true" aria-pressed="true" title="Width and height are linked">${LINK_SIZE_ICON}</button>
                     <div class="ss-field">
                       <label>Height</label>
                       <input class="ss-input" data-role="height" type="number" min="64" max="4096" step="64" value="1024" />
                     </div>
-                    <label class="ss-link-size"><input data-role="link-size" type="checkbox" checked /> Link dimensions</label>
+                    <input data-role="link-size" type="checkbox" checked hidden />
                   </div>
                 </div>
                 <div class="ss-field">
@@ -1988,8 +2053,8 @@ class StudioController {
                   <select class="ss-select" data-role="scheduler"><option value="">Connection default</option></select>
                 </div>
                 <div class="ss-inline-actions ss-wide">
-                  <button class="ss-button ss-context-button" data-action="change-orientation" data-role="orientation-action" title="Change image orientation">${PORTRAIT_ICON}<span>Make portrait</span></button>
-                  <button class="ss-button ss-context-button" data-action="toggle-seed-mode" data-role="seed-action" title="Reuse the current output seed">${CURRENT_SEED_ICON}<span>Use current seed</span></button>
+                  <button class="ss-button ss-context-button" data-action="change-orientation" data-role="orientation-action" title="Change image orientation">${PORTRAIT_ICON}<span>Portrait</span></button>
+                  <button class="ss-button ss-context-button" data-action="toggle-seed-mode" data-role="seed-action" title="Reuse the current output seed">${CURRENT_SEED_ICON}<span>Current seed</span></button>
                 </div>
                 <div class="ss-init-panel">
                   <div class="ss-init-preview" data-role="init-preview">No init</div>
@@ -2063,7 +2128,12 @@ class StudioController {
               <div class="ss-current-preview" data-role="current-preview" data-action="inspect-output" title="Open full-size image and generation details">
                 <div class="ss-preview-empty" data-role="preview-empty"><strong>No output yet</strong>Generate an image or open one from History.</div>
                 <img data-role="preview-image" alt="Generated image preview" hidden />
-                <div class="ss-preview-loading" data-role="preview-loading"><div class="ss-spinner" aria-label="Generating"></div></div>
+                <div class="ss-preview-loading" data-role="preview-loading">
+                  <div class="ss-generation-progress" data-role="generation-progress" data-indeterminate="true">
+                    <div class="ss-progress-track"><span class="ss-progress-fill" data-role="progress-fill"></span></div>
+                    <div class="ss-progress-label" data-role="progress-label">Preparing…</div>
+                  </div>
+                </div>
               </div>
               <div class="ss-output-meta">
                 <div class="ss-output-label" data-role="output-label">Nothing selected</div>
@@ -2134,7 +2204,7 @@ class StudioController {
                 <button class="ss-icon-button ss-pane-toggle" data-action="toggle-loras" title="Collapse LoRA workspace" aria-label="Collapse LoRA workspace">⌄</button>
               </div>
               <div class="ss-library-tools">
-                <input class="ss-input" data-role="lora-search" type="search" placeholder="Search LoRAs…" />
+                <input class="ss-input" data-role="lora-search" type="search" placeholder="Search keywords, tags, triggers…" />
                 <select class="ss-select ss-lora-filter" data-role="lora-filter" aria-label="LoRA compatibility filter">
                   <option value="compatible">Compatible only</option>
                   <option value="all">All model families</option>
@@ -2207,10 +2277,12 @@ class StudioController {
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
             </div>
-            <h4>Resolved positive prompt</h4>
+            <h4>Submitted positive prompt</h4>
             <p class="ss-inspector-copy" data-role="inspector-positive">Prompt metadata is unavailable for this older output.</p>
-            <h4>Resolved negative prompt</h4>
+            <h4>Submitted negative prompt</h4>
             <p class="ss-inspector-copy" data-role="inspector-negative">No negative prompt recorded.</p>
+            <h4>Used presets</h4>
+            <p class="ss-inspector-copy" data-role="inspector-presets">No Swarm presets recorded.</p>
             <h4>LoRA stack</h4>
             <p class="ss-inspector-copy" data-role="inspector-loras">No LoRAs recorded.</p>
             <div class="ss-inspector-path" data-role="inspector-path" hidden>Saved by SwarmUI to <code data-role="inspector-path-value"></code></div>
@@ -2271,7 +2343,10 @@ class StudioController {
         });
         this.get('[data-role="aspect"]').addEventListener("change", ()=>this.applyAspectSelection());
         this.get('[data-role="size-slider"]').addEventListener("input", ()=>this.applyAspectScale());
-        this.get('[data-role="link-size"]').addEventListener("change", ()=>this.applyAspectSelection());
+        this.get('[data-role="link-size"]').addEventListener("change", ()=>{
+            this.updateSizeLinkControl();
+            this.applyAspectSelection();
+        });
         this.get('[data-role="seed"]').addEventListener("input", ()=>this.updateContextControls());
         this.get('[data-role="denoise"]').addEventListener("input", (event)=>{
             this.get('[data-role="denoise-label"]').textContent = Number(event.currentTarget.value).toFixed(2);
@@ -2348,6 +2423,7 @@ class StudioController {
             if (action === "close-studio") this.modal.dismiss();
             if (action === "change-orientation") this.changeOrientation();
             if (action === "toggle-seed-mode") this.toggleSeedMode();
+            if (action === "toggle-size-link") this.toggleSizeLink();
             if (action === "use-current-init" || action === "use-as-init") void this.useCurrentAsInit();
             if (action === "pick-init") this.get('[data-role="init-file"]').click();
             if (action === "clear-init") this.clearInitImage();
@@ -2482,7 +2558,8 @@ class StudioController {
                     if (typeof data.preview === "string" && data.preview) {
                         this.showLivePreview(data.preview, step, totalSteps);
                     }
-                    this.setRunStatus(totalSteps > 0 ? `Rendering ${step} / ${totalSteps} · ${Math.round(step / totalSteps * 100)}%` : "Rendering live preview…");
+                    this.updateGenerationProgress(step, totalSteps);
+                    this.setRunStatus("Rendering in SwarmUI…");
                     break;
                 }
             case "generation_interrupt_requested":
@@ -2586,12 +2663,12 @@ class StudioController {
             if (typeof payload?.preview === "string" && payload.preview) {
                 this.showLivePreview(payload.preview, step, totalSteps);
             }
-            const progress = totalSteps > 0 ? `Rendering ${step} / ${totalSteps} · ${Math.round(step / totalSteps * 100)}%` : "Rendering live preview…";
-            this.setRunStatus(progress);
+            this.updateGenerationProgress(step, totalSteps);
+            this.setRunStatus("Rendering in SwarmUI…");
             return;
         }
         if (type === "complete") {
-            this.get('[data-role="preview-loading"]').dataset.visible = "false";
+            this.updateGenerationProgress(1, 1);
             this.setRunStatus("Rendering complete; Lumiverse is finalizing the full-resolution image…");
             return;
         }
@@ -2890,6 +2967,7 @@ class StudioController {
         assign("denoise", "denoise", .6);
         this.setDimensions(Number(defaults.width) || 1024, Number(defaults.height) || 1024);
         this.get('[data-role="denoise-label"]').textContent = Number(this.get('[data-role="denoise"]').value || .6).toFixed(2);
+        this.updateSizeLinkControl();
         this.updateContextControls();
     }
     setDimensions(width, height) {
@@ -2923,6 +3001,19 @@ class StudioController {
         this.get('[data-role="custom-size"]').hidden = !custom;
         this.get('[data-role="size-scale-field"]').hidden = custom && !this.get('[data-role="link-size"]').checked;
         if (!custom) this.applyAspectScale();
+    }
+    toggleSizeLink() {
+        const link = this.get('[data-role="link-size"]');
+        link.checked = !link.checked;
+        this.updateSizeLinkControl();
+        this.applyAspectSelection();
+    }
+    updateSizeLinkControl() {
+        const linked = this.get('[data-role="link-size"]').checked;
+        const button = this.get('[data-role="size-link"]');
+        button.dataset.linked = String(linked);
+        button.setAttribute("aria-pressed", String(linked));
+        button.title = linked ? "Width and height are linked; click to edit them independently" : "Width and height are independent; click to link them";
     }
     applyAspectScale() {
         const aspect = this.get('[data-role="aspect"]').value;
@@ -2960,9 +3051,9 @@ class StudioController {
     resolvedPrompts() {
         const presets = this.state.selectedPresets.filter((selected)=>selected.enabled);
         const titles = presets.map((preset)=>preset.title);
-        const resolved = applyPresetStackPrompts(this.finalPrompt(), this.get('[data-role="negative"]').value.trim(), titles, this.state.swarmPresets);
         return {
-            ...resolved,
+            prompt: this.finalPrompt(),
+            negativePrompt: this.get('[data-role="negative"]').value.trim(),
             presets: titles
         };
     }
@@ -2973,7 +3064,7 @@ class StudioController {
             status.textContent = "No enabled Swarm presets; prompts pass through unchanged.";
             return;
         }
-        status.textContent = `${enabled.length} preset${enabled.length === 1 ? "" : "s"} applied top to bottom: ${enabled.map((preset)=>preset.title).join(" → ")}. Resolved prompts are recorded with the output.`;
+        status.textContent = `${enabled.length} preset${enabled.length === 1 ? "" : "s"} sent in order: ${enabled.map((preset)=>preset.title).join(" → ")}. Swarm resolves their parameter maps server-side; Studio records the submitted prompt and preset names.`;
     }
     refreshMetadata() {
         if (!this.state.connection) return;
@@ -3071,8 +3162,7 @@ class StudioController {
         const compatibility = this.get('[data-role="lora-filter"]').value;
         const items = this.state.loras.filter((lora)=>{
             if (compatibility === "compatible" && !this.isLoraCompatible(lora)) return false;
-            if (!query) return true;
-            return [
+            return matchesKeywordQuery(query, [
                 lora.name,
                 lora.title,
                 lora.author,
@@ -3080,9 +3170,16 @@ class StudioController {
                 lora.architecture,
                 lora.className,
                 lora.compatClass,
+                lora.resolution,
+                lora.license,
+                lora.date,
+                lora.usageHint,
                 lora.triggerPhrase,
-                ...lora.tags
-            ].join(" ").toLowerCase().includes(query);
+                lora.hash,
+                this.loraFamily(lora),
+                lora.local ? "local" : "remote",
+                lora.tags
+            ]);
         });
         return items.sort((a, b)=>{
             if (sort === "newest") return (b.timeModified || b.timeCreated || 0) - (a.timeModified || a.timeCreated || 0);
@@ -3497,8 +3594,9 @@ class StudioController {
             details?.initImageLabel ? `img2img · ${details.initImageLabel}` : ""
         ].filter(Boolean);
         for (const value of factValues)facts.appendChild(element("span", "ss-badge", String(value)));
-        this.get('[data-role="inspector-positive"]').textContent = details?.resolvedPrompt || details?.prompt || "Prompt metadata is unavailable for this older output.";
-        this.get('[data-role="inspector-negative"]').textContent = details?.resolvedNegativePrompt || details?.negativePrompt || "No negative prompt recorded.";
+        this.get('[data-role="inspector-positive"]').textContent = details?.prompt || details?.resolvedPrompt || "Prompt metadata is unavailable for this older output.";
+        this.get('[data-role="inspector-negative"]').textContent = details?.negativePrompt || details?.resolvedNegativePrompt || "No negative prompt recorded.";
+        this.get('[data-role="inspector-presets"]').textContent = details?.presets?.length ? details.presets.join("\n") : "No Swarm presets recorded.";
         this.get('[data-role="inspector-loras"]').textContent = details?.loras?.length ? details.loras.map((lora)=>`${lora.name} · ${lora.weight}`).join("\n") : "No LoRAs recorded.";
         const path = details?.swarmPath || "";
         this.get('[data-role="inspector-path"]').hidden = !path;
@@ -4022,8 +4120,22 @@ class StudioController {
         }
         if (value) {
             this.updatePreviewAspect(numberValue(this.get('[data-role="width"]'), 1024), numberValue(this.get('[data-role="height"]'), 1024));
+            this.updateGenerationProgress(0, 0);
         }
         this.get('[data-role="preview-loading"]').dataset.visible = String(value);
+    }
+    updateGenerationProgress(step, totalSteps) {
+        const hasTotal = Number.isFinite(totalSteps) && totalSteps > 0;
+        const safeStep = hasTotal ? clamp(Number(step) || 0, 0, totalSteps) : 0;
+        const percentage = hasTotal ? clamp(Math.round(safeStep / totalSteps * 100), 0, 100) : 0;
+        for (const progress of this.root.querySelectorAll('[data-role="generation-progress"]')){
+            progress.dataset.indeterminate = String(!hasTotal);
+            progress.style.setProperty("--ss-progress", `${percentage}%`);
+            const label = progress.querySelector('[data-role="progress-label"]');
+            if (label) {
+                label.textContent = hasTotal ? `${percentage}% · ${Math.round(safeStep)} / ${Math.round(totalSteps)}` : "Preparing generation…";
+            }
+        }
     }
     interruptGeneration() {
         if (!this.generating || !this.currentJobId || !this.state.connection) return;
@@ -4049,7 +4161,7 @@ class StudioController {
         preview.src = src;
         preview.hidden = false;
         this.get('[data-role="preview-empty"]').hidden = true;
-        this.get('[data-role="preview-loading"]').dataset.visible = "false";
+        this.updateGenerationProgress(step, totalSteps);
         this.get('[data-role="output-label"]').textContent = label;
         this.get('[data-action="download-output"]').disabled = true;
         this.get('[data-action="copy-output"]').disabled = true;
@@ -4238,10 +4350,10 @@ class StudioController {
         const width = numberValue(this.get('[data-role="width"]'), 1024);
         const height = numberValue(this.get('[data-role="height"]'), 1024);
         const makePortrait = width >= height;
-        orientationButton.innerHTML = `${makePortrait ? PORTRAIT_ICON : LANDSCAPE_ICON}<span>${makePortrait ? "Make portrait" : "Make landscape"}</span>`;
+        orientationButton.innerHTML = `${makePortrait ? PORTRAIT_ICON : LANDSCAPE_ICON}<span>${makePortrait ? "Portrait" : "Landscape"}</span>`;
         orientationButton.title = makePortrait ? "Flip the current aspect ratio to portrait" : "Flip the current aspect ratio to landscape";
         const random = numberValue(this.get('[data-role="seed"]'), -1) === -1;
-        seedButton.innerHTML = `${random ? CURRENT_SEED_ICON : RANDOM_SEED_ICON}<span>${random ? "Use current seed" : "Random seed"}</span>`;
+        seedButton.innerHTML = `${random ? CURRENT_SEED_ICON : RANDOM_SEED_ICON}<span>${random ? "Current seed" : "Random seed"}</span>`;
         seedButton.title = random ? "Lock to the current output's seed (or create a fixed seed if no output is selected)" : "Set seed to -1 for a random generation";
     }
     setConnectionStatus(status) {

@@ -7,6 +7,7 @@ const {
   dimensionsForAspect,
   fitAspectWithin,
   inferModelFamily,
+  matchesKeywordQuery,
   modelSignalsCompatible,
 } = await import("../dist/frontend.js")
 
@@ -28,6 +29,9 @@ assert.deepEqual(
 )
 assert.deepEqual(fitAspectWithin(2, 1000, 300), { width: 600, height: 300 })
 assert.deepEqual(fitAspectWithin(0.5, 200, 1000), { width: 200, height: 400 })
+assert.equal(matchesKeywordQuery("anima portrait", ["Anima model", "soft portrait"]), true)
+assert.equal(matchesKeywordQuery('"soft portrait" anima', ["Anima model", "soft portrait"]), true)
+assert.equal(matchesKeywordQuery("illustrious portrait", ["Anima model", "soft portrait"]), false)
 
 assert.equal(inferModelFamily("BSSANIRLANIMASemi_v10"), "anima")
 assert.equal(inferModelFamily("Illustrious XL v1.5"), "illustrious")
@@ -91,6 +95,8 @@ assert.match(source, /createOutputFolder/)
 assert.match(source, /data-role="aspect"/)
 assert.match(source, /data-role="size-slider"/)
 assert.match(source, /data-role="link-size"/)
+assert.match(source, /data-role="size-link"/)
+assert.match(source, /data-role="generation-progress"/)
 assert.match(source, /data-role="denoise"/)
 assert.match(source, /<select class="ss-select" data-role="sampler"/)
 assert.match(source, /<select class="ss-select" data-role="scheduler"/)
@@ -108,6 +114,7 @@ assert.match(source, /data-resize="prompt"/)
 assert.match(source, /fitPreviewToAspect/)
 assert.match(source, /fitInspectorToSpace/)
 assert.match(source, /data-role="inspector-positive"/)
+assert.match(source, /data-role="inspector-presets"/)
 assert.match(source, /@media \(max-width: 720px\)/)
 
 console.log("frontend behavior contract: ok")

@@ -6,20 +6,20 @@ It adds:
 
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
-- Positive and negative prompting, checkpoint selection, linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, model-component overrides, and raw request JSON
+- Positive and negative prompting, checkpoint selection, chain-linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, model-component overrides, and raw request JSON
 - Context-aware orientation and seed actions that flip to the useful next state, with fixed-seed reuse from the selected output
-- A searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
+- A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
 - Ordered LoRA stacking with per-item enable/disable, weights, opt-in trigger phrases, reorder controls, and reusable saved stack presets
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
-- A click-to-zoom full-size output inspector with resolved positive/negative prompts, preset and timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, and **Use as init image**
+- A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, and **Use as init image**
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with per-image Reuse / Use as init / Delete menus
 - A fullscreen Lumiverse output library with reusable virtual folders, 30 images per page, and bulk folder/delete actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
-- Live SwarmUI/ComfyUI progress frames through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
+- Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
 
 Generation itself goes through `spindle.imageGen.generate()`. That means it continues to use the SwarmUI connection, encrypted secret, persistence, and ownership behavior already managed by Lumiverse.
 
@@ -74,16 +74,14 @@ per-user extension storage. Generation details are associated with the
 persisted Lumiverse image ID so History can show the prompts used by recent
 Swarm Studio outputs.
 
-The inspector records both the submitted prompts and, when SwarmUI exposes
-them, the final prompts after the ordered preset stack is applied. Swarm preset
-parameter maps replace matching values in order—the last enabled preset that
-defines a prompt or negative prompt wins—so Studio does not invent local
-`{value}` templating. Choose
-presets from the dropdown to add them to a checklist, then enable, disable, or
-reorder them. **Reuse Parameters** restores the submitted prompt, ordered
-presets, checkpoint, render settings, LoRA stack, and the actual resolved seed
-reported by SwarmUI so the next render is reproducible and presets are not
-accidentally applied twice.
+The inspector treats the exact prompt text sent by Studio as the authoritative
+prompt record and lists the ordered Swarm presets separately as provenance.
+This avoids claiming that a local reconstruction is SwarmUI's final
+server-resolved prompt. Choose presets from the dropdown to add them to a
+checklist, then enable, disable, or reorder them. **Reuse Parameters** restores
+the submitted prompt, ordered presets, checkpoint, render settings, LoRA
+stack, and the actual resolved seed reported by SwarmUI so the next render is
+reproducible and presets are not accidentally applied twice.
 
 Swarm Studio reads sampler and scheduler choices from SwarmUI's
 `ListT2IParams` response and user presets from `GetMyUserData`. If those
@@ -96,9 +94,9 @@ the current prompts and recognized render controls through SwarmUI's
 `AddNewPreset` API, then selects the new preset in Studio.
 
 For newly generated images, Swarm Studio looks up SwarmUI's saved image
-metadata to display preparation time, generation time, preset names, resolved
-prompts, and the original Swarm path. When those fields are unavailable, it
-shows an end-to-end time measured around Lumiverse's generation call.
+metadata to display preparation time, generation time, preset names, and the
+original Swarm path. When those fields are unavailable, it shows an end-to-end
+time measured around Lumiverse's generation call.
 
 On mobile, saved LoRA stacks can also be loaded directly from the combined
 Create tab above the positive and negative prompts.
