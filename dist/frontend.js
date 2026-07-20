@@ -20,6 +20,11 @@ const LIBRARY_ICON = `
 const SETTINGS_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.82 2.82-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.36a1.7 1.7 0 0 0-1.88.34l-.06.06-2.82-2.82.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3v-4h.04A1.7 1.7 0 0 0 4.6 8.92a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.82-2.82.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3V3h4v.08a1.7 1.7 0 0 0 1.04 1.48 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.82 2.82-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z"/></svg>
 `;
+const EXPAND_ICON = `
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"/>
+  </svg>
+`;
 const FRAME_WALL_ICON = `
   <svg viewBox="0 0 457.667 457.667" fill="currentColor" aria-hidden="true">
     <path d="M116.352 141.241h108.759v-38.686H116.352v38.686Zm7-31.686h94.759v24.686h-94.759v-24.686ZM348.908 102.555v38.686h108.759v-38.686H348.908Zm101.759 31.686h-94.759v-24.686h94.759v24.686ZM348.908 277.929h108.759V149.746H348.908v128.183Zm7-121.183h94.759V270.93h-94.759V156.746ZM116.352 355.111h108.759v-38.686H116.352v38.686Zm7-31.685h94.759v24.686h-94.759v-24.686ZM232.704 355.111h224.962v-70.11H232.704v70.11Zm7-63.11h210.962v56.11H239.704v-56.11ZM0 186.087h108.759v-83.531H0v83.531Zm7-76.532h94.759v69.531H7v-69.531ZM341.463 102.555H232.704v83.531h108.759v-83.531Zm-7 76.532h-94.759v-69.531h94.759v69.531ZM341.463 194.398H232.704v83.531h108.759v-83.531Zm-7 76.531h-94.759v-69.531h94.759v69.531ZM0 355.111h108.759V194.398H0v160.713Zm7-153.713h94.759v146.713H7V201.398ZM116.352 309.189h108.759V148.476H116.352v160.713Zm7-153.713h94.759v146.713h-94.759V155.476Z"/>
@@ -1753,15 +1758,16 @@ const STUDIO_V3_STYLES = `
     .ss-mobile-prompt-tools {
       display: flex;
       justify-content: flex-end;
+      gap: 7px;
       margin-top: 8px;
     }
-    .ss-mobile-random-seed {
+    .ss-mobile-prompt-tool {
       display: inline-flex;
       align-items: center;
       gap: 7px;
       min-height: 34px;
     }
-    .ss-mobile-random-seed svg { width: 15px; height: 15px; }
+    .ss-mobile-prompt-tool svg { width: 15px; height: 15px; fill: none; stroke: currentColor; }
     .ss-generation-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ss-aspect-controls { grid-template-columns: 1fr; }
     .ss-custom-size { grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr); }
@@ -1961,7 +1967,8 @@ const STUDIO_V3_STYLES = `
   .ss-workflow-modal-title strong { overflow: hidden; font: 600 18px/1.15 Georgia, "Times New Roman", serif; text-overflow: ellipsis; white-space: nowrap; }
   .ss-workflow-modal-description { padding: 11px 15px; color: var(--lumiverse-text-muted); font-size: 10px; line-height: 1.5; }
   .ss-workflow-modal .ss-workflow-fields { min-height: 0; overflow-y: auto; padding: 4px 15px 16px; }
-  .ss-workflow-configure { white-space: nowrap; }
+  .ss-workflow-configure { width: 28px; height: 28px; padding: 6px; }
+  .ss-workflow-configure svg { width: 14px; height: 14px; }
 
   .ss-miniplayer {
     --ss-mini-progress: 0%;
@@ -2107,7 +2114,7 @@ const STUDIO_V3_STYLES = `
     .ss-workflow-field-grid { grid-template-columns: 1fr; }
     .ss-workflow-field[data-wide="true"] { grid-column: auto; }
     .ss-workflow-picker { grid-template-columns: minmax(0, 1fr) auto; }
-    .ss-workflow-configure { grid-column: 1 / -1; }
+    .ss-workflow-configure { grid-column: 1 / -1; justify-self: end; }
     .ss-miniplayer { grid-template-columns: 58px minmax(0, 1fr) auto; padding: 6px; }
     .ss-mini-preview { width: 58px; height: 58px; }
     .ss-miniplayer[data-expanded="true"] { grid-template-columns: 60px minmax(0, 1fr) auto; }
@@ -2293,6 +2300,11 @@ export function quickGenerationParameters(defaults = {}) {
         loraWeights: []
     };
 }
+export function inheritQuickGenerationParameters(defaults = {}, studioParameters) {
+    return studioParameters ? {
+        ...studioParameters
+    } : quickGenerationParameters(defaults);
+}
 const ASPECT_PRESETS = {
     "1:1": {
         label: "Square · 1:1",
@@ -2446,9 +2458,11 @@ class MiniPlayerController {
     widget;
     root;
     openStudio;
+    getStudioDraft;
     collapsed = false;
     expanded = false;
     quickConnection = null;
+    quickConnections = [];
     quickPending = null;
     bootstrapRequestId = crypto.randomUUID();
     state = "idle";
@@ -2458,15 +2472,17 @@ class MiniPlayerController {
         connectionId: "",
         preview: "",
         latestImage: null,
+        draft: null,
         step: 0,
         totalSteps: 0,
         status: "Ready when inspiration hits."
     };
-    constructor(ctx, widget, openStudio){
+    constructor(ctx, widget, openStudio, getStudioDraft){
         this.ctx = ctx;
         this.widget = widget;
         this.root = widget.root;
         this.openStudio = openStudio;
+        this.getStudioDraft = getStudioDraft;
         try {
             const stored = JSON.parse(window.localStorage.getItem(MINIPLAYER_STORAGE_KEY) || "{}");
             this.collapsed = stored.collapsed === true;
@@ -2526,6 +2542,17 @@ class MiniPlayerController {
             ...this.snapshotValue
         };
     }
+    captureDraft(draft, syncPrompts = true) {
+        if (!draft) return;
+        this.snapshotValue.draft = draft;
+        if (syncPrompts) {
+            const prompt = this.root.querySelector('[data-role="mini-prompt"]');
+            const negative = this.root.querySelector('[data-role="mini-negative"]');
+            if (prompt) prompt.value = draft.details.prompt || "";
+            if (negative) negative.value = draft.details.negativePrompt || "";
+        }
+        this.render();
+    }
     bootstrap() {
         this.ctx.sendToBackend({
             type: "bootstrap",
@@ -2584,6 +2611,12 @@ class MiniPlayerController {
             totalSteps: 1,
             status: "Generation complete · saved by Lumiverse"
         };
+        if (latestImage?.details && this.snapshotValue.draft) {
+            this.snapshotValue.draft = {
+                ...this.snapshotValue.draft,
+                details: latestImage.details
+            };
+        }
         const prompt = this.root.querySelector('[data-role="mini-prompt"]');
         const negative = this.root.querySelector('[data-role="mini-negative"]');
         if (prompt && !prompt.value.trim() && details?.prompt) prompt.value = details.prompt;
@@ -2611,6 +2644,7 @@ class MiniPlayerController {
         if (payload?.type === "bootstrap_result") {
             const connections = Array.isArray(data.connections) ? data.connections : [];
             const swarmConnections = connections.filter((connection)=>String(connection?.provider || "").toLowerCase() === "swarmui");
+            this.quickConnections = swarmConnections;
             this.quickConnection = swarmConnections.find((connection)=>connection?.is_default) || swarmConnections[0] || null;
             this.render();
             return;
@@ -2669,7 +2703,10 @@ class MiniPlayerController {
     }
     quickGenerate() {
         if (this.snapshotValue.active) return;
-        const connection = this.quickConnection;
+        const liveDraft = this.getStudioDraft();
+        if (liveDraft) this.captureDraft(liveDraft, false);
+        const draft = liveDraft || this.snapshotValue.draft;
+        const connection = (draft?.connectionId ? this.quickConnections.find((candidate)=>String(candidate.id) === draft.connectionId) : null) || this.quickConnection;
         const prompt = this.root.querySelector('[data-role="mini-prompt"]')?.value.trim() || "";
         const negativePrompt = this.root.querySelector('[data-role="mini-negative"]')?.value.trim() || "";
         if (!connection) {
@@ -2684,8 +2721,12 @@ class MiniPlayerController {
             this.render();
             return;
         }
-        const parameters = quickGenerationParameters(connection.default_parameters || {});
-        const model = String(connection.model || "");
+        const parameters = inheritQuickGenerationParameters(connection.default_parameters || {}, draft?.details.parameters);
+        const model = String(draft?.details.model || connection.model || "");
+        const loras = Array.isArray(parameters.loras) ? parameters.loras.map((name)=>String(name)) : (draft?.details.loras || []).map((lora)=>lora.name);
+        const loraWeights = Array.isArray(parameters.loraWeights) ? parameters.loraWeights.map(Number) : (draft?.details.loras || []).map((lora)=>lora.weight);
+        parameters.loras = loras;
+        parameters.loraWeights = loraWeights;
         const clientJobId = crypto.randomUUID();
         this.quickPending = {
             prompt,
@@ -2694,10 +2735,26 @@ class MiniPlayerController {
             resolvedNegativePrompt: negativePrompt,
             model,
             parameters,
-            loras: [],
-            presets: [],
-            workflow: "",
+            loras: loras.map((name, index)=>({
+                    name,
+                    weight: Number.isFinite(loraWeights[index]) ? loraWeights[index] : 1
+                })),
+            presets: draft?.details.presets || [],
+            workflow: draft?.details.workflow || "",
+            initImageId: draft?.details.initImageId || "",
+            initImageLabel: draft?.details.initImageLabel || "",
             createdAt: Date.now()
+        };
+        this.snapshotValue.draft = draft ? {
+            ...draft,
+            details: this.quickPending
+        } : {
+            connectionId: String(connection.id || ""),
+            details: this.quickPending,
+            stack: [],
+            selectedPresets: [],
+            workflow: null,
+            initImage: null
         };
         this.begin(clientJobId, String(connection.id || ""), `Preparing quick image · ${model || "SwarmUI"}`);
         this.ctx.sendToBackend({
@@ -2714,8 +2771,10 @@ class MiniPlayerController {
             recordHints: {
                 resolvedPrompt: prompt,
                 resolvedNegativePrompt: negativePrompt,
-                presets: [],
-                workflow: "",
+                presets: draft?.details.presets || [],
+                workflow: draft?.details.workflow || "",
+                initImageId: draft?.details.initImageId || "",
+                initImageLabel: draft?.details.initImageLabel || "",
                 source: "miniplayer"
             }
         });
@@ -2753,6 +2812,10 @@ class MiniPlayerController {
     setExpanded(value) {
         this.expanded = value;
         if (value) this.collapsed = false;
+        if (value) {
+            const liveDraft = this.getStudioDraft();
+            if (liveDraft) this.captureDraft(liveDraft);
+        }
         try {
             window.localStorage.setItem(MINIPLAYER_STORAGE_KEY, JSON.stringify({
                 collapsed: this.collapsed,
@@ -2838,6 +2901,9 @@ class StudioController {
     generating = false;
     currentJobId = "";
     currentJobConnectionId = "";
+    pendingDraftRestore = null;
+    pendingWorkflowRestore = null;
+    workflowOpenOnLoad = true;
     workflowValues = new Map();
     workflowEnabled = new Set();
     workflowImageValues = new Map();
@@ -2931,6 +2997,7 @@ class StudioController {
         document.addEventListener("keydown", this.handleKeyDown, true);
         this.setRunStatus("Loading Lumiverse connections…");
         const activitySnapshot = this.activity?.snapshot();
+        this.pendingDraftRestore = activitySnapshot?.draft || null;
         if (activitySnapshot?.latestImage) this.setCurrentImage(activitySnapshot.latestImage);
         if (activitySnapshot?.active) {
             this.generating = true;
@@ -2973,6 +3040,62 @@ class StudioController {
         const shell = this.root.querySelector(".ss-shell");
         if (shell) applyAppearanceVariables(shell, appearance);
         this.syncAppearanceControls();
+    }
+    exportDraft() {
+        if (!this.state.connection) return this.pendingDraftRestore;
+        let rawRequestOverride;
+        try {
+            rawRequestOverride = this.buildRawOverride();
+        } catch  {
+            rawRequestOverride = this.get('[data-role="raw-override"]').value.trim() || undefined;
+        }
+        const enabled = this.state.stack.filter((item)=>item.enabled);
+        const parameters = this.collectGenerationParameters(rawRequestOverride, enabled);
+        const prompt = this.finalPrompt();
+        const negativePrompt = this.get('[data-role="negative"]').value.trim();
+        const model = this.get('[data-role="model"]').value || this.state.connection.model;
+        const resolved = this.resolvedPrompts();
+        return {
+            connectionId: String(this.state.connection.id || ""),
+            details: {
+                prompt,
+                negativePrompt,
+                resolvedPrompt: resolved.prompt,
+                resolvedNegativePrompt: resolved.negativePrompt,
+                model,
+                parameters,
+                loras: enabled.map((item)=>({
+                        name: item.lora.name,
+                        weight: item.weight
+                    })),
+                presets: resolved.presets,
+                workflow: this.state.selectedWorkflow?.name || "",
+                initImageId: this.state.initImage?.imageId || "",
+                initImageLabel: this.state.initImage?.label || "",
+                createdAt: Date.now()
+            },
+            stack: this.state.stack.map((item)=>({
+                    name: item.lora.name,
+                    title: item.lora.title,
+                    weight: item.weight,
+                    enabled: item.enabled,
+                    useTrigger: item.useTrigger
+                })),
+            selectedPresets: this.state.selectedPresets.map((preset)=>({
+                    ...preset
+                })),
+            workflow: this.state.selectedWorkflow ? {
+                name: this.state.selectedWorkflow.name,
+                values: Object.fromEntries(this.workflowValues),
+                enabled: [
+                    ...this.workflowEnabled
+                ],
+                images: Object.fromEntries(this.workflowImageValues)
+            } : null,
+            initImage: this.state.initImage ? {
+                ...this.state.initImage
+            } : null
+        };
     }
     syncAppearanceControls() {
         const shell = this.root.querySelector(".ss-shell");
@@ -3356,7 +3479,7 @@ are removed when CSS is applied.</pre>
                       </select>
                     </div>
                     <span class="ss-workflow-badge" data-role="workflow-badge" data-active="false">Native</span>
-                    <button class="ss-button ss-workflow-configure" data-action="open-workflow-setup" disabled>Setup</button>
+                    <button class="ss-icon-button ss-workflow-configure" data-action="open-workflow-setup" title="Open workflow setup" aria-label="Open workflow setup" disabled>${EXPAND_ICON}</button>
                   </div>
                   <div class="ss-workflow-description" data-role="workflow-description">Use Swarm’s normal parameter pipeline, or select a saved Comfy workflow exposed to its Generate tab.</div>
                 </section>
@@ -3530,7 +3653,8 @@ are removed when CSS is applied.</pre>
                 </div>
               </div>
               <div class="ss-mobile-prompt-tools">
-                <button class="ss-button ss-mobile-random-seed" data-action="random-seed-mobile" title="Use a new random seed for the next generation">${RANDOM_SEED_ICON}<span>Random seed</span></button>
+                <button class="ss-button ss-mobile-prompt-tool" data-action="open-output-library" title="Open the output library">${LIBRARY_ICON}<span>Library</span></button>
+                <button class="ss-button ss-mobile-prompt-tool" data-action="random-seed-mobile" title="Use a new random seed for the next generation">${RANDOM_SEED_ICON}<span>Random seed</span></button>
               </div>
             </section>
           </main>
@@ -3979,8 +4103,21 @@ are removed when CSS is applied.</pre>
                 this.workflowRequestId = "";
                 this.state.selectedWorkflow = data;
                 this.initializeWorkflowValues(this.state.selectedWorkflow);
+                if (this.pendingWorkflowRestore?.name === this.state.selectedWorkflow.name) {
+                    for (const [key, value] of Object.entries(this.pendingWorkflowRestore.values)){
+                        this.workflowValues.set(key, value);
+                    }
+                    this.workflowEnabled.clear();
+                    for (const key of this.pendingWorkflowRestore.enabled)this.workflowEnabled.add(key);
+                    this.workflowImageValues.clear();
+                    for (const [key, value] of Object.entries(this.pendingWorkflowRestore.images)){
+                        this.workflowImageValues.set(key, value);
+                    }
+                }
+                this.pendingWorkflowRestore = null;
                 this.renderWorkflowControls();
-                this.openWorkflowSetup();
+                if (this.workflowOpenOnLoad) this.openWorkflowSetup();
+                this.workflowOpenOnLoad = true;
                 this.setRunStatus(`Loaded workflow “${this.state.selectedWorkflow.name}”.`);
                 break;
             case "generation_started":
@@ -4184,7 +4321,7 @@ are removed when CSS is applied.</pre>
             option.value = connection.id;
             select.appendChild(option);
         }
-        const preferred = this.state.connections.find((item)=>item.is_default) || this.state.connections[0];
+        const preferred = this.state.connections.find((item)=>item.id === this.pendingDraftRestore?.connectionId) || this.state.connections.find((item)=>item.is_default) || this.state.connections[0];
         select.value = preferred.id;
         this.loadConnection(preferred.id);
     }
@@ -4231,6 +4368,11 @@ are removed when CSS is applied.</pre>
         this.acceptSwarmOptions(data.swarmOptions);
         this.populateModels();
         this.applyConnectionDefaults();
+        if (this.pendingDraftRestore && (!this.pendingDraftRestore.connectionId || this.pendingDraftRestore.connectionId === this.state.connection?.id)) {
+            const draft = this.pendingDraftRestore;
+            this.pendingDraftRestore = null;
+            this.restoreDraft(draft);
+        }
         this.updateFamilyChip();
         this.showMetadataError(data.metadataError || "");
         this.renderLoras();
@@ -4319,13 +4461,17 @@ are removed when CSS is applied.</pre>
         }
         this.renderWorkflowControls();
     }
-    selectWorkflow(name) {
+    selectWorkflow(name, openOnLoad = true, restore = null) {
         this.workflowRequestId = "";
+        this.workflowOpenOnLoad = openOnLoad;
+        this.pendingWorkflowRestore = restore;
         this.state.selectedWorkflow = null;
         this.workflowValues.clear();
         this.workflowEnabled.clear();
         this.workflowImageValues.clear();
         if (!name) {
+            this.pendingWorkflowRestore = null;
+            this.workflowOpenOnLoad = true;
             this.closeWorkflowSetup();
             this.renderWorkflowControls();
             this.setRunStatus("Using Swarm’s standard generation pipeline.");
@@ -5406,9 +5552,11 @@ are removed when CSS is applied.</pre>
         image.style.width = `${Math.round(fitted.width)}px`;
         image.style.height = `${Math.round(fitted.height)}px`;
     }
-    reuseCurrentParameters() {
-        const details = this.state.currentImage?.details;
-        if (!details) return;
+    restoreDraft(draft) {
+        this.applyGenerationDetails(draft.details, draft, false);
+        this.setRunStatus("Restored the previous Studio model, presets, LoRAs, workflow, sampler, scheduler, and render controls.");
+    }
+    applyGenerationDetails(details, draft = null, closeOverlays = true) {
         const parameters = details.parameters || {};
         this.get('[data-role="positive"]').value = details.prompt || details.resolvedPrompt || "";
         this.get('[data-role="negative"]').value = details.negativePrompt || details.resolvedNegativePrompt || "";
@@ -5447,31 +5595,57 @@ are removed when CSS is applied.</pre>
         assign("clip-g", parameters.clipGModel);
         assign("t5", parameters.t5XXLModel);
         assign("raw-override", parameters.rawRequestOverride);
-        if (details.workflow && this.state.swarmWorkflows.some((workflow)=>workflow.name === details.workflow)) {
+        const workflowDraft = draft?.workflow || null;
+        const workflowName = workflowDraft?.name || details.workflow || "";
+        if (workflowName && this.state.swarmWorkflows.some((workflow)=>workflow.name === workflowName)) {
             const workflowSelect = this.get('[data-role="workflow-select"]');
-            workflowSelect.value = details.workflow;
-            this.selectWorkflow(details.workflow);
+            workflowSelect.value = workflowName;
+            this.selectWorkflow(workflowName, closeOverlays, workflowDraft);
         } else {
             this.get('[data-role="workflow-select"]').value = "";
             this.selectWorkflow("");
         }
-        this.state.selectedPresets = (details.presets || []).map((title)=>({
+        this.state.selectedPresets = draft ? draft.selectedPresets.map((preset)=>({
+                ...preset
+            })) : (details.presets || []).map((title)=>({
                 title,
                 enabled: true
             }));
-        this.state.stack = (details.loras || []).map((saved)=>({
+        this.state.stack = draft ? draft.stack.map((saved)=>{
+            const lora = this.state.loras.find((item)=>item.name === saved.name) || manualLora(saved.name, saved.title);
+            return {
+                lora,
+                weight: clamp(Number(saved.weight) || 1, -10, 10),
+                enabled: saved.enabled !== false,
+                useTrigger: Boolean(saved.useTrigger && lora.triggerPhrase)
+            };
+        }) : (details.loras || []).map((saved)=>({
                 lora: this.state.loras.find((item)=>item.name === saved.name) || manualLora(saved.name),
                 weight: clamp(Number(saved.weight) || 1, -10, 10),
                 enabled: true,
                 useTrigger: false
             }));
+        if (draft) {
+            this.state.initImage = draft.initImage ? {
+                ...draft.initImage
+            } : null;
+            this.renderInitImage();
+        }
         this.renderStack();
         this.renderLoras();
         this.renderPresetStack();
         this.updateContextControls();
-        this.closeInspector();
-        this.closeOutputLibrary();
-        if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create");
+        if (closeOverlays) {
+            this.closeInspector();
+            this.closeOutputLibrary();
+            if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create");
+        }
+    }
+    reuseCurrentParameters() {
+        const details = this.state.currentImage?.details;
+        if (!details) return;
+        this.applyGenerationDetails(details);
+        const parameters = details.parameters || {};
         this.setRunStatus(`Reused prompts, locked seed ${parameters.seed ?? "as recorded"}, presets, render settings, and LoRA stack.`);
     }
     deleteCurrentOutput() {
@@ -5819,26 +5993,7 @@ are removed when CSS is applied.</pre>
         Object.assign(parsed, this.workflowRawOverrides());
         return Object.keys(parsed).length ? JSON.stringify(parsed) : undefined;
     }
-    generate() {
-        if (this.generating || !this.state.connection) return;
-        const selectedWorkflowName = this.get('[data-role="workflow-select"]').value;
-        if (selectedWorkflowName && this.state.selectedWorkflow?.name !== selectedWorkflowName) {
-            this.setRunStatus("Wait for the selected workflow controls to finish loading.", true);
-            return;
-        }
-        const prompt = this.finalPrompt();
-        if (!prompt) {
-            this.setRunStatus("Enter a prompt or enable a LoRA trigger phrase.", true);
-            return;
-        }
-        let rawRequestOverride;
-        try {
-            rawRequestOverride = this.buildRawOverride();
-        } catch (error) {
-            this.setRunStatus(error instanceof Error ? error.message : String(error), true);
-            return;
-        }
-        const enabled = this.state.stack.filter((item)=>item.enabled);
+    collectGenerationParameters(rawRequestOverride, enabled = this.state.stack.filter((item)=>item.enabled)) {
         const optional = (role)=>this.get(`[data-role="${role}"]`).value.trim();
         const parameters = {
             width: clamp(numberValue(this.get('[data-role="width"]'), 1024), 64, 4096),
@@ -5866,6 +6021,29 @@ are removed when CSS is applied.</pre>
             ];
             parameters.denoise = clamp(numberValue(this.get('[data-role="denoise"]'), .6), 0, 1);
         }
+        return parameters;
+    }
+    generate() {
+        if (this.generating || !this.state.connection) return;
+        const selectedWorkflowName = this.get('[data-role="workflow-select"]').value;
+        if (selectedWorkflowName && this.state.selectedWorkflow?.name !== selectedWorkflowName) {
+            this.setRunStatus("Wait for the selected workflow controls to finish loading.", true);
+            return;
+        }
+        const prompt = this.finalPrompt();
+        if (!prompt) {
+            this.setRunStatus("Enter a prompt or enable a LoRA trigger phrase.", true);
+            return;
+        }
+        let rawRequestOverride;
+        try {
+            rawRequestOverride = this.buildRawOverride();
+        } catch (error) {
+            this.setRunStatus(error instanceof Error ? error.message : String(error), true);
+            return;
+        }
+        const enabled = this.state.stack.filter((item)=>item.enabled);
+        const parameters = this.collectGenerationParameters(rawRequestOverride, enabled);
         const clientJobId = crypto.randomUUID();
         const negativePrompt = this.get('[data-role="negative"]').value.trim();
         const model = this.get('[data-role="model"]').value || this.state.connection.model;
@@ -5888,6 +6066,7 @@ are removed when CSS is applied.</pre>
             createdAt: Date.now()
         };
         this.preGenerationImage = this.state.currentImage;
+        this.activity?.captureDraft(this.exportDraft());
         this.generating = true;
         this.currentJobId = clientJobId;
         this.currentJobConnectionId = this.state.connection.id;
@@ -6257,6 +6436,7 @@ export function setup(ctx) {
         activeStudio.setTheme(currentTheme);
         if (initialView === "library") activeStudio.openLibrary();
         modal.onDismiss(()=>{
+            miniplayer?.captureDraft(activeStudio?.exportDraft() || null);
             activeStudio?.dispose();
             activeStudio = null;
             activeModal = null;
@@ -6272,7 +6452,7 @@ export function setup(ctx) {
                 tooltip: "Swarm Studio miniplayer",
                 chromeless: true
             });
-            miniplayer = new MiniPlayerController(ctx, widget, ()=>openStudio("studio"));
+            miniplayer = new MiniPlayerController(ctx, widget, ()=>openStudio("studio"), ()=>activeStudio?.exportDraft() || null);
             miniplayer.setAppearance(appearance);
         } catch  {
             miniplayer = null;

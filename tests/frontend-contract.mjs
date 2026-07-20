@@ -7,6 +7,7 @@ const {
   dimensionsForAspect,
   fitAspectWithin,
   inferModelFamily,
+  inheritQuickGenerationParameters,
   isWorkflowCoreParameter,
   matchesKeywordQuery,
   modelSignalsCompatible,
@@ -54,6 +55,23 @@ assert.deepEqual(
   },
 )
 assert.equal(quickGenerationParameters({ width: 9000 }).width, 4096)
+assert.deepEqual(
+  inheritQuickGenerationParameters(
+    { sampler: "euler", scheduler: "normal" },
+    {
+      sampler: "dpmpp_2m_sde_gpu",
+      scheduler: "beta57",
+      rawRequestOverride: JSON.stringify({ presets: ["Cinematic", "Polish"] }),
+      loras: ["styles/ink.safetensors"],
+    },
+  ),
+  {
+    sampler: "dpmpp_2m_sde_gpu",
+    scheduler: "beta57",
+    rawRequestOverride: JSON.stringify({ presets: ["Cinematic", "Polish"] }),
+    loras: ["styles/ink.safetensors"],
+  },
+)
 assert.equal(isWorkflowCoreParameter("negative_prompt"), true)
 assert.equal(isWorkflowCoreParameter("comfyrawworkflowinputdecimaldenoiseb"), false)
 assert.doesNotMatch(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /@import\s+"/)
@@ -100,6 +118,7 @@ assert.match(source, /data-action="toggle-fullscreen"/)
 assert.match(source, /data-action="change-orientation"/)
 assert.match(source, /data-action="toggle-seed-mode"/)
 assert.match(source, /data-action="random-seed-mobile"/)
+assert.match(source, /ss-mobile-prompt-tools[\s\S]*?data-action="open-output-library"[\s\S]*?data-action="random-seed-mobile"/)
 assert.match(source, /data-role="workflow-select"/)
 assert.match(source, /data-role="workflow-fields"/)
 assert.match(source, /load_swarm_workflow/)
@@ -112,10 +131,17 @@ assert.match(source, /data-action="mini-expand"/)
 assert.match(source, /data-action="mini-generate"/)
 assert.match(source, /Quick create/)
 assert.match(source, /activitySnapshot\?\.latestImage/)
+assert.match(source, /activitySnapshot\?\.draft/)
+assert.match(source, /exportDraft\(\)/)
+assert.match(source, /pendingDraftRestore/)
+assert.match(source, /captureDraft\(activeStudio\?\.exportDraft\(\)/)
+assert.match(source, /draft\?\.details\.presets/)
 assert.match(source, /ss-miniplayer/)
 assert.match(source, /data-role="workflow-modal"/)
 assert.match(source, /data-action="open-workflow-setup"/)
 assert.match(source, /data-action="use-standard-workflow"/)
+assert.match(source, /EXPAND_ICON/)
+assert.doesNotMatch(source, /data-action="open-workflow-setup"[^>]*>Setup</)
 assert.match(source, /ss-mobile-prompt-tools/)
 assert.match(source, /data-mobile-panel="create-prompt"[\s\S]*?ss-negative-v3[\s\S]*?data-action="random-seed-mobile"/)
 assert.match(source, /"interrupt-generation"/)

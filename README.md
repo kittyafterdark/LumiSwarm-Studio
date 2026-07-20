@@ -6,7 +6,7 @@ It adds:
 
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
-- A one-tap mobile **Random seed** action directly below the Create tab's positive and negative prompts
+- One-tap mobile **Library** and **Random seed** actions directly below the Create tab's positive and negative prompts
 - A Lumiverse-native profile plus an automatic Custom state for component colors, panel geometry, opacity, blur, and CSS overrides
 - A full appearance editor with native component color pickers, border-radius, surface-opacity and backdrop-blur sliders, plus persisted custom CSS
 - A compact opaque settings panel containing appearance controls, metadata refresh, and the encrypted metadata token
@@ -27,7 +27,7 @@ It adds:
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
 - A draggable Lumiverse float player with collapsed, compact, and maximized **Quick create** layouts; it survives closing Studio, generates from a lightweight prompt, follows live previews and progress, and can interrupt directly
-- Shared float-player/Studio output state, so a quick image generated outside the modal is already selected when the full Studio opens
+- Shared float-player/Studio output and draft state, so Quick create inherits the last model, dimensions, sampler, scheduler, presets, LoRAs, workflow, init image, and overrides—and the full Studio restores them when it reopens
 - The drawer’s picture-frame wall emblem reused consistently in the float player, Studio header, drawer registration, and chat input action
 
 Generation itself goes through `spindle.imageGen.generate()`. That means it continues to use the SwarmUI connection, encrypted secret, persistence, and ownership behavior already managed by Lumiverse.
@@ -206,11 +206,15 @@ Spindle stream hook is already present.
 While a generation is active, the Lumiverse float player remains visible even
 if the Studio modal is closed. Its compact layout shows the latest streamed
 preview, step-aware progress, and current workflow/model status. Maximize it for
-**Quick create**, which uses Lumiverse's default SwarmUI connection and its
-saved model/render defaults with a fresh random seed. The stop control targets
-the active client job; clicking the preview reopens Studio with the same live or
-completed output already selected. Size preferences are stored locally, while
-generation state itself stays in memory only for the current Lumiverse session.
+**Quick create**. After Studio has been opened, Quick create inherits its full
+in-memory draft—including the connection, model, size, seed, sampler, scheduler,
+presets, LoRAs, workflow inputs, init image, and raw overrides—while its compact
+positive and negative fields replace only the prompt text. Before a Studio draft
+exists, it uses Lumiverse's default SwarmUI connection defaults. The stop control
+targets the active client job; clicking the preview reopens Studio with the same
+live or completed output and draft already restored. Size preferences are stored
+locally, while generation state and draft data stay in memory only for the
+current Lumiverse session.
 
 ## GitHub source installation
 
