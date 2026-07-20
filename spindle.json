@@ -1,5 +1,5 @@
 {
-  "version": "0.12.1",
+  "version": "0.13.0",
   "name": "Swarm Studio",
   "identifier": "swarm_studio",
   "author": "kittyafterdark",
@@ -11,6 +11,7 @@
     "cors_proxy",
     "images",
     "chats",
+    "chat_mutation",
     "ui_panels"
   ],
   "entry_backend": "dist/backend.js",

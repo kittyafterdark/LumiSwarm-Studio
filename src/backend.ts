@@ -1163,7 +1163,17 @@ function permissionSnapshot(): Record<string, boolean> {
     metadata: spindle.permissions.has("cors_proxy"),
     images: spindle.permissions.has("images"),
     chats: spindle.permissions.has("chats"),
+    chatMutation: spindle.permissions.has("chat_mutation"),
   }
+}
+
+function markdownImageMessage(label: string, url: string): string {
+  const safeLabel = (label || "Swarm Studio output")
+    .replace(/[\[\]\r\n]+/g, " ")
+    .trim()
+    .slice(0, 160) || "Swarm Studio output"
+  const safeUrl = url.replace(/[<>\r\n]/g, (value) => encodeURIComponent(value))
+  return `![${safeLabel}](<${safeUrl}>)`
 }
 
 async function listOutputs(
@@ -1584,6 +1594,43 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           type: "library_outputs_result",
           requestId,
           data: await listLibraryOutputs(userId),
+        }, userId)
+        return
+      }
+      case "append_output_to_chat": {
+        if (!spindle.permissions.has("chat_mutation")) {
+          throw new Error("Grant the Chat Mutation permission to append outputs to chat.")
+        }
+        if (!spindle.permissions.has("images") || !spindle.permissions.has("chats")) {
+          throw new Error("Images and Chats permissions are required to append an output.")
+        }
+        const imageId = asString(payload?.imageId).trim()
+        if (!imageId) throw new Error("Choose a saved Lumiverse output first.")
+        const activeChat = await spindle.chats.getActive(userId)
+        if (!activeChat?.id) throw new Error("Open a Lumiverse chat before appending an output.")
+        const image = await spindle.images.get(imageId, {
+          onlyOwned: true,
+          specificity: "sm",
+          userId,
+        })
+        if (!image) throw new Error("That Lumiverse-owned output could not be found.")
+        const imageUrl = asString(image.url).trim()
+        if (!imageUrl) throw new Error("Lumiverse did not expose a usable URL for that output.")
+        const label = asString(payload?.label).trim()
+          || asString(image.original_filename).trim()
+          || "Swarm Studio output"
+        const result = await spindle.chat.appendMessage(activeChat.id, {
+          role: "assistant",
+          content: markdownImageMessage(label, imageUrl),
+          metadata: {
+            source: "swarm_studio",
+            image_id: imageId,
+          },
+        })
+        spindle.sendToFrontend({
+          type: "output_appended_to_chat",
+          requestId,
+          data: { imageId, label, messageId: result?.id || "" },
         }, userId)
         return
       }

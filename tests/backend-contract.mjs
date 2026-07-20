@@ -4,10 +4,11 @@ let frontendHandler
 const sent = []
 const secrets = new Map()
 const userFiles = new Map()
-const permissions = new Set(["image_gen", "cors_proxy", "images", "chats"])
+const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "chat_mutation"])
 let imageDeleted = false
 let presetAdded = false
 let interruptRequested = false
+let appendedMessage = null
 
 globalThis.spindle = {
   permissions: {
@@ -76,6 +77,17 @@ globalThis.spindle = {
       return { id: "chat-1", character_id: "char-1" }
     },
   },
+  chat: {
+    async appendMessage(chatId, message) {
+      assert.equal(chatId, "chat-1")
+      assert.equal(message.role, "assistant")
+      assert.match(message.content, /^!\[image\.png\]\(<\/api\/v1\/images\/image-1\?size=sm>\)$/)
+      assert.equal(message.metadata.source, "swarm_studio")
+      assert.equal(message.metadata.image_id, "image-1")
+      appendedMessage = message
+      return { id: "message-image-1" }
+    },
+  },
   images: {
     async list(options) {
       assert.equal(options.onlyOwned, true)
@@ -93,6 +105,13 @@ globalThis.spindle = {
       assert.equal(userId, "user-1")
       imageDeleted = true
       return true
+    },
+    async get(imageId, options) {
+      assert.equal(imageId, "image-1")
+      assert.equal(options.onlyOwned, true)
+      assert.equal(options.specificity, "sm")
+      assert.equal(options.userId, "user-1")
+      return { id: imageId, url: "/api/v1/images/image-1?size=sm", original_filename: "image.png" }
     },
   },
   enclave: {
@@ -502,6 +521,14 @@ const bulkMoved = await request("bulk_move_outputs", {
   folderId,
 })
 assert.deepEqual(bulkMoved.data[0].imageIds, ["image-1"])
+
+const appended = await request("append_output_to_chat", {
+  imageId: "image-1",
+  label: "image.png",
+})
+assert.equal(appended.data.messageId, "message-image-1")
+assert.equal(appended.data.imageId, "image-1")
+assert.ok(appendedMessage)
 
 const deleted = await request("bulk_delete_outputs", { imageIds: ["image-1"] })
 assert.deepEqual(deleted.data.deletedIds, ["image-1"])

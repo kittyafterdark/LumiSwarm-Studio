@@ -18,10 +18,10 @@ It adds:
 - Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, and reusable saved stack presets
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
-- A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, and **Use as init image**
+- A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
-- A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Delete menus
+- A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Append to chat / Delete menus
 - A fullscreen searchable Lumiverse output library with reusable virtual folders, 30 images per desktop page, 15 per mobile page, and bulk folder/delete actions
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
@@ -47,6 +47,7 @@ Generation itself goes through `spindle.imageGen.generate()`. That means it cont
    - `cors_proxy` — direct SwarmUI LoRA metadata and preview requests, including local/private-network servers
    - `images` — the extension-owned output gallery
    - `chats` — tags outputs to the active chat and character
+   - `chat_mutation` — explicitly appends a selected output to the active chat
    - `ui_panels` — the persistent generation miniplayer
 
 4. Make sure Lumiverse already has a working **SwarmUI** image generation connection.
@@ -138,7 +139,9 @@ Choose a local image from the Generation tab or use any current/history output
 from its inspector. Images are resized in the browser to a maximum dimension of
 1536 pixels and sent through Lumiverse as a SwarmUI reference image. The
 **Creativity** control maps to SwarmUI's img2img denoise value. The encoded init
-image itself is deliberately excluded from stored generation metadata.
+image itself is deliberately excluded from stored generation metadata. Its
+slider spans the full init-image panel, and long filenames are clamped to one
+ellipsis-safe line so they cannot squeeze the generation controls.
 
 ## Output library and folders
 
@@ -158,6 +161,11 @@ deletes the actual owned image and removes its Swarm Studio metadata and folder
 assignment. When Swarm exposes the generated file path in image metadata, the
 inspector displays it below the recorded LoRA stack as a read-only saved-path
 reference.
+
+**Append to chat** verifies the selected image is owned by this extension and
+then uses Lumiverse's scoped chat-mutation API to add it to the active chat as
+an assistant image message. It is available from the output header, inspector,
+and each History card's action menu.
 
 ## Themes and settings
 
@@ -215,6 +223,10 @@ targets the active client job; clicking the preview reopens Studio with the same
 live or completed output and draft already restored. Size preferences are stored
 locally, while generation state and draft data stay in memory only for the
 current Lumiverse session.
+On mobile, collapsed mode matches Lumiverse's native 40 × 40 float-widget cap;
+its preview exposes a visible reopen glyph and reserves the tap from the host
+drag gesture. Desktop collapsed mode remains 56 × 56. Right-clicking the
+collapsed preview also reopens Studio.
 
 ## GitHub source installation
 

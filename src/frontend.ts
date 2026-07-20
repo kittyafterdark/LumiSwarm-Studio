@@ -1294,11 +1294,12 @@ const STUDIO_V3_STYLES = `
   }
   .ss-init-preview img { width: 100%; height: 100%; object-fit: cover; }
   .ss-init-content { min-width: 0; display: grid; gap: 5px; }
-  .ss-init-head { display: flex; align-items: center; gap: 5px; }
-  .ss-init-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+  .ss-init-head { min-width: 0; display: flex; align-items: center; gap: 5px; overflow: hidden; }
+  .ss-init-head strong { flex: 0 0 auto; }
+  .ss-init-label { min-width: 0; max-width: 100%; flex: 1 1 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
   .ss-init-actions { display: flex; flex-wrap: wrap; gap: 5px; }
   .ss-init-actions .ss-button { min-height: 27px; padding: 4px 7px; }
-  .ss-creativity-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 30px; gap: 6px; align-items: center; font-size: 9px; color: var(--lumiverse-text-muted); }
+  .ss-creativity-row { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr) 30px; gap: 6px; align-items: center; font-size: 9px; color: var(--lumiverse-text-muted); }
   .ss-preset-stack {
     display: grid;
     gap: 5px;
@@ -2206,6 +2207,9 @@ const STUDIO_V3_STYLES = `
     display: grid;
     grid-template-columns: 1fr;
     place-items: center;
+    width: 56px;
+    height: 56px;
+    aspect-ratio: 1;
     padding: 5px;
     border-radius: 18px;
   }
@@ -2227,6 +2231,19 @@ const STUDIO_V3_STYLES = `
     cursor: pointer;
   }
   .ss-miniplayer[data-collapsed="true"] .ss-mini-preview { width: 100%; height: 100%; border: 0; }
+  .ss-mini-reopen {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background: rgba(0, 0, 0, .46);
+    opacity: 0;
+    transition: opacity .15s ease;
+  }
+  .ss-mini-reopen svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+  .ss-miniplayer[data-collapsed="true"] .ss-mini-preview:hover .ss-mini-reopen,
+  .ss-miniplayer[data-collapsed="true"] .ss-mini-preview:focus-visible .ss-mini-reopen { opacity: 1; }
   .ss-mini-preview svg { width: 30px; height: 30px; fill: currentColor; stroke: none; }
   .ss-mini-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ss-mini-preview img[hidden] { display: none; }
@@ -2314,6 +2331,8 @@ const STUDIO_V3_STYLES = `
   .ss-mini-generate:disabled { opacity: .48; cursor: not-allowed; }
 
   @media (max-width: 720px) {
+    .ss-miniplayer[data-collapsed="true"] { width: 40px; height: 40px; padding: 3px; border-radius: 13px; }
+    .ss-miniplayer[data-collapsed="true"] .ss-mini-reopen { opacity: .78; }
     .ss-workflow-field-grid { grid-template-columns: 1fr; }
     .ss-workflow-field[data-wide="true"] { grid-column: auto; }
     .ss-workflow-picker { grid-template-columns: minmax(0, 1fr) auto; }
@@ -2739,6 +2758,8 @@ class MiniPlayerController {
     this.ctx = ctx
     this.widget = widget
     this.root = widget.root
+    this.root.style.width = "100%"
+    this.root.style.height = "100%"
     this.openStudio = openStudio
     this.getStudioDraft = getStudioDraft
     try {
@@ -2755,6 +2776,7 @@ class MiniPlayerController {
           <span data-role="mini-placeholder">${FRAME_WALL_ICON}</span>
           <img data-role="mini-image" alt="Latest Swarm Studio preview" hidden />
           <span class="ss-mini-live-dot" aria-hidden="true"></span>
+          <span class="ss-mini-reopen" aria-hidden="true">${EXPAND_ICON}</span>
         </button>
         <div class="ss-mini-copy">
           <div class="ss-mini-title"><span>Swarm Studio</span><span class="ss-mini-state" data-role="mini-state">Ready</span></div>
@@ -2787,6 +2809,19 @@ class MiniPlayerController {
       if (action === "mini-collapse") this.setCollapsed(!this.collapsed)
       if (action === "mini-expand") this.setExpanded(!this.expanded)
       if (action === "mini-generate") this.quickGenerate()
+    })
+    this.root.addEventListener("pointerdown", (event) => {
+      if (this.collapsed && (event.target as HTMLElement).closest('[data-action="mini-open"]')) {
+        // Lumi's float-widget drag gesture otherwise consumes the tap before
+        // the collapsed player's open control receives its click.
+        event.stopPropagation()
+      }
+    }, true)
+    this.root.addEventListener("contextmenu", (event) => {
+      if (!this.collapsed || !(event.target as HTMLElement).closest('[data-action="mini-open"]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      this.openStudio()
     })
     this.setCollapsed(this.collapsed)
     if (this.expanded) this.setExpanded(true)
@@ -3126,7 +3161,8 @@ class MiniPlayerController {
 
   private resizeWidget(): void {
     if (this.collapsed) {
-      this.widget.setSize(56, 56)
+      const size = window.innerWidth <= 600 ? 40 : 56
+      this.widget.setSize(size, size)
       return
     }
     if (this.expanded) {
@@ -3849,8 +3885,8 @@ are removed when CSS is applied.</pre>
                       <button class="ss-button" data-action="pick-init">Choose file</button>
                       <button class="ss-button ss-button-danger" data-action="clear-init" disabled>Clear</button>
                     </div>
-                    <label class="ss-creativity-row"><span>Creativity</span><input data-role="denoise" type="range" min="0" max="1" step="0.05" value="0.6" /><span data-role="denoise-label">0.60</span></label>
                   </div>
+                  <label class="ss-creativity-row"><span>Creativity</span><input data-role="denoise" type="range" min="0" max="1" step="0.05" value="0.6" /><span data-role="denoise-label">0.60</span></label>
                   <input data-role="init-file" type="file" accept="image/*" hidden />
                 </div>
               </div>
@@ -3907,6 +3943,7 @@ are removed when CSS is applied.</pre>
                 <div class="ss-output-actions">
                   <button class="ss-button" data-action="download-output" disabled>Download</button>
                   <button class="ss-button" data-action="copy-output" disabled>Copy URL</button>
+                  <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
                 </div>
               </div>
               <div class="ss-current-preview" data-role="current-preview" data-action="inspect-output" title="Open full-size image and generation details">
@@ -4080,6 +4117,7 @@ are removed when CSS is applied.</pre>
             <div class="ss-inspector-actions">
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
               <button class="ss-button" data-action="use-as-init">Use as init image</button>
+              <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
             </div>
@@ -4330,6 +4368,7 @@ are removed when CSS is applied.</pre>
       if (action === "history-next") this.changeHistoryPage(1)
       if (action === "download-output") this.downloadCurrent()
       if (action === "copy-output") void this.copyCurrentUrl()
+      if (action === "append-to-chat") this.appendCurrentToChat()
       if (action === "inspect-output") this.openInspector()
       if (action === "close-inspector") this.closeInspector()
       if (action === "reuse-parameters") this.reuseCurrentParameters()
@@ -4517,6 +4556,9 @@ are removed when CSS is applied.</pre>
         this.renderOutputLibrary()
         this.setRunStatus("Output folders updated.")
         break
+      case "output_appended_to_chat":
+        this.setRunStatus(`Appended “${data.label || "output"}” to the active Lumiverse chat.`)
+        break
       case "output_deleted":
         this.acceptOutputPage(data)
         this.state.outputFolders = Array.isArray(data.folders) ? data.folders : this.state.outputFolders
@@ -4616,11 +4658,13 @@ are removed when CSS is applied.</pre>
     if (!this.state.permissions.metadata) missing.push("CORS Proxy (LoRA metadata/previews)")
     if (!this.state.permissions.images) missing.push("Images (output history)")
     if (!this.state.permissions.chats) missing.push("Chats (chat/character ownership)")
+    if (!this.state.permissions.chatMutation) missing.push("Chat Mutation (append outputs to chat)")
     const banner = this.get<HTMLElement>('[data-role="permission-banner"]')
     banner.dataset.visible = String(missing.length > 0)
     banner.textContent = missing.length
       ? `Grant these extension permissions in Lumiverse for the complete studio: ${missing.join(", ")}.`
       : ""
+    this.updateAppendControls()
   }
 
   private populateConnections(): void {
@@ -5956,6 +6000,7 @@ are removed when CSS is applied.</pre>
     this.get<HTMLButtonElement>('[data-action="reuse-parameters"]').disabled = !details
     this.get<HTMLButtonElement>('[data-action="use-as-init"]').disabled = !image.src
     this.get<HTMLButtonElement>('[data-action="delete-output"]').disabled = !image.id
+    this.updateAppendControls()
     inspector.hidden = false
     this.setInspectorZoom(1)
     requestAnimationFrame(() => this.fitInspectorToSpace())
@@ -6095,6 +6140,13 @@ are removed when CSS is applied.</pre>
     if (!window.confirm(`Delete “${image.label}” from Lumiverse? This cannot be undone.`)) return
     this.send("delete_output", { imageId: image.id })
     this.setRunStatus(`Deleting “${image.label}”…`)
+  }
+
+  private appendCurrentToChat(): void {
+    const image = this.state.currentImage
+    if (!image?.id || !this.state.activeChat?.id) return
+    this.setRunStatus(`Appending “${image.label}” to the active Lumiverse chat…`)
+    this.send("append_output_to_chat", { imageId: image.id, label: image.label })
   }
 
   private async useCurrentAsInit(): Promise<void> {
@@ -6731,6 +6783,12 @@ are removed when CSS is applied.</pre>
       }
       menuAction("Reuse", "", () => this.reuseCurrentParameters(), !current.details)
       menuAction("Use as init", "", () => void this.useCurrentAsInit(), !current.src)
+      menuAction(
+        "Append to chat",
+        "",
+        () => this.appendCurrentToChat(),
+        !current.id || !this.state.activeChat?.id || !this.state.permissions.chatMutation,
+      )
       menuAction("Delete", "ss-button-danger", () => this.deleteCurrentOutput(), !current.id)
       menuToggle.addEventListener("click", (event) => {
         event.stopPropagation()
@@ -6793,6 +6851,7 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="output-label"]').textContent = image.label
     this.get<HTMLButtonElement>('[data-action="download-output"]').disabled = false
     this.get<HTMLButtonElement>('[data-action="copy-output"]').disabled = !image.url
+    this.updateAppendControls()
     this.updateContextControls()
   }
 
@@ -6806,7 +6865,22 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="output-label"]').textContent = "Nothing selected"
     this.get<HTMLButtonElement>('[data-action="download-output"]').disabled = true
     this.get<HTMLButtonElement>('[data-action="copy-output"]').disabled = true
+    this.updateAppendControls()
     this.updateContextControls()
+  }
+
+  private updateAppendControls(): void {
+    const enabled = Boolean(
+      this.state.currentImage?.id
+      && this.state.activeChat?.id
+      && this.state.permissions.chatMutation,
+    )
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="append-to-chat"]')) {
+      button.disabled = !enabled
+      button.title = enabled
+        ? "Insert this Lumiverse-owned output into the active chat"
+        : "Requires an active chat, a saved output, and Chat Mutation permission"
+    }
   }
 
   private downloadCurrent(): void {
