@@ -11,7 +11,7 @@ It adds:
 - A full appearance editor with native component color pickers, border-radius, surface-opacity and backdrop-blur sliders, plus persisted custom CSS
 - A compact opaque settings panel containing appearance controls, metadata refresh, and the encrypted metadata token
 - Positive and negative prompting, checkpoint selection, chain-linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, model-component overrides, and raw request JSON
-- Saved SwarmUI/ComfyUI workflows presented as ordinary grouped controls: choose a workflow, edit the parameters its author exposed, upload workflow image inputs, and generate without touching the node graph
+- Saved SwarmUI/ComfyUI workflows presented through a focused setup modal: choose a workflow, edit the grouped parameters its author exposed, upload workflow image inputs, and generate without touching the node graph
 - Context-aware orientation and seed actions that flip to the useful next state, with fixed-seed reuse from the selected output
 - A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
@@ -26,7 +26,9 @@ It adds:
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
-- A draggable Lumiverse float miniplayer that survives closing Studio, follows live previews and progress, opens the full workspace on click, and can interrupt the active generation directly
+- A draggable Lumiverse float player with collapsed, compact, and maximized **Quick create** layouts; it survives closing Studio, generates from a lightweight prompt, follows live previews and progress, and can interrupt directly
+- Shared float-player/Studio output state, so a quick image generated outside the modal is already selected when the full Studio opens
+- The drawer’s picture-frame wall emblem reused consistently in the float player, Studio header, drawer registration, and chat input action
 
 Generation itself goes through `spindle.imageGen.generate()`. That means it continues to use the SwarmUI connection, encrypted secret, persistence, and ownership behavior already managed by Lumiverse.
 
@@ -122,7 +124,8 @@ by the workflow author. Parameters that Swarm already considers core generation
 controls continue to use Studio's existing prompt, model, size, step, CFG,
 sampler, scheduler, seed, LoRA, preset, and init-image fields.
 
-Studio selects the saved server-side graph with SwarmUI's
+Selecting a workflow opens its dedicated setup modal and automatically closes
+back to the compact generation rail when finished. Studio selects the saved server-side graph with SwarmUI's
 `comfyuicustomworkflow` generation parameter and submits only the exposed
 values. It does not copy, rewrite, or persist the Comfy graph itself. Workflow
 image fields are encoded only for the active request and redacted from saved
@@ -200,12 +203,14 @@ git apply /path/to/swarm-studio/patches/lumiverse-spindle-live-preview.patch
 Then rebuild/restart Lumiverse normally. Do not apply the patch when the native
 Spindle stream hook is already present.
 
-While a generation is active, the Lumiverse float miniplayer remains visible
-even if the Studio modal is closed. It shows the latest streamed preview,
-step-aware progress, and current workflow/model status. Its stop control targets
-the active client job; clicking the preview reopens Studio with the same live
-state. The collapsed/expanded preference is stored locally, while generation
-state itself stays in memory only for the current Lumiverse session.
+While a generation is active, the Lumiverse float player remains visible even
+if the Studio modal is closed. Its compact layout shows the latest streamed
+preview, step-aware progress, and current workflow/model status. Maximize it for
+**Quick create**, which uses Lumiverse's default SwarmUI connection and its
+saved model/render defaults with a fresh random seed. The stop control targets
+the active client job; clicking the preview reopens Studio with the same live or
+completed output already selected. Size preferences are stored locally, while
+generation state itself stays in memory only for the current Lumiverse session.
 
 ## GitHub source installation
 
@@ -225,6 +230,12 @@ Node's built-in TypeScript type stripper, so it does not need a package install.
 ```sh
 npm run build
 ```
+
+Lumiverse checkouts that include `scripts/e2e-diagnostics` can also run the
+signed-in generic Spindle diagnostics against `swarm_studio`. Provision that
+tool's own `.env` intentionally, install its isolated Playwright dependencies,
+and use `SPINDLE_EXTENSION_FILTER=swarm_studio`; credentials are never read or
+stored by this extension.
 
 The repository metadata in `spindle.json` points to
 `kittyafterdark/LumiSwarm-Studio`.

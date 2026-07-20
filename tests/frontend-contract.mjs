@@ -11,6 +11,7 @@ const {
   matchesKeywordQuery,
   modelSignalsCompatible,
   outputLibraryPageSize,
+  quickGenerationParameters,
   sanitizeCustomCss,
 } = await import("../dist/frontend.js")
 
@@ -38,6 +39,21 @@ assert.equal(matchesKeywordQuery("illustrious portrait", ["Anima model", "soft p
 assert.equal(outputLibraryPageSize(390), 15)
 assert.equal(outputLibraryPageSize(720), 15)
 assert.equal(outputLibraryPageSize(721), 30)
+assert.deepEqual(
+  quickGenerationParameters({ width: 576, height: 384, steps: 26, cfg_scale: 4, sampler: "euler", scheduler: "beta57" }),
+  {
+    width: 576,
+    height: 384,
+    steps: 26,
+    cfgScale: 4,
+    seed: -1,
+    sampler: "euler",
+    scheduler: "beta57",
+    loras: [],
+    loraWeights: [],
+  },
+)
+assert.equal(quickGenerationParameters({ width: 9000 }).width, 4096)
 assert.equal(isWorkflowCoreParameter("negative_prompt"), true)
 assert.equal(isWorkflowCoreParameter("comfyrawworkflowinputdecimaldenoiseb"), false)
 assert.doesNotMatch(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /@import\s+"/)
@@ -92,7 +108,14 @@ assert.match(source, /createWorkflowField/)
 assert.match(source, /createFloatWidget/)
 assert.match(source, /class MiniPlayerController/)
 assert.match(source, /data-action="mini-interrupt"/)
+assert.match(source, /data-action="mini-expand"/)
+assert.match(source, /data-action="mini-generate"/)
+assert.match(source, /Quick create/)
+assert.match(source, /activitySnapshot\?\.latestImage/)
 assert.match(source, /ss-miniplayer/)
+assert.match(source, /data-role="workflow-modal"/)
+assert.match(source, /data-action="open-workflow-setup"/)
+assert.match(source, /data-action="use-standard-workflow"/)
 assert.match(source, /ss-mobile-prompt-tools/)
 assert.match(source, /data-mobile-panel="create-prompt"[\s\S]*?ss-negative-v3[\s\S]*?data-action="random-seed-mobile"/)
 assert.match(source, /"interrupt-generation"/)
@@ -145,6 +168,7 @@ assert.match(source, /data-action="set-theme"/)
 assert.match(source, /type StudioTheme = "lumiverse" \| "custom"/)
 assert.match(source, /studioAppearanceIsCustom/)
 assert.match(source, /FRAME_WALL_ICON/)
+assert.doesNotMatch(source, /STUDIO_ICON/)
 assert.match(source, /SPARKLE_ICON/)
 assert.match(source, /ss-launcher-corner/)
 assert.match(source, /ss-launcher-emblem/)

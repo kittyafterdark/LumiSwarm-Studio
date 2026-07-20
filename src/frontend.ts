@@ -210,13 +210,6 @@ type ModelFamily =
   | "hunyuan"
   | "unknown"
 
-const STUDIO_ICON = `
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M4 5.5h16v13H4z"/><path d="m7 15 3-3 2.2 2.2 2.3-2.8L18 15"/>
-    <path d="M8 8.5h.01"/><path d="M17.5 2.8v4M15.5 4.8h4"/>
-  </svg>
-`
-
 const PORTRAIT_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="m10 8 2-2 2 2M12 6v7"/></svg>
 `
@@ -246,7 +239,7 @@ const SETTINGS_ICON = `
 `
 
 const FRAME_WALL_ICON = `
-  <svg viewBox="0 0 457.667 457.667" aria-hidden="true">
+  <svg viewBox="0 0 457.667 457.667" fill="currentColor" aria-hidden="true">
     <path d="M116.352 141.241h108.759v-38.686H116.352v38.686Zm7-31.686h94.759v24.686h-94.759v-24.686ZM348.908 102.555v38.686h108.759v-38.686H348.908Zm101.759 31.686h-94.759v-24.686h94.759v24.686ZM348.908 277.929h108.759V149.746H348.908v128.183Zm7-121.183h94.759V270.93h-94.759V156.746ZM116.352 355.111h108.759v-38.686H116.352v38.686Zm7-31.685h94.759v24.686h-94.759v-24.686ZM232.704 355.111h224.962v-70.11H232.704v70.11Zm7-63.11h210.962v56.11H239.704v-56.11ZM0 186.087h108.759v-83.531H0v83.531Zm7-76.532h94.759v69.531H7v-69.531ZM341.463 102.555H232.704v83.531h108.759v-83.531Zm-7 76.532h-94.759v-69.531h94.759v69.531ZM341.463 194.398H232.704v83.531h108.759v-83.531Zm-7 76.531h-94.759v-69.531h94.759v69.531ZM0 355.111h108.759V194.398H0v160.713Zm7-153.713h94.759v146.713H7V201.398ZM116.352 309.189h108.759V148.476H116.352v160.713Zm7-153.713h94.759v146.713h-94.759V155.476Z"/>
   </svg>
 `
@@ -1057,6 +1050,7 @@ const STUDIO_V3_STYLES = `
     font-weight: 750;
   }
   .ss-brand svg { width: 20px; height: 20px; color: var(--lumiverse-accent, #7dd3fc); }
+  .ss-brand svg { fill: currentColor; }
   .ss-top-actions { display: flex; align-items: center; gap: 6px; }
   .ss-top-actions .ss-button { white-space: nowrap; }
   .ss-close-studio { display: none; }
@@ -2056,7 +2050,7 @@ const STUDIO_V3_STYLES = `
       linear-gradient(135deg, color-mix(in srgb, var(--lumiverse-accent) 7%, transparent), transparent 58%),
       color-mix(in srgb, var(--ss-panel-bg) var(--ss-surface-opacity), transparent);
   }
-  .ss-workflow-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: end; }
+  .ss-workflow-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: end; }
   .ss-workflow-picker .ss-field { min-width: 0; }
   .ss-workflow-badge {
     min-height: 27px;
@@ -2114,6 +2108,46 @@ const STUDIO_V3_STYLES = `
     border-radius: 999px;
     animation: ss-spin .75s linear infinite;
   }
+  .ss-workflow-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483004;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: color-mix(in srgb, var(--ss-canvas-bg, var(--lumiverse-bg, #050608)) 72%, transparent);
+    backdrop-filter: blur(max(10px, var(--ss-backdrop-blur, 10px)));
+  }
+  .ss-workflow-modal[hidden] { display: none; }
+  .ss-workflow-modal-card {
+    width: min(720px, 94vw);
+    max-height: min(820px, 88dvh);
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    overflow: hidden;
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    border-radius: var(--ss-panel-radius, 14px);
+    color: var(--ss-text-color, var(--lumiverse-text));
+    background: color-mix(in srgb, var(--ss-panel-bg, var(--lumiverse-fill, #111116)) 97%, #000);
+    box-shadow: 0 28px 90px rgba(0, 0, 0, .68), inset 0 1px rgba(255, 255, 255, .04);
+  }
+  .ss-workflow-modal-head,
+  .ss-workflow-modal-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 13px 15px;
+    border-color: var(--ss-outline, var(--lumiverse-border));
+    background: color-mix(in srgb, var(--ss-header-bg, var(--lumiverse-fill-subtle)) 94%, #000);
+  }
+  .ss-workflow-modal-head { border-bottom: 1px solid; }
+  .ss-workflow-modal-actions { justify-content: flex-end; border-top: 1px solid; }
+  .ss-workflow-modal-title { min-width: 0; display: grid; gap: 2px; }
+  .ss-workflow-modal-title strong { overflow: hidden; font: 600 18px/1.15 Georgia, "Times New Roman", serif; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-workflow-modal-description { padding: 11px 15px; color: var(--lumiverse-text-muted); font-size: 10px; line-height: 1.5; }
+  .ss-workflow-modal .ss-workflow-fields { min-height: 0; overflow-y: auto; padding: 4px 15px 16px; }
+  .ss-workflow-configure { white-space: nowrap; }
 
   .ss-miniplayer {
     --ss-mini-progress: 0%;
@@ -2138,6 +2172,12 @@ const STUDIO_V3_STYLES = `
   .ss-miniplayer[data-state="running"] {
     border-color: color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 68%, var(--lumiverse-border));
   }
+  .ss-miniplayer[data-expanded="true"] {
+    grid-template-columns: 82px minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    align-items: stretch;
+    overflow: visible;
+  }
   .ss-miniplayer[data-collapsed="true"] {
     display: grid;
     grid-template-columns: 1fr;
@@ -2146,7 +2186,8 @@ const STUDIO_V3_STYLES = `
     border-radius: 18px;
   }
   .ss-miniplayer[data-collapsed="true"] .ss-mini-copy,
-  .ss-miniplayer[data-collapsed="true"] .ss-mini-actions { display: none; }
+  .ss-miniplayer[data-collapsed="true"] .ss-mini-actions,
+  .ss-miniplayer[data-collapsed="true"] .ss-mini-quick { display: none; }
   .ss-mini-preview {
     position: relative;
     width: 76px;
@@ -2162,7 +2203,7 @@ const STUDIO_V3_STYLES = `
     cursor: pointer;
   }
   .ss-miniplayer[data-collapsed="true"] .ss-mini-preview { width: 100%; height: 100%; border: 0; }
-  .ss-mini-preview svg { width: 27px; height: 27px; fill: none; stroke: currentColor; }
+  .ss-mini-preview svg { width: 30px; height: 30px; fill: currentColor; stroke: none; }
   .ss-mini-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ss-mini-preview img[hidden] { display: none; }
   .ss-mini-live-dot {
@@ -2187,6 +2228,7 @@ const STUDIO_V3_STYLES = `
   .ss-miniplayer[data-indeterminate="true"] .ss-mini-fill { width: 38%; animation: ss-mini-indeterminate 1.1s ease-in-out infinite; }
   @keyframes ss-mini-indeterminate { 0% { transform: translateX(-115%); } 100% { transform: translateX(280%); } }
   .ss-mini-actions { display: grid; grid-template-columns: repeat(2, 26px); gap: 4px; }
+  .ss-miniplayer[data-expanded="true"] .ss-mini-actions { grid-template-columns: repeat(2, 28px); align-content: start; }
   .ss-mini-button {
     width: 26px;
     height: 26px;
@@ -2200,14 +2242,63 @@ const STUDIO_V3_STYLES = `
     cursor: pointer;
   }
   .ss-mini-button:hover { color: var(--lumiverse-text); border-color: var(--lumiverse-accent, var(--lumiverse-primary)); }
+  .ss-mini-button svg { width: 13px; height: 13px; fill: currentColor; }
   .ss-mini-button[data-action="mini-interrupt"] { color: #ff8b96; }
   .ss-mini-button[hidden] { display: none; }
+  .ss-mini-quick {
+    grid-column: 1 / -1;
+    min-height: 0;
+    display: none;
+    grid-template-rows: auto minmax(64px, 1fr) auto auto;
+    gap: 7px;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--lumiverse-border) 70%, transparent);
+  }
+  .ss-miniplayer[data-expanded="true"] .ss-mini-quick { display: grid; }
+  .ss-mini-quick-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .ss-mini-quick-head strong { font: 600 13px/1 Georgia, "Times New Roman", serif; }
+  .ss-mini-quick-head span { color: var(--lumiverse-text-muted); font-size: 8px; }
+  .ss-mini-prompt,
+  .ss-mini-negative {
+    width: 100%;
+    resize: none;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: var(--ss-control-radius, 8px);
+    color: var(--lumiverse-text);
+    background: color-mix(in srgb, var(--lumiverse-fill-subtle, #221b27) 90%, #000);
+    font: inherit;
+    line-height: 1.4;
+    outline: 0;
+  }
+  .ss-mini-prompt { min-height: 62px; padding: 8px 9px; font-size: 10px; }
+  .ss-mini-negative { height: 31px; padding: 6px 8px; font-size: 9px; }
+  .ss-mini-prompt:focus,
+  .ss-mini-negative:focus { border-color: var(--lumiverse-accent, var(--lumiverse-primary)); }
+  .ss-mini-quick-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+  .ss-mini-connection { overflow: hidden; color: var(--lumiverse-text-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-mini-generate {
+    min-height: 31px;
+    padding: 6px 13px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 55%, var(--lumiverse-border));
+    border-radius: var(--ss-control-radius, 8px);
+    color: color-mix(in srgb, var(--lumiverse-accent-contrast, #09080b) 92%, #000);
+    background: var(--lumiverse-accent, var(--lumiverse-primary));
+    font-size: 9px;
+    font-weight: 750;
+    cursor: pointer;
+  }
+  .ss-mini-generate:disabled { opacity: .48; cursor: not-allowed; }
 
   @media (max-width: 720px) {
     .ss-workflow-field-grid { grid-template-columns: 1fr; }
     .ss-workflow-field[data-wide="true"] { grid-column: auto; }
+    .ss-workflow-picker { grid-template-columns: minmax(0, 1fr) auto; }
+    .ss-workflow-configure { grid-column: 1 / -1; }
     .ss-miniplayer { grid-template-columns: 58px minmax(0, 1fr) auto; padding: 6px; }
     .ss-mini-preview { width: 58px; height: 58px; }
+    .ss-miniplayer[data-expanded="true"] { grid-template-columns: 60px minmax(0, 1fr) auto; }
+    .ss-workflow-modal { padding: 8px; place-items: stretch; }
+    .ss-workflow-modal-card { width: 100%; max-height: calc(100dvh - 16px); }
   }
 
   @media (max-width: 470px) {
@@ -2402,6 +2493,24 @@ export function outputLibraryPageSize(viewportWidth: number): number {
   return viewportWidth <= 720 ? 15 : 30
 }
 
+export function quickGenerationParameters(defaults: Record<string, unknown> = {}): Record<string, unknown> {
+  const numberDefault = (key: string, fallback: number): number => {
+    const value = Number(defaults[key])
+    return Number.isFinite(value) ? value : fallback
+  }
+  return {
+    width: clamp(numberDefault("width", 1024), 64, 4096),
+    height: clamp(numberDefault("height", 1024), 64, 4096),
+    steps: clamp(numberDefault("steps", 20), 1, 150),
+    cfgScale: clamp(numberDefault("cfgScale", numberDefault("cfg_scale", 7)), 1, 30),
+    seed: -1,
+    sampler: String(defaults.sampler || "") || undefined,
+    scheduler: String(defaults.scheduler || "") || undefined,
+    loras: [],
+    loraWeights: [],
+  }
+}
+
 const ASPECT_PRESETS: Record<string, { label: string; width: number; height: number }> = {
   "1:1": { label: "Square · 1:1", width: 1024, height: 1024 },
   "2:3": { label: "Portrait · 2:3", width: 832, height: 1216 },
@@ -2558,6 +2667,7 @@ interface StudioActivitySnapshot {
   jobId: string
   connectionId: string
   preview: string
+  latestImage: CurrentImage | null
   step: number
   totalSteps: number
   status: string
@@ -2569,12 +2679,17 @@ class MiniPlayerController {
   private readonly root: HTMLElement
   private readonly openStudio: () => void
   private collapsed = false
+  private expanded = false
+  private quickConnection: any | null = null
+  private quickPending: GenerationDetails | null = null
+  private readonly bootstrapRequestId = crypto.randomUUID()
   private state: "idle" | "running" | "done" | "error" = "idle"
   private snapshotValue: StudioActivitySnapshot = {
     active: false,
     jobId: "",
     connectionId: "",
     preview: "",
+    latestImage: null,
     step: 0,
     totalSteps: 0,
     status: "Ready when inspiration hits.",
@@ -2586,14 +2701,17 @@ class MiniPlayerController {
     this.root = widget.root
     this.openStudio = openStudio
     try {
-      this.collapsed = JSON.parse(window.localStorage.getItem(MINIPLAYER_STORAGE_KEY) || "{}").collapsed === true
+      const stored = JSON.parse(window.localStorage.getItem(MINIPLAYER_STORAGE_KEY) || "{}")
+      this.collapsed = stored.collapsed === true
+      this.expanded = !this.collapsed && stored.expanded === true
     } catch {
       this.collapsed = false
+      this.expanded = false
     }
     this.root.innerHTML = `
-      <div class="ss-miniplayer" data-role="miniplayer" data-state="idle" data-collapsed="false" data-indeterminate="false">
+      <div class="ss-miniplayer" data-role="miniplayer" data-state="idle" data-collapsed="false" data-expanded="false" data-indeterminate="false">
         <button class="ss-mini-preview" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">
-          <span data-role="mini-placeholder">${STUDIO_ICON}</span>
+          <span data-role="mini-placeholder">${FRAME_WALL_ICON}</span>
           <img data-role="mini-image" alt="Latest Swarm Studio preview" hidden />
           <span class="ss-mini-live-dot" aria-hidden="true"></span>
         </button>
@@ -2605,7 +2723,17 @@ class MiniPlayerController {
         <div class="ss-mini-actions">
           <button class="ss-mini-button" data-action="mini-interrupt" title="Interrupt generation" aria-label="Interrupt generation" hidden>■</button>
           <button class="ss-mini-button" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">↗</button>
+          <button class="ss-mini-button" data-action="mini-expand" title="Open quick create" aria-label="Open quick create">⛶</button>
           <button class="ss-mini-button" data-action="mini-collapse" title="Collapse miniplayer" aria-label="Collapse miniplayer">−</button>
+        </div>
+        <div class="ss-mini-quick" data-role="mini-quick">
+          <div class="ss-mini-quick-head"><strong>Quick create</strong><span>Scene tools will live here, too.</span></div>
+          <textarea class="ss-mini-prompt" data-role="mini-prompt" placeholder="Describe a quick image…" aria-label="Quick image prompt"></textarea>
+          <input class="ss-mini-negative" data-role="mini-negative" placeholder="Negative prompt (optional)" aria-label="Quick negative prompt" />
+          <div class="ss-mini-quick-actions">
+            <span class="ss-mini-connection" data-role="mini-connection">Finding Lumiverse’s SwarmUI connection…</span>
+            <button class="ss-mini-generate" data-action="mini-generate" disabled>Generate quick image</button>
+          </div>
         </div>
       </div>
     `
@@ -2616,8 +2744,11 @@ class MiniPlayerController {
       if (action === "mini-open") this.openStudio()
       if (action === "mini-interrupt") this.interrupt()
       if (action === "mini-collapse") this.setCollapsed(!this.collapsed)
+      if (action === "mini-expand") this.setExpanded(!this.expanded)
+      if (action === "mini-generate") this.quickGenerate()
     })
     this.setCollapsed(this.collapsed)
+    if (this.expanded) this.setExpanded(true)
     this.render()
   }
 
@@ -2627,6 +2758,10 @@ class MiniPlayerController {
 
   snapshot(): StudioActivitySnapshot {
     return { ...this.snapshotValue }
+  }
+
+  bootstrap(): void {
+    this.ctx.sendToBackend({ type: "bootstrap", requestId: this.bootstrapRequestId })
   }
 
   begin(jobId: string, connectionId: string, label = "Preparing SwarmUI generation…"): void {
@@ -2662,8 +2797,17 @@ class MiniPlayerController {
     this.render()
   }
 
-  complete(jobId: string, imageSrc: string): void {
+  complete(jobId: string, data: any): void {
     if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return
+    const imageSrc = String(data?.result?.imageDataUrl || data?.result?.imageUrl || "")
+    const details = (data?.record || this.quickPending || null) as GenerationDetails | null
+    const latestImage: CurrentImage | null = imageSrc ? {
+      id: String(data?.result?.imageId || data?.record?.imageId || "") || undefined,
+      src: imageSrc,
+      url: String(data?.result?.imageUrl || imageSrc),
+      label: `${String(data?.result?.model || details?.model || "SwarmUI")} · just generated`,
+      details,
+    } : this.snapshotValue.latestImage
     this.state = "done"
     this.snapshotValue = {
       ...this.snapshotValue,
@@ -2671,10 +2815,16 @@ class MiniPlayerController {
       jobId: "",
       connectionId: "",
       preview: imageSrc || this.snapshotValue.preview,
+      latestImage,
       step: 1,
       totalSteps: 1,
       status: "Generation complete · saved by Lumiverse",
     }
+    const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')
+    const negative = this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')
+    if (prompt && !prompt.value.trim() && details?.prompt) prompt.value = details.prompt
+    if (negative && !negative.value.trim() && details?.negativePrompt) negative.value = details.negativePrompt
+    this.quickPending = null
     this.render()
   }
 
@@ -2690,11 +2840,19 @@ class MiniPlayerController {
       totalSteps: 0,
       status: message || "Generation stopped.",
     }
+    this.quickPending = null
     this.render()
   }
 
   onMessage(payload: any): void {
     const data = payload?.data || {}
+    if (payload?.type === "bootstrap_result") {
+      const connections = Array.isArray(data.connections) ? data.connections : []
+      const swarmConnections = connections.filter((connection: any) => String(connection?.provider || "").toLowerCase() === "swarmui")
+      this.quickConnection = swarmConnections.find((connection: any) => connection?.is_default) || swarmConnections[0] || null
+      this.render()
+      return
+    }
     if (payload?.type === "generation_started") {
       this.begin(
         String(payload.clientJobId || ""),
@@ -2713,10 +2871,7 @@ class MiniPlayerController {
       return
     }
     if (payload?.type === "generation_result") {
-      this.complete(
-        String(payload.clientJobId || ""),
-        String(data.result?.imageDataUrl || data.result?.imageUrl || ""),
-      )
+      this.complete(String(payload.clientJobId || ""), data)
       return
     }
     if (payload?.type === "generation_interrupt_requested" && payload.clientJobId === this.snapshotValue.jobId) {
@@ -2768,22 +2923,122 @@ class MiniPlayerController {
     this.render()
   }
 
+  private quickGenerate(): void {
+    if (this.snapshotValue.active) return
+    const connection = this.quickConnection
+    const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')?.value.trim() || ""
+    const negativePrompt = this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')?.value.trim() || ""
+    if (!connection) {
+      this.state = "error"
+      this.snapshotValue.status = "No Lumiverse SwarmUI connection is available."
+      this.render()
+      return
+    }
+    if (!prompt) {
+      this.state = "error"
+      this.snapshotValue.status = "Give Quick create a prompt first."
+      this.render()
+      return
+    }
+    const parameters = quickGenerationParameters(connection.default_parameters || {})
+    const model = String(connection.model || "")
+    const clientJobId = crypto.randomUUID()
+    this.quickPending = {
+      prompt,
+      negativePrompt,
+      resolvedPrompt: prompt,
+      resolvedNegativePrompt: negativePrompt,
+      model,
+      parameters,
+      loras: [],
+      presets: [],
+      workflow: "",
+      createdAt: Date.now(),
+    }
+    this.begin(clientJobId, String(connection.id || ""), `Preparing quick image · ${model || "SwarmUI"}`)
+    this.ctx.sendToBackend({
+      type: "generate",
+      requestId: crypto.randomUUID(),
+      input: {
+        prompt,
+        negativePrompt: negativePrompt || undefined,
+        connection_id: connection.id,
+        model,
+        clientJobId,
+        parameters,
+      },
+      recordHints: {
+        resolvedPrompt: prompt,
+        resolvedNegativePrompt: negativePrompt,
+        presets: [],
+        workflow: "",
+        source: "miniplayer",
+      },
+    })
+  }
+
   private setCollapsed(value: boolean): void {
     this.collapsed = value
+    if (value) this.expanded = false
     try {
-      window.localStorage.setItem(MINIPLAYER_STORAGE_KEY, JSON.stringify({ collapsed: value }))
+      window.localStorage.setItem(MINIPLAYER_STORAGE_KEY, JSON.stringify({ collapsed: value, expanded: this.expanded }))
     } catch {
       // The active session can still use the chosen miniplayer size.
     }
     const mini = this.root.querySelector<HTMLElement>('[data-role="miniplayer"]')
-    if (mini) mini.dataset.collapsed = String(value)
-    this.widget.setSize(value ? 56 : (window.innerWidth <= 720 ? Math.min(318, window.innerWidth - 24) : 318), value ? 56 : (window.innerWidth <= 720 ? 72 : 94))
+    if (mini) {
+      mini.dataset.collapsed = String(value)
+      mini.dataset.expanded = String(this.expanded)
+    }
+    this.resizeWidget()
     const toggle = this.root.querySelector<HTMLButtonElement>('[data-action="mini-collapse"]')
     if (toggle) {
       toggle.textContent = value ? "+" : "−"
       toggle.title = value ? "Expand miniplayer" : "Collapse miniplayer"
       toggle.setAttribute("aria-label", toggle.title)
     }
+    if (!this.expanded) {
+      const expand = this.root.querySelector<HTMLButtonElement>('[data-action="mini-expand"]')
+      if (expand) {
+        expand.textContent = "⛶"
+        expand.title = "Open quick create"
+        expand.setAttribute("aria-label", expand.title)
+      }
+    }
+  }
+
+  private setExpanded(value: boolean): void {
+    this.expanded = value
+    if (value) this.collapsed = false
+    try {
+      window.localStorage.setItem(MINIPLAYER_STORAGE_KEY, JSON.stringify({ collapsed: this.collapsed, expanded: value }))
+    } catch {
+      // The active session can still use the chosen miniplayer size.
+    }
+    const mini = this.root.querySelector<HTMLElement>('[data-role="miniplayer"]')
+    if (mini) {
+      mini.dataset.collapsed = String(this.collapsed)
+      mini.dataset.expanded = String(value)
+    }
+    const toggle = this.root.querySelector<HTMLButtonElement>('[data-action="mini-expand"]')
+    if (toggle) {
+      toggle.textContent = value ? "▣" : "⛶"
+      toggle.title = value ? "Return to compact player" : "Open quick create"
+      toggle.setAttribute("aria-label", toggle.title)
+    }
+    this.resizeWidget()
+  }
+
+  private resizeWidget(): void {
+    if (this.collapsed) {
+      this.widget.setSize(56, 56)
+      return
+    }
+    if (this.expanded) {
+      this.widget.setSize(Math.min(430, window.innerWidth - 24), window.innerWidth <= 720 ? 304 : 270)
+      return
+    }
+    this.widget.setSize(window.innerWidth <= 720 ? Math.min(318, window.innerWidth - 24) : 318, window.innerWidth <= 720 ? 72 : 94)
   }
 
   private render(): void {
@@ -2795,6 +3050,7 @@ class MiniPlayerController {
       : this.state === "done" ? 100 : 0
     mini.dataset.state = this.state
     mini.dataset.collapsed = String(this.collapsed)
+    mini.dataset.expanded = String(this.expanded)
     mini.dataset.indeterminate = String(this.state === "running" && !hasTotal)
     mini.style.setProperty("--ss-mini-progress", `${percentage}%`)
     const labels = { idle: "Ready", running: "Live", done: "Done", error: "Stopped" }
@@ -2811,6 +3067,14 @@ class MiniPlayerController {
       placeholder.hidden = false
     }
     this.root.querySelector<HTMLButtonElement>('[data-action="mini-interrupt"]')!.hidden = !this.snapshotValue.active
+    const quickButton = this.root.querySelector<HTMLButtonElement>('[data-action="mini-generate"]')
+    if (quickButton) quickButton.disabled = this.snapshotValue.active || !this.quickConnection
+    const connection = this.root.querySelector<HTMLElement>('[data-role="mini-connection"]')
+    if (connection) {
+      connection.textContent = this.quickConnection
+        ? `${String(this.quickConnection.name || "SwarmUI")} · ${String(this.quickConnection.model || "connection default")}`
+        : "No Lumiverse SwarmUI connection found"
+    }
   }
 }
 
@@ -2855,6 +3119,12 @@ class StudioController {
       return
     }
     const inspector = this.root.querySelector<HTMLElement>('[data-role="inspector"]')
+    const workflow = this.root.querySelector<HTMLElement>('[data-role="workflow-modal"]')
+    if (workflow && !workflow.hidden) {
+      this.closeWorkflowSetup()
+      event.stopPropagation()
+      return
+    }
     if (inspector && !inspector.hidden) {
       this.closeInspector()
       event.stopPropagation()
@@ -2926,6 +3196,7 @@ class StudioController {
     document.addEventListener("keydown", this.handleKeyDown, true)
     this.setRunStatus("Loading Lumiverse connections…")
     const activitySnapshot = this.activity?.snapshot()
+    if (activitySnapshot?.latestImage) this.setCurrentImage(activitySnapshot.latestImage)
     if (activitySnapshot?.active) {
       this.generating = true
       this.currentJobId = activitySnapshot.jobId
@@ -3235,7 +3506,7 @@ class StudioController {
     this.root.innerHTML = `
       <div class="ss-shell" data-mobile-tab="create">
         <div class="ss-topbar">
-          <div class="ss-brand">${STUDIO_ICON}<span>Swarm Studio</span></div>
+          <div class="ss-brand">${FRAME_WALL_ICON}<span>Swarm Studio</span></div>
           <div class="ss-connection-wrap">
             <select class="ss-select ss-connection" data-role="connection" aria-label="SwarmUI connection">
               <option value="">Loading SwarmUI connections…</option>
@@ -3362,9 +3633,9 @@ are removed when CSS is applied.</pre>
                       </select>
                     </div>
                     <span class="ss-workflow-badge" data-role="workflow-badge" data-active="false">Native</span>
+                    <button class="ss-button ss-workflow-configure" data-action="open-workflow-setup" disabled>Setup</button>
                   </div>
                   <div class="ss-workflow-description" data-role="workflow-description">Use Swarm’s normal parameter pipeline, or select a saved Comfy workflow exposed to its Generate tab.</div>
-                  <div class="ss-workflow-fields" data-role="workflow-fields"></div>
                 </section>
                 <div class="ss-field ss-wide">
                   <label>Checkpoint</label>
@@ -3621,6 +3892,24 @@ are removed when CSS is applied.</pre>
           <button class="ss-button ss-button-primary ss-generate ss-mobile-generate" data-action="generate" disabled>Generate image</button>
         </div>
 
+        <div class="ss-workflow-modal" data-role="workflow-modal" hidden>
+          <section class="ss-workflow-modal-card" role="dialog" aria-modal="true" aria-labelledby="ss-workflow-modal-title">
+            <header class="ss-workflow-modal-head">
+              <div class="ss-workflow-modal-title">
+                <span class="ss-eyebrow">ComfyUI · Saved workflow</span>
+                <strong id="ss-workflow-modal-title" data-role="workflow-modal-title">Workflow setup</strong>
+              </div>
+              <button class="ss-icon-button" data-action="close-workflow-setup" aria-label="Close workflow setup">×</button>
+            </header>
+            <div class="ss-workflow-modal-description" data-role="workflow-modal-description">Exposed workflow parameters appear here.</div>
+            <div class="ss-workflow-fields" data-role="workflow-fields"></div>
+            <footer class="ss-workflow-modal-actions">
+              <button class="ss-button" data-action="use-standard-workflow">Use standard generation</button>
+              <button class="ss-button ss-button-primary" data-action="close-workflow-setup">Done</button>
+            </footer>
+          </section>
+        </div>
+
         <div class="ss-inspector" data-role="inspector" hidden>
           <div class="ss-inspector-stage" data-role="inspector-stage">
             <div class="ss-inspector-toolbar">
@@ -3863,6 +4152,12 @@ are removed when CSS is applied.</pre>
       if (action === "toggle-seed-mode") this.toggleSeedMode()
       if (action === "random-seed-mobile") this.useRandomSeed()
       if (action === "toggle-size-link") this.toggleSizeLink()
+      if (action === "open-workflow-setup") this.openWorkflowSetup()
+      if (action === "close-workflow-setup") this.closeWorkflowSetup()
+      if (action === "use-standard-workflow") {
+        this.get<HTMLSelectElement>('[data-role="workflow-select"]').value = ""
+        this.selectWorkflow("")
+      }
       if (action === "use-current-init" || action === "use-as-init") void this.useCurrentAsInit()
       if (action === "pick-init") this.get<HTMLInputElement>('[data-role="init-file"]').click()
       if (action === "clear-init") this.clearInitImage()
@@ -3968,6 +4263,7 @@ are removed when CSS is applied.</pre>
         this.state.selectedWorkflow = data as SwarmWorkflowDetails
         this.initializeWorkflowValues(this.state.selectedWorkflow)
         this.renderWorkflowControls()
+        this.openWorkflowSetup()
         this.setRunStatus(`Loaded workflow “${this.state.selectedWorkflow.name}”.`)
         break
       case "generation_started":
@@ -4326,6 +4622,7 @@ are removed when CSS is applied.</pre>
     this.workflowEnabled.clear()
     this.workflowImageValues.clear()
     if (!name) {
+      this.closeWorkflowSetup()
       this.renderWorkflowControls()
       this.setRunStatus("Using Swarm’s standard generation pipeline.")
       return
@@ -4340,6 +4637,8 @@ are removed when CSS is applied.</pre>
     badge.dataset.active = "true"
     badge.textContent = "Loading…"
     this.get<HTMLElement>('[data-role="workflow-description"]').textContent = summary.description || "Loading workflow controls from SwarmUI…"
+    this.get<HTMLElement>('[data-role="workflow-modal-title"]').textContent = summary.name
+    this.get<HTMLElement>('[data-role="workflow-modal-description"]').textContent = summary.description || "Loading exposed workflow parameters from SwarmUI…"
     const fields = this.get<HTMLElement>('[data-role="workflow-fields"]')
     fields.replaceChildren(element("div", "ss-workflow-loading", "Reading exposed workflow parameters…"))
     this.workflowRequestId = this.send("load_swarm_workflow", {
@@ -4364,9 +4663,15 @@ are removed when CSS is applied.</pre>
     const workflow = this.state.selectedWorkflow
     const badge = this.get<HTMLElement>('[data-role="workflow-badge"]')
     const description = this.get<HTMLElement>('[data-role="workflow-description"]')
+    const configure = this.get<HTMLButtonElement>('[data-action="open-workflow-setup"]')
+    const modalTitle = this.get<HTMLElement>('[data-role="workflow-modal-title"]')
+    const modalDescription = this.get<HTMLElement>('[data-role="workflow-modal-description"]')
     const root = this.get<HTMLElement>('[data-role="workflow-fields"]')
     root.replaceChildren()
     if (!workflow) {
+      configure.disabled = true
+      modalTitle.textContent = "Workflow setup"
+      modalDescription.textContent = "Select a saved SwarmUI workflow to edit the controls its author exposed."
       badge.dataset.active = "false"
       badge.textContent = "Native"
       description.textContent = this.state.workflowError
@@ -4375,11 +4680,15 @@ are removed when CSS is applied.</pre>
       return
     }
 
+    configure.disabled = false
+    modalTitle.textContent = workflow.name
     badge.dataset.active = "true"
     const customParameters = workflow.parameters.filter((parameter) => parameter.visible && !isWorkflowCoreParameter(parameter.id))
     badge.textContent = `Comfy · ${customParameters.length} extra`
     description.textContent = workflow.description
       || "Studio’s normal controls feed the recognized workflow inputs; workflow-specific inputs appear below."
+    modalDescription.textContent = workflow.description
+      || "Studio’s normal controls feed recognized roles. Only workflow-specific controls are listed below."
 
     if (!customParameters.length) {
       root.appendChild(element("div", "ss-empty", "This workflow uses Studio’s existing prompt and generation controls."))
@@ -4410,6 +4719,18 @@ are removed when CSS is applied.</pre>
       details.appendChild(grid)
       root.appendChild(details)
     }
+  }
+
+  private openWorkflowSetup(): void {
+    if (!this.state.selectedWorkflow) return
+    const modal = this.get<HTMLElement>('[data-role="workflow-modal"]')
+    modal.hidden = false
+    requestAnimationFrame(() => modal.querySelector<HTMLButtonElement>('[data-action="close-workflow-setup"]')?.focus())
+  }
+
+  private closeWorkflowSetup(): void {
+    const modal = this.root.querySelector<HTMLElement>('[data-role="workflow-modal"]')
+    if (modal) modal.hidden = true
   }
 
   private createWorkflowField(parameter: SwarmWorkflowParameter): HTMLElement {
@@ -6474,7 +6795,7 @@ export function setup(ctx: FrontendContext): () => void {
     headerTitle: "Swarm Studio",
     description: "Open the metadata-aware SwarmUI prompt and LoRA studio",
     keywords: ["image", "generation", "lora", "swarmui", "prompt", "studio"],
-    iconSvg: STUDIO_ICON,
+    iconSvg: FRAME_WALL_ICON,
   })
   launcher = element("div", "ss-launcher")
   launcher.dataset.theme = currentTheme
@@ -6505,7 +6826,7 @@ export function setup(ctx: FrontendContext): () => void {
   const inputAction = ctx.ui.registerInputBarAction({
     id: "open-swarm-studio",
     label: "Open Swarm Studio",
-    iconSvg: STUDIO_ICON,
+    iconSvg: FRAME_WALL_ICON,
     enabled: true,
   })
   const removeActionClick = inputAction.onClick(() => openStudio("studio"))
@@ -6525,6 +6846,7 @@ export function setup(ctx: FrontendContext): () => void {
     miniplayer?.onImageGenerationEvent("error", payload)
     activeStudio?.onImageGenerationEvent("error", payload)
   })
+  miniplayer?.bootstrap()
 
   return () => {
     activeStudio?.dispose()
