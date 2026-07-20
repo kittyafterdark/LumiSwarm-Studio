@@ -6,6 +6,8 @@ const secrets = new Map()
 const userFiles = new Map()
 const permissions = new Set(["image_gen", "cors_proxy", "images", "chats"])
 let imageDeleted = false
+let presetAdded = false
+let interruptRequested = false
 
 globalThis.spindle = {
   permissions: {
@@ -43,13 +45,19 @@ globalThis.spindle = {
     async getModels() {
       return [{ id: "base.safetensors", label: "Base" }]
     },
-    async generate(input) {
+    async *generateStream(input) {
       assert.deepEqual(input.parameters.loras, ["styles/ink.safetensors"])
       assert.equal(input.parameters.referenceImages[0].mimeType, "image/png")
       assert.equal(input.parameters.denoise, 0.55)
       assert.equal(input.owner_chat_id, "chat-1")
       assert.equal(input.owner_character_id, "char-1")
       assert.equal(input.clientJobId, "studio-job-1")
+      assert.equal(input.signal instanceof AbortSignal, true)
+      yield {
+        step: 4,
+        totalSteps: 20,
+        preview: "data:image/jpeg;base64,UFJFVklFVw==",
+      }
       return {
         imageDataUrl: "data:image/png;base64,QUJD",
         imageUrl: "/api/v1/image-gen/results/image-1",
@@ -164,8 +172,16 @@ globalThis.spindle = {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           list: [
-            { id: "sampler", values: ["euler", "dpmpp_2m_sde_gpu"] },
-            { id: "scheduler", values: ["normal", "beta57"] },
+            { id: "prompt", name: "Prompt", type: "text" },
+            { id: "negativeprompt", name: "Negative Prompt", type: "text" },
+            { id: "model", name: "Model", type: "model" },
+            { id: "width", name: "Width", type: "integer" },
+            { id: "height", name: "Height", type: "integer" },
+            { id: "steps", name: "Steps", type: "integer" },
+            { id: "cfgscale", name: "CFG Scale", type: "decimal" },
+            { id: "seed", name: "Seed", type: "integer" },
+            { id: "sampler", name: "Sampler", type: "dropdown", values: ["euler", "dpmpp_2m_sde_gpu"] },
+            { id: "scheduler", name: "Scheduler", type: "dropdown", values: ["normal", "beta57"] },
           ],
         }),
       }
@@ -176,15 +192,48 @@ globalThis.spindle = {
         statusText: "OK",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          presets: [{
-            title: "Cinematic",
-            description: "Film look",
-            param_map: {
-              prompt: "cinematic lighting, {value}",
-              negativeprompt: "{value}, flat lighting",
+          permissions: ["manage_presets"],
+          presets: [
+            {
+              title: "Cinematic",
+              description: "Film look",
+              param_map: {
+                prompt: "cinematic lighting, ink style, portrait",
+                negativeprompt: "blurry, flat lighting",
+              },
             },
-          }],
+            ...(presetAdded ? [{
+              title: "Studio Current",
+              description: "Saved by contract",
+              param_map: { prompt: "ink style, portrait" },
+            }] : []),
+          ],
         }),
+      }
+    }
+    if (url.endsWith("/API/AddNewPreset")) {
+      const body = JSON.parse(options.body)
+      assert.equal(body.title, "Studio Current")
+      assert.equal(body.param_map.prompt, "ink style, portrait")
+      assert.equal("unknown" in body.param_map, false)
+      presetAdded = true
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ success: true }),
+      }
+    }
+    if (url.endsWith("/API/InterruptAll")) {
+      const body = JSON.parse(options.body)
+      assert.equal(body.session_id, "session-1")
+      assert.equal(body.other_sessions, true)
+      interruptRequested = true
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ success: true }),
       }
     }
     if (url.endsWith("/API/ListImages")) {
@@ -199,6 +248,8 @@ globalThis.spindle = {
               sui_image_params: {
                 prompt: "cinematic lighting, ink style, portrait",
                 negativeprompt: "blurry, flat lighting",
+                original_prompt: "ink style, portrait",
+                original_negativeprompt: "blurry",
                 seed: 987654321,
               },
               sui_extra_data: {
@@ -263,7 +314,9 @@ assert.equal(connection.data.checkpoints[0].compatClass, "stable-diffusion-xl-v1
 assert.deepEqual(connection.data.swarmOptions.samplers, ["euler", "dpmpp_2m_sde_gpu"])
 assert.deepEqual(connection.data.swarmOptions.schedulers, ["normal", "beta57"])
 assert.equal(connection.data.swarmOptions.presets[0].title, "Cinematic")
-assert.equal(connection.data.swarmOptions.presets[0].paramMap.prompt, "cinematic lighting, {value}")
+assert.equal(connection.data.swarmOptions.presets[0].paramMap.prompt, "cinematic lighting, ink style, portrait")
+assert.equal(connection.data.swarmOptions.canManagePresets, true)
+assert.equal(connection.data.swarmOptions.parameters.some((parameter) => parameter.id === "prompt"), true)
 
 const savedStack = await request("save_stack_preset", {
   preset: {
@@ -325,6 +378,31 @@ assert.equal(generated.data.record.initImageLabel, "source.png")
 assert.equal(generated.data.record.parameters.seed, 987654321)
 assert.equal("referenceImages" in generated.data.record.parameters, false)
 assert.equal(generated.data.outputs[0].studioMetadata.imageId, "image-1")
+const progress = sent.find((entry) => entry.payload.type === "generation_progress")
+assert.equal(progress.payload.clientJobId, "studio-job-1")
+assert.equal(progress.payload.data.step, 4)
+assert.equal(progress.payload.data.totalSteps, 20)
+assert.equal(progress.payload.data.preview, "data:image/jpeg;base64,UFJFVklFVw==")
+
+const createdPreset = await request("add_swarm_preset", {
+  connectionId: "swarm-1",
+  title: "Studio Current",
+  description: "Saved by contract",
+  paramMap: {
+    prompt: "ink style, portrait",
+    width: 768,
+    unknown: "must be discarded",
+  },
+})
+assert.equal(createdPreset.data.title, "Studio Current")
+assert.equal(createdPreset.data.swarmOptions.presets.some((preset) => preset.title === "Studio Current"), true)
+
+const interrupted = await request("interrupt_generation", {
+  connectionId: "swarm-1",
+  clientJobId: "already-finished-job",
+})
+assert.equal(interrupted.data.interrupted, false)
+assert.equal(interruptRequested, true)
 
 const page = await request("refresh_outputs", { offset: 12, limit: 12 })
 assert.equal(page.data.offset, 12)

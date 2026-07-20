@@ -12,19 +12,19 @@ const {
 
 assert.deepEqual(dimensionsForAspect("1:1", 1024), { width: 1024, height: 1024 })
 assert.deepEqual(dimensionsForAspect("16:9", 1024), { width: 1344, height: 768 })
-assert.equal(applyPresetPrompt("portrait", "cinematic, {value}"), "cinematic, portrait")
-assert.equal(applyPresetPrompt("", "{value}, flat lighting"), "flat lighting")
+assert.equal(applyPresetPrompt("portrait", "cinematic masterpiece"), "cinematic masterpiece")
+assert.equal(applyPresetPrompt("", "flat lighting"), "flat lighting")
 assert.deepEqual(
   applyPresetStackPrompts(
     "portrait",
     "blurry",
     ["Cinematic", "Polish"],
     [
-      { title: "Cinematic", paramMap: { prompt: "cinematic, {value}", negativeprompt: "{value}, flat" } },
-      { title: "Polish", paramMap: { prompt: "{value}, detailed", negativeprompt: "messy, {value}" } },
+      { title: "Cinematic", paramMap: { prompt: "cinematic portrait", negativeprompt: "flat lighting" } },
+      { title: "Polish", paramMap: { prompt: "polished anime portrait", negativeprompt: "messy anatomy" } },
     ],
   ),
-  { prompt: "cinematic, portrait, detailed", negativePrompt: "messy, blurry, flat" },
+  { prompt: "polished anime portrait", negativePrompt: "messy anatomy" },
 )
 assert.deepEqual(fitAspectWithin(2, 1000, 300), { width: 600, height: 300 })
 assert.deepEqual(fitAspectWithin(0.5, 200, 1000), { width: 200, height: 400 })
@@ -67,6 +67,10 @@ assert.match(source, /data-tab="loras"/)
 assert.match(source, /data-tab="history"/)
 assert.doesNotMatch(source, /data-tab="prompt"/)
 assert.match(source, /data-action="toggle-fullscreen"/)
+assert.match(source, /data-action="change-orientation"/)
+assert.match(source, /data-action="toggle-seed-mode"/)
+assert.match(source, /"interrupt-generation"/)
+assert.match(source, /data-action="add-swarm-preset"/)
 assert.match(source, /data-action="save-stack"/)
 assert.match(source, /data-action="reuse-parameters"/)
 assert.match(source, /data-action="use-as-init"/)
@@ -102,6 +106,7 @@ assert.match(source, /data-resize="dock"/)
 assert.match(source, /data-resize="lora-split"/)
 assert.match(source, /data-resize="prompt"/)
 assert.match(source, /fitPreviewToAspect/)
+assert.match(source, /fitInspectorToSpace/)
 assert.match(source, /data-role="inspector-positive"/)
 assert.match(source, /@media \(max-width: 720px\)/)
 

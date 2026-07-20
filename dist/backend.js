@@ -12,6 +12,7 @@ const HISTORY_PAGE_SIZE = 12;
 const DEFAULT_SWARMUI_URL = "http://localhost:7801";
 const sessions = new Map();
 const previewCache = new Map();
+const generationControllers = new Map();
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -216,6 +217,17 @@ function parseSwarmPreset(value) {
         paramMap
     };
 }
+function parseSwarmParameter(value) {
+    const item = asRecord(value);
+    const id = asString(item.id).trim();
+    if (!id) return null;
+    return {
+        id,
+        name: asString(item.name).trim() || id,
+        type: asString(item.type).trim(),
+        description: asString(item.description).trim()
+    };
+}
 async function loadSwarmOptions(connection, token, userId) {
     const baseUrl = normalizeBaseUrl(connection.api_url);
     const sessionId = await getSession(connection, token, userId);
@@ -228,6 +240,7 @@ async function loadSwarmOptions(connection, token, userId) {
         }, token, "preset listing request")
     ]);
     const params = Array.isArray(paramsData.list) ? paramsData.list.map(asRecord) : [];
+    const userPermissions = stringList(userData.permissions).map((permission)=>permission.toLowerCase());
     const valuesFor = (id)=>{
         const parameter = params.find((item)=>asString(item.id).toLowerCase() === id);
         return stringList(parameter?.values);
@@ -235,7 +248,9 @@ async function loadSwarmOptions(connection, token, userId) {
     return {
         samplers: valuesFor("sampler"),
         schedulers: valuesFor("scheduler"),
-        presets: (Array.isArray(userData.presets) ? userData.presets : []).map(parseSwarmPreset).filter((item)=>Boolean(item))
+        presets: (Array.isArray(userData.presets) ? userData.presets : []).map(parseSwarmPreset).filter((item)=>Boolean(item)),
+        parameters: params.map(parseSwarmParameter).filter((item)=>Boolean(item)),
+        canManagePresets: userPermissions.includes("manage_presets")
     };
 }
 async function loadStackPresets(userId) {
@@ -493,6 +508,7 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
             const params = asRecord(metadata.sui_image_params);
             const extra = asRecord(metadata.sui_extra_data);
             return [
+                metadataString(params, "original_prompt", "originalprompt"),
                 metadataString(params, "prompt"),
                 metadataString(extra, "original_prompt", "originalprompt")
             ].some((prompt)=>requestedPrompt && prompt === requestedPrompt);
@@ -506,8 +522,8 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
             prep: metadataString(extra, "prep_time", "preptime"),
             generation: metadataString(extra, "generation_time", "generationtime") || fallback.generation,
             source: "swarm",
-            resolvedPrompt: metadataString(params, "prompt") || metadataString(extra, "original_prompt", "originalprompt") || fallback.resolvedPrompt,
-            resolvedNegativePrompt: metadataString(params, "negativeprompt", "negative_prompt") || metadataString(extra, "original_negative_prompt", "originalnegativeprompt") || fallback.resolvedNegativePrompt,
+            resolvedPrompt: metadataString(params, "prompt") || metadataString(params, "original_prompt", "originalprompt") || metadataString(extra, "original_prompt", "originalprompt") || fallback.resolvedPrompt,
+            resolvedNegativePrompt: metadataString(params, "negativeprompt", "negative_prompt") || metadataString(params, "original_negativeprompt", "original_negative_prompt", "originalnegativeprompt") || metadataString(extra, "original_negative_prompt", "originalnegativeprompt") || fallback.resolvedNegativePrompt,
             presets,
             swarmPath: asString(matched.file.src),
             resolvedSeed: metadataNumber(params, "seed") ?? fallback.resolvedSeed
@@ -515,6 +531,72 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
     } catch (error) {
         spindle.log.warn(`Could not read SwarmUI generation metadata: ${error instanceof Error ? error.message : String(error)}`);
         return fallback;
+    }
+}
+function generationKey(userId, clientJobId) {
+    return `${userId || "scoped"}\0${clientJobId}`;
+}
+function isAbortError(error) {
+    return error instanceof Error && (error.name === "AbortError" || /abort|interrupt|cancel/i.test(error.message));
+}
+async function generateWithProgress(input, controller, clientJobId, userId) {
+    const generationInput = {
+        ...input,
+        signal: controller.signal
+    };
+    const streamFactory = spindle.imageGen?.generateStream;
+    if (typeof streamFactory !== "function") {
+        return asRecord(await spindle.imageGen.generate(generationInput));
+    }
+    const iterator = await streamFactory.call(spindle.imageGen, generationInput);
+    if (!iterator || typeof iterator.next !== "function") {
+        throw new Error("Lumiverse returned an invalid image generation stream.");
+    }
+    let lastStep = 0;
+    let lastTotalSteps = 0;
+    let streamedResult = null;
+    while(true){
+        const next = await iterator.next();
+        if (next.done) {
+            const returned = asRecord(next.value);
+            if (Object.keys(returned).length) return returned;
+            if (streamedResult) return streamedResult;
+            throw new Error("Lumiverse's image generation stream ended without a final result.");
+        }
+        const chunk = asRecord(next.value);
+        const chunkData = asRecord(chunk.data);
+        const nestedResult = asRecord(chunk.result);
+        const dataResult = asRecord(chunkData.result);
+        const resultCandidate = Object.keys(nestedResult).length ? nestedResult : Object.keys(dataResult).length ? dataResult : /done|complete|result/i.test(asString(chunk.type)) ? Object.keys(chunkData).length ? chunkData : chunk : {};
+        if (typeof resultCandidate.imageDataUrl === "string" || typeof resultCandidate.imageUrl === "string" || typeof resultCandidate.imageId === "string") {
+            streamedResult = resultCandidate;
+        }
+        const step = metadataNumber(chunk, "step") ?? metadataNumber(chunkData, "step") ?? lastStep;
+        const totalSteps = metadataNumber(chunk, "totalSteps", "total_steps") ?? metadataNumber(chunkData, "totalSteps", "total_steps") ?? lastTotalSteps;
+        if (step) lastStep = step;
+        if (totalSteps) lastTotalSteps = totalSteps;
+        spindle.sendToFrontend({
+            type: "generation_progress",
+            clientJobId,
+            data: {
+                step,
+                totalSteps,
+                preview: metadataString(chunk, "preview", "imageDataUrl", "image_data_url") || metadataString(chunkData, "preview", "imageDataUrl", "image_data_url"),
+                nodeId: metadataString(chunk, "nodeId", "node_id") || metadataString(chunkData, "nodeId", "node_id")
+            }
+        }, userId);
+    }
+}
+async function interruptSwarmGeneration(connection, token, userId) {
+    if (!spindle.permissions.has("cors_proxy")) return;
+    try {
+        const sessionId = await getSession(connection, token, userId);
+        await corsJson(`${normalizeBaseUrl(connection.api_url)}/API/InterruptAll`, {
+            session_id: sessionId,
+            other_sessions: true
+        }, token, "generation interrupt request");
+    } catch (error) {
+        spindle.log.warn(`Could not send SwarmUI interrupt fallback: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 function headerValue(headers, name) {
@@ -638,7 +720,9 @@ async function loadConnection(connectionId, userId) {
     let swarmOptions = {
         samplers: [],
         schedulers: [],
-        presets: []
+        presets: [],
+        parameters: [],
+        canManagePresets: false
     };
     const metadataErrors = [];
     if (spindle.permissions.has("cors_proxy")) {
@@ -769,13 +853,39 @@ async function handleMessage(payload, userId) {
                     const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
                     const connection = await getConnection(asString(input.connection_id), userId);
                     const token = spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null;
+                    const clientJobId = asString(input.clientJobId).trim() || crypto.randomUUID();
+                    const controllerKey = generationKey(userId, clientJobId);
+                    const controller = new AbortController();
+                    const controllerEntry = {
+                        controller,
+                        nativeStream: typeof spindle.imageGen?.generateStream === "function"
+                    };
+                    generationControllers.set(controllerKey, controllerEntry);
                     const startedAt = Date.now();
-                    const result = await spindle.imageGen.generate({
-                        ...input,
-                        owner_chat_id: activeChat?.id || undefined,
-                        owner_character_id: activeChat?.character_id || undefined,
-                        userId
-                    });
+                    let result;
+                    try {
+                        result = await generateWithProgress({
+                            ...input,
+                            clientJobId,
+                            owner_chat_id: activeChat?.id || undefined,
+                            owner_character_id: activeChat?.character_id || undefined,
+                            userId
+                        }, controller, clientJobId, userId);
+                    } catch (error) {
+                        if (isAbortError(error) || controller.signal.aborted) {
+                            spindle.sendToFrontend({
+                                type: "generation_interrupted",
+                                requestId,
+                                clientJobId
+                            }, userId);
+                            return;
+                        }
+                        throw error;
+                    } finally{
+                        if (generationControllers.get(controllerKey)?.controller === controller) {
+                            generationControllers.delete(controllerKey);
+                        }
+                    }
                     const totalMs = Date.now() - startedAt;
                     const timing = await loadLatestSwarmGenerationMetadata(connection, token, input, totalMs, userId);
                     let record = null;
@@ -792,6 +902,72 @@ async function handleMessage(payload, userId) {
                             result,
                             record,
                             ...outputPage
+                        }
+                    }, userId);
+                    return;
+                }
+            case "interrupt_generation":
+                {
+                    const clientJobId = asString(payload?.clientJobId).trim();
+                    if (!clientJobId) throw new Error("No active generation was supplied.");
+                    const controllerEntry = generationControllers.get(generationKey(userId, clientJobId));
+                    controllerEntry?.controller.abort("Interrupted from Swarm Studio");
+                    const connectionId = asString(payload?.connectionId);
+                    if (connectionId && !controllerEntry?.nativeStream) {
+                        const connection = await getConnection(connectionId, userId);
+                        const token = spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null;
+                        await interruptSwarmGeneration(connection, token, userId);
+                    }
+                    spindle.sendToFrontend({
+                        type: "generation_interrupt_requested",
+                        requestId,
+                        clientJobId,
+                        data: {
+                            interrupted: Boolean(controllerEntry)
+                        }
+                    }, userId);
+                    return;
+                }
+            case "add_swarm_preset":
+                {
+                    const connectionId = asString(payload?.connectionId);
+                    const title = asString(payload?.title).trim().slice(0, 100);
+                    if (!title) throw new Error("Give the Swarm preset a name.");
+                    const connection = await getConnection(connectionId, userId);
+                    const token = await getMetadataToken(connectionId, userId);
+                    const options = await loadSwarmOptions(connection, token, userId);
+                    if (!options.canManagePresets) {
+                        throw new Error("Your SwarmUI account does not have permission to manage presets.");
+                    }
+                    const allowed = new Set(options.parameters.map((parameter)=>parameter.id.toLowerCase()));
+                    const requestedMap = asRecord(payload?.paramMap);
+                    const paramMap = {};
+                    for (const [key, value] of Object.entries(requestedMap)){
+                        if (!allowed.has(key.toLowerCase())) continue;
+                        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+                            paramMap[key] = String(value);
+                        }
+                    }
+                    if (!Object.keys(paramMap).length) {
+                        throw new Error("SwarmUI's schema did not expose any saveable parameters.");
+                    }
+                    const sessionId = await getSession(connection, token, userId);
+                    const response = await corsJson(`${normalizeBaseUrl(connection.api_url)}/API/AddNewPreset`, {
+                        session_id: sessionId,
+                        title,
+                        description: asString(payload?.description).trim().slice(0, 500),
+                        param_map: paramMap,
+                        is_edit: false,
+                        is_starred: false
+                    }, token, "preset creation request");
+                    const presetFailure = asString(response.preset_fail).trim();
+                    if (presetFailure) throw new Error(presetFailure);
+                    spindle.sendToFrontend({
+                        type: "swarm_preset_added",
+                        requestId,
+                        data: {
+                            title,
+                            swarmOptions: await loadSwarmOptions(connection, token, userId)
                         }
                     }, userId);
                     return;

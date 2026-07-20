@@ -90,6 +90,13 @@ interface SwarmPreset {
   paramMap: Record<string, string>
 }
 
+interface SwarmParameter {
+  id: string
+  name: string
+  type: string
+  description: string
+}
+
 interface SelectedPreset {
   title: string
   enabled: boolean
@@ -119,6 +126,8 @@ interface StudioState {
   stack: StackItem[]
   stackPresets: StackPreset[]
   swarmPresets: SwarmPreset[]
+  swarmParameters: SwarmParameter[]
+  canManagePresets: boolean
   selectedPresets: SelectedPreset[]
   samplers: string[]
   schedulers: string[]
@@ -153,6 +162,22 @@ const STUDIO_ICON = `
     <path d="M4 5.5h16v13H4z"/><path d="m7 15 3-3 2.2 2.2 2.3-2.8L18 15"/>
     <path d="M8 8.5h.01"/><path d="M17.5 2.8v4M15.5 4.8h4"/>
   </svg>
+`
+
+const PORTRAIT_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="m10 8 2-2 2 2M12 6v7"/></svg>
+`
+
+const LANDSCAPE_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="m16 10 2 2-2 2M18 12h-7"/></svg>
+`
+
+const RANDOM_SEED_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3c4 0 6 10 10 10h3M17 14l3 3-3 3M4 17h3c1.5 0 2.7-1.3 3.8-3M14 7c1-1.7 2-3 3-3h3M17 1l3 3-3 3"/><path d="M12 11.5h.01"/></svg>
+`
+
+const CURRENT_SEED_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/><path d="M17.5 3.5 20 1m-1 4h3"/></svg>
 `
 
 const STYLES = `
@@ -241,6 +266,15 @@ const STYLES = `
     border-color: transparent;
   }
   .ss-button-danger { color: #ef7777; }
+  .ss-generate.ss-button-danger {
+    color: #fff;
+    border-color: color-mix(in srgb, #ef4444 70%, var(--lumiverse-border));
+    background: color-mix(in srgb, #ef4444 72%, var(--lumiverse-fill));
+  }
+  .ss-generate.ss-button-danger:hover:not(:disabled) {
+    border-color: #fb7185;
+    background: color-mix(in srgb, #ef4444 84%, var(--lumiverse-fill));
+  }
   .ss-icon-button { min-width: 34px; padding: 6px 8px; }
   .ss-input, .ss-select, .ss-textarea {
     width: 100%;
@@ -709,6 +743,25 @@ const STUDIO_V3_STYLES = `
   .ss-generation-controls .ss-wide { grid-column: 1 / -1; }
   .ss-generation-controls .ss-inline-actions { align-items: center; }
   .ss-generation-controls .ss-inline-actions .ss-button { flex: 1; }
+  .ss-context-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .ss-context-button svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .ss-preset-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+  .ss-preset-picker .ss-button[hidden] { display: none; }
   .ss-aspect-controls {
     grid-column: 1 / -1;
     display: grid;
@@ -1101,8 +1154,8 @@ const STUDIO_V3_STYLES = `
     padding: 58px 28px 28px;
   }
   .ss-inspector-image {
-    max-width: 100%;
-    max-height: calc(100dvh - 92px);
+    max-width: none;
+    max-height: none;
     object-fit: contain;
     transform: scale(var(--ss-image-scale, 1));
     transform-origin: center;
@@ -1128,6 +1181,13 @@ const STUDIO_V3_STYLES = `
     padding: 18px;
     background: var(--lumiverse-fill-subtle);
   }
+  .ss-inspector-details-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+  }
+  .ss-inspector-details-head h3 { margin: 0 0 4px; }
   .ss-inspector-details h3 { margin: 0 0 4px; font-size: 15px; }
   .ss-inspector-details h4 { margin: 18px 0 6px; font-size: 10px; color: var(--lumiverse-text-muted); text-transform: uppercase; letter-spacing: .06em; }
   .ss-inspector-copy {
@@ -1150,6 +1210,11 @@ const STUDIO_V3_STYLES = `
     margin-top: 12px;
   }
   .ss-inspector-actions .ss-button-danger { grid-column: 1 / -1; }
+  .ss-inspector-actions [data-action="open-output-library"] {
+    grid-column: 1 / -1;
+    width: min(210px, 100%);
+    justify-self: center;
+  }
   .ss-inspector-path {
     margin-top: 10px;
     padding: 8px 9px;
@@ -1162,7 +1227,7 @@ const STUDIO_V3_STYLES = `
   }
   .ss-inspector-path[hidden] { display: none; }
   .ss-inspector-path code { color: var(--lumiverse-text); font: inherit; }
-  .ss-inspector-close { position: absolute; top: 12px; right: 12px; z-index: 2; }
+  .ss-inspector-close { position: static; z-index: 2; }
   .ss-output-library {
     position: fixed;
     inset: 0;
@@ -1473,7 +1538,7 @@ const STUDIO_V3_STYLES = `
       grid-template-rows: minmax(45dvh, 1fr) minmax(210px, 40dvh);
     }
     .ss-inspector-stage { padding: 52px 12px 16px; }
-    .ss-inspector-image { max-height: calc(60dvh - 70px); }
+    .ss-inspector-image { max-height: none; }
     .ss-inspector-details { border-left: 0; border-top: 1px solid var(--lumiverse-border); padding: 13px; }
     .ss-output-library {
       grid-template-columns: 1fr;
@@ -1584,10 +1649,7 @@ export function dimensionsForAspect(
 export function applyPresetPrompt(base: string, update: string): string {
   const cleanUpdate = String(update || "").trim()
   if (!cleanUpdate) return base
-  const resolved = cleanUpdate.includes("{value}")
-    ? cleanUpdate.replaceAll("{value}", base)
-    : cleanUpdate
-  return resolved.replace(/^[\s,;|]+|[\s,;|]+$/g, "").trim()
+  return cleanUpdate
 }
 
 export function applyPresetStackPrompts(
@@ -1721,6 +1783,7 @@ class StudioController {
   private generating = false
   private currentJobId = ""
   private pendingGeneration: GenerationDetails | null = null
+  private preGenerationImage: CurrentImage | null = null
   private imageScale = 1
   private previewAspect = 1
   private libraryFolderId = ""
@@ -1728,6 +1791,7 @@ class StudioController {
   private readonly libraryPageSize = 30
   private readonly librarySelection = new Set<string>()
   private outputResizeObserver: ResizeObserver | null = null
+  private inspectorResizeObserver: ResizeObserver | null = null
   private stopActiveResize: (() => void) | null = null
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
@@ -1764,6 +1828,8 @@ class StudioController {
       stack: [],
       stackPresets: [],
       swarmPresets: [],
+      swarmParameters: [],
+      canManagePresets: false,
       selectedPresets: [],
       samplers: [],
       schedulers: [],
@@ -1784,6 +1850,8 @@ class StudioController {
     if (typeof ResizeObserver !== "undefined") {
       this.outputResizeObserver = new ResizeObserver(() => this.fitPreviewToAspect())
       this.outputResizeObserver.observe(this.get<HTMLElement>('[data-role="output-stage"]'))
+      this.inspectorResizeObserver = new ResizeObserver(() => this.fitInspectorToSpace())
+      this.inspectorResizeObserver.observe(this.get<HTMLElement>('[data-role="inspector-stage"]'))
     }
     document.addEventListener("keydown", this.handleKeyDown, true)
     this.setRunStatus("Loading Lumiverse connections…")
@@ -1796,6 +1864,8 @@ class StudioController {
     this.previewObserver = null
     this.outputResizeObserver?.disconnect()
     this.outputResizeObserver = null
+    this.inspectorResizeObserver?.disconnect()
+    this.inspectorResizeObserver = null
     this.stopActiveResize?.()
     this.stopActiveResize = null
     document.removeEventListener("keydown", this.handleKeyDown, true)
@@ -2100,8 +2170,8 @@ class StudioController {
                   <select class="ss-select" data-role="scheduler"><option value="">Connection default</option></select>
                 </div>
                 <div class="ss-inline-actions ss-wide">
-                  <button class="ss-button" data-action="swap-size" title="Swap width and height">↔ Swap</button>
-                  <button class="ss-button" data-action="random-seed" title="Use a random seed">✦ Random seed</button>
+                  <button class="ss-button ss-context-button" data-action="change-orientation" data-role="orientation-action" title="Change image orientation">${PORTRAIT_ICON}<span>Make portrait</span></button>
+                  <button class="ss-button ss-context-button" data-action="toggle-seed-mode" data-role="seed-action" title="Reuse the current output seed">${CURRENT_SEED_ICON}<span>Use current seed</span></button>
                 </div>
                 <div class="ss-init-panel">
                   <div class="ss-init-preview" data-role="init-preview">No init</div>
@@ -2122,7 +2192,10 @@ class StudioController {
                 <div class="ss-advanced-grid">
                   <div class="ss-field ss-wide">
                     <label>Swarm preset stack</label>
-                    <select class="ss-select" data-role="presets"><option value="">Add a preset…</option></select>
+                    <div class="ss-preset-picker">
+                      <select class="ss-select" data-role="presets"><option value="">Add a preset…</option></select>
+                      <button class="ss-button" data-action="add-swarm-preset" data-role="add-swarm-preset" hidden>Save current</button>
+                    </div>
                     <div class="ss-preset-stack" data-role="preset-stack">
                       <div class="ss-empty ss-preset-empty">No presets selected.</div>
                     </div>
@@ -2292,7 +2365,6 @@ class StudioController {
         </div>
 
         <div class="ss-inspector" data-role="inspector" hidden>
-          <button class="ss-icon-button ss-inspector-close" data-action="close-inspector" aria-label="Close full-size image">×</button>
           <div class="ss-inspector-stage" data-role="inspector-stage">
             <div class="ss-inspector-toolbar">
               <button class="ss-icon-button" data-action="zoom-out" aria-label="Zoom out">−</button>
@@ -2303,8 +2375,13 @@ class StudioController {
             <img class="ss-inspector-image" data-role="inspector-image" alt="Full-size generated output" />
           </div>
           <aside class="ss-inspector-details">
-            <h3 data-role="inspector-title">Generated output</h3>
-            <div class="ss-muted ss-tiny">Full-size image and recorded generation settings</div>
+            <div class="ss-inspector-details-head">
+              <div>
+                <h3 data-role="inspector-title">Generated output</h3>
+                <div class="ss-muted ss-tiny">Full-size image and recorded generation settings</div>
+              </div>
+              <button class="ss-icon-button ss-inspector-close" data-action="close-inspector" aria-label="Close full-size image">×</button>
+            </div>
             <div class="ss-inspector-facts" data-role="inspector-facts"></div>
             <div class="ss-inspector-actions">
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
@@ -2378,6 +2455,7 @@ class StudioController {
     this.get<HTMLSelectElement>('[data-role="aspect"]').addEventListener("change", () => this.applyAspectSelection())
     this.get<HTMLInputElement>('[data-role="size-slider"]').addEventListener("input", () => this.applyAspectScale())
     this.get<HTMLInputElement>('[data-role="link-size"]').addEventListener("change", () => this.applyAspectSelection())
+    this.get<HTMLInputElement>('[data-role="seed"]').addEventListener("input", () => this.updateContextControls())
     this.get<HTMLInputElement>('[data-role="denoise"]').addEventListener("input", (event) => {
       this.get<HTMLElement>('[data-role="denoise-label"]').textContent =
         Number((event.currentTarget as HTMLInputElement).value).toFixed(2)
@@ -2395,11 +2473,13 @@ class StudioController {
       this.updateLinkedCustomDimension("width", Number((event.currentTarget as HTMLInputElement).value))
       updateRequestedAspect()
       this.updateSizeReadout()
+      this.updateContextControls()
     })
     this.get<HTMLInputElement>('[data-role="height"]').addEventListener("input", (event) => {
       this.updateLinkedCustomDimension("height", Number((event.currentTarget as HTMLInputElement).value))
       updateRequestedAspect()
       this.updateSizeReadout()
+      this.updateContextControls()
     })
     this.get<HTMLInputElement>('[data-role="init-file"]').addEventListener("change", (event) => {
       const input = event.currentTarget as HTMLInputElement
@@ -2456,8 +2536,8 @@ class StudioController {
       if (action === "save-token") this.saveToken()
       if (action === "clear-token") this.clearToken()
       if (action === "close-studio") this.modal.dismiss()
-      if (action === "swap-size") this.swapSize()
-      if (action === "random-seed") this.get<HTMLInputElement>('[data-role="seed"]').value = "-1"
+      if (action === "change-orientation") this.changeOrientation()
+      if (action === "toggle-seed-mode") this.toggleSeedMode()
       if (action === "use-current-init" || action === "use-as-init") void this.useCurrentAsInit()
       if (action === "pick-init") this.get<HTMLInputElement>('[data-role="init-file"]').click()
       if (action === "clear-init") this.clearInitImage()
@@ -2476,6 +2556,7 @@ class StudioController {
       if (action === "load-stack") this.loadStackPreset()
       if (action === "delete-stack") this.deleteStackPreset()
       if (action === "generate") this.generate()
+      if (action === "interrupt-generation") this.interruptGeneration()
       if (action === "refresh-outputs") this.refreshOutputs()
       if (action === "history-prev") this.changeHistoryPage(-1)
       if (action === "history-next") this.changeHistoryPage(1)
@@ -2497,6 +2578,7 @@ class StudioController {
       if (action === "preset-up") this.moveSelectedPreset(Number(button.dataset.presetIndex), -1)
       if (action === "preset-down") this.moveSelectedPreset(Number(button.dataset.presetIndex), 1)
       if (action === "preset-remove") this.removeSelectedPreset(Number(button.dataset.presetIndex))
+      if (action === "add-swarm-preset") this.addSwarmPreset()
       if (action === "library-folder") {
         this.libraryFolderId = button.dataset.folderId || ""
         this.libraryPage = 0
@@ -2504,7 +2586,10 @@ class StudioController {
       }
       if (action === "zoom-in") this.setInspectorZoom(this.imageScale + 0.25)
       if (action === "zoom-out") this.setInspectorZoom(this.imageScale - 0.25)
-      if (action === "zoom-reset") this.setInspectorZoom(1)
+      if (action === "zoom-reset") {
+        this.setInspectorZoom(1)
+        this.fitInspectorToSpace()
+      }
     })
   }
 
@@ -2573,8 +2658,45 @@ class StudioController {
           })
         }
         this.pendingGeneration = null
+        this.preGenerationImage = null
         this.renderOutputs()
         this.setRunStatus("Generation complete. Output saved to Lumiverse.")
+        break
+      case "generation_progress": {
+        if (!this.currentJobId || payload.clientJobId !== this.currentJobId) break
+        const step = Number.isFinite(data.step) ? Number(data.step) : 0
+        const totalSteps = Number.isFinite(data.totalSteps) ? Number(data.totalSteps) : 0
+        if (typeof data.preview === "string" && data.preview) {
+          this.showLivePreview(data.preview, step, totalSteps)
+        }
+        this.setRunStatus(
+          totalSteps > 0
+            ? `Rendering ${step} / ${totalSteps} · ${Math.round((step / totalSteps) * 100)}%`
+            : "Rendering live preview…",
+        )
+        break
+      }
+      case "generation_interrupt_requested":
+        if (payload.clientJobId === this.currentJobId) {
+          this.setRunStatus("Interrupt requested — stopping SwarmUI…")
+        }
+        break
+      case "generation_interrupted":
+        if (!payload.clientJobId || payload.clientJobId === this.currentJobId) {
+          this.generating = false
+          this.currentJobId = ""
+          this.pendingGeneration = null
+          this.setGenerating(false)
+          if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
+          else this.clearCurrentImage()
+          this.preGenerationImage = null
+          this.setRunStatus("Generation interrupted. Your previous output is still safe.")
+        }
+        break
+      case "swarm_preset_added":
+        this.acceptSwarmOptions(data.swarmOptions)
+        this.addSelectedPreset(String(data.title || ""))
+        this.setRunStatus(`Saved and selected Swarm preset “${data.title}”.`)
         break
       case "outputs_result":
         this.acceptOutputPage(data)
@@ -2639,6 +2761,8 @@ class StudioController {
           this.currentJobId = ""
           this.pendingGeneration = null
           this.setGenerating(false)
+          if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
+          this.preGenerationImage = null
         }
         this.setConnectionStatus("error")
         this.setRunStatus(payload.error || "Swarm Studio request failed.", true)
@@ -2675,6 +2799,8 @@ class StudioController {
     this.generating = false
     this.currentJobId = ""
     this.setGenerating(false)
+    if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
+    this.preGenerationImage = null
     this.setRunStatus(payload?.message || "Image generation failed.", true)
   }
 
@@ -2720,6 +2846,8 @@ class StudioController {
     this.state.checkpoints = []
     this.state.loras = []
     this.state.swarmPresets = []
+    this.state.swarmParameters = []
+    this.state.canManagePresets = false
     this.state.selectedPresets = []
     this.state.samplers = []
     this.state.schedulers = []
@@ -2778,6 +2906,8 @@ class StudioController {
       ? value.schedulers
       : fallbackSchedulers
     this.state.swarmPresets = Array.isArray(value?.presets) ? value.presets : []
+    this.state.swarmParameters = Array.isArray(value?.parameters) ? value.parameters : []
+    this.state.canManagePresets = Boolean(value?.canManagePresets)
     this.populateSimpleSelect("sampler", "Connection default", this.state.samplers, previousSampler)
     this.populateSimpleSelect("scheduler", "Connection default", this.state.schedulers, previousScheduler)
 
@@ -2793,6 +2923,11 @@ class StudioController {
       presetSelect.appendChild(option)
     }
     presetSelect.value = ""
+    const addPreset = this.get<HTMLButtonElement>('[data-role="add-swarm-preset"]')
+    addPreset.hidden = !this.state.canManagePresets || !this.state.swarmParameters.length
+    addPreset.title = addPreset.hidden
+      ? "SwarmUI did not expose preset-management permission and a usable parameter schema."
+      : "Save the current prompts and render controls as a SwarmUI preset"
     this.renderPresetStack()
   }
 
@@ -2815,6 +2950,46 @@ class StudioController {
     if (!Number.isInteger(index) || index < 0 || index >= this.state.selectedPresets.length) return
     this.state.selectedPresets.splice(index, 1)
     this.renderPresetStack()
+  }
+
+  private addSwarmPreset(): void {
+    if (!this.state.connection || !this.state.canManagePresets || !this.state.swarmParameters.length) return
+    const title = window.prompt("Name this SwarmUI preset:", "")?.trim()
+    if (!title) return
+    const description = window.prompt("Optional preset description:", "")?.trim() || ""
+    const schemaIds = new Map(
+      this.state.swarmParameters.map((parameter) => [parameter.id.toLowerCase(), parameter.id]),
+    )
+    const paramMap: Record<string, string> = {}
+    const add = (id: string, value: unknown) => {
+      const schemaId = schemaIds.get(id.toLowerCase())
+      if (!schemaId || value === undefined || value === null || String(value).trim() === "") return
+      paramMap[schemaId] = String(value)
+    }
+    add("prompt", this.get<HTMLTextAreaElement>('[data-role="positive"]').value.trim())
+    add("negativeprompt", this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim())
+    add("model", this.get<HTMLSelectElement>('[data-role="model"]').value)
+    add("width", Math.trunc(numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024)))
+    add("height", Math.trunc(numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024)))
+    add("steps", Math.trunc(numberValue(this.get<HTMLInputElement>('[data-role="steps"]'), 20)))
+    add("cfgscale", numberValue(this.get<HTMLInputElement>('[data-role="cfg"]'), 7))
+    add("seed", Math.trunc(numberValue(this.get<HTMLInputElement>('[data-role="seed"]'), -1)))
+    add("sampler", this.get<HTMLSelectElement>('[data-role="sampler"]').value)
+    add("scheduler", this.get<HTMLSelectElement>('[data-role="scheduler"]').value)
+    add("vae", this.get<HTMLInputElement>('[data-role="vae"]').value)
+    add("automaticvae", this.get<HTMLInputElement>('[data-role="vae"]').value)
+    add("refinermodel", this.get<HTMLInputElement>('[data-role="unet"]').value)
+    if (!Object.keys(paramMap).length) {
+      this.setRunStatus("SwarmUI's schema did not expose any of Studio's current controls.", true)
+      return
+    }
+    this.send("add_swarm_preset", {
+      connectionId: this.state.connection.id,
+      title,
+      description,
+      paramMap,
+    })
+    this.setRunStatus(`Saving SwarmUI preset “${title}”…`)
   }
 
   private renderPresetStack(): void {
@@ -2928,6 +3103,7 @@ class StudioController {
     )
     this.get<HTMLElement>('[data-role="denoise-label"]').textContent =
       Number(this.get<HTMLInputElement>('[data-role="denoise"]').value || .6).toFixed(2)
+    this.updateContextControls()
   }
 
   private setDimensions(width: number, height: number): void {
@@ -2955,6 +3131,7 @@ class StudioController {
     this.get<HTMLElement>('[data-role="custom-size"]').hidden = aspect.value !== "custom"
     this.updateSizeReadout()
     this.updatePreviewAspect(safeWidth, safeHeight)
+    this.updateContextControls()
   }
 
   private applyAspectSelection(): void {
@@ -2987,6 +3164,7 @@ class StudioController {
       this.updatePreviewAspect(width, height)
     }
     this.updateSizeReadout()
+    this.updateContextControls()
   }
 
   private updateLinkedCustomDimension(axis: "width" | "height", value: number): void {
@@ -3584,7 +3762,9 @@ class StudioController {
     const image = this.state.currentImage
     if (!image) return
     const inspector = this.get<HTMLElement>('[data-role="inspector"]')
-    this.get<HTMLImageElement>('[data-role="inspector-image"]').src = image.url || image.src
+    const inspectorImage = this.get<HTMLImageElement>('[data-role="inspector-image"]')
+    inspectorImage.onload = () => this.fitInspectorToSpace()
+    inspectorImage.src = image.url || image.src
     this.get<HTMLElement>('[data-role="inspector-title"]').textContent = image.label
     const details = image.details || null
     const parameters = details?.parameters || {}
@@ -3621,6 +3801,7 @@ class StudioController {
     this.get<HTMLButtonElement>('[data-action="delete-output"]').disabled = !image.id
     inspector.hidden = false
     this.setInspectorZoom(1)
+    requestAnimationFrame(() => this.fitInspectorToSpace())
   }
 
   private closeInspector(): void {
@@ -3630,7 +3811,27 @@ class StudioController {
   private setInspectorZoom(value: number): void {
     this.imageScale = clamp(value, 0.5, 4)
     this.get<HTMLImageElement>('[data-role="inspector-image"]').style.setProperty("--ss-image-scale", String(this.imageScale))
-    this.get<HTMLElement>('[data-role="zoom-label"]').textContent = `${Math.round(this.imageScale * 100)}%`
+    this.get<HTMLElement>('[data-role="zoom-label"]').textContent =
+      this.imageScale === 1 ? "Fit" : `${Math.round(this.imageScale * 100)}%`
+  }
+
+  private fitInspectorToSpace(): void {
+    const inspector = this.root.querySelector<HTMLElement>('[data-role="inspector"]')
+    if (!inspector || inspector.hidden) return
+    const stage = this.get<HTMLElement>('[data-role="inspector-stage"]')
+    const image = this.get<HTMLImageElement>('[data-role="inspector-image"]')
+    const recordedWidth = Number(this.state.currentImage?.details?.parameters?.width)
+    const recordedHeight = Number(this.state.currentImage?.details?.parameters?.height)
+    const naturalWidth = image.naturalWidth || recordedWidth
+    const naturalHeight = image.naturalHeight || recordedHeight
+    if (!naturalWidth || !naturalHeight || stage.clientWidth <= 0 || stage.clientHeight <= 0) return
+    const fitted = fitAspectWithin(
+      naturalWidth / naturalHeight,
+      Math.max(80, stage.clientWidth - 48),
+      Math.max(80, stage.clientHeight - 94),
+    )
+    image.style.width = `${Math.round(fitted.width)}px`
+    image.style.height = `${Math.round(fitted.height)}px`
   }
 
   private reuseCurrentParameters(): void {
@@ -3685,6 +3886,7 @@ class StudioController {
     this.renderStack()
     this.renderLoras()
     this.renderPresetStack()
+    this.updateContextControls()
     this.closeInspector()
     this.closeOutputLibrary()
     if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create")
@@ -4092,6 +4294,7 @@ class StudioController {
       initImageLabel: this.state.initImage?.label || "",
       createdAt: Date.now(),
     }
+    this.preGenerationImage = this.state.currentImage
     this.generating = true
     this.currentJobId = clientJobId
     this.setGenerating(true)
@@ -4152,9 +4355,13 @@ class StudioController {
   }
 
   private setGenerating(value: boolean): void {
-    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="generate"]')) {
-      button.disabled = value || !this.state.connection || !this.state.permissions.imageGen
-      button.textContent = value ? "Generating…" : "Generate image"
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>(".ss-generate")) {
+      button.disabled = !value && (!this.state.connection || !this.state.permissions.imageGen)
+      button.dataset.action = value ? "interrupt-generation" : "generate"
+      button.textContent = value ? "Interrupt generation" : "Generate image"
+      button.classList.toggle("ss-button-danger", value)
+      button.classList.toggle("ss-button-primary", !value)
+      button.title = value ? "Stop the active SwarmUI generation" : "Generate image"
     }
     if (value) {
       this.updatePreviewAspect(
@@ -4163,6 +4370,15 @@ class StudioController {
       )
     }
     this.get<HTMLElement>('[data-role="preview-loading"]').dataset.visible = String(value)
+  }
+
+  private interruptGeneration(): void {
+    if (!this.generating || !this.currentJobId || !this.state.connection) return
+    this.send("interrupt_generation", {
+      clientJobId: this.currentJobId,
+      connectionId: this.state.connection.id,
+    })
+    this.setRunStatus("Interrupt requested — stopping SwarmUI…")
   }
 
   private showLivePreview(src: string, step: number, totalSteps: number): void {
@@ -4304,6 +4520,7 @@ class StudioController {
     this.get<HTMLElement>('[data-role="output-label"]').textContent = image.label
     this.get<HTMLButtonElement>('[data-action="download-output"]').disabled = false
     this.get<HTMLButtonElement>('[data-action="copy-output"]').disabled = !image.url
+    this.updateContextControls()
   }
 
   private clearCurrentImage(): void {
@@ -4316,6 +4533,7 @@ class StudioController {
     this.get<HTMLElement>('[data-role="output-label"]').textContent = "Nothing selected"
     this.get<HTMLButtonElement>('[data-action="download-output"]').disabled = true
     this.get<HTMLButtonElement>('[data-action="copy-output"]').disabled = true
+    this.updateContextControls()
   }
 
   private downloadCurrent(): void {
@@ -4340,10 +4558,67 @@ class StudioController {
     }
   }
 
-  private swapSize(): void {
+  private changeOrientation(): void {
     const width = numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024)
     const height = numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024)
-    this.setDimensions(height, width)
+    const target: "portrait" | "landscape" = width >= height ? "portrait" : "landscape"
+    const aspect = this.get<HTMLSelectElement>('[data-role="aspect"]')
+    const reciprocal: Record<string, string> = {
+      "2:3": "3:2",
+      "3:2": "2:3",
+      "4:5": "5:4",
+      "5:4": "4:5",
+      "9:16": "16:9",
+      "16:9": "9:16",
+    }
+    if (aspect.value === "1:1") {
+      aspect.value = target === "portrait" ? "2:3" : "3:2"
+      this.applyAspectSelection()
+      return
+    }
+    const swappedPreset = reciprocal[aspect.value]
+    if (swappedPreset) {
+      aspect.value = swappedPreset
+      this.applyAspectSelection()
+      return
+    }
+    if (
+      (target === "portrait" && width >= height)
+      || (target === "landscape" && height >= width)
+    ) {
+      this.setDimensions(height, width)
+    }
+  }
+
+  private toggleSeedMode(): void {
+    const seed = this.get<HTMLInputElement>('[data-role="seed"]')
+    if (numberValue(seed, -1) === -1) {
+      const recordedSeed = Number(this.state.currentImage?.details?.parameters?.seed)
+      const fallback = crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff
+      seed.value = String(Number.isFinite(recordedSeed) && recordedSeed >= 0 ? Math.trunc(recordedSeed) : fallback)
+    } else {
+      seed.value = "-1"
+    }
+    this.updateContextControls()
+  }
+
+  private updateContextControls(): void {
+    const orientationButton = this.root.querySelector<HTMLButtonElement>('[data-role="orientation-action"]')
+    const seedButton = this.root.querySelector<HTMLButtonElement>('[data-role="seed-action"]')
+    if (!orientationButton || !seedButton) return
+    const width = numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024)
+    const height = numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024)
+    const makePortrait = width >= height
+    orientationButton.innerHTML = `${makePortrait ? PORTRAIT_ICON : LANDSCAPE_ICON}<span>${makePortrait ? "Make portrait" : "Make landscape"}</span>`
+    orientationButton.title = makePortrait
+      ? "Flip the current aspect ratio to portrait"
+      : "Flip the current aspect ratio to landscape"
+
+    const random = numberValue(this.get<HTMLInputElement>('[data-role="seed"]'), -1) === -1
+    seedButton.innerHTML = `${random ? CURRENT_SEED_ICON : RANDOM_SEED_ICON}<span>${random ? "Use current seed" : "Random seed"}</span>`
+    seedButton.title = random
+      ? "Lock to the current output's seed (or create a fixed seed if no output is selected)"
+      : "Set seed to -1 for a random generation"
   }
 
   private setConnectionStatus(status: "loading" | "ready" | "warning" | "error"): void {

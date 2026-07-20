@@ -7,17 +7,19 @@ It adds:
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
 - Positive and negative prompting, checkpoint selection, linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, model-component overrides, and raw request JSON
+- Context-aware orientation and seed actions that flip to the useful next state, with fixed-seed reuse from the selected output
 - A searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
 - Ordered LoRA stacking with per-item enable/disable, weights, opt-in trigger phrases, reorder controls, and reusable saved stack presets
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with resolved positive/negative prompts, preset and timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, and **Use as init image**
+- Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with per-image Reuse / Use as init / Delete menus
 - A fullscreen Lumiverse output library with reusable virtual folders, 30 images per page, and bulk folder/delete actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
-- Live SwarmUI/ComfyUI progress frames when Lumiverse includes the Spindle streaming bridge described below
+- Live SwarmUI/ComfyUI progress frames through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
 
 Generation itself goes through `spindle.imageGen.generate()`. That means it continues to use the SwarmUI connection, encrypted secret, persistence, and ownership behavior already managed by Lumiverse.
 
@@ -73,7 +75,10 @@ persisted Lumiverse image ID so History can show the prompts used by recent
 Swarm Studio outputs.
 
 The inspector records both the submitted prompts and, when SwarmUI exposes
-them, the final prompts after the ordered preset stack is applied. Choose
+them, the final prompts after the ordered preset stack is applied. Swarm preset
+parameter maps replace matching values in order—the last enabled preset that
+defines a prompt or negative prompt wins—so Studio does not invent local
+`{value}` templating. Choose
 presets from the dropdown to add them to a checklist, then enable, disable, or
 reorder them. **Reuse Parameters** restores the submitted prompt, ordered
 presets, checkpoint, render settings, LoRA stack, and the actual resolved seed
@@ -84,6 +89,11 @@ Swarm Studio reads sampler and scheduler choices from SwarmUI's
 `ListT2IParams` response and user presets from `GetMyUserData`. If those
 metadata calls are unavailable, the controls fall back to common values and
 generation remains available.
+
+When `ListT2IParams` exposes a usable schema and the SwarmUI account has
+`manage_presets`, **Save current** appears beside the preset selector. It saves
+the current prompts and recognized render controls through SwarmUI's
+`AddNewPreset` API, then selects the new preset in Studio.
 
 For newly generated images, Swarm Studio looks up SwarmUI's saved image
 metadata to display preparation time, generation time, preset names, resolved
@@ -119,32 +129,27 @@ assignment. When Swarm exposes the generated file path in image metadata, the
 inspector displays it below the recorded LoRA stack as a read-only saved-path
 reference.
 
-## Live generation previews
+## Live generation previews and interruption
 
-Lumiverse's built-in image sidebar already uses the provider's
-`generateStream()` implementation. Stock Lumiverse currently calls the
-non-streaming `provider.generate()` method for Spindle extensions, so this
-package includes `patches/lumiverse-spindle-live-preview.patch`. The patch
-changes that Spindle handler to:
+Swarm Studio prefers Lumiverse's `spindle.imageGen.generateStream()` API. It
+consumes each provider progress chunk (`step`, `totalSteps`, and `preview`) and
+uses the async generator's return value as the normal persisted result. The
+Generate button becomes **Interrupt generation** while a job is active; its
+AbortSignal stops the exact Spindle stream. On legacy no-stream Lumiverse
+builds, SwarmUI's user-scoped `InterruptAll` route is the compatibility
+fallback and may also stop another SwarmUI job running for the same user.
 
-- Prefer the same `generateStream()` implementation used by the sidebar.
-- Correlate progress with the extension's `clientJobId`.
-- Emit the existing `IMAGE_GEN_PROGRESS`, `IMAGE_GEN_COMPLETE`, and
-  `IMAGE_GEN_ERROR` WebSocket events.
-- Preserve the normal Lumiverse connection secret and image-persistence path.
-
-Swarm Studio automatically subscribes to those job-scoped events. Without the
-core patch it remains fully functional and falls back to its generating state
-followed by the final image.
-
-From the root of a Lumiverse source checkout, apply the bridge with:
+Older Lumiverse builds without `spindle.imageGen.generateStream()` still work
+through `spindle.imageGen.generate()`. The included
+`patches/lumiverse-spindle-live-preview.patch` remains available only for those
+legacy builds; it emits the job-scoped events Studio already understands:
 
 ```sh
 git apply /path/to/swarm-studio/patches/lumiverse-spindle-live-preview.patch
 ```
 
-Then rebuild/restart Lumiverse normally. The patch is intentionally limited to
-the existing Spindle image-generation handler and its developer documentation.
+Then rebuild/restart Lumiverse normally. Do not apply the patch when the native
+Spindle stream hook is already present.
 
 ## GitHub source installation
 
