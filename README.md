@@ -6,16 +6,17 @@ It adds:
 
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
-- Positive and negative prompting, checkpoint selection, linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, Swarm presets, model-component overrides, and raw request JSON
+- Positive and negative prompting, checkpoint selection, linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, model-component overrides, and raw request JSON
 - A searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
 - Ordered LoRA stacking with per-item enable/disable, weights, opt-in trigger phrases, reorder controls, and reusable saved stack presets
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
-- A click-to-zoom full-size output inspector with resolved positive/negative prompts, preset and timing pills, render settings, LoRA stack, **Reuse Parameters**, and **Use as init image**
+- A click-to-zoom full-size output inspector with resolved positive/negative prompts, preset and timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, and **Use as init image**
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
-- A paged, chat-scoped two-column history plus a fullscreen Lumiverse output library with reusable virtual folders
-- Lumiverse output deletion and a capability-aware action that asks SwarmUI to reveal the original file in its host output folder
+- A paged, chat-scoped two-column history with per-image Reuse / Use as init / Delete menus
+- A fullscreen Lumiverse output library with reusable virtual folders, 30 images per page, and bulk folder/delete actions
+- Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames when Lumiverse includes the Spindle streaming bridge described below
 
 Generation itself goes through `spindle.imageGen.generate()`. That means it continues to use the SwarmUI connection, encrypted secret, persistence, and ownership behavior already managed by Lumiverse.
@@ -38,6 +39,10 @@ Generation itself goes through `spindle.imageGen.generate()`. That means it cont
 
 4. Make sure Lumiverse already has a working **SwarmUI** image generation connection.
 5. Open **Swarm Studio** from its drawer tab or the chat input's Extras menu.
+
+If the Lumiverse connection leaves its API URL blank, Swarm Studio uses
+Lumiverse's SwarmUI default: `http://localhost:7801`. Any explicit connection
+URL still takes precedence.
 
 ## Authentication
 
@@ -68,9 +73,12 @@ persisted Lumiverse image ID so History can show the prompts used by recent
 Swarm Studio outputs.
 
 The inspector records both the submitted prompts and, when SwarmUI exposes
-them, the final prompts after a selected Swarm preset is applied. **Reuse
-Parameters** restores the submitted prompt, preset, checkpoint, render
-settings, and LoRA stack so the preset is not accidentally applied twice.
+them, the final prompts after the ordered preset stack is applied. Choose
+presets from the dropdown to add them to a checklist, then enable, disable, or
+reorder them. **Reuse Parameters** restores the submitted prompt, ordered
+presets, checkpoint, render settings, LoRA stack, and the actual resolved seed
+reported by SwarmUI so the next render is reproducible and presets are not
+accidentally applied twice.
 
 Swarm Studio reads sampler and scheduler choices from SwarmUI's
 `ListT2IParams` response and user presets from `GetMyUserData`. If those
@@ -99,18 +107,17 @@ image itself is deliberately excluded from stored generation metadata.
 
 History is scoped to the active chat and paged in groups of 12. The output
 library, opened with the grid button in History or from the inspector, can show
-up to 200 recent extension-owned Lumiverse images across chats.
+up to 200 recent extension-owned Lumiverse images across chats, paged in groups
+of 30. Select a page or individual cards to move many outputs into a virtual
+folder or delete them together.
 
 Folders are lightweight per-user collections stored by the extension; moving
 an output into one does not move or duplicate Lumiverse's underlying image
 asset. Deleting a folder leaves its images intact. **Delete from Lumiverse**
 deletes the actual owned image and removes its Swarm Studio metadata and folder
-assignment.
-
-**Open Swarm folder** is available only for newly tracked outputs with a Swarm
-path. It calls SwarmUI's `OpenImageFolder` endpoint and therefore also depends
-on SwarmUI granting that endpoint and running somewhere with access to a file
-explorer. It cannot open the Swarm host's filesystem directly from Lumiverse.
+assignment. When Swarm exposes the generated file path in image metadata, the
+inspector displays it below the recorded LoRA stack as a read-only saved-path
+reference.
 
 ## Live generation previews
 
