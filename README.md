@@ -6,10 +6,12 @@ It adds:
 
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
+- A one-tap mobile **Random seed** action directly below the Create tab's positive and negative prompts
 - A Lumiverse-native profile plus an automatic Custom state for component colors, panel geometry, opacity, blur, and CSS overrides
 - A full appearance editor with native component color pickers, border-radius, surface-opacity and backdrop-blur sliders, plus persisted custom CSS
 - A compact opaque settings panel containing appearance controls, metadata refresh, and the encrypted metadata token
 - Positive and negative prompting, checkpoint selection, chain-linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, model-component overrides, and raw request JSON
+- Saved SwarmUI/ComfyUI workflows presented as ordinary grouped controls: choose a workflow, edit the parameters its author exposed, upload workflow image inputs, and generate without touching the node graph
 - Context-aware orientation and seed actions that flip to the useful next state, with fixed-seed reuse from the selected output
 - A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
@@ -24,20 +26,26 @@ It adds:
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
+- A draggable Lumiverse float miniplayer that survives closing Studio, follows live previews and progress, opens the full workspace on click, and can interrupt the active generation directly
 
 Generation itself goes through `spindle.imageGen.generate()`. That means it continues to use the SwarmUI connection, encrypted secret, persistence, and ownership behavior already managed by Lumiverse.
 
 ## Install
 
-1. Copy this Repo's url
+1. Build the extension if you are installing from source (Node.js 23.6+):
 
-2. In Lumiverse, open **Extensions**, install the extension install, and enable it.
+   ```sh
+   npm run build
+   ```
+
+2. In Lumiverse, open **Extensions / Spindle**, install the extension folder or packaged archive, and enable it.
 3. Grant these permissions:
 
    - `image_gen` — connections, checkpoints, and generation
    - `cors_proxy` — direct SwarmUI LoRA metadata and preview requests, including local/private-network servers
    - `images` — the extension-owned output gallery
    - `chats` — tags outputs to the active chat and character
+   - `ui_panels` — the persistent generation miniplayer
 
 4. Make sure Lumiverse already has a working **SwarmUI** image generation connection.
 5. Open **Swarm Studio** from its drawer tab or the chat input's Extras menu.
@@ -47,6 +55,9 @@ Lumiverse's SwarmUI default: `http://localhost:7801`. Any explicit connection
 URL still takes precedence.
 
 ## Authentication
+
+Lumiverse correctly does not expose the saved connection secret to extensions. Swarm Studio therefore:
+
 - Uses Lumiverse's saved secret for actual generation.
 - Tries anonymous SwarmUI metadata access first.
 - If SwarmUI requires authentication for model metadata, accepts a metadata-only `swarm_token` from the modal. The token is stored per user in Lumiverse's AES-256-GCM secure enclave and is only sent to the configured SwarmUI origin.
@@ -100,6 +111,24 @@ Create tab above the positive and negative prompts.
 
 Preview images are fetched lazily from the configured SwarmUI origin. Cross-origin preview URLs are refused.
 
+## Saved Swarm workflows
+
+Swarm Studio reads saved workflow summaries from SwarmUI's
+`ComfyListWorkflows` endpoint and loads the selected workflow's exposed
+`custom_params` schema through `ComfyReadWorkflow`. This mirrors SwarmUI's
+**Use Workflow in Generate Tab** behavior: text, number, checkbox, dropdown,
+model, and image parameters become normal Studio controls, grouped and labeled
+by the workflow author. Parameters that Swarm already considers core generation
+controls continue to use Studio's existing prompt, model, size, step, CFG,
+sampler, scheduler, seed, LoRA, preset, and init-image fields.
+
+Studio selects the saved server-side graph with SwarmUI's
+`comfyuicustomworkflow` generation parameter and submits only the exposed
+values. It does not copy, rewrite, or persist the Comfy graph itself. Workflow
+image fields are encoded only for the active request and redacted from saved
+generation metadata. If workflow listing is unavailable, native Swarm image
+generation remains usable and the workflow picker explains the isolated error.
+
 ## Init images
 
 Choose a local image from the Generation tab or use any current/history output
@@ -149,3 +178,53 @@ sparkle are static CSS or inline SVG, with no animated or fetched assets.
 Metadata refresh and the optional encrypted `swarm_token` live in this same
 opaque gear panel.
 
+## Live generation previews and interruption
+
+Swarm Studio prefers Lumiverse's `spindle.imageGen.generateStream()` API. It
+consumes each provider progress chunk (`step`, `totalSteps`, and `preview`) and
+uses the async generator's return value as the normal persisted result. The
+Generate button becomes **Interrupt generation** while a job is active; its
+AbortSignal stops the exact Spindle stream. On legacy no-stream Lumiverse
+builds, SwarmUI's user-scoped `InterruptAll` route is the compatibility
+fallback and may also stop another SwarmUI job running for the same user.
+
+Older Lumiverse builds without `spindle.imageGen.generateStream()` still work
+through `spindle.imageGen.generate()`. The included
+`patches/lumiverse-spindle-live-preview.patch` remains available only for those
+legacy builds; it emits the job-scoped events Studio already understands:
+
+```sh
+git apply /path/to/swarm-studio/patches/lumiverse-spindle-live-preview.patch
+```
+
+Then rebuild/restart Lumiverse normally. Do not apply the patch when the native
+Spindle stream hook is already present.
+
+While a generation is active, the Lumiverse float miniplayer remains visible
+even if the Studio modal is closed. It shows the latest streamed preview,
+step-aware progress, and current workflow/model status. Its stop control targets
+the active client job; clicking the preview reopens Studio with the same live
+state. The collapsed/expanded preference is stored locally, while generation
+state itself stays in memory only for the current Lumiverse session.
+
+## GitHub source installation
+
+Keep `package.json` as valid JSON at the repository root and commit the compiled
+`dist/backend.js` and `dist/frontend.js` files. Lumiverse will install the
+dependency-free package and use the tracked prebuilt bundle.
+
+If an earlier source install failed during dependency installation, stop
+Lumiverse and remove its incomplete `data/extensions/swarm_studio` directory
+before retrying. The failed clone may otherwise leave stale files behind.
+
+## Development
+
+The project intentionally has no runtime dependencies. Its build script uses
+Node's built-in TypeScript type stripper, so it does not need a package install.
+
+```sh
+npm run build
+```
+
+The repository metadata in `spindle.json` points to
+`kittyafterdark/LumiSwarm-Studio`.

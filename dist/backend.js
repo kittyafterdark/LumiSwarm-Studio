@@ -228,16 +228,105 @@ function parseSwarmParameter(value) {
         description: asString(item.description).trim()
     };
 }
+function parseSwarmWorkflowSummary(value) {
+    const item = asRecord(value);
+    const name = asString(item.name).trim().slice(0, 500);
+    if (!name) return null;
+    return {
+        name,
+        image: asString(item.image).trim().slice(0, 2_000),
+        description: asString(item.description).trim().slice(0, 2_000),
+        enableInSimple: asBoolean(item.enable_in_simple)
+    };
+}
+function parseWorkflowJsonObject(value, label) {
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+    if (typeof value !== "string" || !value.trim()) return {};
+    try {
+        return asRecord(JSON.parse(value));
+    } catch  {
+        throw new Error(`SwarmUI returned invalid ${label} JSON.`);
+    }
+}
+function parseSwarmWorkflowParameter(value) {
+    const item = asRecord(value);
+    const id = asString(item.id).trim().slice(0, 500);
+    if (!id || id === "comfyworkflowraw" || id === "comfyworkflowparammetadata") return null;
+    const groupValue = asRecord(item.group);
+    const groupId = asString(groupValue.id).trim().slice(0, 200);
+    const groupName = asString(groupValue.name).trim().slice(0, 200);
+    const values = Array.isArray(item.values) ? item.values.slice(0, 2_000) : [];
+    return {
+        id,
+        name: asString(item.name).trim().slice(0, 300) || id,
+        type: asString(item.type).trim().toLowerCase().slice(0, 80) || "text",
+        description: asString(item.description).trim().slice(0, 2_000),
+        default: item.default,
+        values,
+        viewType: asString(item.view_type).trim().toLowerCase().slice(0, 80),
+        min: asNullableNumber(item.min),
+        max: asNullableNumber(item.max),
+        step: asNullableNumber(item.step),
+        visible: item.visible !== false,
+        toggleable: asBoolean(item.toggleable),
+        advanced: asBoolean(item.advanced) || asBoolean(groupValue.advanced),
+        imageAlwaysBase64: asBoolean(item.image_always_b64),
+        group: groupId || groupName ? {
+            id: groupId || groupName.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 200),
+            name: groupName || groupId,
+            description: asString(groupValue.description).trim().slice(0, 1_000),
+            open: asBoolean(groupValue.open),
+            advanced: asBoolean(groupValue.advanced),
+            canShrink: groupValue.can_shrink !== false,
+            toggles: asBoolean(groupValue.toggles)
+        } : null
+    };
+}
+async function listSwarmWorkflows(connection, token, sessionId) {
+    const data = await corsJson(`${normalizeBaseUrl(connection.api_url)}/API/ComfyListWorkflows`, {
+        session_id: sessionId
+    }, token, "workflow listing request");
+    return (Array.isArray(data.workflows) ? data.workflows : []).map(parseSwarmWorkflowSummary).filter((item)=>Boolean(item)).slice(0, 500);
+}
+async function loadSwarmWorkflow(connection, token, userId, requestedName) {
+    const name = requestedName.trim().slice(0, 500);
+    if (!name) throw new Error("Choose a saved Swarm workflow first.");
+    const sessionId = await getSession(connection, token, userId);
+    const available = await listSwarmWorkflows(connection, token, sessionId);
+    const summary = available.find((workflow)=>workflow.name === name);
+    if (!summary) throw new Error("That saved Swarm workflow is no longer available.");
+    const data = await corsJson(`${normalizeBaseUrl(connection.api_url)}/API/ComfyReadWorkflow`, {
+        session_id: sessionId,
+        name
+    }, token, "workflow detail request");
+    const result = asRecord(data.result);
+    const customParameters = parseWorkflowJsonObject(result.custom_params, "workflow parameter metadata");
+    const parameters = Object.values(customParameters).map(parseSwarmWorkflowParameter).filter((item)=>Boolean(item)).slice(0, 512);
+    return {
+        ...summary,
+        image: asString(result.image).trim().slice(0, 2_000) || summary.image,
+        description: asString(result.description).trim().slice(0, 2_000) || summary.description,
+        enableInSimple: typeof result.enable_in_simple === "boolean" ? result.enable_in_simple : summary.enableInSimple,
+        parameters
+    };
+}
 async function loadSwarmOptions(connection, token, userId) {
     const baseUrl = normalizeBaseUrl(connection.api_url);
     const sessionId = await getSession(connection, token, userId);
-    const [paramsData, userData] = await Promise.all([
+    const [paramsData, userData, workflowResult] = await Promise.all([
         corsJson(`${baseUrl}/API/ListT2IParams`, {
             session_id: sessionId
         }, token, "parameter options request"),
         corsJson(`${baseUrl}/API/GetMyUserData`, {
             session_id: sessionId
-        }, token, "preset listing request")
+        }, token, "preset listing request"),
+        listSwarmWorkflows(connection, token, sessionId).then((workflows)=>({
+                workflows,
+                error: ""
+            })).catch((error)=>({
+                workflows: [],
+                error: error instanceof Error ? error.message : String(error)
+            }))
     ]);
     const params = Array.isArray(paramsData.list) ? paramsData.list.map(asRecord) : [];
     const userPermissions = stringList(userData.permissions).map((permission)=>permission.toLowerCase());
@@ -250,7 +339,9 @@ async function loadSwarmOptions(connection, token, userId) {
         schedulers: valuesFor("scheduler"),
         presets: (Array.isArray(userData.presets) ? userData.presets : []).map(parseSwarmPreset).filter((item)=>Boolean(item)),
         parameters: params.map(parseSwarmParameter).filter((item)=>Boolean(item)),
-        canManagePresets: userPermissions.includes("manage_presets")
+        canManagePresets: userPermissions.includes("manage_presets"),
+        workflows: workflowResult.workflows,
+        workflowError: workflowResult.error
     };
 }
 async function loadStackPresets(userId) {
@@ -390,11 +481,29 @@ async function loadGenerationRecords(userId) {
     });
     return Array.isArray(value) ? value.slice(0, GENERATION_RECORD_LIMIT) : [];
 }
+function sanitizeRawOverrideForRecord(value) {
+    if (typeof value !== "string" || !value.trim()) return "";
+    try {
+        const parsed = asRecord(JSON.parse(value));
+        for (const [key, entry] of Object.entries(parsed)){
+            if (typeof entry === "string" && entry.startsWith("data:image/")) {
+                parsed[key] = "[workflow image omitted from history]";
+            }
+        }
+        const serialized = JSON.stringify(parsed);
+        return serialized.length <= 65_536 ? serialized : "[raw override omitted from history because it exceeded 64 KB]";
+    } catch  {
+        return value.slice(0, 65_536);
+    }
+}
 async function saveGenerationRecord(result, input, hints, timing, userId) {
     const rawParameters = asRecord(input.parameters);
     const { referenceImages: _referenceImages, resolvedSourceImages: _resolvedSourceImages, resolvedReferenceImages: _resolvedReferenceImages, ...parameters } = rawParameters;
     if (timing.resolvedSeed !== null && timing.resolvedSeed >= 0) {
         parameters.seed = Math.trunc(timing.resolvedSeed);
+    }
+    if (parameters.rawRequestOverride !== undefined) {
+        parameters.rawRequestOverride = sanitizeRawOverrideForRecord(parameters.rawRequestOverride);
     }
     const loraNames = Array.isArray(parameters.loras) ? parameters.loras.map(asString).filter(Boolean).slice(0, 64) : [];
     const loraWeights = Array.isArray(parameters.loraWeights) ? parameters.loraWeights.map(Number) : [];
@@ -412,6 +521,7 @@ async function saveGenerationRecord(result, input, hints, timing, userId) {
                 weight: Number.isFinite(loraWeights[index]) ? loraWeights[index] : 1
             })),
         presets: timing.presets.length ? timing.presets : stringList(hints.presets, 20),
+        workflow: asString(hints.workflow).trim().slice(0, 500),
         timing: {
             totalMs: Math.max(0, Math.round(timing.totalMs)),
             prep: timing.prep,
@@ -722,7 +832,9 @@ async function loadConnection(connectionId, userId) {
         schedulers: [],
         presets: [],
         parameters: [],
-        canManagePresets: false
+        canManagePresets: false,
+        workflows: [],
+        workflowError: ""
     };
     const metadataErrors = [];
     if (spindle.permissions.has("cors_proxy")) {
@@ -815,6 +927,21 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
+            case "load_swarm_workflow":
+                {
+                    if (!spindle.permissions.has("cors_proxy")) {
+                        throw new Error("Grant the CORS Proxy permission to load saved Swarm workflows.");
+                    }
+                    const connectionId = asString(payload?.connectionId);
+                    const connection = await getConnection(connectionId, userId);
+                    const token = await getMetadataToken(connectionId, userId);
+                    spindle.sendToFrontend({
+                        type: "swarm_workflow_result",
+                        requestId,
+                        data: await loadSwarmWorkflow(connection, token, userId, asString(payload?.name))
+                    }, userId);
+                    return;
+                }
             case "save_metadata_token":
                 {
                     const connectionId = asString(payload?.connectionId);
@@ -861,6 +988,14 @@ async function handleMessage(payload, userId) {
                         nativeStream: typeof spindle.imageGen?.generateStream === "function"
                     };
                     generationControllers.set(controllerKey, controllerEntry);
+                    spindle.sendToFrontend({
+                        type: "generation_started",
+                        clientJobId,
+                        data: {
+                            connectionId: connection.id,
+                            model: asString(input.model) || connection.model
+                        }
+                    }, userId);
                     const startedAt = Date.now();
                     let result;
                     try {
@@ -898,6 +1033,7 @@ async function handleMessage(payload, userId) {
                     spindle.sendToFrontend({
                         type: "generation_result",
                         requestId,
+                        clientJobId,
                         data: {
                             result,
                             record,
@@ -1113,6 +1249,7 @@ async function handleMessage(payload, userId) {
             requestId,
             operation: type,
             name: asString(payload?.name),
+            clientJobId: asString(payload?.clientJobId) || asString(asRecord(payload?.input).clientJobId),
             error: error instanceof Error ? error.message : String(error)
         }, userId);
     }

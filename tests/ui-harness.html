@@ -24,6 +24,7 @@
     .host-header strong { font-size: 14px; }
     .host-header button { border: 0; background: transparent; color: var(--lumiverse-text-muted); font-size: 22px; }
     .host-body { padding: 13px; overflow: hidden; }
+    .host-widget { position: fixed; right: 18px; bottom: 18px; z-index: 80; }
     #drawer { display: none; }
   </style>
 </head>
@@ -139,6 +140,23 @@
           let clickHandler = () => {}
           return { onClick(handler) { clickHandler = handler; return () => { clickHandler = () => {} } }, destroy() {} }
         },
+        createFloatWidget(options = {}) {
+          const root = document.createElement("div")
+          root.className = "host-widget"
+          root.style.width = `${options.width || 318}px`
+          root.style.height = `${options.height || 94}px`
+          document.body.appendChild(root)
+          return {
+            root,
+            setSize(width, height) {
+              root.style.width = `${width}px`
+              root.style.height = `${height}px`
+            },
+            setVisible(value) { root.hidden = !value },
+            isVisible() { return !root.hidden },
+            destroy() { root.remove() },
+          }
+        },
       },
       onBackendMessage(handler) { handlers.push(handler); return () => {} },
       events: { on() { return () => {} } },
@@ -187,14 +205,34 @@
                 { id: "scheduler", name: "Scheduler", type: "dropdown", description: "" },
               ],
               canManagePresets: true,
+              workflows: [
+                { name: "Studio/Inpaint Detail", image: "/workflow/inpaint", description: "Inpaint and detail pass with exposed mask, denoise, and finishing controls.", enableInSimple: true },
+                { name: "Studio/Upscale Polish", image: "/workflow/upscale", description: "Two-pass upscale and polish workflow.", enableInSimple: true },
+              ],
+              workflowError: "",
             },
             metadataError: "",
             hasMetadataToken: false,
           }})
         } else if (message.type === "preview") {
           later({ type: "preview_result", requestId: message.requestId, name: message.name, dataUrl: previewMap[message.name] })
+        } else if (message.type === "load_swarm_workflow") {
+          later({ type: "swarm_workflow_result", requestId: message.requestId, data: {
+            name: message.name,
+            image: "/workflow/inpaint",
+            description: "Inpaint and detail pass with exposed mask, denoise, and finishing controls.",
+            enableInSimple: true,
+            parameters: [
+              { id: "prompt", name: "Prompt", type: "text", description: "", default: "", values: [], viewType: "prompt", min: null, max: null, step: null, visible: true, toggleable: false, advanced: false, imageAlwaysBase64: false, group: null },
+              { id: "negativeprompt", name: "Negative Prompt", type: "text", description: "", default: "", values: [], viewType: "prompt", min: null, max: null, step: null, visible: true, toggleable: false, advanced: false, imageAlwaysBase64: false, group: null },
+              { id: "comfyrawworkflowinputdecimaldenoiseb", name: "Detail denoise", type: "decimal", description: "How freely the detail pass can redraw.", default: .42, values: [], viewType: "slider", min: 0, max: 1, step: .05, visible: true, toggleable: true, advanced: false, imageAlwaysBase64: false, group: { id: "detail-pass", name: "Detail pass", description: "Fine control over the second sampling pass.", open: true, advanced: false, canShrink: true, toggles: false } },
+              { id: "comfyrawworkflowinputdropdownupscalerc", name: "Upscaler", type: "dropdown", description: "Model used for the finishing upscale.", default: "4x-UltraSharp", values: ["4x-UltraSharp", "RealESRGAN_x4plus"], viewType: "normal", min: null, max: null, step: null, visible: true, toggleable: false, advanced: false, imageAlwaysBase64: false, group: { id: "detail-pass", name: "Detail pass", description: "Fine control over the second sampling pass.", open: true, advanced: false, canShrink: true, toggles: false } },
+              { id: "comfyrawworkflowinputintegerpassesd", name: "Finishing passes", type: "integer", description: "Additional finishing passes.", default: 1, values: [], viewType: "normal", min: 1, max: 4, step: 1, visible: true, toggleable: true, advanced: true, imageAlwaysBase64: false, group: { id: "finishing", name: "Finishing", description: "Optional final-stage controls.", open: false, advanced: true, canShrink: true, toggles: false } },
+            ],
+          }})
         } else if (message.type === "generate") {
           const generatedSource = svg("Generated now", "#134e5e", "#6f3f78")
+          const rawOverride = JSON.parse(message.input.parameters.rawRequestOverride || "{}")
           const record = {
             prompt: message.input.prompt,
             negativePrompt: message.input.negativePrompt || "",
@@ -204,6 +242,7 @@
             parameters: { ...message.input.parameters, seed: 123456789 },
             loras: message.input.parameters.loras.map((name, index) => ({ name, weight: message.input.parameters.loraWeights[index] })),
             presets: message.recordHints.presets,
+            workflow: message.recordHints.workflow || "",
             timing: { totalMs: 2340, prep: "0.27 sec", generation: "2.07 sec", source: "swarm" },
             swarmPath: "2026-07-19/generated-now.png",
             initImageId: message.recordHints.initImageId,
@@ -217,6 +256,13 @@
             studioMetadata: record,
           }
           historyOutputs = [generatedOutput, ...historyOutputs.filter((item) => item.id !== generatedOutput.id)]
+          later({ type: "generation_started", clientJobId: message.input.clientJobId, data: { connectionId: message.input.connection_id, model: message.input.model } })
+          setTimeout(() => later({ type: "generation_progress", clientJobId: message.input.clientJobId, data: {
+            step: 9,
+            totalSteps: 26,
+            preview: generatedSource,
+            workflow: rawOverride.comfyuicustomworkflow || "",
+          }}), 90)
           setTimeout(() => later({ type: "generation_result", requestId: message.requestId, data: {
             result: { imageId: generatedOutput.id, imageDataUrl: generatedSource, imageUrl: generatedSource, model: "anima-semi-v10.safetensors", provider: "swarmui" },
             record,

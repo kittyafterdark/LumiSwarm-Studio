@@ -36,6 +36,30 @@ const SPARKLE_ICON = `
 `;
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1";
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1";
+const MINIPLAYER_STORAGE_KEY = "swarm-studio-miniplayer-v1";
+const WORKFLOW_CORE_PARAMETERS = new Set([
+    "prompt",
+    "negativeprompt",
+    "model",
+    "width",
+    "height",
+    "steps",
+    "cfgscale",
+    "seed",
+    "sampler",
+    "scheduler",
+    "loras",
+    "loraweights",
+    "initimage",
+    "initimagecreativity",
+    "vae",
+    "cliplmodel",
+    "clipgmodel",
+    "txxlmodel",
+    "images",
+    "aspectratio",
+    "sidelength"
+]);
 const STUDIO_THEMES = [
     {
         id: "lumiverse",
@@ -1155,6 +1179,7 @@ const STUDIO_V3_STYLES = `
   .ss-prompt-actions { display: flex; align-items: center; gap: 7px; margin-left: auto; }
   .ss-desktop-generate { min-width: 155px; min-height: 30px; height: 30px; padding-block: 4px; }
   .ss-mobile-stack-picker { display: none; }
+  .ss-mobile-prompt-tools { display: none; }
   .ss-history-pane .ss-history-grid {
     min-height: 0;
     display: grid;
@@ -1730,6 +1755,18 @@ const STUDIO_V3_STYLES = `
       font-size: 9px;
     }
     .ss-mobile-stack-picker .ss-select { width: min(46vw, 210px); height: 30px; }
+    .ss-mobile-prompt-tools {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+    .ss-mobile-random-seed {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 34px;
+    }
+    .ss-mobile-random-seed svg { width: 15px; height: 15px; }
     .ss-generation-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ss-aspect-controls { grid-template-columns: 1fr; }
     .ss-custom-size { grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr); }
@@ -1819,6 +1856,171 @@ const STUDIO_V3_STYLES = `
       gap: 2.2vw;
       padding: 2.2vw;
     }
+  }
+
+  .ss-workflow-panel {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 7px;
+    padding: 9px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent) 24%, var(--ss-outline));
+    border-radius: var(--ss-control-radius);
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--lumiverse-accent) 7%, transparent), transparent 58%),
+      color-mix(in srgb, var(--ss-panel-bg) var(--ss-surface-opacity), transparent);
+  }
+  .ss-workflow-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: end; }
+  .ss-workflow-picker .ss-field { min-width: 0; }
+  .ss-workflow-badge {
+    min-height: 27px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border: 1px solid var(--ss-outline);
+    border-radius: var(--ss-control-radius);
+    color: var(--lumiverse-text-muted);
+    font-size: 9px;
+    white-space: nowrap;
+  }
+  .ss-workflow-badge[data-active="true"] {
+    color: var(--lumiverse-accent);
+    border-color: color-mix(in srgb, var(--lumiverse-accent) 55%, var(--ss-outline));
+  }
+  .ss-workflow-description { color: var(--lumiverse-text-muted); font-size: 9px; line-height: 1.45; }
+  .ss-workflow-description:empty { display: none; }
+  .ss-workflow-fields { display: grid; gap: 7px; }
+  .ss-workflow-fields:empty { display: none; }
+  .ss-workflow-group {
+    border-top: 1px solid color-mix(in srgb, var(--ss-outline) 72%, transparent);
+    padding-top: 7px;
+  }
+  .ss-workflow-group > summary {
+    cursor: pointer;
+    color: var(--lumiverse-text);
+    font-size: 10px;
+    font-weight: 700;
+    list-style-position: inside;
+  }
+  .ss-workflow-group-description { margin: 4px 0 0; color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-workflow-field-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding-top: 7px;
+  }
+  .ss-workflow-field { min-width: 0; display: grid; gap: 4px; align-content: start; }
+  .ss-workflow-field[data-wide="true"] { grid-column: 1 / -1; }
+  .ss-workflow-field-head { min-height: 17px; display: flex; align-items: center; gap: 6px; }
+  .ss-workflow-field-head label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-workflow-toggle { margin: 0 0 0 auto; accent-color: var(--lumiverse-accent); }
+  .ss-workflow-field[data-enabled="false"] > :not(.ss-workflow-field-head) { opacity: .42; pointer-events: none; }
+  .ss-workflow-image-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+  .ss-workflow-image-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-workflow-loading { display: flex; align-items: center; gap: 7px; color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-workflow-loading::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border: 2px solid color-mix(in srgb, var(--lumiverse-accent) 22%, transparent);
+    border-top-color: var(--lumiverse-accent);
+    border-radius: 999px;
+    animation: ss-spin .75s linear infinite;
+  }
+
+  .ss-miniplayer {
+    --ss-mini-progress: 0%;
+    width: 100%;
+    height: 100%;
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr) auto;
+    gap: 9px;
+    align-items: center;
+    padding: 8px;
+    overflow: hidden;
+    color: var(--lumiverse-text, #f5f3f7);
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 38%, var(--lumiverse-border));
+    border-radius: var(--ss-panel-radius, 14px);
+    background:
+      radial-gradient(circle at 8% 10%, color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 17%, transparent), transparent 44%),
+      color-mix(in srgb, var(--lumiverse-fill, #151118) var(--ss-surface-opacity, 96%), transparent);
+    box-shadow: 0 16px 45px rgba(0, 0, 0, .42), inset 0 1px rgba(255, 255, 255, .035);
+    backdrop-filter: blur(var(--ss-backdrop-blur, 12px));
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+  .ss-miniplayer[data-state="running"] {
+    border-color: color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 68%, var(--lumiverse-border));
+  }
+  .ss-miniplayer[data-collapsed="true"] {
+    display: grid;
+    grid-template-columns: 1fr;
+    place-items: center;
+    padding: 5px;
+    border-radius: 18px;
+  }
+  .ss-miniplayer[data-collapsed="true"] .ss-mini-copy,
+  .ss-miniplayer[data-collapsed="true"] .ss-mini-actions { display: none; }
+  .ss-mini-preview {
+    position: relative;
+    width: 76px;
+    height: 76px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 32%, var(--lumiverse-border));
+    border-radius: calc(var(--ss-control-radius, 9px) + 2px);
+    color: var(--lumiverse-accent, var(--lumiverse-primary));
+    background: color-mix(in srgb, var(--lumiverse-fill-subtle, #221b27) 88%, transparent);
+    cursor: pointer;
+  }
+  .ss-miniplayer[data-collapsed="true"] .ss-mini-preview { width: 100%; height: 100%; border: 0; }
+  .ss-mini-preview svg { width: 27px; height: 27px; fill: none; stroke: currentColor; }
+  .ss-mini-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ss-mini-preview img[hidden] { display: none; }
+  .ss-mini-live-dot {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--lumiverse-accent, var(--lumiverse-primary));
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, .45), 0 0 14px var(--lumiverse-accent, var(--lumiverse-primary));
+    opacity: 0;
+  }
+  .ss-miniplayer[data-state="running"] .ss-mini-live-dot { opacity: 1; animation: ss-mini-pulse 1.2s ease-in-out infinite; }
+  @keyframes ss-mini-pulse { 50% { transform: scale(.72); opacity: .55; } }
+  .ss-mini-copy { min-width: 0; display: grid; gap: 5px; }
+  .ss-mini-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; font-weight: 750; }
+  .ss-mini-state { color: var(--lumiverse-accent, var(--lumiverse-primary)); font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .ss-mini-status { overflow: hidden; color: var(--lumiverse-text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-mini-track { height: 4px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--lumiverse-border) 68%, transparent); }
+  .ss-mini-fill { width: var(--ss-mini-progress); height: 100%; display: block; border-radius: inherit; background: var(--lumiverse-accent, var(--lumiverse-primary)); transition: width .18s ease; }
+  .ss-miniplayer[data-indeterminate="true"] .ss-mini-fill { width: 38%; animation: ss-mini-indeterminate 1.1s ease-in-out infinite; }
+  @keyframes ss-mini-indeterminate { 0% { transform: translateX(-115%); } 100% { transform: translateX(280%); } }
+  .ss-mini-actions { display: grid; grid-template-columns: repeat(2, 26px); gap: 4px; }
+  .ss-mini-button {
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: var(--ss-control-radius, 8px);
+    color: var(--lumiverse-text-muted);
+    background: color-mix(in srgb, var(--lumiverse-fill-subtle, #221b27) 82%, transparent);
+    cursor: pointer;
+  }
+  .ss-mini-button:hover { color: var(--lumiverse-text); border-color: var(--lumiverse-accent, var(--lumiverse-primary)); }
+  .ss-mini-button[data-action="mini-interrupt"] { color: #ff8b96; }
+  .ss-mini-button[hidden] { display: none; }
+
+  @media (max-width: 720px) {
+    .ss-workflow-field-grid { grid-template-columns: 1fr; }
+    .ss-workflow-field[data-wide="true"] { grid-column: auto; }
+    .ss-miniplayer { grid-template-columns: 58px minmax(0, 1fr) auto; padding: 6px; }
+    .ss-mini-preview { width: 58px; height: 58px; }
   }
 
   @media (max-width: 470px) {
@@ -1976,6 +2178,9 @@ export function matchesKeywordQuery(query, values) {
         ]).map((value)=>String(value ?? "").toLowerCase()).join(" ");
     return keywords.every((keyword)=>haystack.includes(keyword));
 }
+export function isWorkflowCoreParameter(id) {
+    return WORKFLOW_CORE_PARAMETERS.has(String(id || "").toLowerCase().replace(/[^a-z0-9]+/g, ""));
+}
 export function outputLibraryPageSize(viewportWidth) {
     return viewportWidth <= 720 ? 15 : 30;
 }
@@ -2127,10 +2332,234 @@ function manualLora(name, title = "") {
         hash: ""
     };
 }
+class MiniPlayerController {
+    ctx;
+    widget;
+    root;
+    openStudio;
+    collapsed = false;
+    state = "idle";
+    snapshotValue = {
+        active: false,
+        jobId: "",
+        connectionId: "",
+        preview: "",
+        step: 0,
+        totalSteps: 0,
+        status: "Ready when inspiration hits."
+    };
+    constructor(ctx, widget, openStudio){
+        this.ctx = ctx;
+        this.widget = widget;
+        this.root = widget.root;
+        this.openStudio = openStudio;
+        try {
+            this.collapsed = JSON.parse(window.localStorage.getItem(MINIPLAYER_STORAGE_KEY) || "{}").collapsed === true;
+        } catch  {
+            this.collapsed = false;
+        }
+        this.root.innerHTML = `
+      <div class="ss-miniplayer" data-role="miniplayer" data-state="idle" data-collapsed="false" data-indeterminate="false">
+        <button class="ss-mini-preview" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">
+          <span data-role="mini-placeholder">${STUDIO_ICON}</span>
+          <img data-role="mini-image" alt="Latest Swarm Studio preview" hidden />
+          <span class="ss-mini-live-dot" aria-hidden="true"></span>
+        </button>
+        <div class="ss-mini-copy">
+          <div class="ss-mini-title"><span>Swarm Studio</span><span class="ss-mini-state" data-role="mini-state">Ready</span></div>
+          <div class="ss-mini-status" data-role="mini-status">Ready when inspiration hits.</div>
+          <div class="ss-mini-track"><span class="ss-mini-fill"></span></div>
+        </div>
+        <div class="ss-mini-actions">
+          <button class="ss-mini-button" data-action="mini-interrupt" title="Interrupt generation" aria-label="Interrupt generation" hidden>■</button>
+          <button class="ss-mini-button" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">↗</button>
+          <button class="ss-mini-button" data-action="mini-collapse" title="Collapse miniplayer" aria-label="Collapse miniplayer">−</button>
+        </div>
+      </div>
+    `;
+        this.root.addEventListener("click", (event)=>{
+            const button = event.target.closest("[data-action]");
+            if (!button) return;
+            const action = button.dataset.action;
+            if (action === "mini-open") this.openStudio();
+            if (action === "mini-interrupt") this.interrupt();
+            if (action === "mini-collapse") this.setCollapsed(!this.collapsed);
+        });
+        this.setCollapsed(this.collapsed);
+        this.render();
+    }
+    setAppearance(appearance) {
+        applyAppearanceVariables(this.root, appearance);
+    }
+    snapshot() {
+        return {
+            ...this.snapshotValue
+        };
+    }
+    begin(jobId, connectionId, label = "Preparing SwarmUI generation…") {
+        this.state = "running";
+        this.snapshotValue = {
+            ...this.snapshotValue,
+            active: true,
+            jobId,
+            connectionId,
+            step: 0,
+            totalSteps: 0,
+            status: label
+        };
+        if (this.collapsed) this.setCollapsed(false);
+        this.render();
+    }
+    progress(jobId, preview, step, totalSteps) {
+        if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return;
+        this.state = "running";
+        const hasTotal = Number.isFinite(totalSteps) && totalSteps > 0;
+        this.snapshotValue = {
+            ...this.snapshotValue,
+            active: true,
+            jobId: jobId || this.snapshotValue.jobId,
+            preview: preview || this.snapshotValue.preview,
+            step: Number.isFinite(step) ? Math.max(0, step) : 0,
+            totalSteps: hasTotal ? totalSteps : 0,
+            status: hasTotal ? `Rendering · ${Math.round(Math.max(0, step))} / ${Math.round(totalSteps)}` : "Preparing workflow…"
+        };
+        this.render();
+    }
+    complete(jobId, imageSrc) {
+        if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return;
+        this.state = "done";
+        this.snapshotValue = {
+            ...this.snapshotValue,
+            active: false,
+            jobId: "",
+            connectionId: "",
+            preview: imageSrc || this.snapshotValue.preview,
+            step: 1,
+            totalSteps: 1,
+            status: "Generation complete · saved by Lumiverse"
+        };
+        this.render();
+    }
+    fail(jobId, message) {
+        if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return;
+        this.state = "error";
+        this.snapshotValue = {
+            ...this.snapshotValue,
+            active: false,
+            jobId: "",
+            connectionId: "",
+            step: 0,
+            totalSteps: 0,
+            status: message || "Generation stopped."
+        };
+        this.render();
+    }
+    onMessage(payload) {
+        const data = payload?.data || {};
+        if (payload?.type === "generation_started") {
+            this.begin(String(payload.clientJobId || ""), String(data.connectionId || ""), `Preparing ${String(data.model || "SwarmUI")}…`);
+            return;
+        }
+        if (payload?.type === "generation_progress") {
+            this.progress(String(payload.clientJobId || ""), typeof data.preview === "string" ? data.preview : "", Number(data.step) || 0, Number(data.totalSteps) || 0);
+            return;
+        }
+        if (payload?.type === "generation_result") {
+            this.complete(String(payload.clientJobId || ""), String(data.result?.imageDataUrl || data.result?.imageUrl || ""));
+            return;
+        }
+        if (payload?.type === "generation_interrupt_requested" && payload.clientJobId === this.snapshotValue.jobId) {
+            this.snapshotValue.status = "Interrupt requested…";
+            this.render();
+            return;
+        }
+        if (payload?.type === "generation_interrupted") {
+            this.fail(String(payload.clientJobId || ""), "Generation interrupted · previous output kept");
+            return;
+        }
+        if (payload?.type === "studio_error" && payload.operation === "generate") {
+            this.fail(String(payload.clientJobId || ""), String(payload.error || "Generation failed."));
+        }
+    }
+    onImageGenerationEvent(type, payload) {
+        if (payload?.extensionIdentifier && payload.extensionIdentifier !== "swarm_studio") return;
+        const jobId = String(payload?.assetId || "");
+        if (this.snapshotValue.jobId && jobId && jobId !== this.snapshotValue.jobId) return;
+        if (type === "progress") {
+            this.progress(jobId, typeof payload?.preview === "string" ? payload.preview : "", Number(payload?.step) || 0, Number(payload?.totalSteps) || 0);
+        } else if (type === "complete") {
+            this.snapshotValue.status = "Rendering complete · saving full resolution…";
+            this.render();
+        } else {
+            this.fail(jobId, String(payload?.message || "Generation failed."));
+        }
+    }
+    destroy() {
+        this.widget.destroy();
+    }
+    interrupt() {
+        if (!this.snapshotValue.active || !this.snapshotValue.jobId) return;
+        this.ctx.sendToBackend({
+            type: "interrupt_generation",
+            requestId: crypto.randomUUID(),
+            clientJobId: this.snapshotValue.jobId,
+            connectionId: this.snapshotValue.connectionId
+        });
+        this.snapshotValue.status = "Interrupt requested…";
+        this.render();
+    }
+    setCollapsed(value) {
+        this.collapsed = value;
+        try {
+            window.localStorage.setItem(MINIPLAYER_STORAGE_KEY, JSON.stringify({
+                collapsed: value
+            }));
+        } catch  {}
+        const mini = this.root.querySelector('[data-role="miniplayer"]');
+        if (mini) mini.dataset.collapsed = String(value);
+        this.widget.setSize(value ? 56 : window.innerWidth <= 720 ? Math.min(318, window.innerWidth - 24) : 318, value ? 56 : window.innerWidth <= 720 ? 72 : 94);
+        const toggle = this.root.querySelector('[data-action="mini-collapse"]');
+        if (toggle) {
+            toggle.textContent = value ? "+" : "−";
+            toggle.title = value ? "Expand miniplayer" : "Collapse miniplayer";
+            toggle.setAttribute("aria-label", toggle.title);
+        }
+    }
+    render() {
+        const mini = this.root.querySelector('[data-role="miniplayer"]');
+        if (!mini) return;
+        const hasTotal = this.snapshotValue.totalSteps > 0;
+        const percentage = hasTotal ? clamp(Math.round(this.snapshotValue.step / this.snapshotValue.totalSteps * 100), 0, 100) : this.state === "done" ? 100 : 0;
+        mini.dataset.state = this.state;
+        mini.dataset.collapsed = String(this.collapsed);
+        mini.dataset.indeterminate = String(this.state === "running" && !hasTotal);
+        mini.style.setProperty("--ss-mini-progress", `${percentage}%`);
+        const labels = {
+            idle: "Ready",
+            running: "Live",
+            done: "Done",
+            error: "Stopped"
+        };
+        this.root.querySelector('[data-role="mini-state"]').textContent = labels[this.state];
+        this.root.querySelector('[data-role="mini-status"]').textContent = this.snapshotValue.status;
+        const image = this.root.querySelector('[data-role="mini-image"]');
+        const placeholder = this.root.querySelector('[data-role="mini-placeholder"]');
+        if (this.snapshotValue.preview) {
+            image.src = this.snapshotValue.preview;
+            image.hidden = false;
+            placeholder.hidden = true;
+        } else {
+            image.hidden = true;
+            placeholder.hidden = false;
+        }
+        this.root.querySelector('[data-action="mini-interrupt"]').hidden = !this.snapshotValue.active;
+    }
+}
 class StudioController {
     ctx;
     modal;
     root;
+    activity;
     onThemeChange;
     onAppearanceChange;
     appearance = defaultStudioAppearance();
@@ -2140,8 +2569,13 @@ class StudioController {
     previewCache = new Map();
     requestedPreviews = new Set();
     connectionRequestId = "";
+    workflowRequestId = "";
     generating = false;
     currentJobId = "";
+    currentJobConnectionId = "";
+    workflowValues = new Map();
+    workflowEnabled = new Set();
+    workflowImageValues = new Map();
     pendingGeneration = null;
     preGenerationImage = null;
     imageScale = 1;
@@ -2179,10 +2613,11 @@ class StudioController {
             event.stopPropagation();
         }
     };
-    constructor(ctx, modal, onThemeChange, onAppearanceChange){
+    constructor(ctx, modal, onThemeChange, onAppearanceChange, activity = null){
         this.ctx = ctx;
         this.modal = modal;
         this.root = modal.root;
+        this.activity = activity;
         this.onThemeChange = onThemeChange;
         this.onAppearanceChange = onAppearanceChange;
         this.state = {
@@ -2195,6 +2630,9 @@ class StudioController {
             stackPresets: [],
             swarmPresets: [],
             swarmParameters: [],
+            swarmWorkflows: [],
+            workflowError: "",
+            selectedWorkflow: null,
             canManagePresets: false,
             selectedPresets: [],
             samplers: [],
@@ -2221,6 +2659,18 @@ class StudioController {
         }
         document.addEventListener("keydown", this.handleKeyDown, true);
         this.setRunStatus("Loading Lumiverse connections…");
+        const activitySnapshot = this.activity?.snapshot();
+        if (activitySnapshot?.active) {
+            this.generating = true;
+            this.currentJobId = activitySnapshot.jobId;
+            this.currentJobConnectionId = activitySnapshot.connectionId;
+            this.setGenerating(true);
+            if (activitySnapshot.preview) {
+                this.showLivePreview(activitySnapshot.preview, activitySnapshot.step, activitySnapshot.totalSteps);
+            } else {
+                this.updateGenerationProgress(activitySnapshot.step, activitySnapshot.totalSteps);
+            }
+        }
         this.send("bootstrap");
     }
     dispose() {
@@ -2625,6 +3075,19 @@ are removed when CSS is applied.</pre>
             </div>
             <div class="ss-pane-body">
               <div class="ss-generation-controls">
+                <section class="ss-workflow-panel">
+                  <div class="ss-workflow-picker">
+                    <div class="ss-field">
+                      <label>Generation workflow</label>
+                      <select class="ss-select" data-role="workflow-select" aria-label="Saved Swarm generation workflow">
+                        <option value="">Standard Swarm generation</option>
+                      </select>
+                    </div>
+                    <span class="ss-workflow-badge" data-role="workflow-badge" data-active="false">Native</span>
+                  </div>
+                  <div class="ss-workflow-description" data-role="workflow-description">Use Swarm’s normal parameter pipeline, or select a saved Comfy workflow exposed to its Generate tab.</div>
+                  <div class="ss-workflow-fields" data-role="workflow-fields"></div>
+                </section>
                 <div class="ss-field ss-wide">
                   <label>Checkpoint</label>
                   <select class="ss-select" data-role="model"><option value="">Select a connection first</option></select>
@@ -2793,6 +3256,9 @@ are removed when CSS is applied.</pre>
                   <textarea id="ss-negative-v3" class="ss-textarea" data-role="negative" placeholder="What should not appear…"></textarea>
                   <div class="ss-field-help">Passed through Lumiverse's SwarmUI provider.</div>
                 </div>
+              </div>
+              <div class="ss-mobile-prompt-tools">
+                <button class="ss-button ss-mobile-random-seed" data-action="random-seed-mobile" title="Use a new random seed for the next generation">${RANDOM_SEED_ICON}<span>Random seed</span></button>
               </div>
             </section>
           </main>
@@ -3012,6 +3478,9 @@ are removed when CSS is applied.</pre>
             if (select.value) this.addSelectedPreset(select.value);
             select.value = "";
         });
+        this.get('[data-role="workflow-select"]').addEventListener("change", (event)=>{
+            this.selectWorkflow(event.currentTarget.value);
+        });
         const updateRequestedAspect = ()=>this.updatePreviewAspect(numberValue(this.get('[data-role="width"]'), 1024), numberValue(this.get('[data-role="height"]'), 1024));
         this.get('[data-role="width"]').addEventListener("input", (event)=>{
             this.updateLinkedCustomDimension("width", Number(event.currentTarget.value));
@@ -3106,6 +3575,7 @@ are removed when CSS is applied.</pre>
             if (action === "close-studio") this.modal.dismiss();
             if (action === "change-orientation") this.changeOrientation();
             if (action === "toggle-seed-mode") this.toggleSeedMode();
+            if (action === "random-seed-mobile") this.useRandomSeed();
             if (action === "toggle-size-link") this.toggleSizeLink();
             if (action === "use-current-init" || action === "use-as-init") void this.useCurrentAsInit();
             if (action === "pick-init") this.get('[data-role="init-file"]').click();
@@ -3208,6 +3678,22 @@ are removed when CSS is applied.</pre>
                     this.updatePreviewImages(payload.name, payload.dataUrl);
                 }
                 break;
+            case "swarm_workflow_result":
+                if (payload.requestId !== this.workflowRequestId) break;
+                this.workflowRequestId = "";
+                this.state.selectedWorkflow = data;
+                this.initializeWorkflowValues(this.state.selectedWorkflow);
+                this.renderWorkflowControls();
+                this.setRunStatus(`Loaded workflow “${this.state.selectedWorkflow.name}”.`);
+                break;
+            case "generation_started":
+                if (!this.currentJobId || payload.clientJobId === this.currentJobId) {
+                    this.generating = true;
+                    this.currentJobId = String(payload.clientJobId || this.currentJobId);
+                    this.currentJobConnectionId = String(data.connectionId || this.currentJobConnectionId);
+                    this.setGenerating(true);
+                }
+                break;
             case "token_saved":
             case "token_cleared":
                 this.acceptConnectionData(data);
@@ -3217,6 +3703,7 @@ are removed when CSS is applied.</pre>
             case "generation_result":
                 this.generating = false;
                 this.currentJobId = "";
+                this.currentJobConnectionId = "";
                 this.setGenerating(false);
                 this.acceptOutputPage(data);
                 if (data.result?.imageDataUrl) {
@@ -3254,6 +3741,7 @@ are removed when CSS is applied.</pre>
                 if (!payload.clientJobId || payload.clientJobId === this.currentJobId) {
                     this.generating = false;
                     this.currentJobId = "";
+                    this.currentJobConnectionId = "";
                     this.pendingGeneration = null;
                     this.setGenerating(false);
                     if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage);
@@ -3321,9 +3809,19 @@ are removed when CSS is applied.</pre>
                 this.setRunStatus("Saved LoRA stacks updated.");
                 break;
             case "studio_error":
+                if (payload.operation === "load_swarm_workflow") {
+                    this.workflowRequestId = "";
+                    this.state.selectedWorkflow = null;
+                    this.workflowValues.clear();
+                    this.workflowEnabled.clear();
+                    this.workflowImageValues.clear();
+                    this.get('[data-role="workflow-select"]').value = "";
+                    this.renderWorkflowControls();
+                }
                 if (payload.operation === "generate") {
                     this.generating = false;
                     this.currentJobId = "";
+                    this.currentJobConnectionId = "";
                     this.pendingGeneration = null;
                     this.setGenerating(false);
                     if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage);
@@ -3357,6 +3855,7 @@ are removed when CSS is applied.</pre>
         }
         this.generating = false;
         this.currentJobId = "";
+        this.currentJobConnectionId = "";
         this.setGenerating(false);
         if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage);
         this.preGenerationImage = null;
@@ -3400,6 +3899,13 @@ are removed when CSS is applied.</pre>
         this.state.loras = [];
         this.state.swarmPresets = [];
         this.state.swarmParameters = [];
+        this.state.swarmWorkflows = [];
+        this.state.workflowError = "";
+        this.state.selectedWorkflow = null;
+        this.workflowRequestId = "";
+        this.workflowValues.clear();
+        this.workflowEnabled.clear();
+        this.workflowImageValues.clear();
         this.state.canManagePresets = false;
         this.state.selectedPresets = [];
         this.state.samplers = [];
@@ -3413,6 +3919,8 @@ are removed when CSS is applied.</pre>
             button.disabled = true;
         }
         this.renderLoras();
+        this.populateWorkflowSelect();
+        this.renderWorkflowControls();
         this.connectionRequestId = this.send("load_connection", {
             connectionId
         });
@@ -3465,6 +3973,8 @@ are removed when CSS is applied.</pre>
         this.state.schedulers = Array.isArray(value?.schedulers) && value.schedulers.length ? value.schedulers : fallbackSchedulers;
         this.state.swarmPresets = Array.isArray(value?.presets) ? value.presets : [];
         this.state.swarmParameters = Array.isArray(value?.parameters) ? value.parameters : [];
+        this.state.swarmWorkflows = Array.isArray(value?.workflows) ? value.workflows : [];
+        this.state.workflowError = String(value?.workflowError || "");
         this.state.canManagePresets = Boolean(value?.canManagePresets);
         this.populateSimpleSelect("sampler", "Connection default", this.state.samplers, previousSampler);
         this.populateSimpleSelect("scheduler", "Connection default", this.state.schedulers, previousScheduler);
@@ -3483,7 +3993,241 @@ are removed when CSS is applied.</pre>
         const addPreset = this.get('[data-role="add-swarm-preset"]');
         addPreset.hidden = !this.state.canManagePresets || !this.state.swarmParameters.length;
         addPreset.title = addPreset.hidden ? "SwarmUI did not expose preset-management permission and a usable parameter schema." : "Save the current prompts and render controls as a SwarmUI preset";
+        this.populateWorkflowSelect();
         this.renderPresetStack();
+    }
+    populateWorkflowSelect() {
+        const select = this.get('[data-role="workflow-select"]');
+        const selectedName = this.state.selectedWorkflow?.name || "";
+        select.replaceChildren();
+        const standard = element("option", "", "Standard Swarm generation");
+        standard.value = "";
+        select.appendChild(standard);
+        for (const workflow of this.state.swarmWorkflows){
+            const option = element("option", "", workflow.name);
+            option.value = workflow.name;
+            option.title = workflow.description || "Saved Swarm Comfy workflow";
+            select.appendChild(option);
+        }
+        if (selectedName && this.state.swarmWorkflows.some((workflow)=>workflow.name === selectedName)) {
+            select.value = selectedName;
+        } else {
+            if (selectedName) {
+                this.state.selectedWorkflow = null;
+                this.workflowValues.clear();
+                this.workflowEnabled.clear();
+                this.workflowImageValues.clear();
+            }
+            select.value = "";
+        }
+        this.renderWorkflowControls();
+    }
+    selectWorkflow(name) {
+        this.workflowRequestId = "";
+        this.state.selectedWorkflow = null;
+        this.workflowValues.clear();
+        this.workflowEnabled.clear();
+        this.workflowImageValues.clear();
+        if (!name) {
+            this.renderWorkflowControls();
+            this.setRunStatus("Using Swarm’s standard generation pipeline.");
+            return;
+        }
+        if (!this.state.connection || !this.state.swarmWorkflows.some((workflow)=>workflow.name === name)) {
+            this.get('[data-role="workflow-select"]').value = "";
+            this.renderWorkflowControls();
+            return;
+        }
+        const summary = this.state.swarmWorkflows.find((workflow)=>workflow.name === name);
+        const badge = this.get('[data-role="workflow-badge"]');
+        badge.dataset.active = "true";
+        badge.textContent = "Loading…";
+        this.get('[data-role="workflow-description"]').textContent = summary.description || "Loading workflow controls from SwarmUI…";
+        const fields = this.get('[data-role="workflow-fields"]');
+        fields.replaceChildren(element("div", "ss-workflow-loading", "Reading exposed workflow parameters…"));
+        this.workflowRequestId = this.send("load_swarm_workflow", {
+            connectionId: this.state.connection.id,
+            name
+        });
+    }
+    initializeWorkflowValues(workflow) {
+        this.workflowValues.clear();
+        this.workflowEnabled.clear();
+        this.workflowImageValues.clear();
+        for (const parameter of workflow.parameters){
+            if (parameter.default !== undefined && parameter.default !== null) {
+                this.workflowValues.set(parameter.id, parameter.default);
+            }
+            if (parameter.toggleable) this.workflowEnabled.add(parameter.id);
+        }
+    }
+    renderWorkflowControls() {
+        const workflow = this.state.selectedWorkflow;
+        const badge = this.get('[data-role="workflow-badge"]');
+        const description = this.get('[data-role="workflow-description"]');
+        const root = this.get('[data-role="workflow-fields"]');
+        root.replaceChildren();
+        if (!workflow) {
+            badge.dataset.active = "false";
+            badge.textContent = "Native";
+            description.textContent = this.state.workflowError ? `Standard generation. Saved workflows unavailable: ${this.state.workflowError}` : "Use Swarm’s normal parameter pipeline, or select a saved Comfy workflow exposed to its Generate tab.";
+            return;
+        }
+        badge.dataset.active = "true";
+        const customParameters = workflow.parameters.filter((parameter)=>parameter.visible && !isWorkflowCoreParameter(parameter.id));
+        badge.textContent = `Comfy · ${customParameters.length} extra`;
+        description.textContent = workflow.description || "Studio’s normal controls feed the recognized workflow inputs; workflow-specific inputs appear below.";
+        if (!customParameters.length) {
+            root.appendChild(element("div", "ss-empty", "This workflow uses Studio’s existing prompt and generation controls."));
+            return;
+        }
+        const groups = new Map();
+        for (const parameter of customParameters){
+            const key = parameter.group?.id || (parameter.advanced ? "__advanced" : "__workflow");
+            const current = groups.get(key) || {
+                group: parameter.group,
+                parameters: []
+            };
+            current.parameters.push(parameter);
+            groups.set(key, current);
+        }
+        for (const [key, entry] of groups){
+            const details = element("details", "ss-workflow-group");
+            details.open = entry.group?.open === true || !entry.group?.advanced && key !== "__advanced";
+            const summary = element("summary", "", entry.group?.name || (key === "__advanced" ? "Advanced workflow controls" : "Workflow controls"));
+            details.appendChild(summary);
+            if (entry.group?.description) {
+                details.appendChild(element("p", "ss-workflow-group-description", entry.group.description));
+            }
+            const grid = element("div", "ss-workflow-field-grid");
+            for (const parameter of entry.parameters)grid.appendChild(this.createWorkflowField(parameter));
+            details.appendChild(grid);
+            root.appendChild(details);
+        }
+    }
+    createWorkflowField(parameter) {
+        const field = element("div", "ss-workflow-field");
+        const wide = parameter.type === "image" || parameter.viewType === "prompt" || parameter.viewType === "big";
+        field.dataset.wide = String(wide);
+        field.dataset.enabled = String(!parameter.toggleable || this.workflowEnabled.has(parameter.id));
+        const head = element("div", "ss-workflow-field-head");
+        const label = element("label", "", parameter.name || parameter.id);
+        label.title = parameter.description || parameter.id;
+        head.appendChild(label);
+        if (parameter.toggleable) {
+            const toggle = element("input", "ss-workflow-toggle");
+            toggle.type = "checkbox";
+            toggle.checked = this.workflowEnabled.has(parameter.id);
+            toggle.title = `Include ${parameter.name || parameter.id}`;
+            toggle.setAttribute("aria-label", toggle.title);
+            toggle.addEventListener("change", ()=>{
+                if (toggle.checked) this.workflowEnabled.add(parameter.id);
+                else this.workflowEnabled.delete(parameter.id);
+                field.dataset.enabled = String(toggle.checked);
+            });
+            head.appendChild(toggle);
+        }
+        field.appendChild(head);
+        const currentValue = this.workflowValues.get(parameter.id) ?? parameter.default ?? "";
+        const type = parameter.type.toLowerCase();
+        if (type === "image") {
+            const input = element("input", "ss-input");
+            input.type = "file";
+            input.accept = "image/*";
+            input.addEventListener("change", ()=>{
+                const file = input.files?.[0];
+                if (!file) {
+                    this.workflowImageValues.delete(parameter.id);
+                    return;
+                }
+                if (!file.type.startsWith("image/") || file.size > 4_000_000) {
+                    input.value = "";
+                    this.workflowImageValues.delete(parameter.id);
+                    this.setRunStatus("Workflow images must be image files under 4 MB.", true);
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = ()=>{
+                    this.workflowImageValues.set(parameter.id, String(reader.result || ""));
+                    this.setRunStatus(`Workflow image ready · ${file.name}`);
+                };
+                reader.onerror = ()=>this.setRunStatus(`Could not read ${file.name}.`, true);
+                reader.readAsDataURL(file);
+            });
+            field.appendChild(input);
+        } else if ((type === "dropdown" || type === "model") && parameter.values.length) {
+            const select = element("select", "ss-select");
+            const choices = parameter.values.map((value)=>String(Array.isArray(value) ? value[0] : value));
+            const defaultString = String(currentValue);
+            if (defaultString && !choices.includes(defaultString)) choices.unshift(defaultString);
+            for (const choice of choices){
+                const option = element("option", "", choice);
+                option.value = choice;
+                select.appendChild(option);
+            }
+            select.value = defaultString || choices[0] || "";
+            this.workflowValues.set(parameter.id, select.value);
+            select.addEventListener("change", ()=>this.workflowValues.set(parameter.id, select.value));
+            field.appendChild(select);
+        } else if (type === "boolean") {
+            const input = element("input");
+            input.type = "checkbox";
+            input.checked = currentValue === true || String(currentValue).toLowerCase() === "true";
+            this.workflowValues.set(parameter.id, input.checked);
+            input.addEventListener("change", ()=>this.workflowValues.set(parameter.id, input.checked));
+            field.appendChild(input);
+        } else if (type === "integer" || type === "decimal") {
+            const input = element("input", "ss-input");
+            input.type = "number";
+            if (parameter.min !== null) input.min = String(parameter.min);
+            if (parameter.max !== null) input.max = String(parameter.max);
+            input.step = String(parameter.step && parameter.step > 0 ? parameter.step : type === "integer" ? 1 : .01);
+            input.value = Number.isFinite(Number(currentValue)) ? String(currentValue) : "0";
+            this.workflowValues.set(parameter.id, Number(input.value));
+            input.addEventListener("input", ()=>{
+                const value = Number(input.value);
+                if (Number.isFinite(value)) this.workflowValues.set(parameter.id, type === "integer" ? Math.trunc(value) : value);
+            });
+            field.appendChild(input);
+        } else if (parameter.viewType === "prompt" || parameter.viewType === "big") {
+            const input = element("textarea", "ss-textarea");
+            input.value = String(currentValue);
+            input.addEventListener("input", ()=>this.workflowValues.set(parameter.id, input.value));
+            field.appendChild(input);
+        } else {
+            const input = element("input", "ss-input");
+            input.value = String(currentValue);
+            input.addEventListener("input", ()=>this.workflowValues.set(parameter.id, input.value));
+            field.appendChild(input);
+        }
+        if (parameter.description) field.appendChild(element("div", "ss-field-help", parameter.description));
+        return field;
+    }
+    workflowRawOverrides() {
+        const workflow = this.state.selectedWorkflow;
+        if (!workflow) return {};
+        const result = {
+            comfyuicustomworkflow: workflow.name
+        };
+        for (const parameter of workflow.parameters){
+            if (!parameter.visible || isWorkflowCoreParameter(parameter.id)) continue;
+            if (parameter.toggleable && !this.workflowEnabled.has(parameter.id)) continue;
+            if (parameter.type === "image") {
+                const imageValue = this.workflowImageValues.get(parameter.id);
+                if (imageValue) result[parameter.id] = imageValue;
+                continue;
+            }
+            let value = this.workflowValues.get(parameter.id);
+            if (typeof value === "string") value = value.slice(0, 65_536);
+            if (typeof value === "number") {
+                if (!Number.isFinite(value)) continue;
+                if (parameter.min !== null) value = Math.max(parameter.min, value);
+                if (parameter.max !== null) value = Math.min(parameter.max, value);
+                if (parameter.type === "integer") value = Math.trunc(value);
+            }
+            if (value !== undefined && value !== null) result[parameter.id] = value;
+        }
+        return result;
     }
     addSelectedPreset(title) {
         if (!title || this.state.selectedPresets.some((preset)=>preset.title === title)) return;
@@ -4303,6 +5047,7 @@ are removed when CSS is applied.</pre>
             details?.timing?.generation ? `${details.timing.generation} gen` : "",
             !details?.timing?.prep && details?.timing?.totalMs ? `${(details.timing.totalMs / 1000).toFixed(2)} sec total` : "",
             details?.presets?.length ? `presets · ${details.presets.join(" → ")}` : "",
+            details?.workflow ? `workflow · ${details.workflow}` : "",
             details?.initImageLabel ? `img2img · ${details.initImageLabel}` : ""
         ].filter(Boolean);
         for (const value of factValues)facts.appendChild(element("span", "ss-badge", String(value)));
@@ -4383,6 +5128,14 @@ are removed when CSS is applied.</pre>
         assign("clip-g", parameters.clipGModel);
         assign("t5", parameters.t5XXLModel);
         assign("raw-override", parameters.rawRequestOverride);
+        if (details.workflow && this.state.swarmWorkflows.some((workflow)=>workflow.name === details.workflow)) {
+            const workflowSelect = this.get('[data-role="workflow-select"]');
+            workflowSelect.value = details.workflow;
+            this.selectWorkflow(details.workflow);
+        } else {
+            this.get('[data-role="workflow-select"]').value = "";
+            this.selectWorkflow("");
+        }
         this.state.selectedPresets = (details.presets || []).map((title)=>({
                 title,
                 enabled: true
@@ -4744,10 +5497,16 @@ are removed when CSS is applied.</pre>
         const presets = this.state.selectedPresets.filter((preset)=>preset.enabled).map((preset)=>preset.title);
         if (presets.length) parsed.presets = presets;
         else delete parsed.presets;
+        Object.assign(parsed, this.workflowRawOverrides());
         return Object.keys(parsed).length ? JSON.stringify(parsed) : undefined;
     }
     generate() {
         if (this.generating || !this.state.connection) return;
+        const selectedWorkflowName = this.get('[data-role="workflow-select"]').value;
+        if (selectedWorkflowName && this.state.selectedWorkflow?.name !== selectedWorkflowName) {
+            this.setRunStatus("Wait for the selected workflow controls to finish loading.", true);
+            return;
+        }
         const prompt = this.finalPrompt();
         if (!prompt) {
             this.setRunStatus("Enter a prompt or enable a LoRA trigger phrase.", true);
@@ -4804,6 +5563,7 @@ are removed when CSS is applied.</pre>
                     weight: item.weight
                 })),
             presets: resolved.presets,
+            workflow: this.state.selectedWorkflow?.name || "",
             initImageId: this.state.initImage?.imageId || "",
             initImageLabel: this.state.initImage?.label || "",
             createdAt: Date.now()
@@ -4811,8 +5571,10 @@ are removed when CSS is applied.</pre>
         this.preGenerationImage = this.state.currentImage;
         this.generating = true;
         this.currentJobId = clientJobId;
+        this.currentJobConnectionId = this.state.connection.id;
+        this.activity?.begin(clientJobId, this.state.connection.id, this.state.selectedWorkflow ? `Preparing workflow · ${this.state.selectedWorkflow.name}` : `Preparing ${model || "SwarmUI"}…`);
         this.setGenerating(true);
-        this.setRunStatus(`Generating with ${enabled.length} LoRA${enabled.length === 1 ? "" : "s"}…`);
+        this.setRunStatus(this.state.selectedWorkflow ? `Running workflow “${this.state.selectedWorkflow.name}” with ${enabled.length} LoRA${enabled.length === 1 ? "" : "s"}…` : `Generating with ${enabled.length} LoRA${enabled.length === 1 ? "" : "s"}…`);
         if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create");
         this.send("generate", {
             input: {
@@ -4827,6 +5589,7 @@ are removed when CSS is applied.</pre>
                 resolvedPrompt: resolved.prompt,
                 resolvedNegativePrompt: resolved.negativePrompt,
                 presets: resolved.presets,
+                workflow: this.state.selectedWorkflow?.name || "",
                 initImageId: this.state.initImage?.imageId || "",
                 initImageLabel: this.state.initImage?.label || ""
             }
@@ -4886,10 +5649,10 @@ are removed when CSS is applied.</pre>
         }
     }
     interruptGeneration() {
-        if (!this.generating || !this.currentJobId || !this.state.connection) return;
+        if (!this.generating || !this.currentJobId) return;
         this.send("interrupt_generation", {
             clientJobId: this.currentJobId,
-            connectionId: this.state.connection.id
+            connectionId: this.currentJobConnectionId || this.state.connection?.id || ""
         });
         this.setRunStatus("Interrupt requested — stopping SwarmUI…");
     }
@@ -5091,6 +5854,11 @@ are removed when CSS is applied.</pre>
         }
         this.updateContextControls();
     }
+    useRandomSeed() {
+        this.get('[data-role="seed"]').value = "-1";
+        this.updateContextControls();
+        this.setRunStatus("Random seed enabled for the next generation.");
+    }
     updateContextControls() {
         const orientationButton = this.root.querySelector('[data-role="orientation-action"]');
         const seedButton = this.root.querySelector('[data-role="seed-action"]');
@@ -5129,6 +5897,7 @@ export function setup(ctx) {
     appearance.customCss = sanitizeCustomCss(appearance.customCss);
     if (studioAppearanceIsCustom(appearance)) currentTheme = "custom";
     let launcher = null;
+    let miniplayer = null;
     let removeCustomStyle = appearance.customCss ? ctx.dom.addStyle(appearance.customCss) : null;
     const setThemeState = (theme)=>{
         currentTheme = theme;
@@ -5142,6 +5911,7 @@ export function setup(ctx) {
         setThemeState(studioAppearanceIsCustom(appearance) ? "custom" : "lumiverse");
         persistStudioAppearance(appearance);
         if (launcher) applyAppearanceVariables(launcher, appearance);
+        miniplayer?.setAppearance(appearance);
         activeStudio?.setAppearance(appearance);
         removeCustomStyle?.();
         removeCustomStyle = appearance.customCss ? ctx.dom.addStyle(appearance.customCss) : null;
@@ -5163,7 +5933,7 @@ export function setup(ctx) {
             persistent: false
         });
         activeModal = modal;
-        activeStudio = new StudioController(ctx, modal, selectTheme, updateAppearance);
+        activeStudio = new StudioController(ctx, modal, selectTheme, updateAppearance, miniplayer);
         activeStudio.setAppearance(appearance);
         activeStudio.setTheme(currentTheme);
         if (initialView === "library") activeStudio.openLibrary();
@@ -5173,6 +5943,22 @@ export function setup(ctx) {
             activeModal = null;
         });
     };
+    if (typeof ctx.ui.createFloatWidget === "function") {
+        try {
+            const mobile = window.innerWidth <= 720;
+            const widget = ctx.ui.createFloatWidget({
+                width: mobile ? Math.min(318, window.innerWidth - 24) : 318,
+                height: mobile ? 72 : 94,
+                snapToEdge: true,
+                tooltip: "Swarm Studio miniplayer",
+                chromeless: true
+            });
+            miniplayer = new MiniPlayerController(ctx, widget, ()=>openStudio("studio"));
+            miniplayer.setAppearance(appearance);
+        } catch  {
+            miniplayer = null;
+        }
+    }
     const drawer = ctx.ui.registerDrawerTab({
         id: "swarm-studio",
         title: "Swarm Studio",
@@ -5226,10 +6012,22 @@ export function setup(ctx) {
         enabled: true
     });
     const removeActionClick = inputAction.onClick(()=>openStudio("studio"));
-    const unsubscribeMessages = ctx.onBackendMessage((payload)=>activeStudio?.onMessage(payload));
-    const unsubscribeProgress = ctx.events.on("IMAGE_GEN_PROGRESS", (payload)=>activeStudio?.onImageGenerationEvent("progress", payload));
-    const unsubscribeComplete = ctx.events.on("IMAGE_GEN_COMPLETE", (payload)=>activeStudio?.onImageGenerationEvent("complete", payload));
-    const unsubscribeError = ctx.events.on("IMAGE_GEN_ERROR", (payload)=>activeStudio?.onImageGenerationEvent("error", payload));
+    const unsubscribeMessages = ctx.onBackendMessage((payload)=>{
+        miniplayer?.onMessage(payload);
+        activeStudio?.onMessage(payload);
+    });
+    const unsubscribeProgress = ctx.events.on("IMAGE_GEN_PROGRESS", (payload)=>{
+        miniplayer?.onImageGenerationEvent("progress", payload);
+        activeStudio?.onImageGenerationEvent("progress", payload);
+    });
+    const unsubscribeComplete = ctx.events.on("IMAGE_GEN_COMPLETE", (payload)=>{
+        miniplayer?.onImageGenerationEvent("complete", payload);
+        activeStudio?.onImageGenerationEvent("complete", payload);
+    });
+    const unsubscribeError = ctx.events.on("IMAGE_GEN_ERROR", (payload)=>{
+        miniplayer?.onImageGenerationEvent("error", payload);
+        activeStudio?.onImageGenerationEvent("error", payload);
+    });
     return ()=>{
         activeStudio?.dispose();
         activeModal?.dismiss();
@@ -5242,6 +6040,8 @@ export function setup(ctx) {
         removeActionClick();
         inputAction.destroy();
         drawer.destroy();
+        miniplayer?.destroy();
+        miniplayer = null;
         removeCustomStyle?.();
         removeStyle();
     };

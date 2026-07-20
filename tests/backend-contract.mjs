@@ -53,6 +53,10 @@ globalThis.spindle = {
       assert.equal(input.owner_character_id, "char-1")
       assert.equal(input.clientJobId, "studio-job-1")
       assert.equal(input.signal instanceof AbortSignal, true)
+      const rawOverride = JSON.parse(input.parameters.rawRequestOverride)
+      assert.equal(rawOverride.comfyuicustomworkflow, "Portrait/Inpaint")
+      assert.equal(rawOverride.comfyrawworkflowinputdecimaldenoiseb, 0.42)
+      assert.equal(rawOverride.comfyrawworkflowinputimageinitc, "data:image/png;base64,QUJD")
       yield {
         step: 4,
         totalSteps: 20,
@@ -183,6 +187,53 @@ globalThis.spindle = {
             { id: "sampler", name: "Sampler", type: "dropdown", values: ["euler", "dpmpp_2m_sde_gpu"] },
             { id: "scheduler", name: "Scheduler", type: "dropdown", values: ["normal", "beta57"] },
           ],
+        }),
+      }
+    }
+    if (url.endsWith("/API/ComfyListWorkflows")) {
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workflows: [{
+            name: "Portrait/Inpaint",
+            image: "/imgs/model_placeholder.jpg",
+            description: "A saved workflow with an exposed denoise control.",
+            enable_in_simple: true,
+          }],
+        }),
+      }
+    }
+    if (url.endsWith("/API/ComfyReadWorkflow")) {
+      const body = JSON.parse(options.body)
+      assert.equal(body.name, "Portrait/Inpaint")
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          result: {
+            image: "/imgs/model_placeholder.jpg",
+            description: "A saved workflow with an exposed denoise control.",
+            enable_in_simple: true,
+            custom_params: JSON.stringify({
+              prompt: { id: "prompt", name: "Prompt", type: "text", visible: true, default: "portrait" },
+              comfyrawworkflowinputdecimaldenoiseb: {
+                id: "comfyrawworkflowinputdecimaldenoiseb",
+                name: "Denoise",
+                type: "decimal",
+                description: "Workflow denoise strength",
+                default: 0.55,
+                min: 0,
+                max: 1,
+                step: 0.05,
+                visible: true,
+                toggleable: true,
+                group: { id: "refine", name: "Refine", open: true, advanced: false, can_shrink: true, toggles: false },
+              },
+            }),
+          },
         }),
       }
     }
@@ -317,6 +368,17 @@ assert.equal(connection.data.swarmOptions.presets[0].title, "Cinematic")
 assert.equal(connection.data.swarmOptions.presets[0].paramMap.prompt, "cinematic lighting, ink style, portrait")
 assert.equal(connection.data.swarmOptions.canManagePresets, true)
 assert.equal(connection.data.swarmOptions.parameters.some((parameter) => parameter.id === "prompt"), true)
+assert.equal(connection.data.swarmOptions.workflows[0].name, "Portrait/Inpaint")
+assert.equal(connection.data.swarmOptions.workflowError, "")
+
+const workflow = await request("load_swarm_workflow", {
+  connectionId: "swarm-1",
+  name: "Portrait/Inpaint",
+})
+assert.equal(workflow.data.name, "Portrait/Inpaint")
+assert.equal(workflow.data.parameters.length, 2)
+assert.equal(workflow.data.parameters[1].group.name, "Refine")
+assert.equal(workflow.data.parameters[1].default, 0.55)
 
 const savedStack = await request("save_stack_preset", {
   preset: {
@@ -353,12 +415,18 @@ const generated = await request("generate", {
       seed: -1,
       referenceImages: [{ data: "QUJD", mimeType: "image/png" }],
       denoise: 0.55,
+      rawRequestOverride: JSON.stringify({
+        comfyuicustomworkflow: "Portrait/Inpaint",
+        comfyrawworkflowinputdecimaldenoiseb: 0.42,
+        comfyrawworkflowinputimageinitc: "data:image/png;base64,QUJD",
+      }),
     },
   },
   recordHints: {
     resolvedPrompt: "cinematic lighting, ink style, portrait",
     resolvedNegativePrompt: "blurry, flat lighting",
     presets: ["Cinematic"],
+    workflow: "Portrait/Inpaint",
     initImageId: "image-source",
     initImageLabel: "source.png",
   },
@@ -369,6 +437,7 @@ assert.equal(generated.data.record.prompt, "ink style, portrait")
 assert.equal(generated.data.record.resolvedPrompt, "cinematic lighting, ink style, portrait")
 assert.equal(generated.data.record.resolvedNegativePrompt, "blurry, flat lighting")
 assert.deepEqual(generated.data.record.presets, ["Cinematic"])
+assert.equal(generated.data.record.workflow, "Portrait/Inpaint")
 assert.equal(generated.data.record.timing.prep, "0.22 sec")
 assert.equal(generated.data.record.timing.generation, "1.78 sec")
 assert.equal(generated.data.record.timing.source, "swarm")
@@ -377,7 +446,13 @@ assert.equal(generated.data.record.initImageId, "image-source")
 assert.equal(generated.data.record.initImageLabel, "source.png")
 assert.equal(generated.data.record.parameters.seed, 987654321)
 assert.equal("referenceImages" in generated.data.record.parameters, false)
+const storedWorkflowOverride = JSON.parse(generated.data.record.parameters.rawRequestOverride)
+assert.equal(storedWorkflowOverride.comfyuicustomworkflow, "Portrait/Inpaint")
+assert.equal(storedWorkflowOverride.comfyrawworkflowinputimageinitc, "[workflow image omitted from history]")
 assert.equal(generated.data.outputs[0].studioMetadata.imageId, "image-1")
+const started = sent.find((entry) => entry.payload.type === "generation_started")
+assert.equal(started.payload.clientJobId, "studio-job-1")
+assert.equal(started.payload.data.connectionId, "swarm-1")
 const progress = sent.find((entry) => entry.payload.type === "generation_progress")
 assert.equal(progress.payload.clientJobId, "studio-job-1")
 assert.equal(progress.payload.data.step, 4)

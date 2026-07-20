@@ -7,6 +7,7 @@ const {
   dimensionsForAspect,
   fitAspectWithin,
   inferModelFamily,
+  isWorkflowCoreParameter,
   matchesKeywordQuery,
   modelSignalsCompatible,
   outputLibraryPageSize,
@@ -37,6 +38,8 @@ assert.equal(matchesKeywordQuery("illustrious portrait", ["Anima model", "soft p
 assert.equal(outputLibraryPageSize(390), 15)
 assert.equal(outputLibraryPageSize(720), 15)
 assert.equal(outputLibraryPageSize(721), 30)
+assert.equal(isWorkflowCoreParameter("negative_prompt"), true)
+assert.equal(isWorkflowCoreParameter("comfyrawworkflowinputdecimaldenoiseb"), false)
 assert.doesNotMatch(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /@import\s+"/)
 assert.match(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /\.ss-shell/)
 
@@ -80,6 +83,18 @@ assert.doesNotMatch(source, /data-tab="prompt"/)
 assert.match(source, /data-action="toggle-fullscreen"/)
 assert.match(source, /data-action="change-orientation"/)
 assert.match(source, /data-action="toggle-seed-mode"/)
+assert.match(source, /data-action="random-seed-mobile"/)
+assert.match(source, /data-role="workflow-select"/)
+assert.match(source, /data-role="workflow-fields"/)
+assert.match(source, /load_swarm_workflow/)
+assert.match(source, /comfyuicustomworkflow/)
+assert.match(source, /createWorkflowField/)
+assert.match(source, /createFloatWidget/)
+assert.match(source, /class MiniPlayerController/)
+assert.match(source, /data-action="mini-interrupt"/)
+assert.match(source, /ss-miniplayer/)
+assert.match(source, /ss-mobile-prompt-tools/)
+assert.match(source, /data-mobile-panel="create-prompt"[\s\S]*?ss-negative-v3[\s\S]*?data-action="random-seed-mobile"/)
 assert.match(source, /"interrupt-generation"/)
 assert.match(source, /data-action="add-swarm-preset"/)
 assert.match(source, /data-action="save-stack"/)
