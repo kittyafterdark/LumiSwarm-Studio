@@ -1,11 +1,11 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "name": "Swarm Studio",
   "identifier": "swarm_studio",
   "author": "kittyafterdark",
   "github": "https://github.com/kittyafterdark/LumiSwarm-Studio",
   "homepage": "https://github.com/kittyafterdark/LumiSwarm-Studio",
-  "description": "A resizable SwarmUI workspace with adaptive previews, model-compatible LoRA browsing, saved stacks, mobile creation tabs, and fullscreen output inspection.",
+  "description": "A responsive SwarmUI workspace with reusable generation metadata, img2img, paged history, output folders, compatible LoRA browsing, saved stacks, and fullscreen inspection.",
   "permissions": [
     "image_gen",
     "cors_proxy",

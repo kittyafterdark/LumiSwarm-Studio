@@ -59,6 +59,49 @@
       "illustrious/analog-editorial.safetensors": svg("Analog Editorial", "#806241", "#2d5049"),
       "illustrious/crystal-bloom.safetensors": svg("Crystal Bloom", "#543f82", "#188f8b"),
     }
+    const palette = [
+      ["#134e5e", "#6f3f78"],
+      ["#3f2b55", "#9a6854"],
+      ["#123c50", "#32746d"],
+      ["#653b49", "#1f5360"],
+    ]
+    let historyOutputs = Array.from({ length: 32 }, (_, index) => {
+      const number = 32 - index
+      const colors = palette[index % palette.length]
+      const source = svg(`Output ${number}`, colors[0], colors[1])
+      return {
+        id: `image-${number}`,
+        url: source,
+        original_filename: `swarm-output-${number}.png`,
+        studioMetadata: {
+          prompt: `portrait ${number}, cinematic ink style`,
+          negativePrompt: "blurry, low quality",
+          resolvedPrompt: `cinematic lighting, portrait ${number}, cinematic ink style`,
+          resolvedNegativePrompt: "blurry, low quality, flat lighting",
+          model: "anima-semi-v10.safetensors",
+          parameters: {
+            width: number % 3 === 0 ? 768 : 1024,
+            height: number % 3 === 0 ? 1152 : 1024,
+            steps: 28,
+            cfgScale: 4.5,
+            seed: 4000 + number,
+            sampler: "dpmpp_2m",
+            scheduler: "beta57",
+          },
+          loras: [{ name: "anima/cinematic-ink.safetensors", weight: .8 }],
+          presets: ["Cinematic"],
+          timing: { totalMs: 2100, prep: "0.24 sec", generation: "1.86 sec", source: "swarm" },
+          swarmPath: `2026-07-19/swarm-output-${number}.png`,
+          createdAt: Date.now() - index * 60_000,
+        },
+      }
+    })
+    let outputFolders = [{
+      id: "favorites",
+      name: "Favorites",
+      imageIds: ["image-32", "image-29", "image-24"],
+      updatedAt: Date.now(),
+    }]
 
     const drawerRoot = document.querySelector("#drawer")
     const ctx = {
@@ -104,7 +147,11 @@
           later({ type: "bootstrap_result", requestId: message.requestId, data: {
             permissions: { imageGen: true, metadata: true, images: true, chats: true },
             connections: [{ id: "swarm-1", name: "Local SwarmUI", provider: "swarmui", api_url: "http://127.0.0.1:7801", model: "anima-semi-v10.safetensors", is_default: true, default_parameters: { width: 768, height: 1152, steps: 28, cfgScale: 4.5, sampler: "dpmpp_2m", scheduler: "beta57" } }],
-            outputs: [],
+            outputs: historyOutputs.slice(0, 12),
+            total: historyOutputs.length,
+            offset: 0,
+            limit: 12,
+            outputFolders,
             stackPresets: [
               { id: "portrait-stack", name: "Anima portrait", updatedAt: Date.now(), items: [{ name: "anima/soft-portrait.safetensors", title: "Soft Portrait · Anima", weight: .65, enabled: true, useTrigger: false }] },
               { id: "ink-stack", name: "Ink + rim light", updatedAt: Date.now(), items: [{ name: "anima/cinematic-ink.safetensors", title: "Cinematic Ink · Anima", weight: .8, enabled: true, useTrigger: false }, { name: "anima/neon-rim.safetensors", title: "Neon Rim · Anima", weight: .55, enabled: true, useTrigger: false }] },
@@ -120,17 +167,101 @@
               { name: "illustrious-xl-v15.safetensors", title: "Illustrious XL v1.5", architecture: "illustrious/base", className: "checkpoint", compatClass: "illustrious-v1" },
             ],
             loras,
+            swarmOptions: {
+              samplers: ["euler", "dpmpp_2m", "dpmpp_2m_sde_gpu"],
+              schedulers: ["normal", "karras", "beta57"],
+              presets: [
+                { title: "Cinematic", description: "Adds controlled movie lighting.", paramMap: { prompt: "cinematic lighting, {value}", negativeprompt: "{value}, flat lighting" } },
+                { title: "Clean anime", description: "A crisp Anima baseline.", paramMap: { prompt: "{value}, clean anime linework", negativeprompt: "{value}, messy lines" } },
+              ],
+            },
             metadataError: "",
             hasMetadataToken: false,
           }})
         } else if (message.type === "preview") {
           later({ type: "preview_result", requestId: message.requestId, name: message.name, dataUrl: previewMap[message.name] })
         } else if (message.type === "generate") {
+          const generatedSource = svg("Generated now", "#134e5e", "#6f3f78")
+          const record = {
+            prompt: message.input.prompt,
+            negativePrompt: message.input.negativePrompt || "",
+            resolvedPrompt: message.recordHints.resolvedPrompt,
+            resolvedNegativePrompt: message.recordHints.resolvedNegativePrompt,
+            model: message.input.model,
+            parameters: message.input.parameters,
+            loras: message.input.parameters.loras.map((name, index) => ({ name, weight: message.input.parameters.loraWeights[index] })),
+            presets: message.recordHints.presets,
+            timing: { totalMs: 2340, prep: "0.27 sec", generation: "2.07 sec", source: "swarm" },
+            swarmPath: "2026-07-19/generated-now.png",
+            initImageId: message.recordHints.initImageId,
+            initImageLabel: message.recordHints.initImageLabel,
+            createdAt: Date.now(),
+          }
+          const generatedOutput = {
+            id: "image-new",
+            url: generatedSource,
+            original_filename: "generated-now.png",
+            studioMetadata: record,
+          }
+          historyOutputs = [generatedOutput, ...historyOutputs.filter((item) => item.id !== generatedOutput.id)]
           setTimeout(() => later({ type: "generation_result", requestId: message.requestId, data: {
-            result: { imageDataUrl: svg("Generated output", "#134e5e", "#6f3f78"), imageUrl: svg("Generated output", "#134e5e", "#6f3f78"), model: "anima-semi-v10.safetensors", provider: "swarmui" },
-            record: { prompt: message.input.prompt, negativePrompt: message.input.negativePrompt || "", model: message.input.model, parameters: message.input.parameters, loras: message.input.parameters.loras.map((name, index) => ({ name, weight: message.input.parameters.loraWeights[index] })), createdAt: Date.now() },
-            outputs: [],
+            result: { imageId: generatedOutput.id, imageDataUrl: generatedSource, imageUrl: generatedSource, model: "anima-semi-v10.safetensors", provider: "swarmui" },
+            record,
+            outputs: historyOutputs.slice(0, 12),
+            total: historyOutputs.length,
+            offset: 0,
+            limit: 12,
           }}), 350)
+        } else if (message.type === "refresh_outputs") {
+          const offset = Number(message.offset) || 0
+          const limit = Number(message.limit) || 12
+          later({ type: "outputs_result", requestId: message.requestId, data: {
+            outputs: historyOutputs.slice(offset, offset + limit),
+            total: historyOutputs.length,
+            offset,
+            limit,
+          }})
+        } else if (message.type === "list_library_outputs") {
+          later({ type: "library_outputs_result", requestId: message.requestId, data: {
+            outputs: historyOutputs,
+            total: historyOutputs.length,
+            folders: outputFolders,
+          }})
+        } else if (message.type === "create_output_folder") {
+          outputFolders = [{
+            id: `folder-${Date.now()}`,
+            name: message.name,
+            imageIds: [],
+            updatedAt: Date.now(),
+          }, ...outputFolders]
+          later({ type: "output_folders_result", requestId: message.requestId, data: outputFolders })
+        } else if (message.type === "delete_output_folder") {
+          outputFolders = outputFolders.filter((folder) => folder.id !== message.folderId)
+          later({ type: "output_folders_result", requestId: message.requestId, data: outputFolders })
+        } else if (message.type === "move_output_to_folder") {
+          outputFolders = outputFolders.map((folder) => ({
+            ...folder,
+            imageIds: folder.id === message.folderId
+              ? [message.imageId, ...folder.imageIds.filter((id) => id !== message.imageId)]
+              : folder.imageIds.filter((id) => id !== message.imageId),
+          }))
+          later({ type: "output_folders_result", requestId: message.requestId, data: outputFolders })
+        } else if (message.type === "delete_output") {
+          historyOutputs = historyOutputs.filter((output) => output.id !== message.imageId)
+          outputFolders = outputFolders.map((folder) => ({
+            ...folder,
+            imageIds: folder.imageIds.filter((id) => id !== message.imageId),
+          }))
+          later({ type: "output_deleted", requestId: message.requestId, data: {
+            imageId: message.imageId,
+            folders: outputFolders,
+            outputs: historyOutputs.slice(0, 12),
+            total: historyOutputs.length,
+            offset: 0,
+            limit: 12,
+          }})
+        } else if (message.type === "open_swarm_folder") {
+          later({ type: "swarm_folder_opened", requestId: message.requestId, data: { success: true } })
         }
       },
     }

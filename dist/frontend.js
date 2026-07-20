@@ -306,6 +306,7 @@ const STYLES = `
       var(--lumiverse-fill-subtle);
   }
   .ss-current-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .ss-current-preview img[hidden] { display: none !important; }
   .ss-preview-empty { max-width: 190px; text-align: center; color: var(--lumiverse-text-muted); line-height: 1.55; }
   .ss-preview-empty strong { display: block; color: var(--lumiverse-text); margin-bottom: 5px; }
   .ss-preview-loading {
@@ -557,6 +558,69 @@ const STUDIO_V3_STYLES = `
   .ss-generation-controls .ss-wide { grid-column: 1 / -1; }
   .ss-generation-controls .ss-inline-actions { align-items: center; }
   .ss-generation-controls .ss-inline-actions .ss-button { flex: 1; }
+  .ss-aspect-controls {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(110px, .8fr) minmax(130px, 1.2fr);
+    gap: 8px;
+  }
+  .ss-size-slider-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+  }
+  .ss-size-slider-row input[type="range"],
+  .ss-creativity-row input[type="range"] {
+    width: 100%;
+    accent-color: var(--lumiverse-accent, #7dd3fc);
+  }
+  .ss-size-readout { min-width: 72px; text-align: right; color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-custom-size {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 7px;
+    align-items: end;
+  }
+  .ss-custom-size[hidden] { display: none; }
+  .ss-link-size {
+    min-height: 31px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--lumiverse-text-muted);
+    font-size: 9px;
+    white-space: nowrap;
+  }
+  .ss-init-panel {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 8px;
+    padding: 7px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--lumiverse-fill) 72%, transparent);
+  }
+  .ss-init-preview {
+    width: 52px;
+    height: 52px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: 7px;
+    color: var(--lumiverse-text-dim, var(--lumiverse-text-muted));
+    font-size: 9px;
+  }
+  .ss-init-preview img { width: 100%; height: 100%; object-fit: cover; }
+  .ss-init-content { min-width: 0; display: grid; gap: 5px; }
+  .ss-init-head { display: flex; align-items: center; gap: 5px; }
+  .ss-init-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+  .ss-init-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+  .ss-init-actions .ss-button { min-height: 27px; padding: 4px 7px; }
+  .ss-creativity-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 30px; gap: 6px; align-items: center; font-size: 9px; color: var(--lumiverse-text-muted); }
   .ss-center {
     min-width: 0;
     min-height: 0;
@@ -618,10 +682,11 @@ const STUDIO_V3_STYLES = `
     min-height: 0;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: max-content;
     gap: 7px;
     overflow-y: auto;
   }
-  .ss-history-item { position: relative; }
+  .ss-history-item { position: relative; height: auto; aspect-ratio: 1; }
   .ss-history-item::after {
     content: "↗";
     position: absolute;
@@ -638,6 +703,17 @@ const STUDIO_V3_STYLES = `
     transition: opacity .15s ease;
   }
   .ss-history-item:hover::after { opacity: 1; }
+  .ss-history-pagination {
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 5px 7px;
+    border-top: 1px solid var(--lumiverse-border);
+  }
+  .ss-history-pagination .ss-button { min-height: 25px; padding: 3px 8px; }
+  .ss-history-page-label { min-width: 62px; text-align: center; color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-lora-dock {
     min-height: 0;
     flex: 0 0 var(--ss-dock-height);
@@ -873,7 +949,111 @@ const STUDIO_V3_STYLES = `
     overflow-wrap: anywhere;
   }
   .ss-inspector-facts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+  .ss-inspector-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .ss-inspector-actions .ss-button-danger { grid-column: 1 / -1; }
   .ss-inspector-close { position: absolute; top: 12px; right: 12px; z-index: 2; }
+  .ss-output-library {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483008;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr);
+    background: rgba(4, 5, 8, .98);
+    backdrop-filter: blur(12px);
+  }
+  .ss-output-library[hidden] { display: none; }
+  .ss-library-head {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--lumiverse-border);
+    background: var(--lumiverse-fill-subtle);
+  }
+  .ss-library-head strong { font-size: 14px; }
+  .ss-library-head .ss-muted { flex: 1; }
+  .ss-library-folders {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px;
+    border-right: 1px solid var(--lumiverse-border);
+    background: var(--lumiverse-fill-subtle);
+  }
+  .ss-library-folder {
+    width: 100%;
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 7px;
+    margin-bottom: 5px;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--lumiverse-text);
+    text-align: left;
+  }
+  .ss-library-folder:hover,
+  .ss-library-folder[data-active="true"] {
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 45%, var(--lumiverse-border));
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 10%, transparent);
+  }
+  .ss-library-folder span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-library-folder-tools { display: flex; gap: 5px; margin: 10px 0; }
+  .ss-library-folder-tools .ss-button { flex: 1; }
+  .ss-library-main {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .ss-library-toolbar {
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--lumiverse-border);
+  }
+  .ss-library-toolbar .ss-muted { flex: 1; }
+  .ss-output-library-grid {
+    min-height: 0;
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    align-content: start;
+    gap: 9px;
+    overflow-y: auto;
+    padding: 10px;
+  }
+  .ss-library-output {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: 9px;
+    background: var(--lumiverse-fill);
+  }
+  .ss-library-output-button {
+    width: 100%;
+    aspect-ratio: 1;
+    display: block;
+    padding: 0;
+    border: 0;
+    background: #050609;
+  }
+  .ss-library-output-button img { width: 100%; height: 100%; display: block; object-fit: cover; }
+  .ss-library-output-meta { display: grid; gap: 5px; padding: 6px; }
+  .ss-library-output-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+  .ss-library-output-meta .ss-select { height: 28px; font-size: 9px; }
   .ss-token-popover { z-index: 30; }
 
   @media (max-width: 1000px) and (min-width: 721px) {
@@ -1001,7 +1181,14 @@ const STUDIO_V3_STYLES = `
     }
     .ss-mobile-stack-picker .ss-select { width: min(46vw, 210px); height: 30px; }
     .ss-generation-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .ss-history-pane .ss-history-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .ss-aspect-controls { grid-template-columns: 1fr; }
+    .ss-custom-size { grid-template-columns: 1fr 1fr; }
+    .ss-link-size { grid-column: 1 / -1; min-height: 24px; }
+    .ss-history-pane .ss-history-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 2.2vw;
+      padding: 2.2vw;
+    }
     .ss-lora-dock {
       display: none;
       min-height: 0;
@@ -1051,6 +1238,27 @@ const STUDIO_V3_STYLES = `
     .ss-inspector-stage { padding: 52px 12px 16px; }
     .ss-inspector-image { max-height: calc(60dvh - 70px); }
     .ss-inspector-details { border-left: 0; border-top: 1px solid var(--lumiverse-border); padding: 13px; }
+    .ss-output-library {
+      grid-template-columns: 1fr;
+      grid-template-rows: 50px auto minmax(0, 1fr);
+    }
+    .ss-library-head { grid-column: 1; }
+    .ss-library-folders {
+      display: flex;
+      gap: 5px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 7px;
+      border-right: 0;
+      border-bottom: 1px solid var(--lumiverse-border);
+    }
+    .ss-library-folder { width: auto; min-width: max-content; margin: 0; }
+    .ss-library-folder-tools { min-width: max-content; margin: 0; }
+    .ss-output-library-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 2.2vw;
+      padding: 2.2vw;
+    }
   }
 
   @media (max-width: 470px) {
@@ -1093,6 +1301,60 @@ export function fitAspectWithin(aspect, maxWidth, maxHeight) {
         width,
         height
     };
+}
+const ASPECT_PRESETS = {
+    "1:1": {
+        label: "Square · 1:1",
+        width: 1024,
+        height: 1024
+    },
+    "2:3": {
+        label: "Portrait · 2:3",
+        width: 832,
+        height: 1216
+    },
+    "3:2": {
+        label: "Landscape · 3:2",
+        width: 1216,
+        height: 832
+    },
+    "4:5": {
+        label: "Portrait · 4:5",
+        width: 896,
+        height: 1152
+    },
+    "5:4": {
+        label: "Landscape · 5:4",
+        width: 1152,
+        height: 896
+    },
+    "9:16": {
+        label: "Tall · 9:16",
+        width: 768,
+        height: 1344
+    },
+    "16:9": {
+        label: "Wide · 16:9",
+        width: 1344,
+        height: 768
+    }
+};
+function roundModelSize(value) {
+    return clamp(Math.round(value / 64) * 64, 64, 4096);
+}
+export function dimensionsForAspect(aspect, scale) {
+    const preset = ASPECT_PRESETS[aspect] || ASPECT_PRESETS["1:1"];
+    const factor = clamp(Number(scale) || 1024, 256, 2048) / 1024;
+    return {
+        width: roundModelSize(preset.width * factor),
+        height: roundModelSize(preset.height * factor)
+    };
+}
+export function applyPresetPrompt(base, update) {
+    const cleanUpdate = String(update || "").trim();
+    if (!cleanUpdate) return base;
+    const resolved = cleanUpdate.includes("{value}") ? cleanUpdate.replaceAll("{value}", base) : cleanUpdate;
+    return resolved.replace(/^[\s,;|]+|[\s,;|]+$/g, "").trim();
 }
 function labelFromName(name) {
     const leaf = name.split("/").pop() || name;
@@ -1189,6 +1451,9 @@ class StudioController {
     pendingGeneration = null;
     imageScale = 1;
     previewAspect = 1;
+    libraryFolderId = "";
+    libraryPage = 0;
+    libraryPageSize = 20;
     outputResizeObserver = null;
     stopActiveResize = null;
     disposed = false;
@@ -1197,6 +1462,12 @@ class StudioController {
         const inspector = this.root.querySelector('[data-role="inspector"]');
         if (inspector && !inspector.hidden) {
             this.closeInspector();
+            event.stopPropagation();
+            return;
+        }
+        const library = this.root.querySelector('[data-role="output-library"]');
+        if (library && !library.hidden) {
+            this.closeOutputLibrary();
             event.stopPropagation();
             return;
         }
@@ -1218,11 +1489,20 @@ class StudioController {
             loras: [],
             stack: [],
             stackPresets: [],
+            swarmPresets: [],
+            samplers: [],
+            schedulers: [],
             outputs: [],
+            outputTotal: 0,
+            outputOffset: 0,
+            outputLimit: 12,
+            outputFolders: [],
+            libraryOutputs: [],
             activeChat: null,
             permissions: {},
             hasMetadataToken: false,
-            currentImage: null
+            currentImage: null,
+            initImage: null
         };
         this.buildV3();
         this.bind();
@@ -1493,13 +1773,32 @@ class StudioController {
                   <label>Checkpoint</label>
                   <select class="ss-select" data-role="model"><option value="">Select a connection first</option></select>
                 </div>
-                <div class="ss-field">
-                  <label>Width</label>
-                  <input class="ss-input" data-role="width" type="number" min="64" max="4096" step="64" value="1024" />
-                </div>
-                <div class="ss-field">
-                  <label>Height</label>
-                  <input class="ss-input" data-role="height" type="number" min="64" max="4096" step="64" value="1024" />
+                <div class="ss-aspect-controls">
+                  <div class="ss-field">
+                    <label>Aspect ratio</label>
+                    <select class="ss-select" data-role="aspect">
+                      ${Object.entries(ASPECT_PRESETS).map(([value, preset])=>`<option value="${value}">${preset.label}</option>`).join("")}
+                      <option value="custom">Custom / unlink</option>
+                    </select>
+                  </div>
+                  <div class="ss-field" data-role="size-scale-field">
+                    <label>Image scale</label>
+                    <div class="ss-size-slider-row">
+                      <input data-role="size-slider" type="range" min="256" max="2048" step="64" value="1024" />
+                      <span class="ss-size-readout" data-role="size-readout">1024 × 1024</span>
+                    </div>
+                  </div>
+                  <div class="ss-custom-size" data-role="custom-size" hidden>
+                    <div class="ss-field">
+                      <label>Width</label>
+                      <input class="ss-input" data-role="width" type="number" min="64" max="4096" step="64" value="1024" />
+                    </div>
+                    <div class="ss-field">
+                      <label>Height</label>
+                      <input class="ss-input" data-role="height" type="number" min="64" max="4096" step="64" value="1024" />
+                    </div>
+                    <label class="ss-link-size"><input data-role="link-size" type="checkbox" checked /> Link dimensions</label>
+                  </div>
                 </div>
                 <div class="ss-field">
                   <label>Steps</label>
@@ -1515,33 +1814,37 @@ class StudioController {
                 </div>
                 <div class="ss-field ss-wide">
                   <label>Sampler</label>
-                  <input class="ss-input" data-role="sampler" list="ss-samplers" placeholder="Connection default" />
-                  <datalist id="ss-samplers">
-                    <option value="euler"></option><option value="euler_ancestral"></option>
-                    <option value="dpmpp_2m"></option><option value="dpmpp_2m_sde"></option>
-                    <option value="dpmpp_3m_sde"></option><option value="uni_pc"></option>
-                  </datalist>
+                  <select class="ss-select" data-role="sampler"><option value="">Connection default</option></select>
                 </div>
                 <div class="ss-field ss-wide">
                   <label>Scheduler</label>
-                  <input class="ss-input" data-role="scheduler" list="ss-schedulers" placeholder="Connection default" />
-                  <datalist id="ss-schedulers">
-                    <option value="normal"></option><option value="karras"></option>
-                    <option value="exponential"></option><option value="sgm_uniform"></option>
-                    <option value="simple"></option><option value="ddim_uniform"></option>
-                  </datalist>
+                  <select class="ss-select" data-role="scheduler"><option value="">Connection default</option></select>
                 </div>
                 <div class="ss-inline-actions ss-wide">
                   <button class="ss-button" data-action="swap-size" title="Swap width and height">↔ Swap</button>
                   <button class="ss-button" data-action="random-seed" title="Use a random seed">✦ Random seed</button>
+                </div>
+                <div class="ss-init-panel">
+                  <div class="ss-init-preview" data-role="init-preview">No init</div>
+                  <div class="ss-init-content">
+                    <div class="ss-init-head"><strong class="ss-tiny">Init image</strong><span class="ss-init-label" data-role="init-label">Text-to-image</span></div>
+                    <div class="ss-init-actions">
+                      <button class="ss-button" data-action="use-current-init" disabled>Use current</button>
+                      <button class="ss-button" data-action="pick-init">Choose file</button>
+                      <button class="ss-button ss-button-danger" data-action="clear-init" disabled>Clear</button>
+                    </div>
+                    <label class="ss-creativity-row"><span>Creativity</span><input data-role="denoise" type="range" min="0" max="1" step="0.05" value="0.6" /><span data-role="denoise-label">0.60</span></label>
+                  </div>
+                  <input data-role="init-file" type="file" accept="image/*" hidden />
                 </div>
               </div>
               <details class="ss-advanced">
                 <summary>Advanced Swarm controls</summary>
                 <div class="ss-advanced-grid">
                   <div class="ss-field ss-wide">
-                    <label>Swarm preset(s)</label>
-                    <input class="ss-input" data-role="presets" placeholder="portrait, cinematic" />
+                    <label>Swarm preset</label>
+                    <select class="ss-select" data-role="presets"><option value="">No preset</option></select>
+                    <div class="ss-field-help" data-role="preset-resolved">The selected Swarm preset’s resolved prompts appear in output details.</div>
                   </div>
                   <div class="ss-field">
                     <label>VAE override</label>
@@ -1632,12 +1935,18 @@ class StudioController {
             <div class="ss-pane-head">
               <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny"><span data-role="output-count">0</span> saved outputs</div></div>
               <div>
+                <button class="ss-icon-button ss-pane-toggle" data-action="open-output-library" title="Open folders and all Swarm Studio outputs" aria-label="Open output library">▦</button>
                 <button class="ss-icon-button ss-pane-toggle" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
                 <button class="ss-icon-button ss-pane-toggle" data-action="toggle-history" title="Collapse history sidebar" aria-label="Collapse history sidebar">›</button>
               </div>
             </div>
             <div class="ss-pane-body ss-history-grid" data-role="history-grid">
               <div class="ss-empty">Outputs created in this chat will appear here.</div>
+            </div>
+            <div class="ss-history-pagination">
+              <button class="ss-button" data-action="history-prev" disabled>‹</button>
+              <span class="ss-history-page-label" data-role="history-page">1 / 1</span>
+              <button class="ss-button" data-action="history-next" disabled>›</button>
             </div>
           </aside>
         </div>
@@ -1715,13 +2024,43 @@ class StudioController {
             <h3 data-role="inspector-title">Generated output</h3>
             <div class="ss-muted ss-tiny">Full-size image and recorded generation settings</div>
             <div class="ss-inspector-facts" data-role="inspector-facts"></div>
-            <h4>Positive prompt</h4>
+            <div class="ss-inspector-actions">
+              <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
+              <button class="ss-button" data-action="use-as-init">Use as init image</button>
+              <button class="ss-button" data-action="open-swarm-folder" disabled>Open Swarm folder</button>
+              <button class="ss-button" data-action="open-output-library">Output library</button>
+              <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
+            </div>
+            <h4>Resolved positive prompt</h4>
             <p class="ss-inspector-copy" data-role="inspector-positive">Prompt metadata is unavailable for this older output.</p>
-            <h4>Negative prompt</h4>
+            <h4>Resolved negative prompt</h4>
             <p class="ss-inspector-copy" data-role="inspector-negative">No negative prompt recorded.</p>
             <h4>LoRA stack</h4>
             <p class="ss-inspector-copy" data-role="inspector-loras">No LoRAs recorded.</p>
           </aside>
+        </div>
+
+        <div class="ss-output-library" data-role="output-library" hidden>
+          <header class="ss-library-head">
+            <strong>Output library</strong>
+            <span class="ss-muted ss-tiny">Lumiverse-owned Swarm Studio images and virtual folders</span>
+            <button class="ss-icon-button" data-action="close-output-library" aria-label="Close output library">×</button>
+          </header>
+          <aside class="ss-library-folders" data-role="library-folders">
+            <div class="ss-empty">Loading folders…</div>
+          </aside>
+          <main class="ss-library-main">
+            <div class="ss-library-toolbar">
+              <strong class="ss-tiny" data-role="library-title">All outputs</strong>
+              <span class="ss-muted ss-tiny" data-role="library-count">0 images</span>
+              <button class="ss-button" data-action="library-prev" disabled>‹</button>
+              <span class="ss-history-page-label" data-role="library-page">1 / 1</span>
+              <button class="ss-button" data-action="library-next" disabled>›</button>
+            </div>
+            <div class="ss-output-library-grid" data-role="library-grid">
+              <div class="ss-empty">Loading outputs…</div>
+            </div>
+          </main>
         </div>
       </div>
     `;
@@ -1744,9 +2083,39 @@ class StudioController {
             const presetId = event.currentTarget.value;
             if (presetId) this.loadStackPreset(presetId);
         });
+        this.get('[data-role="aspect"]').addEventListener("change", ()=>this.applyAspectSelection());
+        this.get('[data-role="size-slider"]').addEventListener("input", ()=>this.applyAspectScale());
+        this.get('[data-role="link-size"]').addEventListener("change", ()=>this.applyAspectSelection());
+        this.get('[data-role="denoise"]').addEventListener("input", (event)=>{
+            this.get('[data-role="denoise-label"]').textContent = Number(event.currentTarget.value).toFixed(2);
+        });
+        this.get('[data-role="presets"]').addEventListener("change", ()=>this.updateResolvedPresetSummary());
         const updateRequestedAspect = ()=>this.updatePreviewAspect(numberValue(this.get('[data-role="width"]'), 1024), numberValue(this.get('[data-role="height"]'), 1024));
-        this.get('[data-role="width"]').addEventListener("input", updateRequestedAspect);
-        this.get('[data-role="height"]').addEventListener("input", updateRequestedAspect);
+        this.get('[data-role="width"]').addEventListener("input", (event)=>{
+            this.updateLinkedCustomDimension("width", Number(event.currentTarget.value));
+            updateRequestedAspect();
+            this.updateSizeReadout();
+        });
+        this.get('[data-role="height"]').addEventListener("input", (event)=>{
+            this.updateLinkedCustomDimension("height", Number(event.currentTarget.value));
+            updateRequestedAspect();
+            this.updateSizeReadout();
+        });
+        this.get('[data-role="init-file"]').addEventListener("change", (event)=>{
+            const input = event.currentTarget;
+            const file = input.files?.[0];
+            input.value = "";
+            if (file) void this.setInitFromBlob(file, file.name, "");
+        });
+        this.root.addEventListener("change", (event)=>{
+            const select = event.target.closest('[data-role="library-folder-select"]');
+            if (select?.dataset.imageId) {
+                this.send("move_output_to_folder", {
+                    imageId: select.dataset.imageId,
+                    folderId: select.value
+                });
+            }
+        });
         this.root.addEventListener("pointerdown", (event)=>{
             const handle = event.target.closest("[data-resize]");
             if (handle) this.beginResize(handle.dataset.resize || "", event);
@@ -1767,6 +2136,9 @@ class StudioController {
             if (action === "close-studio") this.modal.dismiss();
             if (action === "swap-size") this.swapSize();
             if (action === "random-seed") this.get('[data-role="seed"]').value = "-1";
+            if (action === "use-current-init" || action === "use-as-init") void this.useCurrentAsInit();
+            if (action === "pick-init") this.get('[data-role="init-file"]').click();
+            if (action === "clear-init") this.clearInitImage();
             if (action === "manual-lora") this.addManualLora();
             if (action === "toggle-generation") this.togglePane("generation");
             if (action === "toggle-history") this.togglePane("history");
@@ -1782,11 +2154,27 @@ class StudioController {
             if (action === "load-stack") this.loadStackPreset();
             if (action === "delete-stack") this.deleteStackPreset();
             if (action === "generate") this.generate();
-            if (action === "refresh-outputs") this.send("refresh_outputs");
+            if (action === "refresh-outputs") this.refreshOutputs();
+            if (action === "history-prev") this.changeHistoryPage(-1);
+            if (action === "history-next") this.changeHistoryPage(1);
             if (action === "download-output") this.downloadCurrent();
             if (action === "copy-output") void this.copyCurrentUrl();
             if (action === "inspect-output") this.openInspector();
             if (action === "close-inspector") this.closeInspector();
+            if (action === "reuse-parameters") this.reuseCurrentParameters();
+            if (action === "delete-output") this.deleteCurrentOutput();
+            if (action === "open-swarm-folder") this.openSwarmFolder();
+            if (action === "open-output-library") this.openOutputLibrary();
+            if (action === "close-output-library") this.closeOutputLibrary();
+            if (action === "create-output-folder") this.createOutputFolder();
+            if (action === "delete-output-folder") this.deleteSelectedOutputFolder();
+            if (action === "library-prev") this.changeLibraryPage(-1);
+            if (action === "library-next") this.changeLibraryPage(1);
+            if (action === "library-folder") {
+                this.libraryFolderId = button.dataset.folderId || "";
+                this.libraryPage = 0;
+                this.renderOutputLibrary();
+            }
             if (action === "zoom-in") this.setInspectorZoom(this.imageScale + 0.25);
             if (action === "zoom-out") this.setInspectorZoom(this.imageScale - 0.25);
             if (action === "zoom-reset") this.setInspectorZoom(1);
@@ -1807,8 +2195,9 @@ class StudioController {
         switch(payload?.type){
             case "bootstrap_result":
                 this.state.connections = Array.isArray(data.connections) ? data.connections : [];
-                this.state.outputs = Array.isArray(data.outputs) ? data.outputs : [];
+                this.acceptOutputPage(data);
                 this.state.stackPresets = Array.isArray(data.stackPresets) ? data.stackPresets : [];
+                this.state.outputFolders = Array.isArray(data.outputFolders) ? data.outputFolders : [];
                 this.state.activeChat = data.activeChat || null;
                 this.state.permissions = data.permissions || {};
                 this.renderPermissions();
@@ -1824,6 +2213,7 @@ class StudioController {
             case "metadata_result":
                 this.state.loras = Array.isArray(data.loras) ? data.loras : [];
                 this.state.checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints : this.state.checkpoints;
+                this.acceptSwarmOptions(data.swarmOptions);
                 this.showMetadataError(data.metadataError || "");
                 this.updateFamilyChip();
                 this.renderLoras();
@@ -1847,9 +2237,10 @@ class StudioController {
                 this.generating = false;
                 this.currentJobId = "";
                 this.setGenerating(false);
-                this.state.outputs = Array.isArray(data.outputs) ? data.outputs : [];
+                this.acceptOutputPage(data);
                 if (data.result?.imageDataUrl) {
                     this.setCurrentImage({
+                        id: data.result.imageId || data.record?.imageId,
                         src: data.result.imageDataUrl,
                         url: data.result.imageUrl || data.result.imageDataUrl,
                         label: `${data.result.model || "SwarmUI"} · just generated`,
@@ -1861,9 +2252,32 @@ class StudioController {
                 this.setRunStatus("Generation complete. Output saved to Lumiverse.");
                 break;
             case "outputs_result":
-                this.state.outputs = Array.isArray(data) ? data : [];
+                this.acceptOutputPage(data);
                 this.renderOutputs();
-                this.setRunStatus(`History refreshed: ${this.state.outputs.length} outputs.`);
+                this.setRunStatus(`History refreshed: ${this.state.outputTotal} outputs.`);
+                break;
+            case "library_outputs_result":
+                this.state.libraryOutputs = Array.isArray(data.outputs) ? data.outputs : [];
+                this.state.outputFolders = Array.isArray(data.folders) ? data.folders : this.state.outputFolders;
+                this.renderOutputLibrary();
+                break;
+            case "output_folders_result":
+                this.state.outputFolders = Array.isArray(data) ? data : [];
+                this.renderOutputLibrary();
+                this.setRunStatus("Output folders updated.");
+                break;
+            case "output_deleted":
+                this.acceptOutputPage(data);
+                this.state.outputFolders = Array.isArray(data.folders) ? data.folders : this.state.outputFolders;
+                this.state.libraryOutputs = this.state.libraryOutputs.filter((output)=>output.id !== data.imageId);
+                if (this.state.currentImage?.id === data.imageId) this.clearCurrentImage();
+                this.closeInspector();
+                this.renderOutputs();
+                this.renderOutputLibrary();
+                this.setRunStatus("Output deleted from Lumiverse.");
+                break;
+            case "swarm_folder_opened":
+                this.setRunStatus("Asked SwarmUI to reveal the output in its host file explorer.");
                 break;
             case "stack_presets_result":
                 this.state.stackPresets = Array.isArray(data) ? data : [];
@@ -1944,6 +2358,9 @@ class StudioController {
         this.state.models = [];
         this.state.checkpoints = [];
         this.state.loras = [];
+        this.state.swarmPresets = [];
+        this.state.samplers = [];
+        this.state.schedulers = [];
         this.previewObserver?.disconnect();
         this.requestedPreviews.clear();
         this.previewCache.clear();
@@ -1963,6 +2380,7 @@ class StudioController {
         this.state.checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints : [];
         this.state.loras = Array.isArray(data.loras) ? data.loras : [];
         this.state.hasMetadataToken = Boolean(data.hasMetadataToken);
+        this.acceptSwarmOptions(data.swarmOptions);
         this.populateModels();
         this.applyConnectionDefaults();
         this.updateFamilyChip();
@@ -1974,6 +2392,69 @@ class StudioController {
         for (const button of this.root.querySelectorAll('[data-action="generate"]')){
             button.disabled = !this.state.connection || !this.state.permissions.imageGen;
         }
+    }
+    acceptOutputPage(data) {
+        this.state.outputs = Array.isArray(data?.outputs) ? data.outputs : Array.isArray(data) ? data : [];
+        this.state.outputTotal = Math.max(this.state.outputs.length, Number(data?.total) || 0);
+        this.state.outputOffset = Math.max(0, Number(data?.offset) || 0);
+        this.state.outputLimit = Math.max(1, Number(data?.limit) || this.state.outputLimit || 12);
+    }
+    acceptSwarmOptions(value) {
+        const previousSampler = this.root.querySelector('[data-role="sampler"]')?.value || "";
+        const previousScheduler = this.root.querySelector('[data-role="scheduler"]')?.value || "";
+        const previousPreset = this.root.querySelector('[data-role="presets"]')?.value || "";
+        const fallbackSamplers = [
+            "euler",
+            "euler_ancestral",
+            "dpmpp_2m",
+            "dpmpp_2m_sde",
+            "dpmpp_3m_sde",
+            "uni_pc"
+        ];
+        const fallbackSchedulers = [
+            "normal",
+            "karras",
+            "exponential",
+            "sgm_uniform",
+            "simple",
+            "ddim_uniform"
+        ];
+        this.state.samplers = Array.isArray(value?.samplers) && value.samplers.length ? value.samplers : fallbackSamplers;
+        this.state.schedulers = Array.isArray(value?.schedulers) && value.schedulers.length ? value.schedulers : fallbackSchedulers;
+        this.state.swarmPresets = Array.isArray(value?.presets) ? value.presets : [];
+        this.populateSimpleSelect("sampler", "Connection default", this.state.samplers, previousSampler);
+        this.populateSimpleSelect("scheduler", "Connection default", this.state.schedulers, previousScheduler);
+        const presetSelect = this.get('[data-role="presets"]');
+        presetSelect.replaceChildren();
+        const blank = element("option", "", "No preset");
+        blank.value = "";
+        presetSelect.appendChild(blank);
+        for (const preset of this.state.swarmPresets){
+            const option = element("option", "", preset.title);
+            option.value = preset.title;
+            option.title = preset.description;
+            presetSelect.appendChild(option);
+        }
+        presetSelect.value = this.state.swarmPresets.some((preset)=>preset.title === previousPreset) ? previousPreset : "";
+        this.updateResolvedPresetSummary();
+    }
+    populateSimpleSelect(role, blankLabel, values, selected) {
+        const select = this.get(`[data-role="${role}"]`);
+        select.replaceChildren();
+        const blank = element("option", "", blankLabel);
+        blank.value = "";
+        select.appendChild(blank);
+        if (selected && !values.includes(selected)) {
+            const current = element("option", "", `${selected} · connection`);
+            current.value = selected;
+            select.appendChild(current);
+        }
+        for (const value of values){
+            const option = element("option", "", value);
+            option.value = value;
+            select.appendChild(option);
+        }
+        select.value = selected;
     }
     populateModels() {
         const select = this.get('[data-role="model"]');
@@ -2020,7 +2501,103 @@ class StudioController {
         assign("clip-l", "clipLModel", "");
         assign("clip-g", "clipGModel", "");
         assign("t5", "t5XXLModel", "");
-        this.updatePreviewAspect(numberValue(this.get('[data-role="width"]'), 1024), numberValue(this.get('[data-role="height"]'), 1024));
+        assign("denoise", "denoise", .6);
+        this.setDimensions(Number(defaults.width) || 1024, Number(defaults.height) || 1024);
+        this.get('[data-role="denoise-label"]').textContent = Number(this.get('[data-role="denoise"]').value || .6).toFixed(2);
+    }
+    setDimensions(width, height) {
+        const safeWidth = roundModelSize(width);
+        const safeHeight = roundModelSize(height);
+        this.get('[data-role="width"]').value = String(safeWidth);
+        this.get('[data-role="height"]').value = String(safeHeight);
+        const ratio = safeWidth / safeHeight;
+        let best = "";
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (const [key, preset] of Object.entries(ASPECT_PRESETS)){
+            const distance = Math.abs(ratio - preset.width / preset.height);
+            if (distance < bestDistance) {
+                best = key;
+                bestDistance = distance;
+            }
+        }
+        const aspect = this.get('[data-role="aspect"]');
+        aspect.value = bestDistance <= .035 ? best : "custom";
+        const preset = ASPECT_PRESETS[best];
+        const scale = preset ? 1024 * (safeWidth >= safeHeight ? safeWidth / preset.width : safeHeight / preset.height) : Math.max(safeWidth, safeHeight);
+        this.get('[data-role="size-slider"]').value = String(clamp(Math.round(scale), 256, 2048));
+        this.get('[data-role="custom-size"]').hidden = aspect.value !== "custom";
+        this.updateSizeReadout();
+        this.updatePreviewAspect(safeWidth, safeHeight);
+    }
+    applyAspectSelection() {
+        const aspect = this.get('[data-role="aspect"]').value;
+        const custom = aspect === "custom";
+        this.get('[data-role="custom-size"]').hidden = !custom;
+        this.get('[data-role="size-scale-field"]').hidden = custom && !this.get('[data-role="link-size"]').checked;
+        if (!custom) this.applyAspectScale();
+    }
+    applyAspectScale() {
+        const aspect = this.get('[data-role="aspect"]').value;
+        const scale = numberValue(this.get('[data-role="size-slider"]'), 1024);
+        if (aspect !== "custom") {
+            const dimensions = dimensionsForAspect(aspect, scale);
+            this.get('[data-role="width"]').value = String(dimensions.width);
+            this.get('[data-role="height"]').value = String(dimensions.height);
+            this.updatePreviewAspect(dimensions.width, dimensions.height);
+        } else if (this.get('[data-role="link-size"]').checked) {
+            const longest = Math.max(numberValue(this.get('[data-role="width"]'), 1024), numberValue(this.get('[data-role="height"]'), 1024));
+            const factor = longest > 0 ? scale / longest : 1;
+            const width = roundModelSize(numberValue(this.get('[data-role="width"]'), 1024) * factor);
+            const height = roundModelSize(numberValue(this.get('[data-role="height"]'), 1024) * factor);
+            this.get('[data-role="width"]').value = String(width);
+            this.get('[data-role="height"]').value = String(height);
+            this.updatePreviewAspect(width, height);
+        }
+        this.updateSizeReadout();
+    }
+    updateLinkedCustomDimension(axis, value) {
+        if (this.get('[data-role="aspect"]').value !== "custom" || !this.get('[data-role="link-size"]').checked || !Number.isFinite(value)) return;
+        if (axis === "width") {
+            this.get('[data-role="height"]').value = String(roundModelSize(value / this.previewAspect));
+        } else {
+            this.get('[data-role="width"]').value = String(roundModelSize(value * this.previewAspect));
+        }
+    }
+    updateSizeReadout() {
+        const width = numberValue(this.get('[data-role="width"]'), 1024);
+        const height = numberValue(this.get('[data-role="height"]'), 1024);
+        this.get('[data-role="size-readout"]').textContent = `${width} × ${height}`;
+    }
+    resolvedPrompts() {
+        const prompt = this.finalPrompt();
+        const negativePrompt = this.get('[data-role="negative"]').value.trim();
+        const presetName = this.get('[data-role="presets"]').value;
+        const preset = this.state.swarmPresets.find((item)=>item.title === presetName);
+        if (!preset) return {
+            prompt,
+            negativePrompt,
+            presets: []
+        };
+        return {
+            prompt: applyPresetPrompt(prompt, preset.paramMap.prompt || ""),
+            negativePrompt: applyPresetPrompt(negativePrompt, preset.paramMap.negativeprompt || preset.paramMap.negative_prompt || ""),
+            presets: [
+                preset.title
+            ]
+        };
+    }
+    updateResolvedPresetSummary() {
+        const status = this.get('[data-role="preset-resolved"]');
+        const presetName = this.get('[data-role="presets"]').value;
+        const preset = this.state.swarmPresets.find((item)=>item.title === presetName);
+        if (!preset) {
+            status.textContent = "No Swarm preset; prompts pass through unchanged.";
+            return;
+        }
+        const changes = [];
+        if (preset.paramMap.prompt) changes.push("positive");
+        if (preset.paramMap.negativeprompt || preset.paramMap.negative_prompt) changes.push("negative");
+        status.textContent = changes.length ? `${preset.title} resolves ${changes.join(" + ")} prompt text; the resolved values are recorded with the output.` : `${preset.title} changes render parameters without replacing prompt text.`;
     }
     refreshMetadata() {
         if (!this.state.connection) return;
@@ -2532,12 +3109,23 @@ class StudioController {
             details?.model,
             parameters.width && parameters.height ? `${parameters.width} × ${parameters.height}` : "",
             parameters.steps ? `${parameters.steps} steps` : "",
-            parameters.seed !== undefined ? `seed ${parameters.seed}` : ""
+            parameters.seed !== undefined ? `seed ${parameters.seed}` : "",
+            parameters.sampler ? String(parameters.sampler) : "",
+            parameters.scheduler ? String(parameters.scheduler) : "",
+            details?.timing?.prep ? `${details.timing.prep} prep` : "",
+            details?.timing?.generation ? `${details.timing.generation} gen` : "",
+            !details?.timing?.prep && details?.timing?.totalMs ? `${(details.timing.totalMs / 1000).toFixed(2)} sec total` : "",
+            details?.presets?.length ? `preset · ${details.presets.join(", ")}` : "",
+            details?.initImageLabel ? `img2img · ${details.initImageLabel}` : ""
         ].filter(Boolean);
         for (const value of factValues)facts.appendChild(element("span", "ss-badge", String(value)));
-        this.get('[data-role="inspector-positive"]').textContent = details?.prompt || "Prompt metadata is unavailable for this older output.";
-        this.get('[data-role="inspector-negative"]').textContent = details?.negativePrompt || "No negative prompt recorded.";
+        this.get('[data-role="inspector-positive"]').textContent = details?.resolvedPrompt || details?.prompt || "Prompt metadata is unavailable for this older output.";
+        this.get('[data-role="inspector-negative"]').textContent = details?.resolvedNegativePrompt || details?.negativePrompt || "No negative prompt recorded.";
         this.get('[data-role="inspector-loras"]').textContent = details?.loras?.length ? details.loras.map((lora)=>`${lora.name} · ${lora.weight}`).join("\n") : "No LoRAs recorded.";
+        this.get('[data-action="reuse-parameters"]').disabled = !details;
+        this.get('[data-action="use-as-init"]').disabled = !image.src;
+        this.get('[data-action="delete-output"]').disabled = !image.id;
+        this.get('[data-action="open-swarm-folder"]').disabled = !details?.swarmPath || !this.state.connection;
         inspector.hidden = false;
         this.setInspectorZoom(1);
     }
@@ -2548,6 +3136,268 @@ class StudioController {
         this.imageScale = clamp(value, 0.5, 4);
         this.get('[data-role="inspector-image"]').style.setProperty("--ss-image-scale", String(this.imageScale));
         this.get('[data-role="zoom-label"]').textContent = `${Math.round(this.imageScale * 100)}%`;
+    }
+    reuseCurrentParameters() {
+        const details = this.state.currentImage?.details;
+        if (!details) return;
+        const parameters = details.parameters || {};
+        this.get('[data-role="positive"]').value = details.prompt || details.resolvedPrompt || "";
+        this.get('[data-role="negative"]').value = details.negativePrompt || details.resolvedNegativePrompt || "";
+        if (details.model) {
+            const model = this.get('[data-role="model"]');
+            if (![
+                ...model.options
+            ].some((option)=>option.value === details.model)) {
+                const option = element("option", "", `${details.model} · reused`);
+                option.value = details.model;
+                model.appendChild(option);
+            }
+            model.value = details.model;
+        }
+        const assign = (role, value)=>{
+            if (value === undefined || value === null) return;
+            const control = this.get(`[data-role="${role}"]`);
+            if (control instanceof HTMLSelectElement && value && ![
+                ...control.options
+            ].some((option)=>option.value === String(value))) {
+                const option = element("option", "", `${value} · reused`);
+                option.value = String(value);
+                control.appendChild(option);
+            }
+            control.value = String(value);
+        };
+        this.setDimensions(Number(parameters.width) || 1024, Number(parameters.height) || 1024);
+        assign("steps", parameters.steps);
+        assign("cfg", parameters.cfgScale);
+        assign("seed", parameters.seed);
+        assign("sampler", parameters.sampler);
+        assign("scheduler", parameters.scheduler);
+        assign("vae", parameters.vae);
+        assign("unet", parameters.unet);
+        assign("clip-l", parameters.clipLModel);
+        assign("clip-g", parameters.clipGModel);
+        assign("t5", parameters.t5XXLModel);
+        assign("raw-override", parameters.rawRequestOverride);
+        const preset = details.presets?.[0] || "";
+        this.get('[data-role="presets"]').value = this.state.swarmPresets.some((item)=>item.title === preset) ? preset : "";
+        this.state.stack = (details.loras || []).map((saved)=>({
+                lora: this.state.loras.find((item)=>item.name === saved.name) || manualLora(saved.name),
+                weight: clamp(Number(saved.weight) || 1, -10, 10),
+                enabled: true,
+                useTrigger: false
+            }));
+        this.renderStack();
+        this.renderLoras();
+        this.updateResolvedPresetSummary();
+        this.closeInspector();
+        if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create");
+        this.setRunStatus("Reused prompts, preset, render settings, and LoRA stack.");
+    }
+    deleteCurrentOutput() {
+        const image = this.state.currentImage;
+        if (!image?.id) return;
+        if (!window.confirm(`Delete “${image.label}” from Lumiverse? This cannot be undone.`)) return;
+        this.send("delete_output", {
+            imageId: image.id
+        });
+        this.setRunStatus(`Deleting “${image.label}”…`);
+    }
+    openSwarmFolder() {
+        const path = this.state.currentImage?.details?.swarmPath;
+        if (!path || !this.state.connection) return;
+        this.send("open_swarm_folder", {
+            connectionId: this.state.connection.id,
+            path
+        });
+        this.setRunStatus("Asking SwarmUI to reveal the original output…");
+    }
+    async useCurrentAsInit() {
+        const image = this.state.currentImage;
+        if (!image?.src) return;
+        this.setRunStatus("Preparing the selected output for img2img…");
+        try {
+            const response = await fetch(image.url || image.src, {
+                credentials: "same-origin"
+            });
+            if (!response.ok) throw new Error(`Image request failed (${response.status}).`);
+            await this.setInitFromBlob(await response.blob(), image.label, image.id || "");
+            this.closeInspector();
+            if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("generation");
+            this.setRunStatus(`Init image ready · creativity ${this.get('[data-role="denoise"]').value}.`);
+        } catch (error) {
+            this.setRunStatus(`Could not prepare init image: ${error instanceof Error ? error.message : String(error)}`, true);
+        }
+    }
+    async setInitFromBlob(blob, label, imageId) {
+        if (!blob.type.startsWith("image/")) throw new Error("Choose an image file.");
+        let prepared = blob;
+        try {
+            const bitmap = await createImageBitmap(blob);
+            const maxDimension = 1536;
+            const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+            canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+            canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+            bitmap.close();
+            const compressed = await new Promise((resolve)=>canvas.toBlob(resolve, "image/webp", .88));
+            if (compressed) prepared = compressed;
+        } catch  {}
+        if (prepared.size > 2_700_000) {
+            throw new Error("The prepared init image is still too large; choose an image under roughly 3 MB.");
+        }
+        const dataUrl = await new Promise((resolve, reject)=>{
+            const reader = new FileReader();
+            reader.onload = ()=>resolve(String(reader.result || ""));
+            reader.onerror = ()=>reject(reader.error || new Error("Could not read image."));
+            reader.readAsDataURL(prepared);
+        });
+        const comma = dataUrl.indexOf(",");
+        if (comma < 0) throw new Error("Could not encode the init image.");
+        this.state.initImage = {
+            data: dataUrl.slice(comma + 1),
+            mimeType: prepared.type || blob.type || "image/png",
+            src: dataUrl,
+            label,
+            imageId
+        };
+        this.renderInitImage();
+    }
+    clearInitImage() {
+        this.state.initImage = null;
+        this.renderInitImage();
+        this.setRunStatus("Init image cleared; generation is text-to-image again.");
+    }
+    renderInitImage() {
+        const preview = this.get('[data-role="init-preview"]');
+        const label = this.get('[data-role="init-label"]');
+        const clear = this.get('[data-action="clear-init"]');
+        preview.replaceChildren();
+        if (!this.state.initImage) {
+            preview.textContent = "No init";
+            label.textContent = "Text-to-image";
+            clear.disabled = true;
+            return;
+        }
+        const image = element("img");
+        image.src = this.state.initImage.src;
+        image.alt = this.state.initImage.label;
+        preview.appendChild(image);
+        label.textContent = this.state.initImage.label;
+        clear.disabled = false;
+    }
+    openOutputLibrary() {
+        this.closeInspector();
+        this.get('[data-role="output-library"]').hidden = false;
+        this.get('[data-role="library-grid"]').replaceChildren(element("div", "ss-empty", "Loading Lumiverse outputs…"));
+        this.send("list_library_outputs");
+    }
+    closeOutputLibrary() {
+        this.get('[data-role="output-library"]').hidden = true;
+    }
+    createOutputFolder() {
+        const name = window.prompt("Name this output folder:");
+        if (!name?.trim()) return;
+        this.send("create_output_folder", {
+            name: name.trim()
+        });
+    }
+    deleteSelectedOutputFolder() {
+        const folder = this.state.outputFolders.find((item)=>item.id === this.libraryFolderId);
+        if (!folder || !window.confirm(`Delete folder “${folder.name}”? Its images stay in Lumiverse.`)) return;
+        this.send("delete_output_folder", {
+            folderId: folder.id
+        });
+        this.libraryFolderId = "";
+        this.libraryPage = 0;
+    }
+    changeLibraryPage(delta) {
+        const filtered = this.filteredLibraryOutputs();
+        const pages = Math.max(1, Math.ceil(filtered.length / this.libraryPageSize));
+        this.libraryPage = clamp(this.libraryPage + delta, 0, pages - 1);
+        this.renderOutputLibrary();
+    }
+    filteredLibraryOutputs() {
+        if (!this.libraryFolderId) return this.state.libraryOutputs;
+        const assigned = new Set(this.state.outputFolders.flatMap((folder)=>folder.imageIds));
+        if (this.libraryFolderId === "__unfiled__") {
+            return this.state.libraryOutputs.filter((output)=>!assigned.has(String(output.id)));
+        }
+        const folder = this.state.outputFolders.find((item)=>item.id === this.libraryFolderId);
+        const ids = new Set(folder?.imageIds || []);
+        return this.state.libraryOutputs.filter((output)=>ids.has(String(output.id)));
+    }
+    renderOutputLibrary() {
+        const folderPane = this.get('[data-role="library-folders"]');
+        folderPane.replaceChildren();
+        const appendFolder = (id, name, count)=>{
+            const button = element("button", "ss-library-folder");
+            button.dataset.action = "library-folder";
+            button.dataset.folderId = id;
+            button.dataset.active = String(this.libraryFolderId === id);
+            button.append(element("span", "", name), element("span", "ss-muted ss-tiny", String(count)));
+            folderPane.appendChild(button);
+        };
+        appendFolder("", "All outputs", this.state.libraryOutputs.length);
+        const assigned = new Set(this.state.outputFolders.flatMap((folder)=>folder.imageIds));
+        appendFolder("__unfiled__", "Unfiled", this.state.libraryOutputs.filter((output)=>!assigned.has(String(output.id))).length);
+        for (const folder of this.state.outputFolders){
+            const ids = new Set(folder.imageIds);
+            appendFolder(folder.id, folder.name, this.state.libraryOutputs.filter((output)=>ids.has(String(output.id))).length);
+        }
+        const tools = element("div", "ss-library-folder-tools");
+        const create = element("button", "ss-button", "New folder");
+        create.dataset.action = "create-output-folder";
+        const remove = element("button", "ss-button ss-button-danger", "Delete");
+        remove.dataset.action = "delete-output-folder";
+        remove.disabled = !this.state.outputFolders.some((folder)=>folder.id === this.libraryFolderId);
+        tools.append(create, remove);
+        folderPane.appendChild(tools);
+        const filtered = this.filteredLibraryOutputs();
+        const pages = Math.max(1, Math.ceil(filtered.length / this.libraryPageSize));
+        this.libraryPage = clamp(this.libraryPage, 0, pages - 1);
+        const selectedFolder = this.state.outputFolders.find((folder)=>folder.id === this.libraryFolderId);
+        this.get('[data-role="library-title"]').textContent = selectedFolder?.name || (this.libraryFolderId === "__unfiled__" ? "Unfiled" : "All outputs");
+        this.get('[data-role="library-count"]').textContent = `${filtered.length} image${filtered.length === 1 ? "" : "s"}`;
+        this.get('[data-role="library-page"]').textContent = `${this.libraryPage + 1} / ${pages}`;
+        this.get('[data-action="library-prev"]').disabled = this.libraryPage <= 0;
+        this.get('[data-action="library-next"]').disabled = this.libraryPage >= pages - 1;
+        const grid = this.get('[data-role="library-grid"]');
+        grid.replaceChildren();
+        const page = filtered.slice(this.libraryPage * this.libraryPageSize, (this.libraryPage + 1) * this.libraryPageSize);
+        if (!page.length) {
+            grid.appendChild(element("div", "ss-empty", "No outputs in this folder yet."));
+            return;
+        }
+        for (const output of page){
+            const card = element("article", "ss-library-output");
+            const open = element("button", "ss-library-output-button");
+            const image = element("img");
+            image.src = output.url;
+            image.alt = output.original_filename || "Generated output";
+            open.appendChild(image);
+            open.addEventListener("click", ()=>{
+                this.setCurrentImage(this.outputToCurrentImage(output));
+                this.openInspector();
+            });
+            const meta = element("div", "ss-library-output-meta");
+            meta.appendChild(element("div", "ss-library-output-name", output.original_filename || `Output ${output.id}`));
+            const folderSelect = element("select", "ss-select");
+            folderSelect.dataset.role = "library-folder-select";
+            folderSelect.dataset.imageId = String(output.id);
+            const unfiled = element("option", "", "Unfiled");
+            unfiled.value = "";
+            folderSelect.appendChild(unfiled);
+            for (const folder of this.state.outputFolders){
+                const option = element("option", "", folder.name);
+                option.value = folder.id;
+                folderSelect.appendChild(option);
+            }
+            folderSelect.value = this.state.outputFolders.find((folder)=>folder.imageIds.includes(String(output.id)))?.id || "";
+            meta.appendChild(folderSelect);
+            card.append(open, meta);
+            grid.appendChild(card);
+        }
     }
     inheritedTriggers() {
         const seen = new Set();
@@ -2584,8 +3434,10 @@ class StudioController {
             }
             parsed = value;
         }
-        const presets = this.get('[data-role="presets"]').value.split(",").map((value)=>value.trim()).filter(Boolean);
-        if (presets.length) parsed.presets = presets;
+        const preset = this.get('[data-role="presets"]').value.trim();
+        if (preset) parsed.presets = [
+            preset
+        ];
         return Object.keys(parsed).length ? JSON.stringify(parsed) : undefined;
     }
     generate() {
@@ -2621,18 +3473,33 @@ class StudioController {
             loraWeights: enabled.map((item)=>item.weight),
             rawRequestOverride
         };
+        if (this.state.initImage) {
+            parameters.referenceImages = [
+                {
+                    data: this.state.initImage.data,
+                    mimeType: this.state.initImage.mimeType
+                }
+            ];
+            parameters.denoise = clamp(numberValue(this.get('[data-role="denoise"]'), .6), 0, 1);
+        }
         const clientJobId = crypto.randomUUID();
         const negativePrompt = this.get('[data-role="negative"]').value.trim();
         const model = this.get('[data-role="model"]').value || this.state.connection.model;
+        const resolved = this.resolvedPrompts();
         this.pendingGeneration = {
             prompt,
             negativePrompt,
+            resolvedPrompt: resolved.prompt,
+            resolvedNegativePrompt: resolved.negativePrompt,
             model,
             parameters,
             loras: enabled.map((item)=>({
                     name: item.lora.name,
                     weight: item.weight
                 })),
+            presets: resolved.presets,
+            initImageId: this.state.initImage?.imageId || "",
+            initImageLabel: this.state.initImage?.label || "",
             createdAt: Date.now()
         };
         this.generating = true;
@@ -2648,6 +3515,13 @@ class StudioController {
                 model,
                 clientJobId,
                 parameters
+            },
+            recordHints: {
+                resolvedPrompt: resolved.prompt,
+                resolvedNegativePrompt: resolved.negativePrompt,
+                presets: resolved.presets,
+                initImageId: this.state.initImage?.imageId || "",
+                initImageLabel: this.state.initImage?.label || ""
             }
         });
     }
@@ -2710,7 +3584,12 @@ class StudioController {
     renderOutputs() {
         const grid = this.get('[data-role="history-grid"]');
         grid.replaceChildren();
-        this.get('[data-role="output-count"]').textContent = String(this.state.outputs.length);
+        this.get('[data-role="output-count"]').textContent = String(this.state.outputTotal);
+        const pages = Math.max(1, Math.ceil(this.state.outputTotal / this.state.outputLimit));
+        const page = Math.min(pages, Math.floor(this.state.outputOffset / this.state.outputLimit) + 1);
+        this.get('[data-role="history-page"]').textContent = `${page} / ${pages}`;
+        this.get('[data-action="history-prev"]').disabled = this.state.outputOffset <= 0;
+        this.get('[data-action="history-next"]').disabled = this.state.outputOffset + this.state.outputLimit >= this.state.outputTotal;
         if (!this.state.outputs.length) {
             grid.appendChild(element("div", "ss-empty", "Outputs created in this chat will appear here."));
             return;
@@ -2723,17 +3602,32 @@ class StudioController {
             image.alt = output.original_filename || "Generated image";
             button.appendChild(image);
             button.addEventListener("click", ()=>{
-                const fullUrl = typeof output.url === "string" ? output.url.replace(/\?.*$/, "") : output.url;
-                this.setCurrentImage({
-                    src: output.url,
-                    url: fullUrl || output.url,
-                    label: output.original_filename || `Output ${output.id}`,
-                    details: output.studioMetadata || null
-                });
+                this.setCurrentImage(this.outputToCurrentImage(output));
                 this.openInspector();
             });
             grid.appendChild(button);
         }
+    }
+    refreshOutputs(offset = this.state.outputOffset) {
+        this.send("refresh_outputs", {
+            offset,
+            limit: this.state.outputLimit
+        });
+    }
+    changeHistoryPage(delta) {
+        const next = Math.max(0, this.state.outputOffset + delta * this.state.outputLimit);
+        if (next >= this.state.outputTotal && delta > 0) return;
+        this.refreshOutputs(next);
+    }
+    outputToCurrentImage(output) {
+        const fullUrl = typeof output.url === "string" ? output.url.replace(/\?.*$/, "") : output.url;
+        return {
+            id: String(output.id || ""),
+            src: output.url,
+            url: fullUrl || output.url,
+            label: output.original_filename || `Output ${output.id}`,
+            details: output.studioMetadata || null
+        };
     }
     setCurrentImage(image) {
         this.state.currentImage = image;
@@ -2748,10 +3642,22 @@ class StudioController {
         };
         preview.src = image.src;
         preview.hidden = false;
+        this.get('[data-action="use-current-init"]').disabled = false;
         this.get('[data-role="preview-empty"]').hidden = true;
         this.get('[data-role="output-label"]').textContent = image.label;
         this.get('[data-action="download-output"]').disabled = false;
         this.get('[data-action="copy-output"]').disabled = !image.url;
+    }
+    clearCurrentImage() {
+        this.state.currentImage = null;
+        const preview = this.get('[data-role="preview-image"]');
+        preview.removeAttribute("src");
+        preview.hidden = true;
+        this.get('[data-action="use-current-init"]').disabled = true;
+        this.get('[data-role="preview-empty"]').hidden = false;
+        this.get('[data-role="output-label"]').textContent = "Nothing selected";
+        this.get('[data-action="download-output"]').disabled = true;
+        this.get('[data-action="copy-output"]').disabled = true;
     }
     downloadCurrent() {
         if (!this.state.currentImage) return;
@@ -2774,12 +3680,9 @@ class StudioController {
         }
     }
     swapSize() {
-        const width = this.get('[data-role="width"]');
-        const height = this.get('[data-role="height"]');
-        const oldWidth = width.value;
-        width.value = height.value;
-        height.value = oldWidth;
-        this.updatePreviewAspect(numberValue(width, 1024), numberValue(height, 1024));
+        const width = numberValue(this.get('[data-role="width"]'), 1024);
+        const height = numberValue(this.get('[data-role="height"]'), 1024);
+        this.setDimensions(height, width);
     }
     setConnectionStatus(status) {
         const colors = {
