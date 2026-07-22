@@ -41,6 +41,9 @@ const CHECK_ICON = `
 const NEW_FOLDER_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v10h-17z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
 `;
+const TRASH_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 3h6l1 4H8zM7 7l1 14h8l1-14M10 11v6M14 11v6"/></svg>
+`;
 const EXPAND_ICON = `
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"/>
@@ -1761,6 +1764,11 @@ const STUDIO_V3_STYLES = `
     background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 10%, transparent);
   }
   .ss-library-folder span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-library-folder-delete { color: #ef7777; }
+  .ss-library-folder-delete:hover:not(:disabled) {
+    border-color: color-mix(in srgb, #ef7777 65%, var(--lumiverse-border));
+    background: color-mix(in srgb, #ef7777 13%, transparent);
+  }
   .ss-library-main {
     grid-row: 3;
     min-width: 0;
@@ -1798,10 +1806,13 @@ const STUDIO_V3_STYLES = `
     background: color-mix(in srgb, var(--lumiverse-accent) 5%, var(--lumiverse-fill));
   }
   .ss-library-visual-profile[hidden] { display: none; }
-  .ss-library-visual-profile summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; cursor: pointer; }
+  .ss-library-visual-profile summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; cursor: pointer; list-style: none; }
+  .ss-library-visual-profile summary::-webkit-details-marker { display: none; }
   .ss-library-visual-profile summary > span:first-child { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
   .ss-library-visual-profile summary small { color: var(--lumiverse-text-muted); font-size: 8px; }
-  .ss-library-visual-profile summary > span:last-child { color: var(--lumiverse-accent); font-size: 8px; }
+  .ss-library-visual-summary-meta { display: inline-flex; align-items: center; gap: 8px; color: var(--lumiverse-accent); font-size: 8px; }
+  .ss-library-visual-caret { display: inline-block; color: var(--lumiverse-text); font-size: 13px; line-height: 1; transition: transform .16s ease; }
+  .ss-library-visual-profile[open] .ss-library-visual-caret { transform: rotate(180deg); }
   .ss-library-visual-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(150px, .6fr) auto; gap: 7px; align-items: end; padding: 0 10px 10px; }
   .ss-library-visual-fields .ss-textarea { min-height: 58px; max-height: 110px; resize: vertical; }
   .ss-library-visual-fields .ss-button { min-height: 32px; }
@@ -3730,6 +3741,7 @@ class StudioController {
     librarySelection = new Set();
     librarySearchOpen = false;
     librarySelectionMode = false;
+    hydratedVisualChatId = "";
     pendingCreatedFolder = null;
     missingLoras = [];
     pendingPresetParamMap = {};
@@ -4861,7 +4873,7 @@ are removed when CSS is applied.</pre>
           </aside>
           <main class="ss-library-main">
             <details class="ss-library-visual-profile" data-role="library-visual-profile" hidden>
-              <summary><span><strong data-role="visual-profile-title">Chat visuals</strong><small>Positive · negative · LoRA stack</small></span><span data-role="visual-profile-state">Active</span></summary>
+              <summary><span><strong data-role="visual-profile-title">Chat visuals</strong><small>Positive · negative · LoRA stack</small></span><span class="ss-library-visual-summary-meta"><span data-role="visual-profile-state">Active</span><span class="ss-library-visual-caret" aria-hidden="true">∨</span></span></summary>
               <div class="ss-library-visual-fields">
                 <label class="ss-field"><span>Positive base</span><textarea class="ss-textarea" data-role="visual-positive" placeholder="Character identity and consistent visual tags…"></textarea></label>
                 <label class="ss-field"><span>Negative base</span><textarea class="ss-textarea" data-role="visual-negative" placeholder="Things to consistently avoid…"></textarea></label>
@@ -5215,6 +5227,7 @@ are removed when CSS is applied.</pre>
                 this.populateConnections();
                 this.renderOutputs();
                 this.renderStackPresets();
+                this.hydrateActiveVisualStack();
                 this.updateActiveVisualPill();
                 break;
             case "character_base_tags_result":
@@ -5455,6 +5468,7 @@ are removed when CSS is applied.</pre>
             case "stack_presets_result":
                 this.state.stackPresets = Array.isArray(data) ? data : [];
                 this.renderStackPresets();
+                this.hydrateActiveVisualStack();
                 if (!this.get('[data-role="output-library"]').hidden) this.renderOutputLibrary();
                 this.updateActiveVisualPill();
                 this.setRunStatus("Saved LoRA stacks updated.");
@@ -6816,6 +6830,14 @@ are removed when CSS is applied.</pre>
         }
         this.updatePresetButtons();
     }
+    setStackPresetSelection(presetId) {
+        for (const select of this.root.querySelectorAll('[data-role="stack-preset"], [data-role="mobile-stack-preset"]')){
+            select.value = [
+                ...select.options
+            ].some((option)=>option.value === presetId) ? presetId : "";
+        }
+        this.updatePresetButtons();
+    }
     updatePresetButtons() {
         const selected = Boolean(this.get('[data-role="stack-preset"]').value);
         this.get('[data-action="load-stack"]').disabled = !selected;
@@ -6846,7 +6868,7 @@ are removed when CSS is applied.</pre>
         });
         this.setRunStatus(`Saving LoRA stack “${name.trim()}”…`);
     }
-    loadStackPreset(requestedPresetId) {
+    loadStackPreset(requestedPresetId, announce = true) {
         const presetId = requestedPresetId || this.get('[data-role="stack-preset"]').value;
         const preset = this.state.stackPresets.find((item)=>item.id === presetId);
         if (!preset) return;
@@ -6859,9 +6881,10 @@ are removed when CSS is applied.</pre>
                 useTrigger: Boolean(item.useTrigger && lora.triggerPhrase)
             };
         });
+        this.setStackPresetSelection(preset.id);
         this.renderStack();
         this.renderLoras();
-        this.setRunStatus(`Loaded LoRA stack “${preset.name}”.`);
+        if (announce) this.setRunStatus(`Loaded LoRA stack “${preset.name}”.`);
     }
     stackName() {
         const selectedId = this.get('[data-role="stack-preset"]').value;
@@ -7549,6 +7572,21 @@ are removed when CSS is applied.</pre>
         if (!chatId) return null;
         return this.state.outputFolders.find((folder)=>folder.binding?.type === "chat" && folder.binding.chatId === chatId) || null;
     }
+    hydrateActiveVisualStack(force = false) {
+        const folder = this.activeVisualFolder();
+        const binding = folder?.binding;
+        if (!folder || !binding?.enabled || !binding.stackPresetId || this.pendingDraftRestore) return false;
+        if (!force && this.hydratedVisualChatId === binding.chatId) {
+            this.setStackPresetSelection(binding.stackPresetId);
+            return false;
+        }
+        const preset = this.state.stackPresets.find((candidate)=>candidate.id === binding.stackPresetId);
+        if (!preset) return false;
+        this.hydratedVisualChatId = binding.chatId;
+        this.loadStackPreset(preset.id, false);
+        this.setRunStatus(`Loaded “${preset.name}” from ${folder.name} visuals.`);
+        return true;
+    }
     saveVisualProfile() {
         const folder = this.state.outputFolders.find((candidate)=>candidate.id === this.libraryFolderId);
         if (!folder?.binding) return;
@@ -7566,6 +7604,10 @@ are removed when CSS is applied.</pre>
             folderId: folder.id,
             profile
         });
+        if (folder.binding.chatId === String(this.state.activeChat?.id || "") && profile.stackPresetId) {
+            this.hydratedVisualChatId = "";
+            this.hydrateActiveVisualStack(true);
+        }
         this.updateActiveVisualPill();
         this.updateTriggerSummary();
         this.scheduleStudioProfileSync();
@@ -7782,10 +7824,11 @@ are removed when CSS is applied.</pre>
         }
         folderPane.append(create, scroll);
         if (this.state.outputFolders.some((folder)=>folder.id === this.libraryFolderId)) {
-            const remove = element("button", "ss-icon-button ss-library-folder-anchor", "×");
+            const remove = element("button", "ss-icon-button ss-library-folder-anchor ss-button-danger ss-library-folder-delete");
             remove.dataset.action = "delete-output-folder";
             remove.title = "Delete selected folder";
             remove.setAttribute("aria-label", "Delete selected folder");
+            remove.innerHTML = TRASH_ICON;
             folderPane.appendChild(remove);
         }
     }

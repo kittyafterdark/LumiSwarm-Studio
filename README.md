@@ -23,7 +23,7 @@ It adds:
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, dedupe against the final generation event, and replace themselves with a permanent container-filling Lumiverse image
-- Chat visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack can follow one conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, and file that chat's Studio outputs automatically
+- Chat visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack can follow one conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile stack controls once when that chat opens, and file that chat's Studio outputs automatically
 - Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_tags}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
@@ -179,7 +179,10 @@ original Swarm path. When those fields are unavailable, it shows an end-to-end
 time measured around Lumiverse's generation call.
 
 On mobile, saved LoRA stacks can also be loaded directly from the combined
-Create tab above the positive and negative prompts.
+Create tab above the positive and negative prompts. When the active chat has an
+enabled visual binding, its saved stack is loaded once into the normal editable
+LoRA workspace and selected in both stack selectors. Subsequent manual edits
+are left alone rather than being overwritten on every folder refresh.
 
 Preview images are fetched lazily from the configured SwarmUI origin. Cross-origin preview URLs are refused.
 
