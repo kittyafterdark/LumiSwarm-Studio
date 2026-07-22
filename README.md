@@ -10,7 +10,7 @@ It adds:
 - A Lumiverse-native profile plus an automatic Custom state for component colors, panel geometry, opacity, blur, and CSS overrides
 - A full appearance editor with native component color pickers, border-radius, surface-opacity and backdrop-blur sliders, plus persisted custom CSS
 - A compact opaque settings panel containing appearance controls, metadata refresh, and the encrypted metadata token
-- Positive and negative prompting, checkpoint selection, chain-linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, model-component overrides, and raw request JSON
+- Positive and negative prompting, checkpoint selection, chain-linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, in-app Swarm preset management, model-component overrides, and raw request JSON
 - Saved SwarmUI/ComfyUI workflows presented through a focused setup modal: choose a workflow, edit the grouped parameters its author exposed, upload workflow image inputs, and generate without touching the node graph
 - Context-aware orientation and seed actions that flip to the useful next state, with fixed-seed reuse from the selected output
 - A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
@@ -117,7 +117,9 @@ When `ListT2IParams` exposes a usable schema and the SwarmUI account has
 `manage_presets`, **Save current** appears beside the preset selector. It opens
 a checklist built from the current schema so prompt, model, sizing, sampling,
 LoRAs, workflow, overrides, and seed can be included or omitted individually
-before Studio calls SwarmUI's `AddNewPreset` API.
+before Studio calls SwarmUI's `AddNewPreset` API. The adjacent settings button
+opens a manager where existing presets can be deleted directly through
+SwarmUI's `DeletePreset` API.
 
 Each selected Swarm preset has an **Apply** action. It copies the preset's known
 values into the editable Studio controls, moves any LoRA filename/weight pairs
@@ -254,11 +256,12 @@ targets the active client job; clicking the preview reopens Studio with the same
 live or completed output and draft already restored. Size preferences are stored
 locally, while generation state and draft data stay in memory only for the
 current Lumiverse session.
-On mobile, the extension mounts its own app-overlay miniplayer so the collapsed
-widget remains a complete 64 × 64 square instead of being clipped by the host's
-native 40 × 40 float-widget cap. Mobile Quick Create is opt-in; otherwise the
-widget stays in its square image state. If app-overlay permission is unavailable,
-Studio falls back to Lumiverse's float widget. Interactive Quick Create controls
+On mobile, the extension keeps a Lumiverse app-overlay lifecycle mount but
+portals the visible miniplayer surface to the document root, so the collapsed
+widget remains a complete 64 × 64 square instead of inheriting either the host's
+native float-widget cap or a nested app-root clip. Mobile Quick Create is opt-in;
+otherwise the widget stays in its square image state. If app-overlay permission
+is unavailable, Studio falls back to Lumiverse's float widget. Interactive Quick Create controls
 reserve pointer focus from the drag surface. Desktop collapsed mode remains
 56 × 56. Right-click or long-press either state for **Expand Quick Create** or
 **Minimize Quick Create**, depending on its current state, alongside

@@ -10,6 +10,7 @@ const userFiles = new Map()
 const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "chat_mutation"])
 let imageDeleted = false
 let presetAdded = false
+let presetDeleted = false
 let interruptRequested = false
 let appendedMessage = null
 let macroDefinition = null
@@ -300,7 +301,7 @@ globalThis.spindle = {
                 negativeprompt: "blurry, flat lighting",
               },
             },
-            ...(presetAdded ? [{
+            ...(presetAdded && !presetDeleted ? [{
               title: "Studio Current",
               description: "Saved by contract",
               param_map: { prompt: "ink style, portrait" },
@@ -315,6 +316,18 @@ globalThis.spindle = {
       assert.equal(body.param_map.prompt, "ink style, portrait")
       assert.equal("unknown" in body.param_map, false)
       presetAdded = true
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ success: true }),
+      }
+    }
+    if (url.endsWith("/API/DeletePreset")) {
+      const body = JSON.parse(options.body)
+      assert.equal(body.session_id, "session-1")
+      assert.equal(body.preset, "Studio Current")
+      presetDeleted = true
       return {
         status: 200,
         statusText: "OK",
@@ -559,6 +572,14 @@ const createdPreset = await request("add_swarm_preset", {
 })
 assert.equal(createdPreset.data.title, "Studio Current")
 assert.equal(createdPreset.data.swarmOptions.presets.some((preset) => preset.title === "Studio Current"), true)
+
+const deletedPreset = await request("delete_swarm_preset", {
+  connectionId: "swarm-1",
+  title: "Studio Current",
+})
+assert.equal(deletedPreset.data.title, "Studio Current")
+assert.equal(deletedPreset.data.swarmOptions.presets.some((preset) => preset.title === "Studio Current"), false)
+assert.equal(presetDeleted, true)
 
 const interrupted = await request("interrupt_generation", {
   connectionId: "swarm-1",

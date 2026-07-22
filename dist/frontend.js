@@ -15,7 +15,7 @@ const LINK_SIZE_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5"/><path d="M7.2 16.8 5.7 18.3a3.5 3.5 0 0 1-5-5l3.1-3.1a3.5 3.5 0 0 1 5 0"/><path d="m16.8 7.2 1.5-1.5a3.5 3.5 0 1 1 5 5l-3.1 3.1a3.5 3.5 0 0 1-5 0"/></svg>
 `;
 const LIBRARY_ICON = `
-  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/><path d="m7 17 3-3 2 2 2.5-3 2.5 4"/></svg>
+  <svg class="ss-library-symbol" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/><path d="m7 17 3-3 2 2 2.5-3 2.5 4"/></svg>
 `;
 const INIT_IMAGE_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m6.5 16 3.5-4 2.7 3 2.3-2.5 2.5 3.5"/><circle cx="16.5" cy="8.5" r="1.5"/><path d="M12 2v5m-2-2 2 2 2-2"/></svg>
@@ -904,6 +904,13 @@ const STUDIO_V3_STYLES = `
     stroke-linecap: round;
     stroke-linejoin: round;
   }
+  .ss-library-symbol {
+    fill: none !important;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   .ss-close-studio { display: none; }
   .ss-mobile-tabs { display: none; }
   .ss-workspace {
@@ -1054,6 +1061,8 @@ const STUDIO_V3_STYLES = `
   }
   .ss-preset-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
   .ss-preset-picker .ss-button[hidden] { display: none; }
+  .ss-preset-manage { width: 32px; min-width: 32px; height: 32px; }
+  .ss-preset-manage svg { width: 14px; height: 14px; }
   .ss-aspect-controls {
     grid-column: 1 / -1;
     display: grid;
@@ -1594,11 +1603,6 @@ const STUDIO_V3_STYLES = `
     margin-top: 12px;
   }
   .ss-inspector-actions .ss-button-danger { grid-column: 1 / -1; }
-  .ss-inspector-actions [data-action="open-output-library"] {
-    grid-column: 1 / -1;
-    width: min(210px, 100%);
-    justify-self: center;
-  }
   .ss-inspector-path {
     margin-top: 10px;
     padding: 8px 9px;
@@ -2077,6 +2081,7 @@ const STUDIO_V3_STYLES = `
   .ss-workflow-modal-description { padding: 11px 15px; color: var(--lumiverse-text-muted); font-size: 10px; line-height: 1.5; }
   .ss-workflow-modal .ss-workflow-fields { min-height: 0; overflow-y: auto; padding: 4px 15px 16px; }
   .ss-workflow-modal[data-role="save-preset-modal"],
+  .ss-workflow-modal[data-role="preset-manager-modal"],
   .ss-workflow-modal[data-role="move-folder-modal"] { z-index: 2147483200; }
   .ss-save-preset-fields { min-height: 0; display: grid; gap: 10px; overflow-y: auto; padding: 13px 15px 16px; }
   .ss-save-preset-basics { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; }
@@ -2099,6 +2104,22 @@ const STUDIO_V3_STYLES = `
   .ss-save-param-copy span { color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-move-folder-list { min-height: 0; display: grid; gap: 6px; overflow-y: auto; padding: 13px 15px 16px; }
   .ss-move-folder-choice { justify-content: space-between; text-align: left; }
+  .ss-preset-manager-list { min-height: 0; display: grid; gap: 7px; overflow-y: auto; padding: 13px 15px 16px; }
+  .ss-preset-manager-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border: 1px solid var(--ss-outline);
+    border-radius: var(--ss-control-radius);
+    background: color-mix(in srgb, var(--ss-button-bg) 62%, transparent);
+  }
+  .ss-preset-manager-copy { min-width: 0; display: grid; gap: 3px; }
+  .ss-preset-manager-copy strong,
+  .ss-preset-manager-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-preset-manager-copy span { color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-workflow-configure { width: 28px; height: 28px; padding: 6px; }
   .ss-workflow-configure svg { width: 14px; height: 14px; }
 
@@ -2126,9 +2147,7 @@ const STUDIO_V3_STYLES = `
     font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   }
   .ss-miniplayer-app-mount {
-    position: fixed !important;
-    inset: 0;
-    z-index: 9998;
+    display: contents !important;
     pointer-events: none;
   }
   .ss-miniplayer-app-surface {
@@ -2222,6 +2241,7 @@ const STUDIO_V3_STYLES = `
   .ss-mini-button:hover { color: var(--lumiverse-text); border-color: var(--lumiverse-accent, var(--lumiverse-primary)); }
   .ss-mini-button:disabled { opacity: .36; cursor: not-allowed; }
   .ss-mini-button svg { width: 13px; height: 13px; fill: currentColor; }
+  .ss-mini-button .ss-library-symbol { fill: none !important; }
   .ss-mini-button[hidden] { display: none; }
   .ss-mini-quick {
     grid-column: 1 / -1;
@@ -2398,7 +2418,7 @@ function createOverlayMiniplayerWidget(ctx) {
         return null;
     }
     const surface = element("div", "ss-miniplayer-app-surface");
-    mount.root.appendChild(surface);
+    document.body.appendChild(surface);
     let width = 318;
     let height = 94;
     let x = Math.max(8, window.innerWidth - width - 18);
@@ -2480,6 +2500,7 @@ function createOverlayMiniplayerWidget(ctx) {
         },
         destroy () {
             window.removeEventListener("resize", onResize);
+            surface.remove();
             mount.destroy();
         }
     };
@@ -3533,6 +3554,12 @@ class StudioController {
             event.stopPropagation();
             return;
         }
+        const presetManager = this.root.querySelector('[data-role="preset-manager-modal"]');
+        if (presetManager && !presetManager.hidden) {
+            this.closePresetManager();
+            event.stopPropagation();
+            return;
+        }
         const moveFolder = this.root.querySelector('[data-role="move-folder-modal"]');
         if (moveFolder && !moveFolder.hidden) {
             this.closeMoveFolderModal();
@@ -4195,6 +4222,7 @@ are removed when CSS is applied.</pre>
                     <label>Swarm preset stack</label>
                     <div class="ss-preset-picker">
                       <select class="ss-select" data-role="presets"><option value="">Add a preset…</option></select>
+                      <button class="ss-icon-button ss-preset-manage" data-action="open-preset-manager" data-role="manage-swarm-presets" title="Manage Swarm presets" aria-label="Manage Swarm presets" hidden>${SETTINGS_ICON}</button>
                       <button class="ss-button" data-action="add-swarm-preset" data-role="add-swarm-preset" hidden>Save current</button>
                     </div>
                     <div class="ss-preset-stack" data-role="preset-stack">
@@ -4429,6 +4457,18 @@ are removed when CSS is applied.</pre>
               <div class="ss-save-param-list" data-role="save-preset-fields"></div>
             </div>
             <footer class="ss-workflow-modal-actions"><button class="ss-button" data-action="close-save-preset">Cancel</button><button class="ss-button ss-button-primary" data-action="confirm-save-preset">Save preset</button></footer>
+          </section>
+        </div>
+
+        <div class="ss-workflow-modal" data-role="preset-manager-modal" hidden>
+          <section class="ss-workflow-modal-card" role="dialog" aria-modal="true" aria-labelledby="ss-preset-manager-title">
+            <header class="ss-workflow-modal-head">
+              <div class="ss-workflow-modal-title"><span class="ss-eyebrow">SWARM PRESETS</span><strong id="ss-preset-manager-title">Manage presets</strong></div>
+              <button class="ss-icon-button" data-action="close-preset-manager" aria-label="Close preset manager">×</button>
+            </header>
+            <div class="ss-workflow-modal-description">These are stored by SwarmUI. Deleting one removes it from this Swarm account and from Studio’s active preset stack.</div>
+            <div class="ss-preset-manager-list" data-role="preset-manager-list"></div>
+            <footer class="ss-workflow-modal-actions"><button class="ss-button ss-button-primary" data-action="close-preset-manager">Done</button></footer>
           </section>
         </div>
 
@@ -4723,6 +4763,9 @@ are removed when CSS is applied.</pre>
             if (action === "copy-missing-loras") void this.copyMissingLoras();
             if (action === "close-save-preset") this.closeSavePresetModal();
             if (action === "confirm-save-preset") this.confirmSavePreset();
+            if (action === "open-preset-manager") this.openPresetManager();
+            if (action === "close-preset-manager") this.closePresetManager();
+            if (action === "delete-swarm-preset") this.deleteSwarmPreset(button.dataset.presetTitle || "");
             if (action === "close-move-folder") this.closeMoveFolderModal();
             if (action === "move-folder-choice") this.confirmMoveFolder(button.dataset.folderId || "");
             if (action === "edit-prompt") this.openPromptEditor(button.dataset.promptRole || "");
@@ -4942,6 +4985,15 @@ are removed when CSS is applied.</pre>
                 this.addSelectedPreset(String(data.title || ""));
                 this.setRunStatus(`Saved and selected Swarm preset “${data.title}”.`);
                 break;
+            case "swarm_preset_deleted":
+                {
+                    const title = String(data.title || "");
+                    this.state.selectedPresets = this.state.selectedPresets.filter((preset)=>preset.title !== title);
+                    this.acceptSwarmOptions(data.swarmOptions);
+                    this.renderPresetManager();
+                    this.setRunStatus(`Deleted Swarm preset “${title}”.`);
+                    break;
+                }
             case "outputs_result":
                 this.acceptOutputPage(data);
                 this.renderOutputs();
@@ -5195,6 +5247,10 @@ are removed when CSS is applied.</pre>
         const addPreset = this.get('[data-role="add-swarm-preset"]');
         addPreset.hidden = !this.state.canManagePresets || !this.state.swarmParameters.length;
         addPreset.title = addPreset.hidden ? "SwarmUI did not expose preset-management permission and a usable parameter schema." : "Save the current prompts and render controls as a SwarmUI preset";
+        const managePresets = this.get('[data-role="manage-swarm-presets"]');
+        managePresets.hidden = !this.state.canManagePresets;
+        managePresets.disabled = !this.state.swarmPresets.length;
+        managePresets.title = !this.state.canManagePresets ? "Your SwarmUI account cannot manage presets." : this.state.swarmPresets.length ? "Rename or delete SwarmUI presets" : "No SwarmUI presets to manage yet";
         this.populateWorkflowSelect();
         this.renderPresetStack();
     }
@@ -5545,6 +5601,43 @@ are removed when CSS is applied.</pre>
     closeSavePresetModal() {
         this.get('[data-role="save-preset-modal"]').hidden = true;
         this.pendingPresetParamMap = {};
+    }
+    openPresetManager() {
+        if (!this.state.connection || !this.state.canManagePresets) return;
+        this.renderPresetManager();
+        this.get('[data-role="preset-manager-modal"]').hidden = false;
+    }
+    closePresetManager() {
+        this.get('[data-role="preset-manager-modal"]').hidden = true;
+    }
+    renderPresetManager() {
+        const list = this.get('[data-role="preset-manager-list"]');
+        list.replaceChildren();
+        if (!this.state.swarmPresets.length) {
+            list.appendChild(element("div", "ss-empty", "No SwarmUI presets on this connection."));
+            return;
+        }
+        for (const preset of this.state.swarmPresets){
+            const row = element("div", "ss-preset-manager-row");
+            const copy = element("div", "ss-preset-manager-copy");
+            copy.append(element("strong", "", preset.title), element("span", "", preset.description || "No description"));
+            const remove = element("button", "ss-button ss-button-danger", "Delete");
+            remove.dataset.action = "delete-swarm-preset";
+            remove.dataset.presetTitle = preset.title;
+            remove.title = `Delete ${preset.title} from SwarmUI`;
+            row.append(copy, remove);
+            list.appendChild(row);
+        }
+    }
+    deleteSwarmPreset(title) {
+        const preset = this.state.swarmPresets.find((candidate)=>candidate.title === title);
+        if (!preset || !this.state.connection || !this.state.canManagePresets) return;
+        if (!window.confirm(`Delete Swarm preset “${preset.title}”? This cannot be undone.`)) return;
+        this.send("delete_swarm_preset", {
+            connectionId: this.state.connection.id,
+            title: preset.title
+        });
+        this.setRunStatus(`Deleting Swarm preset “${preset.title}”…`);
     }
     confirmSavePreset() {
         if (!this.state.connection || !this.state.canManagePresets) return;

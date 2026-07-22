@@ -1222,6 +1222,38 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
+            case "delete_swarm_preset":
+                {
+                    const connectionId = asString(payload?.connectionId);
+                    const title = asString(payload?.title).trim().slice(0, 100);
+                    if (!title) throw new Error("Choose a Swarm preset to delete.");
+                    const connection = await getConnection(connectionId, userId);
+                    const token = await getMetadataToken(connectionId, userId);
+                    const options = await loadSwarmOptions(connection, token, userId);
+                    if (!options.canManagePresets) {
+                        throw new Error("Your SwarmUI account does not have permission to manage presets.");
+                    }
+                    if (!options.presets.some((preset)=>preset.title === title)) {
+                        throw new Error(`Swarm preset “${title}” no longer exists.`);
+                    }
+                    const sessionId = await getSession(connection, token, userId);
+                    const response = await corsJson(`${normalizeBaseUrl(connection.api_url)}/API/DeletePreset`, {
+                        session_id: sessionId,
+                        preset: title
+                    }, token, "preset deletion request");
+                    if (!asBoolean(response.success, false)) {
+                        throw new Error(`SwarmUI could not delete preset “${title}”.`);
+                    }
+                    spindle.sendToFrontend({
+                        type: "swarm_preset_deleted",
+                        requestId,
+                        data: {
+                            title,
+                            swarmOptions: await loadSwarmOptions(connection, token, userId)
+                        }
+                    }, userId);
+                    return;
+                }
             case "save_stack_preset":
                 {
                     spindle.sendToFrontend({
