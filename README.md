@@ -5,6 +5,9 @@ Swarm Studio is a Spindle extension that puts a full SwarmUI prompting workspace
 It adds:
 
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
+- A native **Visuals** tab in Lumiverse's character editor for canonical appearance/negative prompts, preferred checkpoint, base LoRAs, references, aspect ratio, preserved traits, outfit/style profiles, and a character-owned output gallery
+- A native **Visual Style** tab in the Loom preset editor for checkpoint, Swarm preset stack, LoRAs, prompt additions, dimensions, and scene-extraction direction; the recipe stays in Lumiverse's namespaced preset metadata
+- Fresh Studio drafts automatically layer the latest Loom visual recipe with the active chat character's Visual Bible; an existing Studio/Quick Create draft is never overwritten
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
 - One-tap mobile **Use as init**, context-aware **Random/Current seed**, and **Append to chat** actions below the Create prompts, with **Library** beside Settings in the header
 - A Lumiverse-native profile plus an automatic Custom state for component colors, panel geometry, opacity, blur, and CSS overrides
@@ -20,7 +23,7 @@ It adds:
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - Native Lumiverse expanded text editors for Studio and Quick Create positive/negative prompts, including the host's macro-aware editing tools
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
-- A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
+- A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, and a proper **Use in Lumiverse** section for avatar replacement, chat posting, palette application, and capability-gated chat wallpaper assignment
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
@@ -51,8 +54,10 @@ Generation itself goes through `spindle.imageGen.generate()`. That means it cont
    - `images` — the extension-owned output gallery
    - `chats` — tags outputs to the active chat and character
    - `chat_mutation` — explicitly appends a selected output to the active chat
+   - `characters` — stores Visual Bibles on character cards and replaces the active character avatar on request
+   - `presets` — stores Visual Style recipes in Loom preset metadata
    - `ui_panels` — the persistent generation miniplayer
-   - `app_manipulation` — the unclipped, draggable 64px mobile miniplayer overlay
+   - `app_manipulation` — the unclipped, draggable 64px mobile miniplayer overlay and output-derived Lumiverse accent palette
 
 4. Make sure Lumiverse already has a working **SwarmUI** image generation connection.
 5. Open **Swarm Studio** from its drawer tab or the chat input's Extras menu.
@@ -70,6 +75,35 @@ Lumiverse correctly does not expose the saved connection secret to extensions. S
 - If SwarmUI requires authentication for model metadata, accepts a metadata-only `swarm_token` from the modal. The token is stored per user in Lumiverse's AES-256-GCM secure enclave and is only sent to the configured SwarmUI origin.
 
 If metadata access is unavailable, generation still works and exact LoRA filenames can be added manually.
+
+## Character Visual Bibles and Loom recipes
+
+The **Visuals** tab is registered directly in Lumiverse's character editor. Its
+data is saved under `character.extensions.swarm_studio.visualBible`, so it
+travels with the character card without modifying Lumiverse-owned fields.
+Canonical prompt layers, always-preserved traits, the selected outfit, and the
+selected style are composed into a fresh Studio prompt. The character's
+preferred checkpoint and aspect ratio override the Loom recipe; compatible
+base LoRAs are merged without duplicating normalized filenames. Reference image
+IDs and URLs are retained as the character's visual source list but are not
+silently sent as img2img inputs.
+
+The Loom preset editor's **Visual Style** tab stores
+`swarm_studio.visualRecipe` through Lumiverse's scoped preset metadata helper.
+When that preset is the latest visual context and Studio has no existing draft,
+its Swarm presets, LoRAs, model, dimensions, and positive/negative additions
+become the base layer beneath the active character recipe. This keeps visual
+configuration attached to the text preset through native editing, duplication,
+and export/import while preserving an in-progress Studio or Quick Create draft.
+
+The inspector's **Use in Lumiverse** section operates only on Lumiverse-owned
+outputs. **Set as avatar** uses the public character avatar API. **Post current
+chat** appends an assistant image message with the image ID, source-turn ID, and
+available generation parameters in message metadata. **Use palette** extracts
+the image's dominant color through Lumiverse and applies it as the accent.
+**Chat wallpaper** remains disabled unless the running Lumiverse build exposes
+a public `spindle.wallpapers.setChat` helper; Swarm Studio does not write Lumi's
+private chat metadata shape.
 
 ## Metadata behavior
 

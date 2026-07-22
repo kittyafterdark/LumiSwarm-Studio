@@ -7,7 +7,16 @@ let frontendHandler
 const sent = []
 const secrets = new Map()
 const userFiles = new Map()
-const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "chat_mutation"])
+const permissions = new Set([
+  "image_gen",
+  "cors_proxy",
+  "images",
+  "chats",
+  "chat_mutation",
+  "characters",
+  "presets",
+  "app_manipulation",
+])
 let imageDeleted = false
 let presetAdded = false
 let presetDeleted = false
@@ -17,6 +26,8 @@ let macroDefinition = null
 let macroValue = ""
 let completionToast = ""
 let downloadedSwarmUrl = ""
+let avatarUpdate = null
+let appliedPalette = null
 
 globalThis.spindle = {
   registerMacro(definition) {
@@ -106,7 +117,39 @@ globalThis.spindle = {
       return { id: "chat-1", character_id: "char-1" }
     },
   },
+  characters: {
+    async get(characterId, userId) {
+      assert.equal(characterId, "char-1")
+      assert.equal(userId, "user-1")
+      return {
+        id: "char-1",
+        name: "Mira",
+        image_id: "avatar-1",
+        extensions: {
+          swarm_studio: {
+            visualBible: {
+              canonicalPrompt: "waist-length black hair, red eyes",
+              preferredCheckpoint: "base.safetensors",
+            },
+          },
+        },
+      }
+    },
+    async setAvatar(characterId, input, userId) {
+      assert.equal(characterId, "char-1")
+      assert.equal(userId, "user-1")
+      assert.equal(input.mime_type, "image/png")
+      assert.equal(input.filename, "mira-output.png")
+      assert.deepEqual([...input.data], [65, 66, 67])
+      avatarUpdate = input
+      return { id: "char-1", name: "Mira", image_id: "avatar-2" }
+    },
+  },
   chat: {
+    async getMessages(chatId) {
+      assert.equal(chatId, "chat-1")
+      return [{ id: "turn-42", role: "user", content: "Show me the scene." }]
+    },
     async appendMessage(chatId, message) {
       assert.equal(chatId, "chat-1")
       assert.equal(message.role, "assistant")
@@ -122,6 +165,13 @@ globalThis.spindle = {
       assert.equal(options.onlyOwned, true)
       assert.equal(Number.isInteger(options.offset), true)
       assert.equal(Number.isInteger(options.limit), true)
+      if (options.characterId) {
+        assert.equal(options.characterId, "char-1")
+        return {
+          data: [{ id: "image-1", url: "/api/v1/images/image-1?size=sm", original_filename: "image.png" }],
+          total: 1,
+        }
+      }
       if (options.limit !== 200) assert.equal(options.chatId, "chat-1")
       if (imageDeleted) return { data: [], total: 0 }
       return {
@@ -141,6 +191,17 @@ globalThis.spindle = {
       assert.equal(options.specificity, "sm")
       assert.equal(options.userId, "user-1")
       return { id: imageId, url: "/api/v1/images/image-1?size=sm", original_filename: "image.png" }
+    },
+  },
+  theme: {
+    async extractColors(imageId, userId) {
+      assert.equal(imageId, "image-1")
+      assert.equal(userId, "user-1")
+      return { dominantHsl: { h: 292, s: 63, l: 58 } }
+    },
+    async applyPalette(palette, userId) {
+      assert.equal(userId, "user-1")
+      appliedPalette = palette
     },
   },
   enclave: {
@@ -433,6 +494,10 @@ assert.equal(bootstrap.data.offset, 0)
 assert.equal(bootstrap.data.limit, 12)
 assert.deepEqual(bootstrap.data.stackPresets, [])
 assert.deepEqual(bootstrap.data.outputFolders, [])
+assert.equal(bootstrap.data.activeCharacter.id, "char-1")
+assert.equal(bootstrap.data.activeCharacter.name, "Mira")
+assert.equal(bootstrap.data.characterVisual.canonicalPrompt, "waist-length black hair, red eyes")
+assert.equal(bootstrap.data.permissions.wallpaper, false)
 
 const expandedPrompt = await request("open_text_editor", {
   editorId: "studio-positive",
@@ -606,6 +671,10 @@ const library = await request("list_library_outputs")
 assert.equal(library.data.outputs.length, 1)
 assert.equal(library.data.folders[0].name, "Favorites")
 
+const characterGallery = await request("list_character_gallery", { characterId: "char-1" })
+assert.equal(characterGallery.data.characterId, "char-1")
+assert.equal(characterGallery.data.outputs[0].id, "image-1")
+
 const bulkMoved = await request("bulk_move_outputs", {
   imageIds: ["image-1"],
   folderId,
@@ -619,6 +688,21 @@ const appended = await request("append_output_to_chat", {
 assert.equal(appended.data.messageId, "message-image-1")
 assert.equal(appended.data.imageId, "image-1")
 assert.ok(appendedMessage)
+assert.equal(appendedMessage.metadata.source_turn_id, "turn-42")
+assert.equal(appendedMessage.metadata.generation.prompt, "ink style, portrait")
+assert.deepEqual(appendedMessage.metadata.generation.presets, ["Cinematic"])
+
+const avatar = await request("set_output_as_character_avatar", {
+  dataUrl: "data:image/png;base64,QUJD",
+  filename: "mira output.png",
+})
+assert.equal(avatar.data.characterId, "char-1")
+assert.equal(avatar.data.characterName, "Mira")
+assert.ok(avatarUpdate)
+
+const palette = await request("apply_output_palette", { imageId: "image-1" })
+assert.equal(palette.data.imageId, "image-1")
+assert.deepEqual(appliedPalette, { accent: { h: 292, s: 63, l: 58 } })
 
 const deleted = await request("bulk_delete_outputs", { imageIds: ["image-1"] })
 assert.deepEqual(deleted.data.deletedIds, ["image-1"])

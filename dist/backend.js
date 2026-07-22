@@ -816,7 +816,26 @@ function permissionSnapshot() {
         metadata: spindle.permissions.has("cors_proxy"),
         images: spindle.permissions.has("images"),
         chats: spindle.permissions.has("chats"),
-        chatMutation: spindle.permissions.has("chat_mutation")
+        chatMutation: spindle.permissions.has("chat_mutation"),
+        characters: spindle.permissions.has("characters"),
+        presets: spindle.permissions.has("presets"),
+        theme: spindle.permissions.has("app_manipulation"),
+        wallpaper: typeof spindle.wallpapers?.setChat === "function"
+    };
+}
+function parseImageDataUrl(value) {
+    const input = asString(value).trim();
+    const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i.exec(input);
+    if (!match) throw new Error("Lumiverse did not receive a valid image payload.");
+    const base64 = match[2].replace(/\s+/g, "");
+    if (base64.length > 24_000_000) throw new Error("That image is too large to use as a character avatar.");
+    const decoded = atob(base64);
+    const data = new Uint8Array(decoded.length);
+    for(let index = 0; index < decoded.length; index += 1)data[index] = decoded.charCodeAt(index);
+    if (!data.byteLength) throw new Error("The selected output was empty.");
+    return {
+        data,
+        mimeType: match[1].toLowerCase()
     };
 }
 function markdownImageMessage(label, url) {
@@ -882,11 +901,19 @@ async function bootstrap(userId) {
     const allConnections = permissions.imageGen ? await spindle.imageGen.listConnections(userId) : [];
     const connections = (Array.isArray(allConnections) ? allConnections : []).filter((connection)=>connection?.provider === "swarmui");
     const activeChat = permissions.chats ? await spindle.chats.getActive(userId) : null;
+    const activeCharacter = permissions.characters && activeChat?.character_id ? await spindle.characters.get(activeChat.character_id, userId) : null;
+    const characterNamespace = asRecord(activeCharacter?.extensions?.swarm_studio);
     const outputPage = await listOutputs(userId, activeChat);
     return {
         permissions,
         connections,
         activeChat,
+        activeCharacter: activeCharacter ? {
+            id: activeCharacter.id,
+            name: activeCharacter.name,
+            image_id: activeCharacter.image_id
+        } : null,
+        characterVisual: asRecord(characterNamespace.visualBible),
         ...outputPage,
         stackPresets: await loadStackPresets(userId),
         outputFolders: await loadOutputFolders(userId)
@@ -1291,6 +1318,32 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
+            case "list_character_gallery":
+                {
+                    if (!spindle.permissions.has("images")) {
+                        throw new Error("Grant the Images permission to load character outputs.");
+                    }
+                    const characterId = asString(payload?.characterId).trim();
+                    if (!characterId) throw new Error("Choose a character before loading its visual gallery.");
+                    const result = await spindle.images.list({
+                        onlyOwned: true,
+                        characterId,
+                        specificity: "sm",
+                        limit: 200,
+                        offset: 0,
+                        userId
+                    });
+                    spindle.sendToFrontend({
+                        type: "character_gallery_result",
+                        requestId,
+                        data: {
+                            characterId,
+                            outputs: Array.isArray(result?.data) ? result.data : [],
+                            total: Number(result?.total) || 0
+                        }
+                    }, userId);
+                    return;
+                }
             case "append_output_to_chat":
                 {
                     if (!spindle.permissions.has("chat_mutation")) {
@@ -1312,13 +1365,30 @@ async function handleMessage(payload, userId) {
                     const imageUrl = asString(image.url).trim();
                     if (!imageUrl) throw new Error("Lumiverse did not expose a usable URL for that output.");
                     const label = asString(payload?.label).trim() || asString(image.original_filename).trim() || "Swarm Studio output";
+                    const record = (await loadGenerationRecords(userId)).find((item)=>item.imageId === imageId) || null;
+                    const messages = typeof spindle.chat.getMessages === "function" ? await spindle.chat.getMessages(activeChat.id) : [];
+                    const sourceTurn = Array.isArray(messages) && messages.length ? messages[messages.length - 1] : null;
+                    const metadata = {
+                        source: "swarm_studio",
+                        image_id: imageId,
+                        source_turn_id: asString(sourceTurn?.id)
+                    };
+                    if (record) {
+                        metadata.generation = {
+                            prompt: record.prompt,
+                            negative_prompt: record.negativePrompt,
+                            model: record.model,
+                            parameters: record.parameters,
+                            loras: record.loras,
+                            presets: record.presets,
+                            workflow: record.workflow,
+                            created_at: record.createdAt
+                        };
+                    }
                     const result = await spindle.chat.appendMessage(activeChat.id, {
                         role: "assistant",
                         content: markdownImageMessage(label, imageUrl),
-                        metadata: {
-                            source: "swarm_studio",
-                            image_id: imageId
-                        }
+                        metadata
                     });
                     spindle.sendToFrontend({
                         type: "output_appended_to_chat",
@@ -1327,6 +1397,90 @@ async function handleMessage(payload, userId) {
                             imageId,
                             label,
                             messageId: result?.id || ""
+                        }
+                    }, userId);
+                    return;
+                }
+            case "set_output_as_character_avatar":
+                {
+                    if (!spindle.permissions.has("characters")) {
+                        throw new Error("Grant the Characters permission to replace a character avatar.");
+                    }
+                    if (!spindle.permissions.has("chats")) {
+                        throw new Error("Grant the Chats permission to resolve the active character.");
+                    }
+                    const activeChat = await spindle.chats.getActive(userId);
+                    if (!activeChat?.character_id) throw new Error("Open a character chat before setting an avatar.");
+                    const parsed = parseImageDataUrl(payload?.dataUrl);
+                    const filename = asString(payload?.filename).trim().replace(/[^a-z0-9_.-]+/gi, "-").slice(0, 180) || `swarm-studio-avatar-${Date.now()}.png`;
+                    const character = await spindle.characters.setAvatar(activeChat.character_id, {
+                        data: parsed.data,
+                        mime_type: parsed.mimeType,
+                        filename
+                    }, userId);
+                    spindle.sendToFrontend({
+                        type: "character_avatar_updated",
+                        requestId,
+                        data: {
+                            characterId: character?.id || activeChat.character_id,
+                            characterName: character?.name || "Character"
+                        }
+                    }, userId);
+                    return;
+                }
+            case "apply_output_palette":
+                {
+                    if (!spindle.permissions.has("app_manipulation")) {
+                        throw new Error("Grant App Manipulation to apply an output palette.");
+                    }
+                    if (!spindle.permissions.has("images")) {
+                        throw new Error("Grant Images permission to extract an output palette.");
+                    }
+                    const imageId = asString(payload?.imageId).trim();
+                    if (!imageId) throw new Error("Choose a saved Lumiverse output first.");
+                    const palette = await spindle.theme.extractColors(imageId, userId);
+                    const accent = asRecord(palette?.dominantHsl);
+                    if (![
+                        accent.h,
+                        accent.s,
+                        accent.l
+                    ].every((value)=>Number.isFinite(Number(value)))) {
+                        throw new Error("Lumiverse could not derive a usable palette from that output.");
+                    }
+                    await spindle.theme.applyPalette({
+                        accent: {
+                            h: Number(accent.h),
+                            s: Number(accent.s),
+                            l: Number(accent.l)
+                        }
+                    }, userId);
+                    spindle.sendToFrontend({
+                        type: "output_palette_applied",
+                        requestId,
+                        data: {
+                            imageId
+                        }
+                    }, userId);
+                    return;
+                }
+            case "set_output_as_chat_wallpaper":
+                {
+                    if (typeof spindle.wallpapers?.setChat !== "function") {
+                        throw new Error("This Lumiverse build does not expose the public chat wallpaper helper yet.");
+                    }
+                    if (!spindle.permissions.has("chats") || !spindle.permissions.has("images")) {
+                        throw new Error("Chats and Images permissions are required to set a wallpaper.");
+                    }
+                    const imageId = asString(payload?.imageId).trim();
+                    const activeChat = await spindle.chats.getActive(userId);
+                    if (!imageId || !activeChat?.id) throw new Error("Choose an output while a chat is open.");
+                    await spindle.wallpapers.setChat(activeChat.id, imageId, userId);
+                    spindle.sendToFrontend({
+                        type: "chat_wallpaper_updated",
+                        requestId,
+                        data: {
+                            imageId,
+                            chatId: activeChat.id
                         }
                     }, userId);
                     return;
