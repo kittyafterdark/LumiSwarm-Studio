@@ -2,6 +2,9 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 
 const source = await readFile(new URL("../src/backend.ts", import.meta.url), "utf8")
+assert.match(source, /case "prepare_lora_download"/)
+assert.match(source, /DoModelDownloadWS/)
+assert.match(source, /Only Civitai and Hugging Face LoRA downloads/)
 
 let frontendHandler
 const sent = []
@@ -99,6 +102,7 @@ globalThis.spindle = {
       assert.equal(input.owner_chat_id, "chat-1")
       assert.equal(input.owner_character_id, "char-1")
       assert.equal(input.signal instanceof AbortSignal, true)
+      let taggedImageId = ""
       if (input.clientJobId === "studio-job-1") {
         assert.deepEqual(input.parameters.loras, ["styles/ink.safetensors"])
         assert.equal(input.parameters.referenceImages[0].mimeType, "image/png")
@@ -109,6 +113,7 @@ globalThis.spindle = {
         assert.equal(rawOverride.comfyrawworkflowinputimageinitc, "data:image/png;base64,QUJD")
       } else {
         taggedGenerationCount += 1
+        taggedImageId = `image-tag-${taggedGenerationCount}`
         assert.match(input.prompt, /^1boy, black hair, red eyes, <preset:Cinematic>, outside, city street/)
         assert.match(input.prompt, /<preset:composition>/)
         assert.equal((input.prompt.match(/<preset:Cinematic>/g) || []).length, 1)
@@ -131,8 +136,8 @@ globalThis.spindle = {
         imageDataUrl: "data:image/png;base64,QUJD",
         imageUrl: input.clientJobId === "studio-job-1"
           ? "/api/v1/image-gen/results/image-1"
-          : "/api/v1/image-gen/results/image-tag-1",
-        imageId: input.clientJobId === "studio-job-1" ? "image-1" : "image-tag-1",
+          : `/api/v1/image-gen/results/${taggedImageId}`,
+        imageId: input.clientJobId === "studio-job-1" ? "image-1" : taggedImageId,
         model: input.model,
         provider: "swarmui",
       }
@@ -538,6 +543,17 @@ assert.equal(expandedPrompt.data.cancelled, false)
 const connection = await request("load_connection", { connectionId: "swarm-1" })
 assert.equal(connection.data.loras.length, 1)
 assert.equal(connection.data.loras[0].triggerPhrase, "ink style")
+
+const loraDownload = await request("prepare_lora_download", {
+  connectionId: "swarm-1",
+  url: "https://civitai.com/api/download/models/12345",
+  name: "styles/new-ink.safetensors",
+})
+assert.equal(loraDownload.data.wsUrl, "ws://localhost:7801/API/DoModelDownloadWS")
+assert.equal(loraDownload.data.sessionId, "session-1")
+assert.equal(loraDownload.data.url, "https://civitai.com/api/download/models/12345")
+assert.equal(loraDownload.data.name, "styles/new-ink")
+assert.equal(loraDownload.data.type, "LoRA")
 assert.equal(connection.data.loras[0].defaultWeight, 0.75)
 assert.equal(connection.data.checkpoints[0].compatClass, "stable-diffusion-xl-v1")
 assert.deepEqual(connection.data.swarmOptions.samplers, ["euler", "dpmpp_2m_sde_gpu"])
@@ -757,6 +773,12 @@ assert.equal((multiTaggedMessage.content.match(/data-swarm-studio-image="true"/g
 assert.equal((multiTaggedMessage.content.match(/data-swarm-studio-inline-action="true"/g) || []).length, 2)
 assert.doesNotMatch(multiTaggedMessage.content, /<swarm-image\b/i)
 assert.equal(multiTaggedMessage.metadata.swarm_studio_tagged_images.length, 2)
+const foldersAfterDisabledVisualGenerations = userFiles.get("output-folders.json")
+assert.deepEqual(
+  foldersAfterDisabledVisualGenerations[0].imageIds,
+  ["image-tag-1"],
+  "disabled chat visuals must leave newly generated images Unfiled",
+)
 
 const originalOutput = await request("download_swarm_output", {
   connectionId: "swarm-1",
@@ -781,6 +803,8 @@ assert.match(source, /data-swarm-studio-image="true"/)
 assert.match(source, /data-swarm-studio-inline-action="true"/)
 assert.match(source, /case "list_tagged_jobs"/)
 assert.match(source, /case "retry_tagged_job"/)
+assert.match(source, /if \(chatFolder\?\.binding && !chatFolder\.binding\.enabled\) return/)
+assert.match(source, /folder\.binding\?\.chatId === activeChat\.id && folder\.binding\.enabled/)
 
 const createdPreset = await request("add_swarm_preset", {
   connectionId: "swarm-1",

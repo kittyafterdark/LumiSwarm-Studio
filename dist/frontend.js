@@ -29,6 +29,9 @@ const EXPORT_ICON = `
 const IMPORT_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-4 4 4-4 4 4"/><path d="M4 17v3h16v-3"/></svg>
 `;
+const DOWNLOAD_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4"/><path d="M4 18h16"/></svg>
+`;
 const SETTINGS_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.82 2.82-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.36a1.7 1.7 0 0 0-1.88.34l-.06.06-2.82-2.82.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3v-4h.04A1.7 1.7 0 0 0 4.6 8.92a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.82-2.82.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3V3h4v.08a1.7 1.7 0 0 0 1.04 1.48 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.82 2.82-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z"/></svg>
 `;
@@ -78,6 +81,7 @@ const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1";
 const MINIPLAYER_STORAGE_KEY = "swarm-studio-miniplayer-v1";
 const MINIPLAYER_POSITION_STORAGE_KEY = "swarm-studio-miniplayer-position-v1";
 const BEHAVIOR_STORAGE_KEY = "swarm-studio-behavior-v3";
+const WORKSPACE_STORAGE_KEY = "swarm-studio-workspace-v1";
 const WORKFLOW_CORE_PARAMETERS = new Set([
     "prompt",
     "negativeprompt",
@@ -1444,12 +1448,20 @@ const STUDIO_V3_STYLES = `
     height: 8px;
     cursor: row-resize;
   }
+  .ss-dock-head {
+    height: 32px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px 0;
+  }
+  .ss-dock-head .ss-pane-toggle { margin-left: auto; flex: 0 0 auto; }
   .ss-lora-dock-content {
-    height: 100%;
+    height: calc(100% - 32px);
     display: grid;
     grid-template-columns: minmax(220px, var(--ss-library-width)) 8px minmax(240px, 1fr);
     gap: 0;
-    padding: 9px 8px 8px;
+    padding: 5px 8px 8px;
   }
   .ss-lora-library,
   .ss-stack-pane {
@@ -1474,10 +1486,44 @@ const STUDIO_V3_STYLES = `
     gap: 7px;
   }
   .ss-lora-titlebar .ss-family-chip { margin-left: auto; }
-  .ss-lora-titlebar .ss-pane-toggle { flex: 0 0 auto; }
   .ss-lora-dock .ss-section-head { min-height: 27px; margin-bottom: 0; }
   .ss-library-tools {
-    grid-template-columns: minmax(140px, 1fr) 135px 100px auto;
+    grid-template-columns: minmax(180px, 1fr) auto 135px 100px;
+  }
+  .ss-lora-query { min-width: 0; }
+  .ss-lora-query > .ss-input { width: 100%; }
+  .ss-library-tools.ss-download-open { grid-template-columns: minmax(0, 1fr); }
+  .ss-library-tools.ss-download-open > :not(.ss-lora-query) { display: none; }
+  .ss-lora-download-entry {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(95px, .45fr) auto auto;
+    gap: 5px;
+  }
+  .ss-lora-download-entry[hidden] { display: none; }
+  .ss-lora-download-toggle,
+  .ss-lora-download-entry .ss-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  .ss-lora-download-toggle svg,
+  .ss-lora-download-entry svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .ss-lora-download-status {
+    grid-column: 1 / -1;
+    min-height: 3px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--ss-outline) 70%, transparent);
+  }
+  .ss-lora-download-status[hidden] { display: none; }
+  .ss-lora-download-status > i {
+    display: block;
+    width: var(--ss-download-progress, 0%);
+    height: 3px;
+    background: var(--lumiverse-accent);
+    transition: width .15s ease;
   }
   .ss-lora-filter {
     border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 38%, var(--lumiverse-border));
@@ -1537,7 +1583,19 @@ const STUDIO_V3_STYLES = `
     grid-template-columns: minmax(110px, 1fr) auto auto auto;
     gap: 5px;
   }
-  .ss-stack-share-tools { display: flex; justify-content: flex-end; gap: 5px; }
+  .ss-stack-share-tools {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding-top: 5px;
+    border-top: 1px solid color-mix(in srgb, var(--ss-outline) 72%, transparent);
+    background: var(--ss-canvas-bg);
+  }
+  .ss-stack-share-tools .ss-clear-stack { margin-left: auto; }
   .ss-stack-share-tools .ss-button { min-height: 27px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; font-size: 9px; }
   .ss-stack-share-tools svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .ss-missing-lora-modal {
@@ -1570,7 +1628,7 @@ const STUDIO_V3_STYLES = `
   .ss-missing-lora-card p { margin: 0; font-size: 10px; line-height: 1.5; }
   .ss-missing-lora-card footer { justify-content: flex-end; }
   .ss-missing-lora-list { min-height: 0; display: grid; gap: 6px; overflow-y: auto; }
-  .ss-missing-lora-row { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; align-items: center; padding: 8px; border: 1px solid var(--ss-outline); border-radius: var(--ss-control-radius); }
+  .ss-missing-lora-row { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; align-items: center; padding: 8px; border: 1px solid var(--ss-outline); border-radius: var(--ss-control-radius); }
   .ss-missing-lora-row strong,
   .ss-missing-lora-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ss-missing-lora-row span { color: var(--lumiverse-text-muted); font-size: 9px; }
@@ -1603,10 +1661,7 @@ const STUDIO_V3_STYLES = `
   .ss-shell.ss-loras-collapsed .ss-lora-grid,
   .ss-shell.ss-loras-collapsed .ss-lora-divider,
   .ss-shell.ss-loras-collapsed .ss-stack-pane,
-  .ss-shell.ss-loras-collapsed .ss-lora-titlebar > :not(.ss-pane-toggle) { display: none; }
-  .ss-shell.ss-loras-collapsed .ss-lora-dock-content { display: block; padding: 2px 5px; }
-  .ss-shell.ss-loras-collapsed .ss-lora-library { display: block; padding: 0; }
-  .ss-shell.ss-loras-collapsed .ss-lora-titlebar { justify-content: flex-end; min-height: 26px; }
+  .ss-shell.ss-loras-collapsed .ss-lora-dock-content { display: none; }
   .ss-commandbar {
     flex: 0 0 30px;
     min-height: 30px;
@@ -3792,6 +3847,9 @@ class StudioController {
     hydratedVisualChatId = "";
     pendingCreatedFolder = null;
     missingLoras = [];
+    loraDownloadQueue = [];
+    loraDownloadRequestId = "";
+    loraDownloadSocket = null;
     pendingPresetParamMap = {};
     pendingMoveImageIds = [];
     outputResizeObserver = null;
@@ -3908,6 +3966,7 @@ class StudioController {
             }
         };
         this.buildV3();
+        this.restoreWorkspaceState();
         this.bind();
         if (typeof ResizeObserver !== "undefined") {
             this.outputResizeObserver = new ResizeObserver(()=>this.fitPreviewToAspect());
@@ -3934,6 +3993,7 @@ class StudioController {
         this.send("bootstrap");
     }
     dispose() {
+        this.persistWorkspaceState();
         this.syncStudioProfile();
         this.disposed = true;
         if (this.profileSyncTimer) clearTimeout(this.profileSyncTimer);
@@ -3946,6 +4006,15 @@ class StudioController {
         this.inspectorResizeObserver = null;
         this.stopActiveResize?.();
         this.stopActiveResize = null;
+        if (this.loraDownloadSocket) {
+            try {
+                this.loraDownloadSocket.send(JSON.stringify({
+                    signal: "cancel"
+                }));
+            } catch  {}
+            this.loraDownloadSocket.close();
+            this.loraDownloadSocket = null;
+        }
         document.removeEventListener("keydown", this.handleKeyDown, true);
     }
     setTheme(theme) {
@@ -4292,7 +4361,6 @@ class StudioController {
                   <option value="name">Filename</option>
                   <option value="newest">Newest</option>
                 </select>
-                <button class="ss-button" data-action="manual-lora">Add filename</button>
               </div>
               <div class="ss-library-status" data-role="metadata-error" hidden></div>
               <div class="ss-lora-grid" data-role="lora-grid">
@@ -4727,15 +4795,28 @@ are removed when CSS is applied.</pre>
 
         <section class="ss-lora-dock">
           <div class="ss-dock-resizer" data-resize="dock" role="separator" aria-orientation="horizontal" title="Drag to resize LoRA workspace"></div>
+          <div class="ss-dock-head">
+            <div class="ss-section-title"><strong>LoRA workspace</strong><span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span></div>
+            <button class="ss-icon-button ss-pane-toggle" data-action="toggle-loras" title="Collapse LoRA workspace" aria-label="Collapse LoRA workspace" aria-expanded="true">⌄</button>
+          </div>
           <div class="ss-lora-dock-content">
             <section class="ss-lora-library">
               <div class="ss-lora-titlebar">
                 <div class="ss-section-title"><strong>Select LoRAs</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
                 <span class="ss-family-chip" data-role="family-chip">Waiting for checkpoint</span>
-                <button class="ss-icon-button ss-pane-toggle" data-action="toggle-loras" title="Collapse LoRA workspace" aria-label="Collapse LoRA workspace">⌄</button>
               </div>
               <div class="ss-library-tools">
-                <input class="ss-input" data-role="lora-search" type="search" placeholder="Search keywords, tags, triggers…" />
+                <div class="ss-lora-query">
+                  <input class="ss-input" data-role="lora-search" type="search" placeholder="Search keywords, tags, triggers…" />
+                  <div class="ss-lora-download-entry" data-role="lora-download-entry" hidden>
+                    <input class="ss-input" data-role="lora-download-url" type="url" inputmode="url" placeholder="Paste or drop a Civitai / Hugging Face download URL…" />
+                    <input class="ss-input" data-role="lora-download-name" placeholder="Optional save name" />
+                    <button class="ss-button ss-button-primary" data-action="start-lora-download" title="Download into SwarmUI">${DOWNLOAD_ICON}<span>Start</span></button>
+                    <button class="ss-button" data-action="cancel-lora-download" title="Close downloader">×</button>
+                  </div>
+                  <div class="ss-lora-download-status" data-role="lora-download-progress" hidden><i></i></div>
+                </div>
+                <button class="ss-button ss-lora-download-toggle" data-action="toggle-lora-download">${DOWNLOAD_ICON}<span>Download</span></button>
                 <select class="ss-select ss-lora-filter" data-role="lora-filter" aria-label="LoRA compatibility filter">
                   <option value="compatible">Compatible only</option>
                   <option value="all">All model families</option>
@@ -4745,7 +4826,6 @@ are removed when CSS is applied.</pre>
                   <option value="name">Filename</option>
                   <option value="newest">Newest</option>
                 </select>
-                <button class="ss-button" data-action="manual-lora">Add filename</button>
               </div>
               <div class="ss-library-status" data-role="metadata-error" hidden></div>
               <div class="ss-lora-grid" data-role="lora-grid">
@@ -4758,7 +4838,6 @@ are removed when CSS is applied.</pre>
             <section class="ss-stack-pane">
               <div class="ss-section-head">
                 <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
-                <button class="ss-button ss-button-danger" data-action="clear-stack" disabled>Clear</button>
               </div>
               <div class="ss-stack-head-tools">
                 <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
@@ -4768,14 +4847,15 @@ are removed when CSS is applied.</pre>
                 <button class="ss-button ss-button-primary" data-action="save-stack">Save</button>
                 <button class="ss-button ss-button-danger" data-action="delete-stack" disabled>Delete</button>
               </div>
-              <div class="ss-stack-share-tools">
-                <button class="ss-button" data-action="export-stack" title="Export the current LoRA stack as shareable JSON">${EXPORT_ICON}<span>Export stack</span></button>
-                <button class="ss-button" data-action="import-stack" title="Import a shared LoRA stack JSON file">${IMPORT_ICON}<span>Import stack</span></button>
-                <button class="ss-button" data-action="apply-lumi-stack" title="Merge this stack into Lumiverse Image Gen and activate it">${EXPORT_ICON}<span>Apply to Lumi</span></button>
-                <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
-              </div>
               <div class="ss-stack-list" data-role="stack-list">
                 <div class="ss-empty">Add LoRAs from the library. Metadata triggers stay off until you enable them.</div>
+              </div>
+              <div class="ss-stack-share-tools">
+                <button class="ss-button" data-action="import-stack" title="Import a shared LoRA stack JSON file">${IMPORT_ICON}<span>Import</span></button>
+                <button class="ss-button" data-action="export-stack" title="Export the current LoRA stack as shareable JSON">${EXPORT_ICON}<span>Export</span></button>
+                <button class="ss-button" data-action="apply-lumi-stack" title="Merge this stack into Lumiverse Image Gen and activate it">${EXPORT_ICON}<span>Apply to Lumi</span></button>
+                <button class="ss-button ss-button-danger ss-clear-stack" data-action="clear-stack" disabled>Clear</button>
+                <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
               </div>
             </section>
           </div>
@@ -4810,9 +4890,9 @@ are removed when CSS is applied.</pre>
         <div class="ss-missing-lora-modal" data-role="missing-lora-modal" hidden>
           <section class="ss-missing-lora-card" role="dialog" aria-modal="true" aria-labelledby="ss-missing-lora-title">
             <header><div><span class="ss-eyebrow">SHARED STACK</span><h3 id="ss-missing-lora-title">Missing LoRAs</h3></div><button class="ss-icon-button" data-action="close-missing-loras" aria-label="Close missing LoRA popup">×</button></header>
-            <p class="ss-muted">The stack was imported. These files are not in the current Swarm library yet; use their source links with SwarmUI’s Model Downloader, then refresh metadata.</p>
+            <p class="ss-muted">Choose LoRAs with direct Civitai or Hugging Face download links. SwarmUI handles credentials, paths, metadata, and duplicate protection.</p>
             <div class="ss-missing-lora-list" data-role="missing-lora-list"></div>
-            <footer><button class="ss-button" data-action="copy-missing-loras">Copy missing list</button><button class="ss-button ss-button-primary" data-action="close-missing-loras">Done</button></footer>
+            <footer><span class="ss-muted ss-tiny" data-role="missing-lora-download-status"></span><button class="ss-button" data-action="copy-missing-loras">Copy list</button><button class="ss-button ss-button-primary" data-action="download-missing-loras">Download selected</button><button class="ss-button" data-action="close-missing-loras">Done</button></footer>
           </section>
         </div>
 
@@ -4965,6 +5045,22 @@ are removed when CSS is applied.</pre>
             if (connectionId) this.loadConnection(connectionId);
         });
         this.get('[data-role="lora-search"]').addEventListener("input", ()=>this.renderLoras());
+        const downloadUrl = this.get('[data-role="lora-download-url"]');
+        downloadUrl.addEventListener("keydown", (event)=>{
+            if (event.key === "Enter") {
+                event.preventDefault();
+                this.startManualLoraDownload();
+            }
+        });
+        downloadUrl.addEventListener("dragover", (event)=>event.preventDefault());
+        downloadUrl.addEventListener("drop", (event)=>{
+            event.preventDefault();
+            const value = event.dataTransfer?.getData("text/uri-list") || event.dataTransfer?.getData("text/plain") || "";
+            if (value.trim()) downloadUrl.value = value.trim().split(/\r?\n/)[0];
+        });
+        for (const details of this.root.querySelectorAll("details.ss-advanced, details.ss-library-visual-profile")){
+            details.addEventListener("toggle", ()=>this.persistWorkspaceState());
+        }
         this.get('[data-role="library-search"]').addEventListener("input", ()=>{
             this.libraryPage = 0;
             this.renderOutputLibrary();
@@ -5167,7 +5263,9 @@ are removed when CSS is applied.</pre>
             if (action === "use-current-init" || action === "use-as-init") void this.useCurrentAsInit();
             if (action === "pick-init") this.get('[data-role="init-file"]').click();
             if (action === "clear-init") this.clearInitImage();
-            if (action === "manual-lora") this.addManualLora();
+            if (action === "toggle-lora-download") this.toggleLoraDownloader();
+            if (action === "start-lora-download") this.startManualLoraDownload();
+            if (action === "cancel-lora-download") this.cancelLoraDownload();
             if (action === "toggle-generation") this.togglePane("generation");
             if (action === "toggle-history") this.togglePane("history");
             if (action === "toggle-loras") this.togglePane("loras");
@@ -5186,6 +5284,7 @@ are removed when CSS is applied.</pre>
             if (action === "apply-lumi-stack") void this.applyLumiverseStack();
             if (action === "close-missing-loras") this.closeMissingLoras();
             if (action === "copy-missing-loras") void this.copyMissingLoras();
+            if (action === "download-missing-loras") this.downloadSelectedMissingLoras();
             if (action === "close-save-preset") this.closeSavePresetModal();
             if (action === "confirm-save-preset") this.confirmSavePreset();
             if (action === "open-preset-manager") this.openPresetManager();
@@ -5294,14 +5393,27 @@ are removed when CSS is applied.</pre>
                 break;
             case "metadata_result":
                 this.state.loras = Array.isArray(data.loras) ? data.loras : [];
+                this.state.stack = this.state.stack.map((item)=>({
+                        ...item,
+                        lora: this.installedLora(item.lora.name) || item.lora
+                    }));
+                this.missingLoras = this.missingLoras.filter((item)=>!this.installedLora(item.name));
                 this.state.checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints : this.state.checkpoints;
                 this.acceptSwarmOptions(data.swarmOptions);
                 this.showMetadataError(data.metadataError || "");
                 this.updateFamilyChip();
                 this.renderLoras();
                 this.renderStack();
+                if (!this.get('[data-role="missing-lora-modal"]').hidden) {
+                    if (this.missingLoras.length) this.showMissingLoras();
+                    else this.closeMissingLoras();
+                }
                 this.setRunStatus(`Metadata refreshed: ${this.state.loras.length} LoRAs.`);
                 this.setConnectionStatus("ready");
+                break;
+            case "lora_download_ready":
+                if (payload.requestId !== this.loraDownloadRequestId) break;
+                this.openLoraDownloadSocket(data);
                 break;
             case "preview_result":
                 if (payload?.name && payload?.dataUrl) {
@@ -5525,6 +5637,11 @@ are removed when CSS is applied.</pre>
                 this.setRunStatus("Saved LoRA stacks updated.");
                 break;
             case "studio_error":
+                if (payload.operation === "prepare_lora_download") {
+                    this.loraDownloadQueue = [];
+                    this.loraDownloadRequestId = "";
+                    this.setLoraDownloadStatus(payload.error || "SwarmUI could not start that download.", true);
+                }
                 if (payload.operation === "create_output_folder") this.pendingCreatedFolder = null;
                 if (payload.operation === "load_swarm_workflow") {
                     this.workflowRequestId = "";
@@ -6747,11 +6864,159 @@ are removed when CSS is applied.</pre>
         this.renderStack();
         this.renderLoras();
     }
-    addManualLora() {
-        const filename = window.prompt("Exact SwarmUI LoRA filename/path");
-        if (!filename?.trim()) return;
-        const name = filename.trim();
-        this.addLora(manualLora(name));
+    toggleLoraDownloader(force) {
+        const search = this.get('[data-role="lora-search"]');
+        const entry = this.get('[data-role="lora-download-entry"]');
+        const shouldOpen = force ?? entry.hidden;
+        if (!shouldOpen && this.loraDownloadSocket) {
+            this.cancelLoraDownload();
+            return;
+        }
+        entry.hidden = !shouldOpen;
+        search.hidden = shouldOpen;
+        entry.closest(".ss-library-tools")?.classList.toggle("ss-download-open", shouldOpen);
+        const toggle = this.get('[data-action="toggle-lora-download"]');
+        toggle.dataset.active = String(shouldOpen);
+        toggle.querySelector("span").textContent = shouldOpen ? "Searching" : "Download";
+        if (shouldOpen) this.get('[data-role="lora-download-url"]').focus();
+    }
+    startManualLoraDownload() {
+        const url = this.get('[data-role="lora-download-url"]').value.trim();
+        const name = this.get('[data-role="lora-download-name"]').value.trim();
+        if (!url || !this.state.connection) {
+            this.setLoraDownloadStatus(url ? "Choose a SwarmUI connection first." : "Paste a download URL first.", true);
+            return;
+        }
+        this.loraDownloadQueue = [
+            {
+                name,
+                title: name,
+                sourceUrl: url,
+                weight: 1,
+                enabled: true,
+                useTrigger: false
+            }
+        ];
+        this.requestNextLoraDownload();
+    }
+    downloadSelectedMissingLoras() {
+        const selected = [
+            ...this.root.querySelectorAll('[data-role="missing-lora-download"]:checked')
+        ].map((input)=>this.missingLoras[Number(input.dataset.index)]).filter((item)=>Boolean(item?.sourceUrl));
+        if (!selected.length) {
+            this.setLoraDownloadStatus("Select at least one LoRA with a source URL.", true);
+            return;
+        }
+        this.loraDownloadQueue = selected;
+        this.requestNextLoraDownload();
+    }
+    requestNextLoraDownload() {
+        const item = this.loraDownloadQueue[0];
+        if (!item || !this.state.connection) return;
+        this.setLoraDownloadStatus(`Preparing ${item.title || labelFromName(item.name)}…`, false, 0);
+        this.loraDownloadRequestId = this.send("prepare_lora_download", {
+            connectionId: this.state.connection.id,
+            url: item.sourceUrl,
+            name: item.name
+        });
+    }
+    openLoraDownloadSocket(data) {
+        const wsUrl = String(data.wsUrl || "");
+        if (!/^wss?:\/\//i.test(wsUrl)) {
+            this.loraDownloadQueue = [];
+            this.setLoraDownloadStatus("SwarmUI returned an invalid downloader address.", true);
+            return;
+        }
+        const item = this.loraDownloadQueue[0];
+        if (!item) return;
+        let finished = false;
+        const socket = new WebSocket(wsUrl);
+        this.loraDownloadSocket = socket;
+        socket.addEventListener("open", ()=>{
+            socket.send(JSON.stringify({
+                session_id: String(data.sessionId || ""),
+                url: String(data.url || ""),
+                type: "LoRA",
+                name: String(data.name || item.name || "downloaded-lora")
+            }));
+            this.setLoraDownloadStatus(`Downloading ${item.title || labelFromName(item.name)}…`, false, 0);
+        });
+        socket.addEventListener("message", (event)=>{
+            let message;
+            try {
+                message = JSON.parse(String(event.data || "{}"));
+            } catch  {
+                return;
+            }
+            if (Number.isFinite(Number(message.current_percent))) {
+                const progress = clamp(Number(message.current_percent), 0, 1);
+                this.setLoraDownloadStatus(`Downloading ${item.title || labelFromName(item.name)} · ${Math.round(progress * 100)}%`, false, progress);
+            }
+            if (message.error) {
+                finished = true;
+                this.loraDownloadQueue = [];
+                this.loraDownloadSocket = null;
+                this.setLoraDownloadStatus(String(message.error), true);
+                socket.close();
+            }
+            if (message.success === true) {
+                finished = true;
+                this.loraDownloadQueue.shift();
+                this.loraDownloadSocket = null;
+                socket.close();
+                if (this.loraDownloadQueue.length) {
+                    this.requestNextLoraDownload();
+                } else {
+                    this.setLoraDownloadStatus("Download complete · refreshing Swarm metadata…", false, 1);
+                    this.get('[data-role="lora-download-url"]').value = "";
+                    this.get('[data-role="lora-download-name"]').value = "";
+                    if (this.state.connection) this.send("refresh_metadata", {
+                        connectionId: this.state.connection.id
+                    });
+                }
+            }
+        });
+        socket.addEventListener("error", ()=>{
+            if (finished) return;
+            finished = true;
+            this.loraDownloadQueue = [];
+            this.loraDownloadSocket = null;
+            this.setLoraDownloadStatus("The browser could not reach SwarmUI's downloader WebSocket.", true);
+        });
+        socket.addEventListener("close", ()=>{
+            if (finished || this.loraDownloadSocket !== socket) return;
+            this.loraDownloadSocket = null;
+            this.loraDownloadQueue = [];
+            this.setLoraDownloadStatus("The SwarmUI downloader connection closed early.", true);
+        });
+    }
+    cancelLoraDownload() {
+        this.loraDownloadQueue = [];
+        this.loraDownloadRequestId = "";
+        const socket = this.loraDownloadSocket;
+        this.loraDownloadSocket = null;
+        if (socket) {
+            try {
+                socket.send(JSON.stringify({
+                    signal: "cancel"
+                }));
+            } catch  {}
+            socket.close();
+        }
+        this.setLoraDownloadStatus("", false);
+        this.toggleLoraDownloader(false);
+    }
+    setLoraDownloadStatus(message, error = false, progress = 0) {
+        const bar = this.get('[data-role="lora-download-progress"]');
+        bar.hidden = !message;
+        bar.style.setProperty("--ss-download-progress", `${Math.round(clamp(progress, 0, 1) * 100)}%`);
+        bar.title = message;
+        const modalStatus = this.root.querySelector('[data-role="missing-lora-download-status"]');
+        if (modalStatus) {
+            modalStatus.textContent = message;
+            modalStatus.style.color = error ? "#ff8b96" : "";
+        }
+        if (message) this.setRunStatus(message, error);
     }
     renderStack() {
         const list = this.get('[data-role="stack-list"]');
@@ -7151,14 +7416,20 @@ are removed when CSS is applied.</pre>
     showMissingLoras() {
         const list = this.get('[data-role="missing-lora-list"]');
         list.replaceChildren();
-        for (const item of this.missingLoras){
+        this.missingLoras.forEach((item, index)=>{
             const row = element("div", "ss-missing-lora-row");
+            const select = element("input");
+            select.type = "checkbox";
+            select.dataset.role = "missing-lora-download";
+            select.dataset.index = String(index);
             const details = element("div");
             details.append(element("strong", "", item.title || labelFromName(item.name)), element("span", "", item.name));
-            row.appendChild(details);
             const sourceUrl = safeHttpUrl(item.sourceUrl);
+            select.checked = Boolean(sourceUrl);
+            select.disabled = !sourceUrl;
+            row.append(select, details);
             if (sourceUrl) {
-                const link = element("a", "", "Civitai source");
+                const link = element("a", "", "Source ↗");
                 link.href = sourceUrl;
                 link.target = "_blank";
                 link.rel = "noopener noreferrer";
@@ -7167,7 +7438,8 @@ are removed when CSS is applied.</pre>
                 row.appendChild(element("span", "", "No source URL"));
             }
             list.appendChild(row);
-        }
+        });
+        this.setLoraDownloadStatus("", false);
         this.get('[data-role="missing-lora-modal"]').hidden = false;
     }
     closeMissingLoras() {
@@ -7192,15 +7464,98 @@ are removed when CSS is applied.</pre>
         });
         this.setRunStatus(`Deleting LoRA stack “${preset.name}”…`);
     }
+    restoreWorkspaceState() {
+        let state = {};
+        try {
+            state = JSON.parse(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || "{}");
+        } catch  {}
+        const shell = this.get(".ss-shell");
+        shell.classList.toggle("ss-generation-collapsed", state?.collapsed?.generation === true);
+        shell.classList.toggle("ss-history-collapsed", state?.collapsed?.history === true);
+        shell.classList.toggle("ss-loras-collapsed", state?.collapsed?.loras === true);
+        shell.classList.toggle("ss-fullscreen-layer", state?.fullscreen === true);
+        const advanced = this.root.querySelector("details.ss-advanced");
+        if (advanced) advanced.open = state?.details?.advanced === true;
+        const visual = this.root.querySelector('details[data-role="library-visual-profile"]');
+        if (visual) visual.open = state?.details?.visual === true;
+        const sizes = {
+            generationWidth: "--ss-generation-width",
+            historyWidth: "--ss-history-width",
+            dockHeight: "--ss-dock-height",
+            libraryWidth: "--ss-library-width",
+            promptHeight: "--ss-prompt-height"
+        };
+        for (const [key, property] of Object.entries(sizes)){
+            const value = Number(state?.sizes?.[key]);
+            if (Number.isFinite(value) && value >= 50 && value <= 2400) shell.style.setProperty(property, `${Math.round(value)}px`);
+        }
+        this.setMobileTab(typeof state?.mobileTab === "string" ? state.mobileTab : "create");
+        this.updateWorkspaceButtons();
+    }
+    persistWorkspaceState() {
+        const shell = this.root.querySelector(".ss-shell");
+        if (!shell) return;
+        const size = (property)=>{
+            const value = Number.parseFloat(shell.style.getPropertyValue(property));
+            return Number.isFinite(value) ? Math.round(value) : null;
+        };
+        try {
+            window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
+                fullscreen: shell.classList.contains("ss-fullscreen-layer"),
+                mobileTab: shell.dataset.mobileTab || "create",
+                collapsed: {
+                    generation: shell.classList.contains("ss-generation-collapsed"),
+                    history: shell.classList.contains("ss-history-collapsed"),
+                    loras: shell.classList.contains("ss-loras-collapsed")
+                },
+                details: {
+                    advanced: this.root.querySelector("details.ss-advanced")?.open === true,
+                    visual: this.root.querySelector('details[data-role="library-visual-profile"]')?.open === true
+                },
+                sizes: {
+                    generationWidth: size("--ss-generation-width"),
+                    historyWidth: size("--ss-history-width"),
+                    dockHeight: size("--ss-dock-height"),
+                    libraryWidth: size("--ss-library-width"),
+                    promptHeight: size("--ss-prompt-height")
+                }
+            }));
+        } catch  {}
+    }
+    updateWorkspaceButtons() {
+        const shell = this.get(".ss-shell");
+        const generation = this.root.querySelector('[data-action="toggle-generation"]');
+        const history = this.root.querySelector('[data-action="toggle-history"]');
+        const loras = this.root.querySelector('[data-action="toggle-loras"]');
+        const fullscreen = this.root.querySelector('[data-action="toggle-fullscreen"]');
+        const generationCollapsed = shell.classList.contains("ss-generation-collapsed");
+        const historyCollapsed = shell.classList.contains("ss-history-collapsed");
+        const lorasCollapsed = shell.classList.contains("ss-loras-collapsed");
+        const isFullscreen = shell.classList.contains("ss-fullscreen-layer");
+        if (generation) {
+            generation.textContent = generationCollapsed ? "›" : "‹";
+            generation.setAttribute("aria-expanded", String(!generationCollapsed));
+        }
+        if (history) {
+            history.textContent = historyCollapsed ? "‹" : "›";
+            history.setAttribute("aria-expanded", String(!historyCollapsed));
+        }
+        if (loras) {
+            loras.textContent = lorasCollapsed ? "⌃" : "⌄";
+            loras.setAttribute("aria-expanded", String(!lorasCollapsed));
+        }
+        if (fullscreen) {
+            fullscreen.textContent = isFullscreen ? "🗗" : "⛶";
+            fullscreen.title = isFullscreen ? "Exit fullscreen studio" : "Enter fullscreen studio";
+        }
+    }
     togglePane(pane) {
         const shell = this.get(".ss-shell");
         const className = `ss-${pane}-collapsed`;
         const collapsed = shell.classList.toggle(className);
-        const button = this.get(`[data-action="toggle-${pane}"]`);
-        if (pane === "generation") button.textContent = collapsed ? "›" : "‹";
-        if (pane === "history") button.textContent = collapsed ? "‹" : "›";
-        if (pane === "loras") button.textContent = collapsed ? "⌃" : "⌄";
-        button.setAttribute("aria-expanded", String(!collapsed));
+        void collapsed;
+        this.updateWorkspaceButtons();
+        this.persistWorkspaceState();
         requestAnimationFrame(()=>this.fitPreviewToAspect());
     }
     beginResize(kind, event) {
@@ -7228,6 +7583,7 @@ are removed when CSS is applied.</pre>
             document.body.style.userSelect = previousUserSelect;
             shell.classList.remove("ss-is-resizing");
             this.stopActiveResize = null;
+            this.persistWorkspaceState();
         };
         this.stopActiveResize = stop;
         document.addEventListener("pointermove", move, true);
@@ -7270,15 +7626,15 @@ are removed when CSS is applied.</pre>
         };
         const property = properties[kind];
         if (property) shell.style.removeProperty(property);
+        this.persistWorkspaceState();
         this.fitPreviewToAspect();
     }
     toggleFullscreen(force) {
         const shell = this.get(".ss-shell");
         const shouldEnter = force ?? !shell.classList.contains("ss-fullscreen-layer");
         shell.classList.toggle("ss-fullscreen-layer", shouldEnter);
-        const button = this.get('[data-action="toggle-fullscreen"]');
-        button.textContent = shouldEnter ? "🗗" : "⛶";
-        button.title = shouldEnter ? "Exit fullscreen studio" : "Enter fullscreen studio";
+        this.updateWorkspaceButtons();
+        this.persistWorkspaceState();
         requestAnimationFrame(()=>this.fitPreviewToAspect());
     }
     setMobileTab(tab) {
@@ -7297,6 +7653,7 @@ are removed when CSS is applied.</pre>
             button.dataset.active = String(active);
             button.setAttribute("aria-current", active ? "page" : "false");
         }
+        this.persistWorkspaceState();
         requestAnimationFrame(()=>this.fitPreviewToAspect());
     }
     openInspector() {

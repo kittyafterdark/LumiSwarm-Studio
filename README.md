@@ -4,7 +4,7 @@ Swarm Studio is a Spindle extension that puts a full SwarmUI prompting workspace
 
 It adds:
 
-- A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
+- A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode; fullscreen, collapse states, mobile tab, and custom pane sizes survive closing Studio
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
 - One-tap mobile **Use as init**, context-aware **Random/Current seed**, and **Append to chat** actions below the Create prompts, with **Library** beside Settings in the header
 - A Lumiverse-native profile plus an automatic Custom state for component colors, panel geometry, opacity, blur, and CSS overrides
@@ -16,7 +16,7 @@ It adds:
 - A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
 - Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, reusable saved stack presets, and one-click materialization of a Swarm preset into editable Studio controls
-- Shareable Studio stack JSON, direct in-app application to Lumiverse Image Gen LoRA presets, and a missing-file handoff with Civitai source links for SwarmUI's Model Downloader
+- Shareable Studio stack JSON, direct in-app application to Lumiverse Image Gen LoRA presets, and an in-Studio, progress-aware SwarmUI downloader for selected missing LoRAs or pasted/dropped Civitai and Hugging Face links
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - Native Lumiverse expanded text editors for Studio and Quick Create positive/negative prompts, including the host's macro-aware editing tools
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
@@ -24,7 +24,7 @@ It adds:
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker and an optional `character="none"` scenery/object mode that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, serialize concurrent insertions into the same reply, and replace themselves with permanent container-filling Lumiverse images
 - Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with current/original settings, edit the prompt in Studio, or open the output library; right-clicking the finished image opens the same menu
-- Chat visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack can follow one conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile stack controls once when that chat opens, and file that chat's Studio outputs automatically
+- Chat visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack can follow one conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile stack controls once when that chat opens, and file that chat's Studio outputs automatically only while the pill is enabled; disabled visuals leave new outputs Unfiled
 - Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_tags}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
@@ -76,7 +76,7 @@ Lumiverse correctly does not expose the saved connection secret to extensions. S
 - Tries anonymous SwarmUI metadata access first.
 - If SwarmUI requires authentication for model metadata, accepts a metadata-only `swarm_token` from the modal. The token is stored per user in Lumiverse's AES-256-GCM secure enclave and is only sent to the configured SwarmUI origin.
 
-If metadata access is unavailable, generation still works and exact LoRA filenames can be added manually.
+If metadata access is unavailable, generation still works; restore metadata access to browse, stack, or download LoRAs through Studio.
 
 ## In-message image tags
 
@@ -140,9 +140,12 @@ activates it in-app; reopening an already-mounted native Image Gen tab makes it
 reload those saved settings. **Import stack** accepts either the portable Studio
 format or a config exported by Lumiverse. If the current Swarm
 library lacks a referenced filename, Studio keeps it in the stack and shows
-the metadata source link when available so it can be pasted into SwarmUI's
-Model Downloader. The extension does not silently trigger Swarm's WebSocket
-downloader.
+the metadata source link when available. **Download selected** explicitly
+hands checked Civitai/Hugging Face URLs to SwarmUI's permission-checked
+`DoModelDownloadWS` endpoint, shows live progress, downloads sequentially, and
+refreshes Studio metadata afterward. Civitai model-page links are resolved to
+the matching filename's version when possible. Downloads never start merely
+because a stack was imported.
 
 The inspector treats the exact prompt text sent by Studio as the authoritative
 prompt record and lists the ordered Swarm presets separately as provenance.

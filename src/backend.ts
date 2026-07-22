@@ -388,6 +388,100 @@ async function getSession(
   return sessionId
 }
 
+async function approvedLoraDownloadUrl(value: unknown, requestedName: unknown): Promise<string> {
+  const input = asString(value).trim()
+  if (!input) throw new Error("Paste a Civitai or Hugging Face download URL first.")
+  let parsed: URL
+  try {
+    parsed = new URL(input)
+  } catch {
+    throw new Error("That LoRA download URL is invalid.")
+  }
+  if (parsed.protocol !== "https:") throw new Error("LoRA downloads require an HTTPS URL.")
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, "")
+  if (host === "civitai.com" || host === "civitai.red") {
+    if (/^\/api\/download\/models\/\d+/i.test(parsed.pathname)) return parsed.href
+    const versionId = parsed.searchParams.get("modelVersionId")
+    if (versionId && /^\d+$/.test(versionId)) {
+      const download = new URL(`https://civitai.com/api/download/models/${versionId}`)
+      const token = parsed.searchParams.get("token")
+      if (token) download.searchParams.set("token", token)
+      return download.href
+    }
+    const modelId = parsed.pathname.match(/^\/models\/(\d+)/i)?.[1]
+    if (modelId) {
+      const response = await spindle.cors(`https://civitai.com/api/v1/models/${modelId}`, {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+      })
+      if (Number(response?.status) < 200 || Number(response?.status) >= 300) {
+        throw new Error(`Civitai could not resolve that model page (${response?.status || "network error"}).`)
+      }
+      let model: JsonObject
+      try { model = asRecord(JSON.parse(String(response?.body || "{}"))) } catch {
+        throw new Error("Civitai returned invalid model metadata.")
+      }
+      const versions = Array.isArray(model.modelVersions) ? model.modelVersions.map(asRecord) : []
+      const wanted = asString(requestedName).toLowerCase().replace(/\\/g, "/").split("/").pop()?.replace(/\.[^.]+$/, "") || ""
+      const matching = versions.find((version) => (Array.isArray(version.files) ? version.files : []).some((raw) => {
+        const filename = asString(asRecord(raw).name).toLowerCase().replace(/\.[^.]+$/, "")
+        return Boolean(wanted && filename && (filename === wanted || filename.includes(wanted) || wanted.includes(filename)))
+      }))
+      const resolvedVersionId = asString((matching || versions[0])?.id) || String((matching || versions[0])?.id || "")
+      if (!/^\d+$/.test(resolvedVersionId)) throw new Error("Civitai did not expose a downloadable version for that model.")
+      return `https://civitai.com/api/download/models/${resolvedVersionId}`
+    }
+    throw new Error("Use Civitai's Download button URL or a numeric Civitai model page URL.")
+  }
+  if (host === "huggingface.co") {
+    if (!parsed.pathname.includes("/resolve/") && !parsed.pathname.includes("/blob/")) {
+      throw new Error("Use a direct Hugging Face file URL containing /resolve/.")
+    }
+    parsed.pathname = parsed.pathname.replace("/blob/", "/resolve/")
+    return parsed.href
+  }
+  throw new Error("Only Civitai and Hugging Face LoRA downloads are allowed here.")
+}
+
+function cleanLoraDownloadName(value: unknown, url: string): string {
+  let name = asString(value).trim().replace(/\\/g, "/")
+  if (!name) {
+    const parsed = new URL(url)
+    const civitaiId = parsed.pathname.match(/\/api\/download\/models\/(\d+)/i)?.[1]
+    name = civitaiId ? `civitai-${civitaiId}` : decodeURIComponent(parsed.pathname.split("/").pop() || "downloaded-lora")
+  }
+  name = name.replace(/\.(?:safetensors|ckpt|pt|bin|gguf)$/i, "").replace(/^\/+|\/+$/g, "")
+  if (!name || name.includes("..")) throw new Error("Choose a safe LoRA filename without parent-directory segments.")
+  const cleaned = name
+    .split("/")
+    .map((part) => part.replace(/[^a-zA-Z0-9 _.,()\[\]-]+/g, "_").trim())
+    .filter(Boolean)
+    .join("/")
+    .slice(0, 300)
+  if (!cleaned) throw new Error("Choose a usable LoRA filename.")
+  return cleaned
+}
+
+async function prepareLoraDownload(payload: any, userId?: string): Promise<JsonObject> {
+  if (!spindle.permissions.has("cors_proxy")) {
+    throw new Error("Grant the CORS Proxy permission so Studio can establish a SwarmUI download session.")
+  }
+  const connectionId = asString(payload?.connectionId).trim()
+  const connection = await getConnection(connectionId, userId)
+  const url = await approvedLoraDownloadUrl(payload?.url, payload?.name)
+  const name = cleanLoraDownloadName(payload?.name, url)
+  const token = await getMetadataToken(connectionId, userId)
+  const sessionId = await getSession(connection, token, userId)
+  const baseUrl = normalizeBaseUrl(connection.api_url)
+  return {
+    wsUrl: `${baseUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:")}/API/DoModelDownloadWS`,
+    sessionId,
+    url,
+    name,
+    type: "LoRA",
+  }
+}
+
 function parseTags(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -1857,9 +1951,14 @@ async function ensureCharacterOutputFolder(
 ): Promise<void> {
   if (!characterId || !characterName || !imageId) return
   const folders = await loadOutputFolders(userId)
+  const chatFolder = folders.find((candidate) => candidate.binding?.chatId === chatId)
+  // The Visuals pill controls both prompt inheritance and automatic filing.
+  // A disabled binding leaves new images Unfiled instead of quietly adding
+  // them to a folder the user explicitly switched off.
+  if (chatFolder?.binding && !chatFolder.binding.enabled) return
   const inheritedTags = asString((await characterBaseTagState(characterId, userId)).tags).trim()
   const folderId = `character:${characterId}`
-  let folder = folders.find((candidate) => candidate.binding?.chatId === chatId)
+  let folder = chatFolder
     || folders.find((candidate) => candidate.id === folderId && !candidate.binding)
   if (!folder) {
     folder = {
@@ -2512,6 +2611,14 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         }, userId)
         return
       }
+      case "prepare_lora_download": {
+        spindle.sendToFrontend({
+          type: "lora_download_ready",
+          requestId,
+          data: await prepareLoraDownload(payload, userId),
+        }, userId)
+        return
+      }
       case "open_text_editor": {
         if (typeof spindle.textEditor?.open !== "function") {
           throw new Error("This Lumiverse build does not expose the expanded text editor.")
@@ -2694,7 +2801,9 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           spindle.log.warn(`Could not persist Swarm Studio generation details: ${error instanceof Error ? error.message : String(error)}`)
         }
         if (record?.imageId && activeChat?.id) {
-          const visualFolder = (await loadOutputFolders(userId)).find((folder) => folder.binding?.chatId === activeChat.id)
+          const visualFolder = (await loadOutputFolders(userId)).find((folder) =>
+            folder.binding?.chatId === activeChat.id && folder.binding.enabled,
+          )
           if (visualFolder) await moveOutputToFolder(record.imageId, visualFolder.id, userId)
         }
         const outputPage = await listOutputs(userId, activeChat)
