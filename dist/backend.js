@@ -5,14 +5,23 @@ const PREVIEW_CACHE_LIMIT = 64;
 const STACK_PRESETS_FILE = "lora-stack-presets.json";
 const GENERATION_RECORDS_FILE = "generation-records.json";
 const OUTPUT_FOLDERS_FILE = "output-folders.json";
+const TAG_AUTOMATION_CONFIG_FILE = "tag-automation-config.json";
+const TAGGED_IMAGE_JOBS_FILE = "tagged-image-jobs.json";
+const STUDIO_GENERATION_PROFILE_FILE = "studio-generation-profile.json";
 const STACK_PRESET_LIMIT = 40;
 const GENERATION_RECORD_LIMIT = 100;
 const OUTPUT_FOLDER_LIMIT = 80;
+const TAGGED_IMAGE_JOB_LIMIT = 160;
 const HISTORY_PAGE_SIZE = 12;
 const DEFAULT_SWARMUI_URL = "http://localhost:7801";
 const sessions = new Map();
 const previewCache = new Map();
 const generationControllers = new Map();
+const runningTaggedJobs = new Set();
+const SWARM_IMAGE_PROTOCOL = `SWARM STUDIO IMAGE REQUEST PROTOCOL
+When a newly generated illustration materially improves your reply, place this exact XML-like tag where the finished image should appear:
+<swarm-image slot="short-stable-name" aspect="4:5" alt="brief accessible description">scene-specific SwarmUI prompt</swarm-image>
+The tag body is an image prompt, not prose for the user. Describe the scene, action, expression, framing, lighting, and environment. Character identity/base tags and the user's current Studio negative prompt are applied automatically. SwarmUI prompt syntax such as <preset:composition> is allowed and must be preserved exactly. Supported aspect values are 1:1, 2:3, 3:2, 4:5, 5:4, 9:16, and 16:9. Do not put Markdown fences around the tag. Use at most two image tags in one reply unless the user explicitly requests more.`;
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -810,13 +819,626 @@ async function fetchSwarmOutput(connection, swarmPath, token) {
         filename: segments[segments.length - 1].slice(0, 240) || `swarm-output-${Date.now()}.png`
     };
 }
+function cleanTagAutomationConfig(value) {
+    const record = asRecord(value);
+    return {
+        autoGenerate: record.autoGenerate === true,
+        injectProtocol: record.injectProtocol === true,
+        completionToast: record.completionToast === true
+    };
+}
+async function loadTagAutomationConfig(userId) {
+    return cleanTagAutomationConfig(await spindle.userStorage.getJson(TAG_AUTOMATION_CONFIG_FILE, {
+        fallback: {
+            autoGenerate: false,
+            injectProtocol: false,
+            completionToast: false
+        },
+        userId
+    }));
+}
+async function saveTagAutomationConfig(value, userId) {
+    const config = cleanTagAutomationConfig(value);
+    await spindle.userStorage.setJson(TAG_AUTOMATION_CONFIG_FILE, config, {
+        indent: 2,
+        userId
+    });
+    return config;
+}
+function stableTextHash(value) {
+    let hash = 2166136261;
+    for(let index = 0; index < value.length; index += 1){
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+}
+function cleanTagSlot(value) {
+    return asString(value).trim().replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+}
+function cleanTaggedImageJob(value) {
+    const record = asRecord(value);
+    const id = asString(record.id).trim();
+    const key = asString(record.key).trim();
+    const chatId = asString(record.chatId).trim();
+    const messageId = asString(record.messageId).trim();
+    if (!id || !key || !chatId || !messageId) return null;
+    const rawStatus = asString(record.status);
+    const status = [
+        "requested",
+        "queued",
+        "generating",
+        "ready",
+        "failed",
+        "cancelled"
+    ].includes(rawStatus) ? rawStatus : "requested";
+    return {
+        id,
+        key,
+        chatId,
+        messageId,
+        slot: cleanTagSlot(record.slot) || "image",
+        prompt: asString(record.prompt).slice(0, 12_000),
+        negativePrompt: asString(record.negativePrompt).slice(0, 12_000),
+        aspect: asString(record.aspect).slice(0, 20),
+        alt: asString(record.alt).slice(0, 300),
+        fullMatch: asString(record.fullMatch).slice(0, 24_000),
+        status,
+        clientJobId: asString(record.clientJobId).slice(0, 120),
+        imageId: asString(record.imageId).slice(0, 200),
+        imageUrl: asString(record.imageUrl).slice(0, 2_000),
+        inserted: record.inserted === true,
+        error: asString(record.error).slice(0, 1_000),
+        ownerCharacterId: asString(record.ownerCharacterId).slice(0, 200),
+        createdAt: Number(record.createdAt) || Date.now(),
+        updatedAt: Number(record.updatedAt) || Date.now(),
+        generationInput: Object.keys(asRecord(record.generationInput)).length ? asRecord(record.generationInput) : undefined,
+        recordHints: Object.keys(asRecord(record.recordHints)).length ? asRecord(record.recordHints) : undefined
+    };
+}
+async function loadTaggedImageJobs(userId) {
+    const value = await spindle.userStorage.getJson(TAGGED_IMAGE_JOBS_FILE, {
+        fallback: [],
+        userId
+    });
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, TAGGED_IMAGE_JOB_LIMIT).flatMap((item)=>{
+        const job = cleanTaggedImageJob(item);
+        return job ? [
+            job
+        ] : [];
+    });
+}
+async function persistTaggedImageJobs(jobs, userId) {
+    await spindle.userStorage.setJson(TAGGED_IMAGE_JOBS_FILE, jobs.slice(0, TAGGED_IMAGE_JOB_LIMIT), {
+        indent: 2,
+        userId
+    });
+}
+async function upsertTaggedImageJob(job, userId) {
+    job.updatedAt = Date.now();
+    const jobs = (await loadTaggedImageJobs(userId)).filter((candidate)=>candidate.id !== job.id);
+    jobs.unshift(job);
+    await persistTaggedImageJobs(jobs, userId);
+    return job;
+}
+function sanitizeRawOverrideForProfile(value) {
+    if (typeof value !== "string" || !value.trim()) return "";
+    try {
+        const parsed = asRecord(JSON.parse(value));
+        for (const [key, entry] of Object.entries(parsed)){
+            if (typeof entry === "string" && entry.startsWith("data:image/") || /(?:init|reference).*image|image.*(?:init|reference)/i.test(key)) {
+                delete parsed[key];
+            }
+        }
+        return JSON.stringify(parsed).slice(0, 65_536);
+    } catch  {
+        return "";
+    }
+}
+function sanitizeStudioProfile(value) {
+    const record = asRecord(value);
+    const rawInput = asRecord(record.input);
+    if (!Object.keys(rawInput).length) return null;
+    const rawParameters = asRecord(rawInput.parameters);
+    const { referenceImages: _referenceImages, resolvedSourceImages: _resolvedSourceImages, resolvedReferenceImages: _resolvedReferenceImages, denoise: _denoise, ...parameters } = rawParameters;
+    if (parameters.rawRequestOverride !== undefined) {
+        const cleaned = sanitizeRawOverrideForProfile(parameters.rawRequestOverride);
+        if (cleaned) parameters.rawRequestOverride = cleaned;
+        else delete parameters.rawRequestOverride;
+    }
+    return {
+        input: {
+            prompt: asString(rawInput.prompt).slice(0, 12_000),
+            negativePrompt: asString(rawInput.negativePrompt).slice(0, 12_000),
+            connection_id: asString(rawInput.connection_id).slice(0, 200),
+            model: asString(rawInput.model).slice(0, 500),
+            parameters
+        },
+        recordHints: {
+            ...asRecord(record.recordHints),
+            initImageId: "",
+            initImageLabel: ""
+        },
+        updatedAt: Number(record.updatedAt) || Date.now()
+    };
+}
+async function loadStudioGenerationProfile(userId) {
+    return sanitizeStudioProfile(await spindle.userStorage.getJson(STUDIO_GENERATION_PROFILE_FILE, {
+        fallback: null,
+        userId
+    }));
+}
+function aspectFromParameters(parameters) {
+    const width = Number(parameters.width);
+    const height = Number(parameters.height);
+    if (!(width > 0) || !(height > 0)) return "";
+    const ratio = width / height;
+    const options = [
+        [
+            "1:1",
+            1
+        ],
+        [
+            "2:3",
+            2 / 3
+        ],
+        [
+            "3:2",
+            3 / 2
+        ],
+        [
+            "4:5",
+            4 / 5
+        ],
+        [
+            "5:4",
+            5 / 4
+        ],
+        [
+            "9:16",
+            9 / 16
+        ],
+        [
+            "16:9",
+            16 / 9
+        ]
+    ];
+    return options.reduce((best, candidate)=>Math.abs(candidate[1] - ratio) < Math.abs(best[1] - ratio) ? candidate : best)[0];
+}
+function pushStudioProfileMacros(profile) {
+    const input = asRecord(profile?.input);
+    const hints = asRecord(profile?.recordHints);
+    const parameters = asRecord(input.parameters);
+    const presetTokens = stringList(hints.presets, 20).map((name)=>name.replace(/[<>\r\n]+/g, "").trim()).filter(Boolean).map((name)=>`<preset:${name}>`).join(" ");
+    spindle.updateMacroValue("swarm_negative", asString(input.negativePrompt));
+    spindle.updateMacroValue("swarm_preset", presetTokens);
+    spindle.updateMacroValue("swarm_checkpoint", asString(input.model));
+    spindle.updateMacroValue("swarm_aspect", aspectFromParameters(parameters));
+}
+async function saveStudioGenerationProfile(input, recordHints, userId) {
+    const profile = sanitizeStudioProfile({
+        input,
+        recordHints,
+        updatedAt: Date.now()
+    });
+    if (!profile) return null;
+    await spindle.userStorage.setJson(STUDIO_GENERATION_PROFILE_FILE, profile, {
+        indent: 2,
+        userId
+    });
+    pushStudioProfileMacros(profile);
+    return profile;
+}
+async function imageUrlForMacro(imageId, userId) {
+    if (!imageId || !spindle.permissions.has("images")) return "";
+    try {
+        const image = await spindle.images.get(imageId, {
+            specificity: "sm",
+            userId
+        });
+        return asString(image?.url);
+    } catch  {
+        return "";
+    }
+}
+async function refreshContextMacros(userId) {
+    let character = null;
+    let persona = null;
+    if (spindle.permissions.has("chats") && spindle.permissions.has("characters")) {
+        try {
+            const chat = await spindle.chats.getActive(userId);
+            if (chat?.character_id) character = await spindle.characters.get(chat.character_id, userId);
+        } catch  {
+            character = null;
+        }
+    }
+    if (spindle.permissions.has("personas")) {
+        try {
+            persona = await spindle.personas.getActive(userId);
+        } catch  {
+            persona = null;
+        }
+    }
+    const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora);
+    spindle.updateMacroValue("char_tags", asString(portable.base_tags));
+    spindle.updateMacroValue("char_profile", await imageUrlForMacro(asString(character?.image_id), userId));
+    spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId));
+}
+function parseTagAttributes(raw) {
+    const attrs = {};
+    const pattern = /([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+    let match;
+    while(match = pattern.exec(raw)){
+        attrs[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4] ?? "";
+    }
+    return attrs;
+}
+function parseSwarmImageTags(content) {
+    const tags = [];
+    const pattern = /<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image\s*>/gi;
+    let match;
+    while((match = pattern.exec(content)) && tags.length < 6){
+        tags.push({
+            fullMatch: match[0],
+            attrs: parseTagAttributes(match[1]),
+            content: match[2]
+        });
+    }
+    return tags;
+}
+function cleanAspect(value) {
+    const aspect = asString(value).trim();
+    return [
+        "1:1",
+        "2:3",
+        "3:2",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9"
+    ].includes(aspect) ? aspect : "";
+}
+function applyAspectToParameters(parameters, aspect) {
+    const clean = cleanAspect(aspect);
+    if (!clean) return;
+    const [x, y] = clean.split(":").map(Number);
+    const currentWidth = Math.max(64, Number(parameters.width) || 1024);
+    const currentHeight = Math.max(64, Number(parameters.height) || 1024);
+    const area = Math.max(64 * 64, currentWidth * currentHeight);
+    const ratio = x / y;
+    const round64 = (value)=>Math.max(64, Math.min(4096, Math.round(value / 64) * 64));
+    parameters.width = round64(Math.sqrt(area * ratio));
+    parameters.height = round64(Math.sqrt(area / ratio));
+}
+async function connectionForTaggedProfile(profile, userId) {
+    const connectionId = asString(asRecord(profile?.input).connection_id);
+    if (connectionId) return getConnection(connectionId, userId);
+    const connections = (await spindle.imageGen.listConnections(userId)).filter((connection)=>asString(connection?.provider).toLowerCase() === "swarmui");
+    const connection = connections.find((candidate)=>candidate?.is_default) || connections[0];
+    if (!connection) throw new Error("Configure a SwarmUI image generation connection before generating tagged images.");
+    return connection;
+}
+async function applyCharacterLayer(chatId, scenePrompt, parameters, userId) {
+    if (!spindle.permissions.has("chats")) return {
+        prompt: scenePrompt,
+        characterId: "",
+        characterName: ""
+    };
+    const chat = await spindle.chats.get(chatId, userId);
+    const characterId = asString(chat?.character_id);
+    if (!characterId || !spindle.permissions.has("characters")) {
+        return {
+            prompt: scenePrompt,
+            characterId,
+            characterName: ""
+        };
+    }
+    const character = await spindle.characters.get(characterId, userId);
+    const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora);
+    const baseTags = asString(portable.base_tags).trim();
+    const prompt = baseTags && !scenePrompt.toLowerCase().includes(baseTags.toLowerCase()) ? `${baseTags}, ${scenePrompt}` : scenePrompt;
+    const characterLora = asString(portable.lora_filename).trim();
+    if (characterLora) {
+        const names = Array.isArray(parameters.loras) ? parameters.loras.map(asString) : [];
+        const weights = Array.isArray(parameters.loraWeights) ? parameters.loraWeights.map(Number) : [];
+        const normalize = (name)=>name.replace(/\\/g, "/").toLowerCase().replace(/\.(?:safetensors|ckpt|pt)$/i, "");
+        if (!names.some((name)=>normalize(name) === normalize(characterLora))) {
+            names.push(characterLora);
+            weights.push(Number.isFinite(Number(portable.weight)) ? Number(portable.weight) : 1);
+        }
+        parameters.loras = names;
+        parameters.loraWeights = weights;
+    }
+    return {
+        prompt,
+        characterId,
+        characterName: asString(character?.name).trim()
+    };
+}
+async function ensureCharacterOutputFolder(characterId, characterName, imageId, userId) {
+    if (!characterId || !characterName || !imageId) return;
+    const folderId = `character:${characterId}`;
+    const folders = await loadOutputFolders(userId);
+    let folder = folders.find((candidate)=>candidate.id === folderId);
+    if (!folder) {
+        folder = {
+            id: folderId,
+            name: characterName.slice(0, 80),
+            imageIds: [],
+            updatedAt: Date.now()
+        };
+        folders.unshift(folder);
+    }
+    folder.name = characterName.slice(0, 80);
+    folder.imageIds = [
+        imageId,
+        ...folder.imageIds.filter((id)=>id !== imageId)
+    ].slice(0, 500);
+    folder.updatedAt = Date.now();
+    await persistOutputFolders(folders, userId);
+}
+function taggedJobPublic(job) {
+    return {
+        id: job.id,
+        key: job.key,
+        chatId: job.chatId,
+        messageId: job.messageId,
+        slot: job.slot,
+        prompt: job.prompt,
+        negativePrompt: job.negativePrompt,
+        aspect: job.aspect,
+        alt: job.alt,
+        status: job.status,
+        clientJobId: job.clientJobId,
+        imageId: job.imageId,
+        imageUrl: job.imageUrl,
+        inserted: job.inserted,
+        error: job.error,
+        ownerCharacterId: job.ownerCharacterId,
+        createdAt: job.createdAt,
+        updatedAt: job.updatedAt
+    };
+}
+function sendTaggedJobState(job, userId) {
+    spindle.sendToFrontend({
+        type: "tagged_image_job",
+        data: taggedJobPublic(job)
+    }, userId);
+}
+function escapeHtmlAttribute(value) {
+    return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+async function finalizeTaggedImageJob(job, userId) {
+    if (!job.imageUrl || !spindle.permissions.has("chat_mutation")) return false;
+    const messages = await spindle.chat.getMessages(job.chatId);
+    const target = messages.find((message)=>asString(message?.id) === job.messageId);
+    const content = asString(target?.content);
+    if (!target || !job.fullMatch || !content.includes(job.fullMatch)) return false;
+    const alt = job.alt || `Generated illustration for ${job.slot}`;
+    const markup = `<img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" loading="lazy">`;
+    const metadata = asRecord(target.metadata);
+    const previous = Array.isArray(metadata.swarm_studio_tagged_images) ? metadata.swarm_studio_tagged_images.filter((item)=>asString(item?.jobId) !== job.id) : [];
+    await spindle.chat.updateMessage(job.chatId, job.messageId, {
+        content: content.replace(job.fullMatch, markup),
+        metadata: {
+            ...metadata,
+            swarm_studio_tagged_images: [
+                ...previous,
+                {
+                    jobId: job.id,
+                    slot: job.slot,
+                    prompt: job.prompt,
+                    negativePrompt: job.negativePrompt,
+                    imageId: job.imageId,
+                    imageUrl: job.imageUrl,
+                    createdAt: job.updatedAt
+                }
+            ]
+        }
+    });
+    job.inserted = true;
+    await upsertTaggedImageJob(job, userId);
+    sendTaggedJobState(job, userId);
+    return true;
+}
+async function runTaggedImageJob(job, useOriginalProfile, userId) {
+    if (runningTaggedJobs.has(job.id)) return;
+    runningTaggedJobs.add(job.id);
+    try {
+        const storedProfile = await loadStudioGenerationProfile(userId);
+        const profile = useOriginalProfile && job.generationInput ? sanitizeStudioProfile({
+            input: job.generationInput,
+            recordHints: job.recordHints,
+            updatedAt: job.updatedAt
+        }) : storedProfile;
+        const connection = await connectionForTaggedProfile(profile, userId);
+        const profileInput = asRecord(profile?.input);
+        const input = {
+            ...profileInput,
+            connection_id: connection.id,
+            model: asString(profileInput.model) || connection.model,
+            parameters: {
+                ...asRecord(connection.default_parameters),
+                ...asRecord(profileInput.parameters)
+            }
+        };
+        const parameters = asRecord(input.parameters);
+        applyAspectToParameters(parameters, job.aspect);
+        const characterLayer = await applyCharacterLayer(job.chatId, job.prompt, parameters, userId);
+        input.prompt = characterLayer.prompt;
+        input.negativePrompt = asString(profileInput.negativePrompt);
+        input.parameters = parameters;
+        input.clientJobId = crypto.randomUUID();
+        job.prompt = characterLayer.prompt;
+        job.negativePrompt = asString(input.negativePrompt);
+        job.ownerCharacterId = characterLayer.characterId;
+        job.clientJobId = asString(input.clientJobId);
+        job.generationInput = sanitizeStudioProfile({
+            input,
+            recordHints: profile?.recordHints,
+            updatedAt: Date.now()
+        })?.input;
+        job.recordHints = asRecord(profile?.recordHints);
+        job.status = "generating";
+        job.error = "";
+        job.inserted = false;
+        await upsertTaggedImageJob(job, userId);
+        sendTaggedJobState(job, userId);
+        const controller = new AbortController();
+        const controllerKey = generationKey(userId, job.clientJobId);
+        generationControllers.set(controllerKey, {
+            controller,
+            nativeStream: typeof spindle.imageGen?.generateStream === "function"
+        });
+        const startedAt = Date.now();
+        let result;
+        try {
+            result = await generateWithProgress({
+                ...input,
+                owner_chat_id: job.chatId,
+                owner_character_id: characterLayer.characterId || undefined,
+                userId
+            }, controller, job.clientJobId, userId);
+        } finally{
+            if (generationControllers.get(controllerKey)?.controller === controller) {
+                generationControllers.delete(controllerKey);
+            }
+        }
+        const timing = await loadLatestSwarmGenerationMetadata(connection, spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null, input, Date.now() - startedAt, userId);
+        const record = await saveGenerationRecord(result, input, {
+            ...asRecord(profile?.recordHints),
+            source: "message-tag"
+        }, timing, userId);
+        job.imageId = record.imageId || asString(result.imageId);
+        job.imageUrl = record.imageUrl || asString(result.imageUrl);
+        if (!job.imageUrl && job.imageId) job.imageUrl = `/api/v1/image-gen/results/${encodeURIComponent(job.imageId)}`;
+        if (!job.imageUrl) throw new Error("Lumiverse completed the image job without returning a saved image URL.");
+        job.status = "ready";
+        job.error = "";
+        await upsertTaggedImageJob(job, userId);
+        spindle.updateMacroValue("last_genned", job.imageUrl);
+        await ensureCharacterOutputFolder(characterLayer.characterId, characterLayer.characterName, job.imageId, userId);
+        const inserted = await finalizeTaggedImageJob(job, userId);
+        if (!inserted) sendTaggedJobState(job, userId);
+        if ((await loadTagAutomationConfig(userId)).completionToast && typeof spindle.toast?.success === "function") {
+            spindle.toast.success(`Swarm Studio attached ${job.alt || "an illustration"}.`);
+        }
+    } catch (error) {
+        job.status = isAbortError(error) ? "cancelled" : "failed";
+        job.error = error instanceof Error ? error.message : String(error);
+        await upsertTaggedImageJob(job, userId);
+        sendTaggedJobState(job, userId);
+    } finally{
+        runningTaggedJobs.delete(job.id);
+    }
+}
+async function requestTaggedImageGeneration(payload, userId) {
+    if (!spindle.permissions.has("image_gen")) throw new Error("Grant Image Generation permission to use Swarm image tags.");
+    if (!spindle.permissions.has("chat_mutation")) throw new Error("Grant Chat Mutation permission to attach generated images to messages.");
+    const chatId = asString(payload?.chatId).trim();
+    const messageId = asString(payload?.messageId).trim();
+    const fullMatch = asString(payload?.fullMatch).slice(0, 24_000);
+    const attrs = asRecord(payload?.attrs);
+    const scenePrompt = asString(payload?.content).trim().slice(0, 12_000);
+    if (!chatId || !messageId || !fullMatch || !scenePrompt) {
+        throw new Error("The Swarm image tag is missing its chat, message, or prompt content.");
+    }
+    const slot = cleanTagSlot(attrs.slot) || `image-${stableTextHash(fullMatch).slice(0, 6)}`;
+    const key = `${chatId}:${messageId}:${slot}:${stableTextHash(fullMatch)}`;
+    const force = payload?.force === true;
+    const useOriginalProfile = asString(payload?.retryMode) === "original";
+    const jobs = await loadTaggedImageJobs(userId);
+    let job = jobs.find((candidate)=>candidate.key === key);
+    if (job) {
+        job.fullMatch = fullMatch;
+        if (job.status === "ready" && !job.inserted) await finalizeTaggedImageJob(job, userId);
+        if (!force || job.status === "generating") {
+            sendTaggedJobState(job, userId);
+            return job;
+        }
+        job.status = "queued";
+        job.error = "";
+        job.imageId = "";
+        job.imageUrl = "";
+        job.inserted = false;
+        await upsertTaggedImageJob(job, userId);
+    } else {
+        job = {
+            id: crypto.randomUUID(),
+            key,
+            chatId,
+            messageId,
+            slot,
+            prompt: scenePrompt,
+            negativePrompt: "",
+            aspect: cleanAspect(attrs.aspect),
+            alt: asString(attrs.alt).trim().slice(0, 300),
+            fullMatch,
+            status: "requested",
+            clientJobId: "",
+            imageId: "",
+            imageUrl: "",
+            inserted: false,
+            error: "",
+            ownerCharacterId: "",
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+        };
+        await upsertTaggedImageJob(job, userId);
+    }
+    sendTaggedJobState(job, userId);
+    const config = await loadTagAutomationConfig(userId);
+    if (config.autoGenerate || force) await runTaggedImageJob(job, useOriginalProfile, userId);
+    return job;
+}
+function cleanGeneratedMarkupForPrompt(content) {
+    return content.replace(/<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image\s*>/gi, (_match, rawAttrs, prompt)=>{
+        const attrs = parseTagAttributes(rawAttrs);
+        return `[Illustration requested${attrs.alt ? `: ${attrs.alt}` : ""}]`;
+    }).replace(/<img\b[^>]*data-swarm-studio-slot="[^"]*"[^>]*alt="([^"]*)"[^>]*>/gi, (_match, alt)=>`[Generated illustration: ${alt}]`).replace(/<img\b[^>]*alt="([^"]*)"[^>]*data-swarm-studio-slot="[^"]*"[^>]*>/gi, (_match, alt)=>`[Generated illustration: ${alt}]`);
+}
+async function taggedImagePromptInterceptor(messages, context) {
+    const userId = asString(context?.userId) || undefined;
+    const cleaned = messages.map((message)=>{
+        if (!message?.__isChatHistory || typeof message.content !== "string") return message;
+        return {
+            ...message,
+            content: cleanGeneratedMarkupForPrompt(message.content)
+        };
+    });
+    const config = await loadTagAutomationConfig(userId);
+    if (!config.injectProtocol) return cleaned;
+    if (cleaned.some((message)=>typeof message?.content === "string" && message.content.includes("SWARM STUDIO IMAGE REQUEST PROTOCOL"))) {
+        return cleaned;
+    }
+    const injected = {
+        role: "system",
+        content: SWARM_IMAGE_PROTOCOL
+    };
+    return {
+        messages: [
+            injected,
+            ...cleaned
+        ],
+        breakdown: [
+            {
+                messageIndex: 0,
+                name: "Swarm Studio image tags"
+            }
+        ]
+    };
+}
 function permissionSnapshot() {
     return {
         imageGen: spindle.permissions.has("image_gen"),
         metadata: spindle.permissions.has("cors_proxy"),
         images: spindle.permissions.has("images"),
         chats: spindle.permissions.has("chats"),
-        chatMutation: spindle.permissions.has("chat_mutation")
+        characters: spindle.permissions.has("characters"),
+        personas: spindle.permissions.has("personas"),
+        chatMutation: spindle.permissions.has("chat_mutation"),
+        interceptor: spindle.permissions.has("interceptor")
     };
 }
 function markdownImageMessage(label, url) {
@@ -879,6 +1501,9 @@ async function listLibraryOutputs(userId) {
 }
 async function bootstrap(userId) {
     const permissions = permissionSnapshot();
+    const profile = await loadStudioGenerationProfile(userId);
+    pushStudioProfileMacros(profile);
+    await refreshContextMacros(userId);
     const allConnections = permissions.imageGen ? await spindle.imageGen.listConnections(userId) : [];
     const connections = (Array.isArray(allConnections) ? allConnections : []).filter((connection)=>connection?.provider === "swarmui");
     const activeChat = permissions.chats ? await spindle.chats.getActive(userId) : null;
@@ -889,7 +1514,8 @@ async function bootstrap(userId) {
         activeChat,
         ...outputPage,
         stackPresets: await loadStackPresets(userId),
-        outputFolders: await loadOutputFolders(userId)
+        outputFolders: await loadOutputFolders(userId),
+        tagAutomation: await loadTagAutomationConfig(userId)
     };
 }
 async function loadConnection(connectionId, userId) {
@@ -950,6 +1576,33 @@ async function handleMessage(payload, userId) {
                         requestId,
                         data: await bootstrap(userId)
                     }, userId);
+                    return;
+                }
+            case "set_tag_automation":
+                {
+                    const config = await saveTagAutomationConfig(payload?.config, userId);
+                    spindle.sendToFrontend({
+                        type: "tag_automation_result",
+                        requestId,
+                        data: config
+                    }, userId);
+                    return;
+                }
+            case "sync_studio_profile":
+                {
+                    const profile = await saveStudioGenerationProfile(payload?.input, payload?.recordHints, userId);
+                    spindle.sendToFrontend({
+                        type: "studio_profile_synced",
+                        requestId,
+                        data: {
+                            updatedAt: profile?.updatedAt || 0
+                        }
+                    }, userId);
+                    return;
+                }
+            case "tag_generate":
+                {
+                    await requestTaggedImageGeneration(payload, userId);
                     return;
                 }
             case "load_connection":
@@ -1086,6 +1739,7 @@ async function handleMessage(payload, userId) {
                         throw new Error("Grant the Image Generation permission to generate.");
                     }
                     const input = asRecord(payload?.input);
+                    await saveStudioGenerationProfile(input, payload?.recordHints, userId);
                     const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
                     const connection = await getConnection(asString(input.connection_id), userId);
                     const token = spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null;
@@ -1441,12 +2095,82 @@ async function handleMessage(payload, userId) {
     }
 }
 spindle.onFrontendMessage(handleMessage);
-spindle.registerMacro({
-    name: "last_genned",
-    category: "extension:swarm_studio",
-    description: "URL of the most recent image generated by Swarm Studio. Useful in HTML artifacts and presets.",
-    returnType: "string",
-    handler: ""
+for (const macro of [
+    {
+        name: "last_genned",
+        description: "URL of the most recent image generated by Swarm Studio. Useful in HTML artifacts and presets."
+    },
+    {
+        name: "swarm_image_protocol",
+        description: "Opt-in instruction block teaching the model how to request in-message Swarm Studio illustrations."
+    },
+    {
+        name: "swarm_negative",
+        description: "The literal negative prompt from the current Swarm Studio generation profile."
+    },
+    {
+        name: "swarm_preset",
+        description: "The current Studio preset stack rendered as native SwarmUI <preset:name> tokens."
+    },
+    {
+        name: "swarm_checkpoint",
+        description: "The checkpoint selected in the current Swarm Studio generation profile."
+    },
+    {
+        name: "swarm_aspect",
+        description: "The closest named aspect ratio in the current Swarm Studio generation profile."
+    },
+    {
+        name: "char_tags",
+        description: "Base image tags from the active character's native Lumiverse Character LoRA binding."
+    },
+    {
+        name: "char_profile",
+        description: "Lumiverse image URL for the active chat character's profile picture."
+    },
+    {
+        name: "user_profile",
+        description: "Lumiverse image URL for the active persona's profile picture."
+    }
+]){
+    spindle.registerMacro({
+        name: macro.name,
+        category: "extension:swarm_studio",
+        description: macro.description,
+        returnType: "string",
+        handler: ""
+    });
+    spindle.updateMacroValue(macro.name, macro.name === "swarm_image_protocol" ? SWARM_IMAGE_PROTOCOL : "");
+}
+spindle.registerInterceptor(taggedImagePromptInterceptor, 90);
+spindle.on("GENERATION_ENDED", async (payload, userId)=>{
+    try {
+        if (payload?.error || !payload?.messageId || !payload?.chatId || !payload?.content) return;
+        if (payload?.generationType === "impersonate" || payload?.generationType === "quiet") return;
+        for (const tag of parseSwarmImageTags(asString(payload.content))){
+            await requestTaggedImageGeneration({
+                chatId: payload.chatId,
+                messageId: payload.messageId,
+                fullMatch: tag.fullMatch,
+                attrs: tag.attrs,
+                content: tag.content
+            }, userId);
+        }
+    } catch (error) {
+        spindle.log.warn(`Could not process Swarm image tags after generation: ${error instanceof Error ? error.message : String(error)}`);
+    }
 });
-spindle.updateMacroValue("last_genned", "");
+for (const eventName of [
+    "CHAT_SWITCHED",
+    "PERSONA_CHANGED",
+    "CHARACTER_AVATAR_CHANGED"
+]){
+    spindle.on(eventName, async (_payload, userId)=>{
+        try {
+            await refreshContextMacros(userId);
+        } catch (error) {
+            spindle.log.warn(`Could not refresh Swarm Studio context macros: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    });
+}
 spindle.log.info("Swarm Studio backend loaded");

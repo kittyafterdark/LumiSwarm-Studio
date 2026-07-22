@@ -7,24 +7,38 @@ let frontendHandler
 const sent = []
 const secrets = new Map()
 const userFiles = new Map()
-const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "chat_mutation"])
+const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "characters", "personas", "chat_mutation", "interceptor"])
 let imageDeleted = false
 let presetAdded = false
 let presetDeleted = false
 let interruptRequested = false
 let appendedMessage = null
-let macroDefinition = null
-let macroValue = ""
+const macroDefinitions = new Map()
+const macroValues = new Map()
+const eventHandlers = new Map()
+let interceptorHandler = null
 let completionToast = ""
 let downloadedSwarmUrl = ""
+let taggedGenerationCount = 0
+const taggedMessage = {
+  id: "message-tag-1",
+  role: "assistant",
+  content: '<article><swarm-image slot="post" aspect="4:5" alt="Street food">outside, city street, food stall, smiling, <preset:composition></swarm-image></article>',
+  metadata: {},
+}
 
 globalThis.spindle = {
   registerMacro(definition) {
-    macroDefinition = definition
+    macroDefinitions.set(definition.name, definition)
   },
   updateMacroValue(name, value) {
-    assert.equal(name, "last_genned")
-    macroValue = value
+    macroValues.set(name, value)
+  },
+  registerInterceptor(handler) {
+    interceptorHandler = handler
+  },
+  on(eventName, handler) {
+    eventHandlers.set(eventName, handler)
   },
   toast: {
     success(message) {
@@ -76,17 +90,27 @@ globalThis.spindle = {
       return [{ id: "base.safetensors", label: "Base" }]
     },
     async *generateStream(input) {
-      assert.deepEqual(input.parameters.loras, ["styles/ink.safetensors"])
-      assert.equal(input.parameters.referenceImages[0].mimeType, "image/png")
-      assert.equal(input.parameters.denoise, 0.55)
       assert.equal(input.owner_chat_id, "chat-1")
       assert.equal(input.owner_character_id, "char-1")
-      assert.equal(input.clientJobId, "studio-job-1")
       assert.equal(input.signal instanceof AbortSignal, true)
-      const rawOverride = JSON.parse(input.parameters.rawRequestOverride)
-      assert.equal(rawOverride.comfyuicustomworkflow, "Portrait/Inpaint")
-      assert.equal(rawOverride.comfyrawworkflowinputdecimaldenoiseb, 0.42)
-      assert.equal(rawOverride.comfyrawworkflowinputimageinitc, "data:image/png;base64,QUJD")
+      if (input.clientJobId === "studio-job-1") {
+        assert.deepEqual(input.parameters.loras, ["styles/ink.safetensors"])
+        assert.equal(input.parameters.referenceImages[0].mimeType, "image/png")
+        assert.equal(input.parameters.denoise, 0.55)
+        const rawOverride = JSON.parse(input.parameters.rawRequestOverride)
+        assert.equal(rawOverride.comfyuicustomworkflow, "Portrait/Inpaint")
+        assert.equal(rawOverride.comfyrawworkflowinputdecimaldenoiseb, 0.42)
+        assert.equal(rawOverride.comfyrawworkflowinputimageinitc, "data:image/png;base64,QUJD")
+      } else {
+        taggedGenerationCount += 1
+        assert.match(input.prompt, /^1girl, long brown hair, pink dress, outside, city street/)
+        assert.match(input.prompt, /<preset:composition>/)
+        assert.equal(input.negativePrompt, "blurry")
+        assert.deepEqual(input.parameters.loras, ["styles/ink.safetensors", "characters/lior.safetensors"])
+        assert.deepEqual(input.parameters.loraWeights, [0.75, 0.8])
+        assert.equal(input.parameters.referenceImages, undefined)
+        assert.equal(input.parameters.denoise, undefined)
+      }
       yield {
         step: 4,
         totalSteps: 20,
@@ -94,8 +118,10 @@ globalThis.spindle = {
       }
       return {
         imageDataUrl: "data:image/png;base64,QUJD",
-        imageUrl: "/api/v1/image-gen/results/image-1",
-        imageId: "image-1",
+        imageUrl: input.clientJobId === "studio-job-1"
+          ? "/api/v1/image-gen/results/image-1"
+          : "/api/v1/image-gen/results/image-tag-1",
+        imageId: input.clientJobId === "studio-job-1" ? "image-1" : "image-tag-1",
         model: input.model,
         provider: "swarmui",
       }
@@ -104,6 +130,33 @@ globalThis.spindle = {
   chats: {
     async getActive() {
       return { id: "chat-1", character_id: "char-1" }
+    },
+    async get(chatId) {
+      assert.equal(chatId, "chat-1")
+      return { id: "chat-1", character_id: "char-1" }
+    },
+  },
+  characters: {
+    async get(characterId) {
+      assert.equal(characterId, "char-1")
+      return {
+        id: "char-1",
+        name: "Lior",
+        image_id: "char-avatar",
+        extensions: {
+          lumiverse_image_gen_lora: {
+            version: 1,
+            lora_filename: "characters/lior.safetensors",
+            weight: 0.8,
+            base_tags: "1girl, long brown hair, pink dress",
+          },
+        },
+      }
+    },
+  },
+  personas: {
+    async getActive() {
+      return { id: "persona-1", name: "User", image_id: "user-avatar" }
     },
   },
   chat: {
@@ -115,6 +168,16 @@ globalThis.spindle = {
       assert.equal(message.metadata.image_id, "image-1")
       appendedMessage = message
       return { id: "message-image-1" }
+    },
+    async getMessages(chatId) {
+      assert.equal(chatId, "chat-1")
+      return [taggedMessage]
+    },
+    async updateMessage(chatId, messageId, patch) {
+      assert.equal(chatId, "chat-1")
+      assert.equal(messageId, "message-tag-1")
+      taggedMessage.content = patch.content
+      taggedMessage.metadata = patch.metadata
     },
   },
   images: {
@@ -136,11 +199,15 @@ globalThis.spindle = {
       return true
     },
     async get(imageId, options) {
-      assert.equal(imageId, "image-1")
-      assert.equal(options.onlyOwned, true)
       assert.equal(options.specificity, "sm")
-      assert.equal(options.userId, "user-1")
-      return { id: imageId, url: "/api/v1/images/image-1?size=sm", original_filename: "image.png" }
+      if (imageId === "image-1") {
+        assert.equal(options.onlyOwned, true)
+        assert.equal(options.userId, "user-1")
+        return { id: imageId, url: "/api/v1/images/image-1?size=sm", original_filename: "image.png" }
+      }
+      if (imageId === "char-avatar") return { id: imageId, url: "/api/v1/images/char-avatar?size=sm" }
+      if (imageId === "user-avatar") return { id: imageId, url: "/api/v1/images/user-avatar?size=sm" }
+      return null
     },
   },
   enclave: {
@@ -412,8 +479,15 @@ globalThis.spindle = {
 
 await import("../dist/backend.js")
 assert.equal(typeof frontendHandler, "function")
-assert.equal(macroDefinition.name, "last_genned")
-assert.equal(macroDefinition.handler, "")
+assert.equal(macroDefinitions.get("last_genned").handler, "")
+assert.equal(macroDefinitions.has("swarm_image_protocol"), true)
+assert.equal(macroDefinitions.has("swarm_negative"), true)
+assert.equal(macroDefinitions.has("char_tags"), true)
+assert.equal(macroDefinitions.has("char_profile"), true)
+assert.equal(macroDefinitions.has("user_profile"), true)
+assert.match(macroValues.get("swarm_image_protocol"), /<swarm-image/)
+assert.equal(typeof interceptorHandler, "function")
+assert.equal(typeof eventHandlers.get("GENERATION_ENDED"), "function")
 
 async function request(type, extra = {}) {
   const requestId = `${type}-${sent.length}`
@@ -549,8 +623,60 @@ assert.equal(progress.payload.clientJobId, "studio-job-1")
 assert.equal(progress.payload.data.step, 4)
 assert.equal(progress.payload.data.totalSteps, 20)
 assert.equal(progress.payload.data.preview, "data:image/jpeg;base64,UFJFVklFVw==")
-assert.equal(macroValue, "/api/v1/image-gen/results/image-1")
+assert.equal(macroValues.get("last_genned"), "/api/v1/image-gen/results/image-1")
+assert.equal(macroValues.get("swarm_negative"), "blurry")
+assert.equal(macroValues.get("swarm_preset"), "<preset:Cinematic>")
+assert.equal(macroValues.get("char_tags"), "1girl, long brown hair, pink dress")
+assert.equal(macroValues.get("char_profile"), "/api/v1/images/char-avatar?size=sm")
+assert.equal(macroValues.get("user_profile"), "/api/v1/images/user-avatar?size=sm")
 assert.match(completionToast, /Swarm Studio finished/)
+
+const tagConfig = await request("set_tag_automation", {
+  config: { autoGenerate: true, injectProtocol: true, completionToast: false },
+})
+assert.deepEqual(tagConfig.data, { autoGenerate: true, injectProtocol: true, completionToast: false })
+const intercepted = await interceptorHandler([
+  {
+    role: "assistant",
+    content: taggedMessage.content,
+    __isChatHistory: true,
+  },
+], { chatId: "chat-1" })
+assert.equal(intercepted.messages[0].role, "system")
+assert.match(intercepted.messages[0].content, /SWARM STUDIO IMAGE REQUEST PROTOCOL/)
+assert.match(intercepted.messages[1].content, /\[Illustration requested: Street food\]/)
+
+const originalTaggedContent = taggedMessage.content
+const tagMatch = originalTaggedContent.match(/<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image>/i)
+assert.ok(tagMatch)
+await frontendHandler({
+  type: "tag_generate",
+  requestId: "tag-generate-1",
+  chatId: "chat-1",
+  messageId: "message-tag-1",
+  fullMatch: tagMatch[0],
+  attrs: { slot: "post", aspect: "4:5", alt: "Street food" },
+  content: tagMatch[2],
+}, "user-1")
+const tagError = sent.find((entry) => entry.payload.requestId === "tag-generate-1" && entry.payload.type === "studio_error")
+assert.equal(tagError, undefined, tagError?.payload?.error)
+assert.equal(taggedGenerationCount, 1)
+assert.match(taggedMessage.content, /<img src="\/api\/v1\/image-gen\/results\/image-tag-1"/)
+assert.match(taggedMessage.content, /data-swarm-studio-slot="post"/)
+assert.equal(taggedMessage.metadata.swarm_studio_tagged_images[0].imageId, "image-tag-1")
+assert.equal(macroValues.get("last_genned"), "/api/v1/image-gen/results/image-tag-1")
+const storedFoldersAfterTag = userFiles.get("output-folders.json")
+assert.equal(storedFoldersAfterTag[0].id, "character:char-1")
+assert.equal(storedFoldersAfterTag[0].name, "Lior")
+assert.deepEqual(storedFoldersAfterTag[0].imageIds, ["image-tag-1"])
+
+await eventHandlers.get("GENERATION_ENDED")({
+  chatId: "chat-1",
+  messageId: "message-tag-1",
+  content: originalTaggedContent,
+  generationType: "normal",
+}, "user-1")
+assert.equal(taggedGenerationCount, 1, "streaming and GENERATION_ENDED delivery must dedupe")
 
 const originalOutput = await request("download_swarm_output", {
   connectionId: "swarm-1",

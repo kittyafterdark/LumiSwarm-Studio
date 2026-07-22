@@ -50,6 +50,10 @@ const FRAME_WALL_ICON = `
 const SPARKLE_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.7 5.2 2.8 8.3 8 9-5.2.7-7.3 3.8-8 9-.7-5.2-2.8-8.3-8-9 5.2-.7 7.3-3.8 8-9Z"/><path d="M19 2.5c.2 1.7.8 2.7 2.5 3-1.7.3-2.3 1.3-2.5 3-.2-1.7-.8-2.7-2.5-3 1.7-.3 2.3-1.3 2.5-3Z"/></svg>
 `;
+const SWARM_IMAGE_PROTOCOL_EXAMPLE = `{{swarm_image_protocol}}
+
+Example output:
+<swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo">outside, city street, food stall, smiling, <preset:composition></swarm-image>`;
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1";
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1";
 const MINIPLAYER_STORAGE_KEY = "swarm-studio-miniplayer-v1";
@@ -678,6 +682,18 @@ const STYLES = `
   .ss-config-section-head span { color: var(--lumiverse-text-muted); font-size: 8.5px; }
   .ss-config-toggle { display: flex; align-items: center; gap: 7px; color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-config-toggle input { accent-color: var(--lumiverse-accent, #7dd3fc); }
+  .ss-tag-protocol-example {
+    display: block;
+    max-height: 74px;
+    overflow: auto;
+    white-space: pre-wrap;
+    padding: 8px;
+    border: 1px dashed color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 32%, var(--ss-outline, var(--lumiverse-border)));
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--ss-canvas, #090a0d) 78%, transparent);
+    color: var(--lumiverse-text-muted);
+    font: 8.5px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
   .ss-config-label { color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-config-theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .ss-config-theme {
@@ -2531,7 +2547,9 @@ function defaultStudioBehavior() {
     return {
         completionToast: false,
         widgetEnabled: true,
-        mobileQuickCreate: false
+        mobileQuickCreate: false,
+        tagAutoGenerate: false,
+        tagPromptInjection: false
     };
 }
 function storedStudioBehavior() {
@@ -2540,7 +2558,9 @@ function storedStudioBehavior() {
         return {
             completionToast: parsed?.completionToast === true,
             widgetEnabled: parsed?.widgetEnabled !== false,
-            mobileQuickCreate: parsed?.mobileQuickCreate === true
+            mobileQuickCreate: parsed?.mobileQuickCreate === true,
+            tagAutoGenerate: parsed?.tagAutoGenerate === true,
+            tagPromptInjection: parsed?.tagPromptInjection === true
         };
     } catch  {
         return defaultStudioBehavior();
@@ -3612,6 +3632,7 @@ class StudioController {
     currentJobConnectionId = "";
     progressStep = 0;
     pendingDraftRestore = null;
+    pendingTaggedPrompt = null;
     pendingWorkflowRestore = null;
     workflowOpenOnLoad = true;
     workflowValues = new Map();
@@ -3630,6 +3651,7 @@ class StudioController {
     outputResizeObserver = null;
     inspectorResizeObserver = null;
     stopActiveResize = null;
+    profileSyncTimer = null;
     disposed = false;
     handleKeyDown = (event)=>{
         if (event.key !== "Escape") return;
@@ -3754,7 +3776,10 @@ class StudioController {
         this.send("bootstrap");
     }
     dispose() {
+        this.syncStudioProfile();
         this.disposed = true;
+        if (this.profileSyncTimer) clearTimeout(this.profileSyncTimer);
+        this.profileSyncTimer = null;
         this.previewObserver?.disconnect();
         this.previewObserver = null;
         this.outputResizeObserver?.disconnect();
@@ -3792,6 +3817,10 @@ class StudioController {
         if (widgetEnabled) widgetEnabled.checked = this.behavior.widgetEnabled;
         const mobileQuickCreate = this.root.querySelector('[data-role="mobile-quick-create"]');
         if (mobileQuickCreate) mobileQuickCreate.checked = this.behavior.mobileQuickCreate;
+        const tagAutoGenerate = this.root.querySelector('[data-role="tag-auto-generate"]');
+        if (tagAutoGenerate) tagAutoGenerate.checked = this.behavior.tagAutoGenerate;
+        const tagPromptInjection = this.root.querySelector('[data-role="tag-prompt-injection"]');
+        if (tagPromptInjection) tagPromptInjection.checked = this.behavior.tagPromptInjection;
     }
     exportDraft() {
         if (!this.state.connection) return this.pendingDraftRestore;
@@ -3848,6 +3877,70 @@ class StudioController {
                 ...this.state.initImage
             } : null
         };
+    }
+    loadTaggedPrompt(prompt, negativePrompt = "") {
+        this.pendingTaggedPrompt = {
+            prompt,
+            negativePrompt
+        };
+        this.applyPendingTaggedPrompt();
+    }
+    applyPendingTaggedPrompt() {
+        if (!this.pendingTaggedPrompt) return;
+        const { prompt, negativePrompt } = this.pendingTaggedPrompt;
+        const positive = this.root.querySelector('[data-role="positive"]');
+        const negative = this.root.querySelector('[data-role="negative"]');
+        if (positive) positive.value = prompt;
+        if (negative && negativePrompt) negative.value = negativePrompt;
+        if (this.state.connection) this.pendingTaggedPrompt = null;
+        this.scheduleStudioProfileSync();
+        this.setRunStatus("Loaded the tagged scene into Studio.");
+        if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create");
+    }
+    scheduleStudioProfileSync() {
+        if (this.disposed) return;
+        if (this.profileSyncTimer) clearTimeout(this.profileSyncTimer);
+        this.profileSyncTimer = setTimeout(()=>{
+            this.profileSyncTimer = null;
+            this.syncStudioProfile();
+        }, 450);
+    }
+    syncStudioProfile() {
+        const draft = this.exportDraft();
+        if (!draft) return;
+        const parameters = {
+            ...draft.details.parameters
+        };
+        delete parameters.referenceImages;
+        delete parameters.resolvedSourceImages;
+        delete parameters.resolvedReferenceImages;
+        delete parameters.denoise;
+        if (typeof parameters.rawRequestOverride === "string") {
+            try {
+                const override = JSON.parse(parameters.rawRequestOverride);
+                for (const [key, value] of Object.entries(override)){
+                    if (typeof value === "string" && value.startsWith("data:image/") || /(?:init|reference).*image|image.*(?:init|reference)/i.test(key)) delete override[key];
+                }
+                parameters.rawRequestOverride = JSON.stringify(override);
+            } catch  {
+                delete parameters.rawRequestOverride;
+            }
+        }
+        this.send("sync_studio_profile", {
+            input: {
+                prompt: draft.details.prompt,
+                negativePrompt: draft.details.negativePrompt,
+                connection_id: draft.connectionId,
+                model: draft.details.model,
+                parameters
+            },
+            recordHints: {
+                resolvedPrompt: draft.details.resolvedPrompt,
+                resolvedNegativePrompt: draft.details.resolvedNegativePrompt,
+                presets: draft.details.presets,
+                workflow: draft.details.workflow
+            }
+        });
     }
     syncAppearanceControls() {
         const shell = this.root.querySelector(".ss-shell");
@@ -4125,6 +4218,16 @@ class StudioController {
                   <label class="ss-config-toggle"><input type="checkbox" data-role="widget-enabled" ${this.behavior.widgetEnabled ? "checked" : ""} /><span>Enable floating Studio widget</span></label>
                   <label class="ss-config-toggle"><input type="checkbox" data-role="mobile-quick-create" ${this.behavior.mobileQuickCreate ? "checked" : ""} /><span>Enable Quick Create on mobile</span></label>
                   <p class="ss-muted ss-tiny">Right-click or long-press the image for Quick Create, Studio, Library, and hide actions. Mobile stays a 64px image until Quick Create is explicitly enabled.</p>
+                </section>
+                <section class="ss-config-section">
+                  <div class="ss-config-section-head"><strong>In-message images</strong><span>Explicitly opt in</span></div>
+                  <label class="ss-config-toggle"><input type="checkbox" data-role="tag-auto-generate" ${this.behavior.tagAutoGenerate ? "checked" : ""} /><span>Automatically generate completed &lt;swarm-image&gt; tags</span></label>
+                  <label class="ss-config-toggle"><input type="checkbox" data-role="tag-prompt-injection" ${this.behavior.tagPromptInjection ? "checked" : ""} /><span>Teach the model the Swarm image-tag protocol</span></label>
+                  <code class="ss-tag-protocol-example">{{swarm_image_protocol}}
+
+&lt;swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo"&gt;outside, city street, food stall, smiling, &lt;preset:composition&gt;&lt;/swarm-image&gt;</code>
+                  <button class="ss-button" data-action="copy-tag-protocol">Copy protocol example</button>
+                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character base tags and the current Studio negative prompt are inherited automatically.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -4706,6 +4809,18 @@ are removed when CSS is applied.</pre>
                 mobileQuickCreate: event.currentTarget.checked
             });
         });
+        this.get('[data-role="tag-auto-generate"]').addEventListener("change", (event)=>{
+            this.onBehaviorChange({
+                ...this.behavior,
+                tagAutoGenerate: event.currentTarget.checked
+            });
+        });
+        this.get('[data-role="tag-prompt-injection"]').addEventListener("change", (event)=>{
+            this.onBehaviorChange({
+                ...this.behavior,
+                tagPromptInjection: event.currentTarget.checked
+            });
+        });
         this.get('[data-role="lora-sort"]').addEventListener("change", ()=>this.renderLoras());
         this.get('[data-role="lora-filter"]').addEventListener("change", ()=>this.renderLoras());
         this.get('[data-role="model"]').addEventListener("change", ()=>{
@@ -4789,6 +4904,14 @@ are removed when CSS is applied.</pre>
             const handle = event.target.closest("[data-resize]");
             if (handle) this.resetResize(handle.dataset.resize || "");
         });
+        const scheduleProfileFromControl = (event)=>{
+            const target = event.target;
+            const role = target.dataset.role || "";
+            if (/search|appearance|metadata-token|custom-css|library-output-check/.test(role) || target.closest('[data-role="config-popover"]')) return;
+            this.scheduleStudioProfileSync();
+        };
+        this.root.addEventListener("input", scheduleProfileFromControl);
+        this.root.addEventListener("change", scheduleProfileFromControl);
         this.root.addEventListener("click", (event)=>{
             const target = event.target;
             if (!target.closest(".ss-config-wrap")) this.closeConfigPopover();
@@ -4798,6 +4921,7 @@ are removed when CSS is applied.</pre>
             const action = button.dataset.action;
             if (action === "refresh-metadata") this.refreshMetadata();
             if (action === "toggle-config") this.toggleConfigPopover(button);
+            if (action === "copy-tag-protocol") void this.copyTagProtocol();
             if (action === "set-theme") {
                 const theme = button.dataset.themeValue;
                 if (STUDIO_THEMES.some((item)=>item.id === theme)) this.onThemeChange(theme);
@@ -4947,7 +5071,9 @@ are removed when CSS is applied.</pre>
             case "connection_result":
                 if (payload.requestId !== this.connectionRequestId) return;
                 this.acceptConnectionData(data);
+                this.applyPendingTaggedPrompt();
                 this.setRunStatus(data.metadataError ? "Ready — LoRA metadata needs attention." : "Ready.");
+                this.scheduleStudioProfileSync();
                 break;
             case "metadata_result":
                 this.state.loras = Array.isArray(data.loras) ? data.loras : [];
@@ -6104,6 +6230,14 @@ are removed when CSS is applied.</pre>
         if (!popover) return;
         popover.hidden = true;
         this.root.querySelector('[data-action="toggle-config"]')?.setAttribute("aria-expanded", "false");
+    }
+    async copyTagProtocol() {
+        try {
+            await navigator.clipboard.writeText(SWARM_IMAGE_PROTOCOL_EXAMPLE);
+            this.setRunStatus("Swarm image-tag protocol copied.");
+        } catch  {
+            this.setRunStatus("The browser blocked clipboard access.", true);
+        }
     }
     saveToken() {
         if (!this.state.connection) return;
@@ -7812,6 +7946,255 @@ are removed when CSS is applied.</pre>
         }
     }
 }
+function widgetEscape(value) {
+    return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function widgetKeyHash(value) {
+    let hash = 2166136261;
+    for(let index = 0; index < value.length; index += 1){
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+}
+class TaggedImageController {
+    ctx;
+    openStudioWithPrompt;
+    openLibrary;
+    behavior;
+    jobs = new Map();
+    tagPayloads = new Map();
+    cleanups = new Map();
+    constructor(ctx, behavior, openStudioWithPrompt, openLibrary){
+        this.ctx = ctx;
+        this.behavior = {
+            ...behavior
+        };
+        this.openStudioWithPrompt = openStudioWithPrompt;
+        this.openLibrary = openLibrary;
+    }
+    setBehavior(behavior) {
+        this.behavior = {
+            ...behavior
+        };
+    }
+    handleTag(payload) {
+        if (!payload?.chatId || !payload?.messageId || payload?.isUser) return;
+        const slot = String(payload?.attrs?.slot || `image-${widgetKeyHash(String(payload.fullMatch || payload.content)).slice(0, 6)}`).replace(/[^a-z0-9_-]+/gi, "-").slice(0, 80);
+        const lookup = this.lookupKey(String(payload.chatId), String(payload.messageId), slot);
+        this.tagPayloads.set(lookup, {
+            ...payload,
+            slot
+        });
+        const optimistic = {
+            id: `pending-${widgetKeyHash(`${lookup}:${payload.fullMatch || ""}`)}`,
+            key: lookup,
+            chatId: String(payload.chatId),
+            messageId: String(payload.messageId),
+            slot,
+            prompt: String(payload.content || "").trim(),
+            negativePrompt: "",
+            aspect: String(payload?.attrs?.aspect || ""),
+            alt: String(payload?.attrs?.alt || ""),
+            status: this.behavior.tagAutoGenerate ? "queued" : "requested",
+            clientJobId: "",
+            imageId: "",
+            imageUrl: "",
+            inserted: false,
+            error: ""
+        };
+        this.jobs.set(optimistic.id, optimistic);
+        this.render(optimistic);
+        this.ctx.sendToBackend({
+            type: "tag_generate",
+            requestId: crypto.randomUUID(),
+            chatId: payload.chatId,
+            messageId: payload.messageId,
+            fullMatch: payload.fullMatch,
+            attrs: payload.attrs,
+            content: payload.content,
+            isStreaming: payload.isStreaming === true
+        });
+    }
+    onMessage(payload) {
+        if (payload?.type === "tagged_image_job") {
+            const job = payload.data;
+            if (!job?.id || !job?.messageId) return;
+            for (const [id, candidate] of this.jobs){
+                if (id.startsWith("pending-") && this.lookupKey(candidate.chatId, candidate.messageId, candidate.slot) === this.lookupKey(job.chatId, job.messageId, job.slot)) {
+                    this.jobs.delete(id);
+                }
+            }
+            const previous = this.jobs.get(job.id);
+            const next = {
+                ...previous,
+                ...job
+            };
+            this.jobs.set(job.id, next);
+            if (next.status === "ready" && next.inserted) this.remove(next);
+            else this.render(next);
+            return;
+        }
+        if (payload?.type === "generation_progress") {
+            const job = [
+                ...this.jobs.values()
+            ].find((candidate)=>candidate.clientJobId && candidate.clientJobId === payload.clientJobId);
+            if (!job) return;
+            const data = payload.data || {};
+            job.status = "generating";
+            job.step = Number(data.step) || 0;
+            job.totalSteps = Number(data.totalSteps) || 0;
+            if (typeof data.preview === "string" && data.preview.startsWith("data:image/")) job.preview = data.preview;
+            this.render(job);
+        }
+    }
+    destroy() {
+        for (const cleanup of this.cleanups.values())cleanup();
+        this.cleanups.clear();
+        this.jobs.clear();
+        this.tagPayloads.clear();
+    }
+    lookupKey(chatId, messageId, slot) {
+        return `${chatId}:${messageId}:${slot}`;
+    }
+    widgetId(job) {
+        return `swarm-studio-image-${widgetKeyHash(this.lookupKey(job.chatId, job.messageId, job.slot))}`;
+    }
+    remove(job) {
+        const id = this.widgetId(job);
+        this.cleanups.get(id)?.();
+        this.cleanups.delete(id);
+    }
+    render(job) {
+        const widgetId = this.widgetId(job);
+        this.cleanups.get(widgetId)?.();
+        const hasTotal = Number(job.totalSteps) > 0;
+        const percentage = hasTotal ? Math.max(0, Math.min(100, Math.round(Number(job.step) / Number(job.totalSteps) * 100))) : 0;
+        const labels = {
+            requested: "Illustration requested",
+            queued: "Queued for SwarmUI",
+            generating: hasTotal ? `Rendering · ${percentage}%` : "Rendering in SwarmUI",
+            ready: "Finishing illustration",
+            failed: "Illustration unavailable",
+            cancelled: "Illustration stopped"
+        };
+        const action = job.status === "requested" ? `<button data-action="generate">Generate image</button>` : job.status === "failed" || job.status === "cancelled" ? `<button data-action="retry">Retry</button>` : "";
+        const preview = job.preview ? `<img class="preview" src="${widgetEscape(job.preview)}" alt="Generation preview">` : `<div class="emblem">${FRAME_WALL_ICON}</div>`;
+        const error = job.error ? `<p class="error">${widgetEscape(job.error)}</p>` : "";
+        const progress = job.status === "generating" ? `<div class="progress"><i style="width:${hasTotal ? percentage : 18}%"></i></div>` : "";
+        const html = `
+      <style>
+        :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+        * { box-sizing: border-box; }
+        body { margin: 0; color: var(--lumiverse-text, #f5f5f7); background: transparent; }
+        .card { position: relative; display: grid; grid-template-columns: 54px minmax(0,1fr) auto; gap: 11px; align-items: center; min-height: 68px; padding: 8px 9px; border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #b994ff) 28%, var(--lumiverse-border, #35313f)); border-radius: var(--lumiverse-radius, 12px); background: linear-gradient(115deg, color-mix(in srgb, var(--lumiverse-accent, #b994ff) 9%, var(--lumiverse-fill, #111116)), var(--lumiverse-fill, #111116)); overflow: hidden; }
+        .preview,.emblem { width: 54px; height: 54px; border-radius: calc(var(--lumiverse-radius, 12px) * .72); border: 1px solid var(--lumiverse-border, #35313f); object-fit: cover; background: var(--lumiverse-fill-subtle, #191820); }
+        .emblem { display: grid; place-items: center; color: var(--lumiverse-accent, #b994ff); }
+        .emblem svg { width: 28px; height: 28px; fill: currentColor; }
+        .copy { min-width: 0; }
+        strong { display: block; font: 600 12px/1.2 Georgia, ui-serif, serif; letter-spacing: .01em; }
+        p { margin: 4px 0 0; color: var(--lumiverse-text-muted, #aaa6b1); font-size: 10px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .error { color: #ff9caa; white-space: normal; }
+        .progress { height: 3px; margin-top: 7px; border-radius: 999px; background: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 14%, transparent); overflow: hidden; }
+        .progress i { display: block; height: 100%; border-radius: inherit; background: var(--lumiverse-accent, #b994ff); transition: width .2s ease; }
+        .actions { display: flex; align-items: center; gap: 5px; }
+        button { min-height: 30px; padding: 0 10px; border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .65); background: var(--lumiverse-fill-subtle, #191820); color: var(--lumiverse-text, #f5f5f7); font: 600 10px/1 system-ui, sans-serif; cursor: pointer; }
+        button:hover { border-color: var(--lumiverse-accent, #b994ff); }
+        .menu { width: 30px; padding: 0; font-size: 16px; }
+        @media (max-width: 480px) { .card { grid-template-columns: 46px minmax(0,1fr) auto; gap: 8px; } .preview,.emblem { width:46px;height:46px; } button:not(.menu) { padding: 0 8px; } }
+      </style>
+      <div class="card" id="card">
+        ${preview}
+        <div class="copy"><strong>${widgetEscape(labels[job.status])}</strong><p>${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}${progress}</div>
+        <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions">⋯</button></div>
+      </div>
+      <script>
+        const send = (type) => window.spindleSandbox.postMessage({ type })
+        document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => send(button.dataset.action)))
+        const card = document.getElementById('card')
+        card.addEventListener('contextmenu', (event) => { event.preventDefault(); send('menu') })
+        let timer = null
+        card.addEventListener('touchstart', () => { timer = setTimeout(() => send('menu'), 520) }, { passive: true })
+        card.addEventListener('touchmove', () => { clearTimeout(timer); timer = null }, { passive: true })
+        card.addEventListener('touchend', () => { clearTimeout(timer); timer = null })
+      </script>`;
+        const cleanup = this.ctx.messages.renderWidget({
+            messageId: job.messageId,
+            widgetId,
+            html
+        }, (message)=>{
+            void this.handleWidgetAction(job, String(message?.type || ""));
+        });
+        this.cleanups.set(widgetId, cleanup);
+    }
+    async handleWidgetAction(job, action) {
+        if (action === "generate" || action === "retry") {
+            this.retry(job, "current");
+            return;
+        }
+        if (action !== "menu") return;
+        const result = await this.ctx.ui.showContextMenu({
+            position: {
+                x: Math.round(window.innerWidth / 2),
+                y: Math.round(window.innerHeight / 2)
+            },
+            items: [
+                {
+                    key: "retry-current",
+                    label: job.status === "requested" ? "Generate with current Studio settings" : "Retry with current Studio settings"
+                },
+                {
+                    key: "retry-original",
+                    label: "Retry with original settings",
+                    disabled: !job.clientJobId
+                },
+                {
+                    key: "edit",
+                    label: "Edit prompt in Swarm Studio"
+                },
+                {
+                    key: "divider",
+                    label: "",
+                    type: "divider"
+                },
+                {
+                    key: "studio",
+                    label: "Open Swarm Studio"
+                },
+                {
+                    key: "library",
+                    label: "Open output library"
+                }
+            ]
+        });
+        if (result.selectedKey === "retry-current") this.retry(job, "current");
+        if (result.selectedKey === "retry-original") this.retry(job, "original");
+        if (result.selectedKey === "edit") {
+            const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot));
+            this.openStudioWithPrompt(String(tag?.content || job.prompt), job.negativePrompt);
+        }
+        if (result.selectedKey === "studio") this.openStudioWithPrompt("", "");
+        if (result.selectedKey === "library") this.openLibrary();
+    }
+    retry(job, retryMode) {
+        const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot));
+        if (!tag) return;
+        job.status = "queued";
+        job.error = "";
+        this.render(job);
+        this.ctx.sendToBackend({
+            type: "tag_generate",
+            requestId: crypto.randomUUID(),
+            chatId: tag.chatId,
+            messageId: tag.messageId,
+            fullMatch: tag.fullMatch,
+            attrs: tag.attrs,
+            content: tag.content,
+            force: true,
+            retryMode
+        });
+    }
+}
 let activeStudio = null;
 let activeModal = null;
 export function setup(ctx) {
@@ -7823,6 +8206,7 @@ export function setup(ctx) {
     if (studioAppearanceIsCustom(appearance)) currentTheme = "custom";
     let launcher = null;
     let miniplayer = null;
+    let taggedImages = null;
     let removeCustomStyle = appearance.customCss ? ctx.dom.addStyle(appearance.customCss) : null;
     const setThemeState = (theme)=>{
         currentTheme = theme;
@@ -7853,6 +8237,16 @@ export function setup(ctx) {
         persistStudioBehavior(behavior);
         miniplayer?.setBehavior(behavior);
         activeStudio?.setBehavior(behavior);
+        taggedImages?.setBehavior(behavior);
+        ctx.sendToBackend({
+            type: "set_tag_automation",
+            requestId: crypto.randomUUID(),
+            config: {
+                autoGenerate: behavior.tagAutoGenerate,
+                injectProtocol: behavior.tagPromptInjection,
+                completionToast: behavior.completionToast
+            }
+        });
     };
     const openStudio = (initialView = "studio")=>{
         if (activeModal) {
@@ -7886,6 +8280,24 @@ export function setup(ctx) {
             miniplayer?.setStudioOpen(false);
         });
     };
+    const openStudioWithTaggedPrompt = (prompt, negativePrompt)=>{
+        openStudio("studio");
+        if (prompt) activeStudio?.loadTaggedPrompt(prompt, negativePrompt);
+    };
+    taggedImages = new TaggedImageController(ctx, behavior, openStudioWithTaggedPrompt, ()=>openStudio("library"));
+    ctx.sendToBackend({
+        type: "set_tag_automation",
+        requestId: crypto.randomUUID(),
+        config: {
+            autoGenerate: behavior.tagAutoGenerate,
+            injectProtocol: behavior.tagPromptInjection,
+            completionToast: behavior.completionToast
+        }
+    });
+    const unregisterTagInterceptor = ctx.messages.registerTagInterceptor({
+        tagName: "swarm-image",
+        removeFromMessage: true
+    }, (payload)=>taggedImages?.handleTag(payload));
     if (typeof document !== "undefined") {
         try {
             const mobile = (document.documentElement.clientWidth || window.innerWidth) <= 720;
@@ -7959,6 +8371,7 @@ export function setup(ctx) {
     const unsubscribeMessages = ctx.onBackendMessage((payload)=>{
         miniplayer?.onMessage(payload);
         activeStudio?.onMessage(payload);
+        taggedImages?.onMessage(payload);
     });
     const unsubscribeProgress = ctx.events.on("IMAGE_GEN_PROGRESS", (payload)=>{
         miniplayer?.onImageGenerationEvent("progress", payload);
@@ -7985,6 +8398,9 @@ export function setup(ctx) {
         removeActionClick();
         inputAction.destroy();
         drawer.destroy();
+        unregisterTagInterceptor();
+        taggedImages?.destroy();
+        taggedImages = null;
         miniplayer?.destroy();
         miniplayer = null;
         removeCustomStyle?.();

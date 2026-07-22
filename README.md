@@ -22,6 +22,9 @@ It adds:
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
+- Opt-in `<swarm-image>` message tags that can begin generating as soon as a complete tag streams, show lazy/progress/failure cards inside the message, dedupe against the final generation event, and replace themselves with a permanent Lumiverse image
+- Native character-image continuity for tagged scenes: Lumiverse Character LoRA `base_tags` are prepended, the bound character LoRA is added only when absent from the Studio stack, and outputs enter an automatic character library folder
+- Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_tags}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Append to chat / Delete menus
@@ -50,7 +53,10 @@ Generation itself goes through `spindle.imageGen.generate()`. That means it cont
    - `cors_proxy` — direct SwarmUI LoRA metadata and preview requests, including local/private-network servers
    - `images` — the extension-owned output gallery
    - `chats` — tags outputs to the active chat and character
+   - `characters` — reads the active character's portable Character LoRA base tags and avatar
+   - `personas` — resolves the active persona avatar for `{{user_profile}}`
    - `chat_mutation` — explicitly appends a selected output to the active chat
+   - `interceptor` — optionally injects the image-tag protocol before LLM generation and cleans extension markup from prompt history
    - `ui_panels` — the persistent generation miniplayer
    - `app_manipulation` — the unclipped, draggable 64px mobile miniplayer overlay
 
@@ -70,6 +76,34 @@ Lumiverse correctly does not expose the saved connection secret to extensions. S
 - If SwarmUI requires authentication for model metadata, accepts a metadata-only `swarm_token` from the modal. The token is stored per user in Lumiverse's AES-256-GCM secure enclave and is only sent to the configured SwarmUI origin.
 
 If metadata access is unavailable, generation still works and exact LoRA filenames can be added manually.
+
+## In-message image tags
+
+Studio settings contains two independent, default-off controls:
+
+- **Automatically generate completed `<swarm-image>` tags** executes image requests. When disabled, the tag becomes a lazy **Generate image** card instead of spending GPU time.
+- **Teach the model the Swarm image-tag protocol** injects a short attributed system instruction. The copyable example and `{{swarm_image_protocol}}` macro remain available when this toggle is disabled, so prompt authors can place the protocol themselves.
+
+The tag body is passed to SwarmUI as scene prompt content. Native Swarm syntax is preserved, including `<preset:name>` tokens:
+
+```html
+<swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo">
+outside, city street, food stall, smiling, <preset:composition>
+</swarm-image>
+```
+
+The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and raw preset parameters form the generation profile. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. A native Lumiverse Character LoRA binding contributes its `base_tags` and LoRA without duplicating a matching LoRA already present in Studio.
+
+Each request is keyed by chat, message, slot, and tag content. Delivery from both streaming tag interception and Lumiverse's final generation event is therefore safe. Right-click or long-press a pending/failed card for current-profile retry, original-profile retry, prompt editing in Studio, or the output library. Finished tags are frozen to their specific Lumiverse image URL rather than leaving the global `{{last_genned}}` macro in old messages.
+
+Profile macros resolve to raw values so authored HTML and display regexes remain presentation-only:
+
+- `{{char_profile}}` / `{{user_profile}}` — authenticated avatar image URLs
+- `{{char_tags}}` — active character Character LoRA base tags
+- `{{swarm_negative}}` — current literal Studio negative prompt
+- `{{swarm_preset}}` — selected Studio presets as native `<preset:name>` tokens
+- `{{swarm_checkpoint}}` / `{{swarm_aspect}}` — current profile details
+- `{{last_genned}}` — latest successful Studio output URL
 
 ## Metadata behavior
 

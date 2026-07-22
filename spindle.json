@@ -1,5 +1,5 @@
 {
-  "version": "0.15.8",
+  "version": "0.15.9",
   "name": "Swarm Studio",
   "identifier": "swarm_studio",
   "author": "kittyafterdark",
@@ -11,7 +11,10 @@
     "cors_proxy",
     "images",
     "chats",
+    "characters",
+    "personas",
     "chat_mutation",
+    "interceptor",
     "ui_panels",
     "app_manipulation"
   ],
