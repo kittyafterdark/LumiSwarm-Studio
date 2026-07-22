@@ -2160,7 +2160,8 @@ const STUDIO_V3_STYLES = `
   }
   .ss-miniplayer-app-surface {
     position: fixed;
-    z-index: 2147483000;
+    /* Above the chat canvas, below Lumi drawers, modals, and toasts. */
+    z-index: 9978;
     left: 18px;
     top: 18px;
     width: 318px;
@@ -2372,6 +2373,7 @@ const STUDIO_V3_STYLES = `
       max-height: 100%;
       box-sizing: border-box;
       aspect-ratio: 1;
+      overflow: hidden;
       padding: 3px;
       border-radius: 13px;
     }
@@ -2415,17 +2417,8 @@ function element(tag, className, text) {
     if (text !== undefined) node.textContent = text;
     return node;
 }
-function createOverlayMiniplayerWidget(ctx) {
-    if (typeof ctx.ui.mountApp !== "function") return null;
-    let mount;
-    try {
-        mount = ctx.ui.mountApp({
-            position: "app-overlay",
-            className: "ss-miniplayer-app-mount"
-        });
-    } catch  {
-        return null;
-    }
+function createOverlayMiniplayerWidget() {
+    if (!document.documentElement) return null;
     const surface = element("div", "ss-miniplayer-app-surface");
     document.documentElement.appendChild(surface);
     let width = 318;
@@ -2510,7 +2503,6 @@ function createOverlayMiniplayerWidget(ctx) {
         destroy () {
             window.removeEventListener("resize", onResize);
             surface.remove();
-            mount.destroy();
         }
     };
 }
@@ -2904,6 +2896,7 @@ class MiniPlayerController {
     getStudioDraft;
     onBehaviorChange;
     behavior;
+    studioOpen = false;
     collapsed = false;
     expanded = true;
     longPressTimer = null;
@@ -2914,6 +2907,14 @@ class MiniPlayerController {
     };
     onDocumentKeyDown = (event)=>{
         if (event.key === "Escape") this.closeContextMenu();
+    };
+    onWindowResize = ()=>{
+        if (this.isMobileViewport() && !this.behavior.mobileQuickCreate && !this.collapsed) {
+            this.setCollapsed(true);
+            return;
+        }
+        this.resizeWidget();
+        this.render();
     };
     quickConnection = null;
     quickConnections = [];
@@ -3037,6 +3038,7 @@ class MiniPlayerController {
         });
         document.addEventListener("pointerdown", this.onDocumentPointerDown);
         document.addEventListener("keydown", this.onDocumentKeyDown);
+        window.addEventListener("resize", this.onWindowResize);
         this.setCollapsed(this.collapsed);
         this.setBehavior(this.behavior);
         this.render();
@@ -3049,9 +3051,13 @@ class MiniPlayerController {
             ...behavior
         };
         if (!this.behavior.mobileQuickCreate && this.isMobileViewport() && !this.collapsed) this.setCollapsed(true);
-        if (typeof this.widget.setVisible === "function") this.widget.setVisible(this.behavior.widgetEnabled);
-        else this.root.hidden = !this.behavior.widgetEnabled;
+        this.syncVisibility();
         this.render();
+    }
+    setStudioOpen(open) {
+        this.studioOpen = open;
+        if (open) this.closeContextMenu();
+        this.syncVisibility();
     }
     snapshot() {
         return {
@@ -3227,7 +3233,13 @@ class MiniPlayerController {
         this.cancelLongPress();
         document.removeEventListener("pointerdown", this.onDocumentPointerDown);
         document.removeEventListener("keydown", this.onDocumentKeyDown);
+        window.removeEventListener("resize", this.onWindowResize);
         this.widget.destroy();
+    }
+    syncVisibility() {
+        const visible = this.behavior.widgetEnabled && !this.studioOpen;
+        if (typeof this.widget.setVisible === "function") this.widget.setVisible(visible);
+        else this.root.hidden = !visible;
     }
     interrupt() {
         if (!this.snapshotValue.active || !this.snapshotValue.jobId) return;
@@ -3441,16 +3453,17 @@ class MiniPlayerController {
         }
     }
     resizeWidget() {
-        const width = this.collapsed ? this.isMobileViewport() ? 64 : 56 : Math.min(430, window.innerWidth - 24);
-        const height = this.collapsed ? width : this.isMobileViewport() ? 304 : 270;
+        const compact = this.collapsed || this.isMobileOrb();
+        const width = compact ? this.isMobileViewport() ? 64 : 56 : Math.min(430, window.innerWidth - 24);
+        const height = compact ? width : this.isMobileViewport() ? 304 : 270;
         this.widget.setSize(width, height);
         if (this.root.classList.contains("ss-miniplayer-app-surface")) {
             this.root.style.width = `${width}px`;
             this.root.style.height = `${height}px`;
         }
-        const expectedCollapsed = this.collapsed;
+        const expectedCompact = compact;
         window.requestAnimationFrame(()=>{
-            if (this.collapsed !== expectedCollapsed) return;
+            if ((this.collapsed || this.isMobileOrb()) !== expectedCompact) return;
             this.widget.setSize(width, height);
             if (this.root.classList.contains("ss-miniplayer-app-surface")) {
                 this.root.style.width = `${width}px`;
@@ -3464,9 +3477,10 @@ class MiniPlayerController {
         const hasTotal = this.snapshotValue.totalSteps > 0;
         const percentage = hasTotal ? clamp(Math.round(this.snapshotValue.step / this.snapshotValue.totalSteps * 100), 0, 100) : this.state === "done" ? 100 : 0;
         mini.dataset.state = this.state;
-        mini.dataset.mobileOrb = String(this.isMobileOrb());
-        mini.dataset.collapsed = String(this.collapsed);
-        mini.dataset.expanded = String(this.expanded);
+        const mobileOrb = this.isMobileOrb();
+        mini.dataset.mobileOrb = String(mobileOrb);
+        mini.dataset.collapsed = String(this.collapsed || mobileOrb);
+        mini.dataset.expanded = String(this.expanded && !mobileOrb);
         mini.dataset.indeterminate = String(this.state === "running" && !hasTotal);
         mini.style.setProperty("--ss-mini-progress", `${percentage}%`);
         const labels = {
@@ -7770,12 +7784,19 @@ export function setup(ctx) {
             if (initialView === "library") activeStudio?.openLibrary();
             return;
         }
-        const modal = ctx.ui.showModal({
-            title: "Swarm Studio",
-            width: 1440,
-            maxHeight: 980,
-            persistent: false
-        });
+        miniplayer?.setStudioOpen(true);
+        let modal;
+        try {
+            modal = ctx.ui.showModal({
+                title: "Swarm Studio",
+                width: 1440,
+                maxHeight: 980,
+                persistent: false
+            });
+        } catch (error) {
+            miniplayer?.setStudioOpen(false);
+            throw error;
+        }
         activeModal = modal;
         activeStudio = new StudioController(ctx, modal, selectTheme, updateAppearance, behavior, updateBehavior, miniplayer);
         activeStudio.setAppearance(appearance);
@@ -7787,12 +7808,13 @@ export function setup(ctx) {
             activeStudio?.dispose();
             activeStudio = null;
             activeModal = null;
+            miniplayer?.setStudioOpen(false);
         });
     };
-    if (typeof ctx.ui.mountApp === "function" || typeof ctx.ui.createFloatWidget === "function") {
+    if (typeof document !== "undefined") {
         try {
             const mobile = window.innerWidth <= 720;
-            const widget = createOverlayMiniplayerWidget(ctx) || (typeof ctx.ui.createFloatWidget === "function" ? ctx.ui.createFloatWidget({
+            const widget = createOverlayMiniplayerWidget() || (typeof ctx.ui.createFloatWidget === "function" ? ctx.ui.createFloatWidget({
                 width: mobile ? 64 : 318,
                 height: mobile ? 64 : 94,
                 snapToEdge: true,

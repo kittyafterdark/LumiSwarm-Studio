@@ -2377,7 +2377,8 @@ const STUDIO_V3_STYLES = `
   }
   .ss-miniplayer-app-surface {
     position: fixed;
-    z-index: 2147483000;
+    /* Above the chat canvas, below Lumi drawers, modals, and toasts. */
+    z-index: 9978;
     left: 18px;
     top: 18px;
     width: 318px;
@@ -2589,6 +2590,7 @@ const STUDIO_V3_STYLES = `
       max-height: 100%;
       box-sizing: border-box;
       aspect-ratio: 1;
+      overflow: hidden;
       padding: 3px;
       border-radius: 13px;
     }
@@ -2638,19 +2640,13 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node
 }
 
-function createOverlayMiniplayerWidget(ctx: FrontendContext): any | null {
-  if (typeof ctx.ui.mountApp !== "function") return null
-  let mount: any
-  try {
-    mount = ctx.ui.mountApp({ position: "app-overlay", className: "ss-miniplayer-app-mount" })
-  } catch {
-    return null
-  }
+function createOverlayMiniplayerWidget(): any | null {
+  if (!document.documentElement) return null
   const surface = element("div", "ss-miniplayer-app-surface")
-  // Keep mountApp as the lifecycle owner, but place the visible surface above
-  // Lumiverse's body. Its mobile shell intentionally collapses body to 0px and
-  // applies overflow: clip; fixed descendants can therefore be cropped on a
-  // physical mobile browser even when their own box measures correctly.
+  // Own this surface directly. mountApp creates a separate 48px host widget;
+  // portalling the visible player out of that host left an invisible draggable
+  // square behind. Lumiverse's mobile body is 0px tall with overflow: clip, so
+  // the viewport-sized document element is the only unclipped neutral parent.
   document.documentElement.appendChild(surface)
   let width = 318
   let height = 94
@@ -2732,7 +2728,6 @@ function createOverlayMiniplayerWidget(ctx: FrontendContext): any | null {
     destroy() {
       window.removeEventListener("resize", onResize)
       surface.remove()
-      mount.destroy()
     },
   }
 }
@@ -3172,6 +3167,7 @@ class MiniPlayerController {
   private readonly getStudioDraft: () => StudioDraft | null
   private readonly onBehaviorChange: (behavior: StudioBehavior) => void
   private behavior: StudioBehavior
+  private studioOpen = false
   private collapsed = false
   private expanded = true
   private longPressTimer: number | null = null
@@ -3182,6 +3178,17 @@ class MiniPlayerController {
   }
   private readonly onDocumentKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") this.closeContextMenu()
+  }
+  private readonly onWindowResize = () => {
+    // Responsive transitions can cross the mobile breakpoint after startup
+    // (rotation, split-screen, browser chrome, desktop emulation). Keep the
+    // controller state and its host box in lockstep with the visual orb.
+    if (this.isMobileViewport() && !this.behavior.mobileQuickCreate && !this.collapsed) {
+      this.setCollapsed(true)
+      return
+    }
+    this.resizeWidget()
+    this.render()
   }
   private quickConnection: any | null = null
   private quickConnections: any[] = []
@@ -3312,6 +3319,7 @@ class MiniPlayerController {
     })
     document.addEventListener("pointerdown", this.onDocumentPointerDown)
     document.addEventListener("keydown", this.onDocumentKeyDown)
+    window.addEventListener("resize", this.onWindowResize)
     this.setCollapsed(this.collapsed)
     this.setBehavior(this.behavior)
     this.render()
@@ -3324,9 +3332,14 @@ class MiniPlayerController {
   setBehavior(behavior: StudioBehavior): void {
     this.behavior = { ...behavior }
     if (!this.behavior.mobileQuickCreate && this.isMobileViewport() && !this.collapsed) this.setCollapsed(true)
-    if (typeof this.widget.setVisible === "function") this.widget.setVisible(this.behavior.widgetEnabled)
-    else this.root.hidden = !this.behavior.widgetEnabled
+    this.syncVisibility()
     this.render()
+  }
+
+  setStudioOpen(open: boolean): void {
+    this.studioOpen = open
+    if (open) this.closeContextMenu()
+    this.syncVisibility()
   }
 
   snapshot(): StudioActivitySnapshot {
@@ -3531,7 +3544,14 @@ class MiniPlayerController {
     this.cancelLongPress()
     document.removeEventListener("pointerdown", this.onDocumentPointerDown)
     document.removeEventListener("keydown", this.onDocumentKeyDown)
+    window.removeEventListener("resize", this.onWindowResize)
     this.widget.destroy()
+  }
+
+  private syncVisibility(): void {
+    const visible = this.behavior.widgetEnabled && !this.studioOpen
+    if (typeof this.widget.setVisible === "function") this.widget.setVisible(visible)
+    else this.root.hidden = !visible
   }
 
   private interrupt(): void {
@@ -3771,10 +3791,14 @@ class MiniPlayerController {
   }
 
   private resizeWidget(): void {
-    const width = this.collapsed
+    // isMobileOrb() is a visual compact state even if a breakpoint transition
+    // happens before collapsed is normalized. Never leave a 430x304 invisible
+    // host around a 64x64 orb.
+    const compact = this.collapsed || this.isMobileOrb()
+    const width = compact
       ? this.isMobileViewport() ? 64 : 56
       : Math.min(430, window.innerWidth - 24)
-    const height = this.collapsed
+    const height = compact
       ? width
       : this.isMobileViewport() ? 304 : 270
     this.widget.setSize(width, height)
@@ -3782,9 +3806,9 @@ class MiniPlayerController {
       this.root.style.width = `${width}px`
       this.root.style.height = `${height}px`
     }
-    const expectedCollapsed = this.collapsed
+    const expectedCompact = compact
     window.requestAnimationFrame(() => {
-      if (this.collapsed !== expectedCollapsed) return
+      if ((this.collapsed || this.isMobileOrb()) !== expectedCompact) return
       this.widget.setSize(width, height)
       if (this.root.classList.contains("ss-miniplayer-app-surface")) {
         this.root.style.width = `${width}px`
@@ -3801,9 +3825,10 @@ class MiniPlayerController {
       ? clamp(Math.round((this.snapshotValue.step / this.snapshotValue.totalSteps) * 100), 0, 100)
       : this.state === "done" ? 100 : 0
     mini.dataset.state = this.state
-    mini.dataset.mobileOrb = String(this.isMobileOrb())
-    mini.dataset.collapsed = String(this.collapsed)
-    mini.dataset.expanded = String(this.expanded)
+    const mobileOrb = this.isMobileOrb()
+    mini.dataset.mobileOrb = String(mobileOrb)
+    mini.dataset.collapsed = String(this.collapsed || mobileOrb)
+    mini.dataset.expanded = String(this.expanded && !mobileOrb)
     mini.dataset.indeterminate = String(this.state === "running" && !hasTotal)
     mini.style.setProperty("--ss-mini-progress", `${percentage}%`)
     const labels = { idle: "Ready", running: "Live", done: "Done", error: "Stopped" }
@@ -8358,12 +8383,19 @@ export function setup(ctx: FrontendContext): () => void {
       if (initialView === "library") activeStudio?.openLibrary()
       return
     }
-    const modal = ctx.ui.showModal({
-      title: "Swarm Studio",
-      width: 1440,
-      maxHeight: 980,
-      persistent: false,
-    })
+    miniplayer?.setStudioOpen(true)
+    let modal: any
+    try {
+      modal = ctx.ui.showModal({
+        title: "Swarm Studio",
+        width: 1440,
+        maxHeight: 980,
+        persistent: false,
+      })
+    } catch (error) {
+      miniplayer?.setStudioOpen(false)
+      throw error
+    }
     activeModal = modal
     activeStudio = new StudioController(
       ctx,
@@ -8383,13 +8415,14 @@ export function setup(ctx: FrontendContext): () => void {
       activeStudio?.dispose()
       activeStudio = null
       activeModal = null
+      miniplayer?.setStudioOpen(false)
     })
   }
 
-  if (typeof ctx.ui.mountApp === "function" || typeof ctx.ui.createFloatWidget === "function") {
+  if (typeof document !== "undefined") {
     try {
       const mobile = window.innerWidth <= 720
-      const widget = createOverlayMiniplayerWidget(ctx) || (typeof ctx.ui.createFloatWidget === "function"
+      const widget = createOverlayMiniplayerWidget() || (typeof ctx.ui.createFloatWidget === "function"
         ? ctx.ui.createFloatWidget({
             width: mobile ? 64 : 318,
             height: mobile ? 64 : 94,
