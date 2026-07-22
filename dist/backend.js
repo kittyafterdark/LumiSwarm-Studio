@@ -18,10 +18,10 @@ const sessions = new Map();
 const previewCache = new Map();
 const generationControllers = new Map();
 const runningTaggedJobs = new Set();
-const SWARM_IMAGE_PROTOCOL = `SWARM STUDIO IMAGE REQUEST PROTOCOL
+const SWARM_IMAGE_PROTOCOL_BASE = `SWARM STUDIO IMAGE REQUEST PROTOCOL
 When a newly generated illustration materially improves your reply, place this exact XML-like tag where the finished image should appear:
 <swarm-image slot="short-stable-name" aspect="4:5" alt="brief accessible description">scene-specific SwarmUI prompt</swarm-image>
-The tag body is an image prompt, not prose for the user. Describe the scene, action, expression, framing, lighting, and environment. Character identity/base tags and the user's current Studio negative prompt are applied automatically. SwarmUI prompt syntax such as <preset:composition> is allowed and must be preserved exactly. Supported aspect values are 1:1, 2:3, 3:2, 4:5, 5:4, 9:16, and 16:9. Do not put Markdown fences around the tag. Use at most two image tags in one reply unless the user explicitly requests more.`;
+The tag body is an image prompt, not prose for the user. Describe the scene, action, expression, framing, lighting, and environment. The active character's base image tags and the user's current Studio negative prompt are applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve every such directive exactly. Supported aspect values are 1:1, 2:3, 3:2, 4:5, 5:4, 9:16, and 16:9. Do not put Markdown fences around the tag.`;
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -1006,15 +1006,24 @@ function aspectFromParameters(parameters) {
     ];
     return options.reduce((best, candidate)=>Math.abs(candidate[1] - ratio) < Math.abs(best[1] - ratio) ? candidate : best)[0];
 }
+function studioPresetTokens(profile) {
+    const hints = asRecord(profile?.recordHints);
+    return stringList(hints.presets, 20).map((name)=>name.replace(/[<>\r\n]+/g, "").trim()).filter(Boolean).map((name)=>`<preset:${name}>`);
+}
+function buildSwarmImageProtocol(profile) {
+    const presetTokens = studioPresetTokens(profile);
+    const presetGuidance = presetTokens.length ? `The active Studio preset stack is force-applied once as ${presetTokens.join(", ")}. Do not repeat those directives in the tag. The {{swarm_preset}} macro expands to that exact directive list for authored prompts and templates. You may add another <preset:exact saved preset name> only when the scene specifically needs a different saved preset.` : `No Studio presets are currently active. The {{swarm_preset}} macro is therefore empty. You may use <preset:exact saved preset name> only when you know the exact saved SwarmUI preset needed by the scene; do not invent placeholder preset names.`;
+    return `${SWARM_IMAGE_PROTOCOL_BASE}\n${presetGuidance}`;
+}
 function pushStudioProfileMacros(profile) {
     const input = asRecord(profile?.input);
-    const hints = asRecord(profile?.recordHints);
     const parameters = asRecord(input.parameters);
-    const presetTokens = stringList(hints.presets, 20).map((name)=>name.replace(/[<>\r\n]+/g, "").trim()).filter(Boolean).map((name)=>`<preset:${name}>`).join(" ");
+    const presetTokens = studioPresetTokens(profile).join(", ");
     spindle.updateMacroValue("swarm_negative", asString(input.negativePrompt));
     spindle.updateMacroValue("swarm_preset", presetTokens);
     spindle.updateMacroValue("swarm_checkpoint", asString(input.model));
     spindle.updateMacroValue("swarm_aspect", aspectFromParameters(parameters));
+    spindle.updateMacroValue("swarm_image_protocol", buildSwarmImageProtocol(profile));
 }
 async function saveStudioGenerationProfile(input, recordHints, userId) {
     const profile = sanitizeStudioProfile({
@@ -1119,7 +1128,32 @@ async function connectionForTaggedProfile(profile, userId) {
     if (!connection) throw new Error("Configure a SwarmUI image generation connection before generating tagged images.");
     return connection;
 }
-async function applyCharacterLayer(chatId, scenePrompt, parameters, userId) {
+function removeTaggedPresetOverride(parameters) {
+    for (const key of Object.keys(parameters)){
+        if (key.toLowerCase().replace(/[^a-z0-9]/g, "") === "presets") delete parameters[key];
+    }
+    if (typeof parameters.rawRequestOverride !== "string") return;
+    try {
+        const override = asRecord(JSON.parse(parameters.rawRequestOverride));
+        for (const key of Object.keys(override)){
+            if (key.toLowerCase().replace(/[^a-z0-9]/g, "") === "presets") delete override[key];
+        }
+        if (Object.keys(override).length) parameters.rawRequestOverride = JSON.stringify(override);
+        else delete parameters.rawRequestOverride;
+    } catch  {
+        delete parameters.rawRequestOverride;
+    }
+}
+function applyStudioPresetLayer(scenePrompt, profile) {
+    const tokens = studioPresetTokens(profile);
+    const tokenList = tokens.join(", ");
+    let prompt = scenePrompt.replace(/\{\{\s*swarm_preset\s*\}\}/gi, tokenList).trim();
+    const lower = prompt.toLowerCase();
+    const missing = tokens.filter((token)=>!lower.includes(token.toLowerCase()));
+    if (missing.length) prompt = `${missing.join(", ")}, ${prompt}`;
+    return prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
+}
+async function applyCharacterLayer(chatId, scenePrompt, userId) {
     if (!spindle.permissions.has("chats")) return {
         prompt: scenePrompt,
         characterId: "",
@@ -1137,19 +1171,9 @@ async function applyCharacterLayer(chatId, scenePrompt, parameters, userId) {
     const character = await spindle.characters.get(characterId, userId);
     const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora);
     const baseTags = asString(portable.base_tags).trim();
-    const prompt = baseTags && !scenePrompt.toLowerCase().includes(baseTags.toLowerCase()) ? `${baseTags}, ${scenePrompt}` : scenePrompt;
-    const characterLora = asString(portable.lora_filename).trim();
-    if (characterLora) {
-        const names = Array.isArray(parameters.loras) ? parameters.loras.map(asString) : [];
-        const weights = Array.isArray(parameters.loraWeights) ? parameters.loraWeights.map(Number) : [];
-        const normalize = (name)=>name.replace(/\\/g, "/").toLowerCase().replace(/\.(?:safetensors|ckpt|pt)$/i, "");
-        if (!names.some((name)=>normalize(name) === normalize(characterLora))) {
-            names.push(characterLora);
-            weights.push(Number.isFinite(Number(portable.weight)) ? Number(portable.weight) : 1);
-        }
-        parameters.loras = names;
-        parameters.loraWeights = weights;
-    }
+    let prompt = scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, baseTags).trim();
+    if (baseTags && !prompt.toLowerCase().includes(baseTags.toLowerCase())) prompt = `${baseTags}, ${prompt}`;
+    prompt = prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
     return {
         prompt,
         characterId,
@@ -1265,7 +1289,11 @@ async function runTaggedImageJob(job, useOriginalProfile, userId) {
         };
         const parameters = asRecord(input.parameters);
         applyAspectToParameters(parameters, job.aspect);
-        const characterLayer = await applyCharacterLayer(job.chatId, job.prompt, parameters, userId);
+        removeTaggedPresetOverride(parameters);
+        const originalTag = parseSwarmImageTags(job.fullMatch)[0];
+        const originalScenePrompt = originalTag?.content.trim() || job.prompt;
+        const presetPrompt = applyStudioPresetLayer(originalScenePrompt, profile);
+        const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, userId);
         input.prompt = characterLayer.prompt;
         input.negativePrompt = asString(profileInput.negativePrompt);
         input.parameters = parameters;
@@ -1319,6 +1347,20 @@ async function runTaggedImageJob(job, useOriginalProfile, userId) {
         await upsertTaggedImageJob(job, userId);
         spindle.updateMacroValue("last_genned", job.imageUrl);
         await ensureCharacterOutputFolder(characterLayer.characterId, characterLayer.characterName, job.imageId, userId);
+        const taggedChat = spindle.permissions.has("chats") ? await spindle.chats.get(job.chatId, userId) : {
+            id: job.chatId
+        };
+        const outputPage = await listOutputs(userId, taggedChat);
+        spindle.sendToFrontend({
+            type: "tagged_generation_result",
+            clientJobId: job.clientJobId,
+            data: {
+                result,
+                record,
+                taggedJob: taggedJobPublic(job),
+                ...outputPage
+            }
+        }, userId);
         const inserted = await finalizeTaggedImageJob(job, userId);
         if (!inserted) sendTaggedJobState(job, userId);
         if ((await loadTagAutomationConfig(userId)).completionToast && typeof spindle.toast?.success === "function") {
@@ -1414,7 +1456,7 @@ async function taggedImagePromptInterceptor(messages, context) {
     }
     const injected = {
         role: "system",
-        content: SWARM_IMAGE_PROTOCOL
+        content: buildSwarmImageProtocol(await loadStudioGenerationProfile(userId))
     };
     return {
         messages: [
@@ -2140,7 +2182,7 @@ for (const macro of [
         returnType: "string",
         handler: ""
     });
-    spindle.updateMacroValue(macro.name, macro.name === "swarm_image_protocol" ? SWARM_IMAGE_PROTOCOL : "");
+    spindle.updateMacroValue(macro.name, macro.name === "swarm_image_protocol" ? buildSwarmImageProtocol(null) : "");
 }
 spindle.registerInterceptor(taggedImagePromptInterceptor, 90);
 spindle.on("GENERATION_ENDED", async (payload, userId)=>{

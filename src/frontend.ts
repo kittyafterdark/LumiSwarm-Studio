@@ -306,7 +306,7 @@ const SPARKLE_ICON = `
 const SWARM_IMAGE_PROTOCOL_EXAMPLE = `{{swarm_image_protocol}}
 
 Example output:
-<swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo">outside, city street, food stall, smiling, <preset:composition></swarm-image>`
+<swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo">outside, city street, food stall, smiling</swarm-image>`
 
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1"
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1"
@@ -991,6 +991,9 @@ const STYLES = `
     font: 8px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
     white-space: pre-wrap;
   }
+  .ss-macro-guide-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; padding: 0 9px 9px; }
+  .ss-macro-guide-grid code { color: var(--lumiverse-accent, #7dd3fc); font: 8px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .ss-macro-guide-grid span { color: var(--lumiverse-text-muted); font-size: 8.5px; line-height: 1.45; }
   .ss-token-popover p { margin: 0 0 8px; color: var(--lumiverse-text-muted); line-height: 1.45; font-size: 10px; }
   .ss-token-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
   .ss-token-wrap { position: relative; }
@@ -3556,6 +3559,10 @@ class MiniPlayerController {
       this.complete(String(payload.clientJobId || ""), data)
       return
     }
+    if (payload?.type === "tagged_generation_result") {
+      this.complete(String(payload.clientJobId || ""), data)
+      return
+    }
     if (payload?.type === "output_appended_to_chat") {
       this.snapshotValue.status = `Appended ${String(data.label || "output")} to chat`
       this.render()
@@ -4600,9 +4607,23 @@ class StudioController {
                   <label class="ss-config-toggle"><input type="checkbox" data-role="tag-prompt-injection" ${this.behavior.tagPromptInjection ? "checked" : ""} /><span>Teach the model the Swarm image-tag protocol</span></label>
                   <code class="ss-tag-protocol-example">{{swarm_image_protocol}}
 
-&lt;swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo"&gt;outside, city street, food stall, smiling, &lt;preset:composition&gt;&lt;/swarm-image&gt;</code>
+&lt;swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo"&gt;outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
                   <button class="ss-button" data-action="copy-tag-protocol">Copy protocol example</button>
-                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character base tags and the current Studio negative prompt are inherited automatically.</p>
+                  <details class="ss-css-guide ss-macro-guide">
+                    <summary>Macro and preset guide</summary>
+                    <div class="ss-macro-guide-grid">
+                      <code>{{swarm_image_protocol}}</code><span>Current model instructions, including the active preset state.</span>
+                      <code>{{swarm_preset}}</code><span>Active preset titles as exact native directives: &lt;preset:name one&gt;, &lt;preset:name two&gt;.</span>
+                      <code>{{swarm_negative}}</code><span>Current Studio negative prompt.</span>
+                      <code>{{char_tags}}</code><span>Active character base image tags. Tagged jobs apply these automatically.</span>
+                      <code>{{char_profile}}</code><span>Active character avatar URL for HTML shells.</span>
+                      <code>{{user_profile}}</code><span>Active persona avatar URL for HTML shells.</span>
+                      <code>{{swarm_checkpoint}}</code><span>Current Studio checkpoint.</span>
+                      <code>{{swarm_aspect}}</code><span>Closest named Studio aspect ratio.</span>
+                      <code>{{last_genned}}</code><span>URL of the latest completed Swarm Studio image.</span>
+                    </div>
+                  </details>
+                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character base tags, the current Studio LoRA stack, active presets, and the current negative prompt are inherited. A character's separately bound LoRA is never added.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -5557,6 +5578,22 @@ are removed when CSS is applied.</pre>
         this.renderOutputs()
         this.setRunStatus("Generation complete. Output saved to Lumiverse.")
         break
+      case "tagged_generation_result": {
+        this.acceptOutputPage(data)
+        const imageSrc = String(data.result?.imageDataUrl || data.result?.imageUrl || data.record?.imageUrl || "")
+        if (imageSrc) {
+          this.setCurrentImage({
+            id: data.result?.imageId || data.record?.imageId,
+            src: imageSrc,
+            url: data.result?.imageUrl || data.record?.imageUrl || imageSrc,
+            label: `${data.result?.model || data.record?.model || "SwarmUI"} · message illustration`,
+            details: data.record || null,
+          })
+        }
+        this.renderOutputs()
+        this.setRunStatus("Message illustration complete. Output synced to Studio.")
+        break
+      }
       case "generation_progress": {
         if (!this.currentJobId || payload.clientJobId !== this.currentJobId) break
         const step = Number.isFinite(data.step) ? Number(data.step) : 0
@@ -8579,9 +8616,6 @@ interface TaggedImageJobView {
   imageUrl: string
   inserted: boolean
   error: string
-  step?: number
-  totalSteps?: number
-  preview?: string
 }
 
 function widgetEscape(value: unknown): string {
@@ -8609,6 +8643,7 @@ class TaggedImageController {
   private behavior: StudioBehavior
   private readonly jobs = new Map<string, TaggedImageJobView>()
   private readonly tagPayloads = new Map<string, any>()
+  private readonly tagFingerprints = new Map<string, string>()
   private readonly cleanups = new Map<string, () => void>()
 
   constructor(
@@ -8634,8 +8669,16 @@ class TaggedImageController {
       .slice(0, 80)
     const lookup = this.lookupKey(String(payload.chatId), String(payload.messageId), slot)
     this.tagPayloads.set(lookup, { ...payload, slot })
+    const fingerprint = widgetKeyHash(String(payload.fullMatch || payload.content || ""))
+    if (this.tagFingerprints.get(lookup) === fingerprint) return
+    this.tagFingerprints.set(lookup, fingerprint)
+    for (const [id, existing] of this.jobs) {
+      if (this.lookupKey(existing.chatId, existing.messageId, existing.slot) !== lookup) continue
+      this.remove(existing)
+      this.jobs.delete(id)
+    }
     const optimistic: TaggedImageJobView = {
-      id: `pending-${widgetKeyHash(`${lookup}:${payload.fullMatch || ""}`)}`,
+      id: `pending-${widgetKeyHash(`${lookup}:${fingerprint}`)}`,
       key: lookup,
       chatId: String(payload.chatId),
       messageId: String(payload.messageId),
@@ -8681,16 +8724,6 @@ class TaggedImageController {
       else this.render(next)
       return
     }
-    if (payload?.type === "generation_progress") {
-      const job = [...this.jobs.values()].find((candidate) => candidate.clientJobId && candidate.clientJobId === payload.clientJobId)
-      if (!job) return
-      const data = payload.data || {}
-      job.status = "generating"
-      job.step = Number(data.step) || 0
-      job.totalSteps = Number(data.totalSteps) || 0
-      if (typeof data.preview === "string" && data.preview.startsWith("data:image/")) job.preview = data.preview
-      this.render(job)
-    }
   }
 
   destroy(): void {
@@ -8698,6 +8731,7 @@ class TaggedImageController {
     this.cleanups.clear()
     this.jobs.clear()
     this.tagPayloads.clear()
+    this.tagFingerprints.clear()
   }
 
   private lookupKey(chatId: string, messageId: string, slot: string): string {
@@ -8717,12 +8751,10 @@ class TaggedImageController {
   private render(job: TaggedImageJobView): void {
     const widgetId = this.widgetId(job)
     this.cleanups.get(widgetId)?.()
-    const hasTotal = Number(job.totalSteps) > 0
-    const percentage = hasTotal ? Math.max(0, Math.min(100, Math.round((Number(job.step) / Number(job.totalSteps)) * 100))) : 0
     const labels: Record<TaggedImageJobView["status"], string> = {
       requested: "Illustration requested",
       queued: "Queued for SwarmUI",
-      generating: hasTotal ? `Rendering · ${percentage}%` : "Rendering in SwarmUI",
+      generating: "Rendering in SwarmUI",
       ready: "Finishing illustration",
       failed: "Illustration unavailable",
       cancelled: "Illustration stopped",
@@ -8732,37 +8764,35 @@ class TaggedImageController {
       : job.status === "failed" || job.status === "cancelled"
         ? `<button data-action="retry">Retry</button>`
         : ""
-    const preview = job.preview
-      ? `<img class="preview" src="${widgetEscape(job.preview)}" alt="Generation preview">`
+    const busy = job.status === "queued" || job.status === "generating" || job.status === "ready"
+    const visual = busy
+      ? `<div class="emblem"><i class="spinner" aria-label="Generating"></i></div>`
       : `<div class="emblem">${FRAME_WALL_ICON}</div>`
     const error = job.error ? `<p class="error">${widgetEscape(job.error)}</p>` : ""
-    const progress = job.status === "generating"
-      ? `<div class="progress"><i style="width:${hasTotal ? percentage : 18}%"></i></div>`
-      : ""
     const html = `
       <style>
         :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
         * { box-sizing: border-box; }
         body { margin: 0; color: var(--lumiverse-text, #f5f5f7); background: transparent; }
         .card { position: relative; display: grid; grid-template-columns: 54px minmax(0,1fr) auto; gap: 11px; align-items: center; min-height: 68px; padding: 8px 9px; border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #b994ff) 28%, var(--lumiverse-border, #35313f)); border-radius: var(--lumiverse-radius, 12px); background: linear-gradient(115deg, color-mix(in srgb, var(--lumiverse-accent, #b994ff) 9%, var(--lumiverse-fill, #111116)), var(--lumiverse-fill, #111116)); overflow: hidden; }
-        .preview,.emblem { width: 54px; height: 54px; border-radius: calc(var(--lumiverse-radius, 12px) * .72); border: 1px solid var(--lumiverse-border, #35313f); object-fit: cover; background: var(--lumiverse-fill-subtle, #191820); }
+        .emblem { width: 54px; height: 54px; border-radius: calc(var(--lumiverse-radius, 12px) * .72); border: 1px solid var(--lumiverse-border, #35313f); background: var(--lumiverse-fill-subtle, #191820); }
         .emblem { display: grid; place-items: center; color: var(--lumiverse-accent, #b994ff); }
         .emblem svg { width: 28px; height: 28px; fill: currentColor; }
+        .spinner { width: 22px; height: 22px; border: 2px solid color-mix(in srgb, currentColor 22%, transparent); border-top-color: currentColor; border-radius: 50%; animation: spin .85s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
         .copy { min-width: 0; }
         strong { display: block; font: 600 12px/1.2 Georgia, ui-serif, serif; letter-spacing: .01em; }
         p { margin: 4px 0 0; color: var(--lumiverse-text-muted, #aaa6b1); font-size: 10px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .error { color: #ff9caa; white-space: normal; }
-        .progress { height: 3px; margin-top: 7px; border-radius: 999px; background: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 14%, transparent); overflow: hidden; }
-        .progress i { display: block; height: 100%; border-radius: inherit; background: var(--lumiverse-accent, #b994ff); transition: width .2s ease; }
         .actions { display: flex; align-items: center; gap: 5px; }
         button { min-height: 30px; padding: 0 10px; border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .65); background: var(--lumiverse-fill-subtle, #191820); color: var(--lumiverse-text, #f5f5f7); font: 600 10px/1 system-ui, sans-serif; cursor: pointer; }
         button:hover { border-color: var(--lumiverse-accent, #b994ff); }
         .menu { width: 30px; padding: 0; font-size: 16px; }
-        @media (max-width: 480px) { .card { grid-template-columns: 46px minmax(0,1fr) auto; gap: 8px; } .preview,.emblem { width:46px;height:46px; } button:not(.menu) { padding: 0 8px; } }
+        @media (max-width: 480px) { .card { grid-template-columns: 46px minmax(0,1fr) auto; gap: 8px; } .emblem { width:46px;height:46px; } button:not(.menu) { padding: 0 8px; } }
       </style>
       <div class="card" id="card">
-        ${preview}
-        <div class="copy"><strong>${widgetEscape(labels[job.status])}</strong><p>${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}${progress}</div>
+        ${visual}
+        <div class="copy"><strong>${widgetEscape(labels[job.status])}</strong><p>${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}</div>
         <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions">⋯</button></div>
       </div>
       <script>

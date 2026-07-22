@@ -23,7 +23,7 @@ let taggedGenerationCount = 0
 const taggedMessage = {
   id: "message-tag-1",
   role: "assistant",
-  content: '<article><swarm-image slot="post" aspect="4:5" alt="Street food">outside, city street, food stall, smiling, <preset:composition></swarm-image></article>',
+  content: '<article><swarm-image slot="post" aspect="4:5" alt="Street food">{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition></swarm-image></article>',
   metadata: {},
 }
 
@@ -103,13 +103,18 @@ globalThis.spindle = {
         assert.equal(rawOverride.comfyrawworkflowinputimageinitc, "data:image/png;base64,QUJD")
       } else {
         taggedGenerationCount += 1
-        assert.match(input.prompt, /^1girl, long brown hair, pink dress, outside, city street/)
+        assert.match(input.prompt, /^1girl, long brown hair, pink dress, <preset:Cinematic>, outside, city street/)
         assert.match(input.prompt, /<preset:composition>/)
+        assert.equal((input.prompt.match(/<preset:Cinematic>/g) || []).length, 1)
+        assert.doesNotMatch(input.prompt, /\{\{swarm_preset\}\}/)
         assert.equal(input.negativePrompt, "blurry")
-        assert.deepEqual(input.parameters.loras, ["styles/ink.safetensors", "characters/lior.safetensors"])
-        assert.deepEqual(input.parameters.loraWeights, [0.75, 0.8])
+        assert.deepEqual(input.parameters.loras, ["styles/ink.safetensors"])
+        assert.deepEqual(input.parameters.loraWeights, [0.75])
         assert.equal(input.parameters.referenceImages, undefined)
         assert.equal(input.parameters.denoise, undefined)
+        const rawOverride = JSON.parse(input.parameters.rawRequestOverride)
+        assert.equal(rawOverride.presets, undefined)
+        assert.equal(rawOverride.comfyuicustomworkflow, "Portrait/Inpaint")
       }
       yield {
         step: 4,
@@ -579,6 +584,7 @@ const generated = await request("generate", {
       referenceImages: [{ data: "QUJD", mimeType: "image/png" }],
       denoise: 0.55,
       rawRequestOverride: JSON.stringify({
+        presets: ["Cinematic"],
         comfyuicustomworkflow: "Portrait/Inpaint",
         comfyrawworkflowinputdecimaldenoiseb: 0.42,
         comfyrawworkflowinputimageinitc: "data:image/png;base64,QUJD",
@@ -644,6 +650,8 @@ const intercepted = await interceptorHandler([
 ], { chatId: "chat-1" })
 assert.equal(intercepted.messages[0].role, "system")
 assert.match(intercepted.messages[0].content, /SWARM STUDIO IMAGE REQUEST PROTOCOL/)
+assert.match(intercepted.messages[0].content, /<preset:Cinematic>/)
+assert.doesNotMatch(intercepted.messages[0].content, /Use at most two image tags/)
 assert.match(intercepted.messages[1].content, /\[Illustration requested: Street food\]/)
 
 const originalTaggedContent = taggedMessage.content
@@ -661,6 +669,9 @@ await frontendHandler({
 const tagError = sent.find((entry) => entry.payload.requestId === "tag-generate-1" && entry.payload.type === "studio_error")
 assert.equal(tagError, undefined, tagError?.payload?.error)
 assert.equal(taggedGenerationCount, 1)
+const taggedResult = sent.find((entry) => entry.payload.type === "tagged_generation_result")
+assert.equal(taggedResult.payload.data.record.imageId, "image-tag-1")
+assert.equal(taggedResult.payload.data.taggedJob.status, "ready")
 assert.match(taggedMessage.content, /<img src="\/api\/v1\/image-gen\/results\/image-tag-1"/)
 assert.match(taggedMessage.content, /data-swarm-studio-slot="post"/)
 assert.equal(taggedMessage.metadata.swarm_studio_tagged_images[0].imageId, "image-tag-1")
