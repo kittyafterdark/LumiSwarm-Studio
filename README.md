@@ -6,7 +6,7 @@ It adds:
 
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
-- One-tap mobile **Library** and **Random seed** actions directly below the Create tab's positive and negative prompts
+- One-tap mobile **Use as init**, context-aware **Random/Current seed**, and **Append to chat** actions below the Create prompts, with **Library** beside Settings in the header
 - A Lumiverse-native profile plus an automatic Custom state for component colors, panel geometry, opacity, blur, and CSS overrides
 - A full appearance editor with native component color pickers, border-radius, surface-opacity and backdrop-blur sliders, plus persisted custom CSS
 - A compact opaque settings panel containing appearance controls, metadata refresh, and the encrypted metadata token
@@ -15,10 +15,12 @@ It adds:
 - Context-aware orientation and seed actions that flip to the useful next state, with fixed-seed reuse from the selected output
 - A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
-- Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, and reusable saved stack presets
+- Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, reusable saved stack presets, and extraction from enabled Swarm presets
+- Shareable Studio stack JSON, Lumiverse Image Gen LoRA-preset import/export, and a missing-file handoff with Civitai source links for SwarmUI's Model Downloader
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
+- Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Append to chat / Delete menus
@@ -26,7 +28,7 @@ It adds:
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
-- A draggable Lumiverse float player with collapsed, compact, and maximized **Quick create** layouts; it survives closing Studio, generates from a lightweight prompt, follows live previews and progress, and can interrupt directly
+- A draggable Lumiverse float player with collapsed, compact, and maximized **Quick create** layouts; it survives closing Studio, generates from editable lightweight prompts, follows live previews and step progress, can append the latest output to chat, and can interrupt directly
 - Shared float-player/Studio output and draft state, so Quick create inherits the last model, dimensions, sampler, scheduler, presets, LoRAs, workflow, init image, and overrides—and the full Studio restores them when it reopens
 - The drawer’s picture-frame wall emblem reused consistently in the float player, Studio header, drawer registration, and chat input action
 
@@ -85,6 +87,14 @@ per-user extension storage. Generation details are associated with the
 persisted Lumiverse image ID so History can show the prompts used by recent
 Swarm Studio outputs.
 
+The stack toolbar can export a portable Studio JSON file or a valid Lumiverse
+Image Gen config containing one active LoRA preset. **Import stack** accepts
+either format, including configs exported by Lumiverse. If the current Swarm
+library lacks a referenced filename, Studio keeps it in the stack and shows
+the metadata source link when available so it can be pasted into SwarmUI's
+Model Downloader. The extension does not silently trigger Swarm's WebSocket
+downloader.
+
 The inspector treats the exact prompt text sent by Studio as the authoritative
 prompt record and lists the ordered Swarm presets separately as provenance.
 This avoids claiming that a local reconstruction is SwarmUI's final
@@ -103,6 +113,10 @@ When `ListT2IParams` exposes a usable schema and the SwarmUI account has
 `manage_presets`, **Save current** appears beside the preset selector. It saves
 the current prompts and recognized render controls through SwarmUI's
 `AddNewPreset` API, then selects the new preset in Studio.
+
+Enabled Swarm presets that expose LoRA filename and weight parameters also
+enable **Extract LoRAs**, which merges those references into Studio's visual
+stack.
 
 For newly generated images, Swarm Studio looks up SwarmUI's saved image
 metadata to display preparation time, generation time, preset names, and the
@@ -160,7 +174,9 @@ asset. Deleting a folder leaves its images intact. **Delete from Lumiverse**
 deletes the actual owned image and removes its Swarm Studio metadata and folder
 assignment. When Swarm exposes the generated file path in image metadata, the
 inspector displays it below the recorded LoRA stack as a read-only saved-path
-reference.
+reference. **Download** then fetches that original Swarm file instead of the
+Lumiverse display derivative, preserving embedded PNG metadata. Older outputs
+without a saved Swarm path fall back to the normal Lumiverse image URL.
 
 **Append to chat** verifies the selected image is owned by this extension and
 then uses Lumiverse's scoped chat-mutation API to add it to the active chat as
@@ -187,7 +203,8 @@ keep overrides inside the Studio, or use `.ss-launcher` to style its drawer
 composition. Its dot field, broken corner ornaments, picture-frame glyph, and
 sparkle are static CSS or inline SVG, with no animated or fetched assets.
 Metadata refresh and the optional encrypted `swarm_token` live in this same
-opaque gear panel.
+opaque gear panel. Its Behavior section can enable or disable completion toasts
+and choose whether a desktop floating-widget tap opens Studio or Quick Create.
 
 ## Live generation previews and interruption
 
@@ -224,9 +241,16 @@ live or completed output and draft already restored. Size preferences are stored
 locally, while generation state and draft data stay in memory only for the
 current Lumiverse session.
 On mobile, collapsed mode matches Lumiverse's native 40 × 40 float-widget cap;
-its preview exposes a visible reopen glyph and reserves the tap from the host
-drag gesture. Desktop collapsed mode remains 56 × 56. Right-clicking the
+the complete border-box is rendered inside that cap, its preview exposes a
+visible reopen glyph, and its tap is reserved from the host drag gesture.
+Interactive Quick Create controls likewise reserve pointer focus from the
+widget drag surface. Desktop collapsed mode remains 56 × 56. Right-clicking the
 collapsed preview also reopens Studio.
+
+After every successful generation, `{{last_genned}}` resolves to the latest
+Lumiverse-owned output URL. This is intended for image URLs in HTML artifacts,
+presets, and other Lumiverse macro-aware text; it is session-live and updates
+again on the next Studio or Quick Create generation.
 
 ## GitHub source installation
 

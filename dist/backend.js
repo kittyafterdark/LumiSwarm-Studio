@@ -125,6 +125,20 @@ function parseTags(value) {
     }
     return [];
 }
+function metadataSourceUrl(...values) {
+    for (const value of values){
+        const text = asString(value).replace(/&amp;/gi, "&");
+        const href = text.match(/href\s*=\s*["']?([^"'\s>]+)/i)?.[1];
+        const direct = text.match(/https?:\/\/[^\s"'<>]+/i)?.[0];
+        const candidate = href || direct;
+        if (!candidate) continue;
+        try {
+            const url = new URL(candidate);
+            if (url.protocol === "http:" || url.protocol === "https:") return url.href;
+        } catch  {}
+    }
+    return "";
+}
 function parseLora(value) {
     const item = asRecord(value);
     const name = asString(item.name).trim();
@@ -152,7 +166,8 @@ function parseLora(value) {
         local: asBoolean(item.local, true),
         timeCreated: asNullableNumber(item.time_created),
         timeModified: asNullableNumber(item.time_modified),
-        hash: asString(item.hash_sha256).trim() || asString(item.hash).trim()
+        hash: asString(item.hash_sha256).trim() || asString(item.hash).trim(),
+        sourceUrl: metadataSourceUrl(item.source_url, item.civitai_url, item.source, item.usage_hint, item.description)
     };
 }
 function parseCheckpoint(value) {
@@ -367,7 +382,8 @@ function cleanStackPreset(value, existingId = "") {
             title: asString(item.title).trim().slice(0, 200),
             weight: Number.isFinite(weight) ? Math.max(-10, Math.min(10, weight)) : 1,
             enabled: asBoolean(item.enabled, true),
-            useTrigger: asBoolean(item.useTrigger, false)
+            useTrigger: asBoolean(item.useTrigger, false),
+            sourceUrl: metadataSourceUrl(item.sourceUrl)
         };
     });
     return {
@@ -754,6 +770,42 @@ async function fetchPreviewDataUrl(connection, previewRef, token) {
     pruneMap(previewCache, PREVIEW_CACHE_LIMIT);
     return dataUrl;
 }
+async function fetchSwarmOutput(connection, swarmPath, token) {
+    const baseUrl = normalizeBaseUrl(connection.api_url);
+    const raw = String(swarmPath || "").trim().replace(/\\/g, "/");
+    if (!raw || raw.includes("?") || raw.includes("#")) {
+        throw new Error("This output does not have a safe SwarmUI file path.");
+    }
+    let relative = raw.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/?ViewSpecial\/Output\//i, "").replace(/^\/?Output\//i, "").replace(/^\/+/, "");
+    const segments = relative.split("/").filter(Boolean);
+    if (!segments.length || segments.some((segment)=>segment === "." || segment === "..")) {
+        throw new Error("SwarmUI returned an invalid output file path.");
+    }
+    relative = segments.map((segment)=>encodeURIComponent(segment)).join("/");
+    const target = `${baseUrl}/ViewSpecial/Output/${relative}`;
+    const headers = {
+        "Accept": "image/*"
+    };
+    if (token) headers.Cookie = `swarm_token=${token}`;
+    const response = await spindle.cors(target, {
+        method: "GET",
+        headers,
+        responseType: "arraybuffer",
+        mediaType: "image"
+    });
+    if (Number(response?.status) < 200 || Number(response?.status) >= 300) {
+        throw new Error(`SwarmUI output download failed (${response?.status || "network error"}).`);
+    }
+    if (response?.encoding !== "base64") {
+        throw new Error("SwarmUI did not return the original output as binary image data.");
+    }
+    const mimeType = headerValue(response.headers, "content-type").split(";")[0].trim() || "image/png";
+    return {
+        dataUrl: `data:${mimeType};base64,${String(response.body || "")}`,
+        mimeType,
+        filename: segments[segments.length - 1].slice(0, 240) || `swarm-output-${Date.now()}.png`
+    };
+}
 function permissionSnapshot() {
     return {
         imageGen: spindle.permissions.has("image_gen"),
@@ -933,6 +985,20 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
+            case "download_swarm_output":
+                {
+                    if (!spindle.permissions.has("cors_proxy")) {
+                        throw new Error("Grant the CORS Proxy permission to download the original SwarmUI output.");
+                    }
+                    const connectionId = asString(payload?.connectionId);
+                    const connection = await getConnection(connectionId, userId);
+                    spindle.sendToFrontend({
+                        type: "swarm_output_download",
+                        requestId,
+                        data: await fetchSwarmOutput(connection, asString(payload?.swarmPath), await getMetadataToken(connectionId, userId))
+                    }, userId);
+                    return;
+                }
             case "load_swarm_workflow":
                 {
                     if (!spindle.permissions.has("cors_proxy")) {
@@ -1046,6 +1112,11 @@ async function handleMessage(payload, userId) {
                             ...outputPage
                         }
                     }, userId);
+                    const latestUrl = record?.imageUrl || asString(result.imageUrl);
+                    if (latestUrl) spindle.updateMacroValue("last_genned", latestUrl);
+                    if (payload?.showCompletionToast !== false && typeof spindle.toast?.success === "function") {
+                        spindle.toast.success(`Swarm Studio finished ${record?.model || asString(result.model) || "your image"}.`);
+                    }
                     return;
                 }
             case "interrupt_generation":
@@ -1301,4 +1372,12 @@ async function handleMessage(payload, userId) {
     }
 }
 spindle.onFrontendMessage(handleMessage);
+spindle.registerMacro({
+    name: "last_genned",
+    category: "extension:swarm_studio",
+    description: "URL of the most recent image generated by Swarm Studio. Useful in HTML artifacts and presets.",
+    returnType: "string",
+    handler: ""
+});
+spindle.updateMacroValue("last_genned", "");
 spindle.log.info("Swarm Studio backend loaded");

@@ -9,8 +9,24 @@ let imageDeleted = false
 let presetAdded = false
 let interruptRequested = false
 let appendedMessage = null
+let macroDefinition = null
+let macroValue = ""
+let completionToast = ""
+let downloadedSwarmUrl = ""
 
 globalThis.spindle = {
+  registerMacro(definition) {
+    macroDefinition = definition
+  },
+  updateMacroValue(name, value) {
+    assert.equal(name, "last_genned")
+    macroValue = value
+  },
+  toast: {
+    success(message) {
+      completionToast = message
+    },
+  },
   permissions: {
     has(permission) {
       return permissions.has(permission)
@@ -333,6 +349,7 @@ globalThis.spindle = {
       }
     }
     if (url.includes("/ViewSpecial/")) {
+      if (url.includes("/ViewSpecial/Output/")) downloadedSwarmUrl = url
       assert.equal(options.responseType, "arraybuffer")
       assert.equal(options.mediaType, "image")
       return {
@@ -356,6 +373,8 @@ globalThis.spindle = {
 
 await import("../dist/backend.js")
 assert.equal(typeof frontendHandler, "function")
+assert.equal(macroDefinition.name, "last_genned")
+assert.equal(macroDefinition.handler, "")
 
 async function request(type, extra = {}) {
   const requestId = `${type}-${sent.length}`
@@ -413,6 +432,7 @@ const savedStack = await request("save_stack_preset", {
 })
 assert.equal(savedStack.data.length, 1)
 assert.equal(savedStack.data[0].items[0].useTrigger, false)
+assert.equal(savedStack.data[0].items[0].sourceUrl, "")
 
 const preview = await request("preview", {
   connectionId: "swarm-1",
@@ -477,6 +497,16 @@ assert.equal(progress.payload.clientJobId, "studio-job-1")
 assert.equal(progress.payload.data.step, 4)
 assert.equal(progress.payload.data.totalSteps, 20)
 assert.equal(progress.payload.data.preview, "data:image/jpeg;base64,UFJFVklFVw==")
+assert.equal(macroValue, "/api/v1/image-gen/results/image-1")
+assert.match(completionToast, /Swarm Studio finished/)
+
+const originalOutput = await request("download_swarm_output", {
+  connectionId: "swarm-1",
+  swarmPath: generated.data.record.swarmPath,
+})
+assert.equal(originalOutput.data.dataUrl, "data:image/png;base64,QUJD")
+assert.equal(originalOutput.data.filename, "image-1.png")
+assert.equal(downloadedSwarmUrl, "http://localhost:7801/ViewSpecial/Output/2026-07-19/image-1.png")
 
 const createdPreset = await request("add_swarm_preset", {
   connectionId: "swarm-1",

@@ -9,6 +9,7 @@ const {
   inferModelFamily,
   inheritQuickGenerationParameters,
   isWorkflowCoreParameter,
+  lorasFromSwarmPreset,
   matchesKeywordQuery,
   modelSignalsCompatible,
   outputLibraryPageSize,
@@ -74,6 +75,16 @@ assert.deepEqual(
 )
 assert.equal(isWorkflowCoreParameter("negative_prompt"), true)
 assert.equal(isWorkflowCoreParameter("comfyrawworkflowinputdecimaldenoiseb"), false)
+assert.deepEqual(
+  lorasFromSwarmPreset({
+    loras: "styles/ink.safetensors, characters/hero.safetensors",
+    loraweights: "0.75,1.2",
+  }),
+  [
+    { name: "styles/ink.safetensors", weight: 0.75 },
+    { name: "characters/hero.safetensors", weight: 1.2 },
+  ],
+)
 assert.doesNotMatch(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /@import\s+"/)
 assert.match(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /\.ss-shell/)
 
@@ -117,8 +128,8 @@ assert.doesNotMatch(source, /data-tab="prompt"/)
 assert.match(source, /data-action="toggle-fullscreen"/)
 assert.match(source, /data-action="change-orientation"/)
 assert.match(source, /data-action="toggle-seed-mode"/)
-assert.match(source, /data-action="random-seed-mobile"/)
-assert.match(source, /ss-mobile-prompt-tools[\s\S]*?data-action="open-output-library"[\s\S]*?data-action="random-seed-mobile"/)
+assert.match(source, /ss-top-actions[\s\S]*?data-action="open-output-library"[\s\S]*?data-action="toggle-config"/)
+assert.match(source, /ss-mobile-prompt-tools[\s\S]*?data-action="use-current-init"[\s\S]*?data-action="toggle-seed-mode"[\s\S]*?data-action="append-to-chat"/)
 assert.match(source, /data-role="workflow-select"/)
 assert.match(source, /data-role="workflow-fields"/)
 assert.match(source, /load_swarm_workflow/)
@@ -143,10 +154,14 @@ assert.match(source, /data-action="use-standard-workflow"/)
 assert.match(source, /EXPAND_ICON/)
 assert.doesNotMatch(source, /data-action="open-workflow-setup"[^>]*>Setup</)
 assert.match(source, /ss-mobile-prompt-tools/)
-assert.match(source, /data-mobile-panel="create-prompt"[\s\S]*?ss-negative-v3[\s\S]*?data-action="random-seed-mobile"/)
+assert.match(source, /data-mobile-panel="create-prompt"[\s\S]*?ss-negative-v3[\s\S]*?data-action="toggle-seed-mode"/)
 assert.match(source, /"interrupt-generation"/)
 assert.match(source, /data-action="add-swarm-preset"/)
 assert.match(source, /data-action="save-stack"/)
+assert.match(source, /data-action="export-stack"/)
+assert.match(source, /data-action="export-lumi-stack"/)
+assert.match(source, /data-action="extract-preset-loras"/)
+assert.match(source, /data-role="missing-lora-modal"/)
 assert.match(source, /data-action="reuse-parameters"/)
 assert.match(source, /data-action="use-as-init"/)
 assert.match(source, /data-action="append-to-chat"/)
@@ -176,7 +191,8 @@ assert.match(source, /data-role="denoise"/)
 assert.match(source, /\.ss-creativity-row\s*\{\s*grid-column:\s*1\s*\/\s*-1/)
 assert.match(source, /const size = window\.innerWidth <= 600 \? 40 : 56/)
 assert.match(source, /ss-mini-reopen/)
-assert.match(source, /collapsed player's open control[\s\S]*event\.stopPropagation\(\)/)
+assert.match(source, /Lumi's float widget makes its entire chrome draggable[\s\S]*event\.stopPropagation\(\)/)
+assert.match(source, /target\.closest\("button, input, textarea, select, a, \[data-action\]"\)/)
 assert.match(source, /<select class="ss-select" data-role="sampler"/)
 assert.match(source, /<select class="ss-select" data-role="scheduler"/)
 assert.match(source, /data-role="presets"/)
