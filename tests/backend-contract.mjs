@@ -738,6 +738,15 @@ const originalOutput = await request("download_swarm_output", {
 assert.equal(originalOutput.data.dataUrl, "data:image/png;base64,QUJD")
 assert.equal(originalOutput.data.filename, "image-1.png")
 assert.equal(downloadedSwarmUrl, "http://localhost:7801/Output/2026-07-19/image-1.png")
+assert.match(source, /Supported aspect values are 1:1, 2:3, 3:2, 3:4, 4:3/)
+assert.match(source, /Use 4:3 for ordinary illustrations placed between prose/)
+assert.match(source, /aspect: cleanAspect\(attrs\.aspect\) \|\| "4:3"/)
+assert.match(source, /character="active"/)
+assert.match(source, /Use character="none" for scenery, objects, establishing shots/)
+assert.match(source, /const NO_CHARACTER_NEGATIVE = "people, person, character/)
+assert.match(source, /const includeCharacter = !\["none", "off", "false", "no", "0"\]\.includes\(characterMode\)/)
+assert.match(source, /excludedLoras: visualStack\.map\(\(item\) => item\.name\)/)
+assert.match(source, /if \(excluded\.has\(name\.toLowerCase\(\)\)\) return/)
 
 const createdPreset = await request("add_swarm_preset", {
   connectionId: "swarm-1",

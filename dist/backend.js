@@ -15,6 +15,7 @@ const OUTPUT_FOLDER_LIMIT = 80;
 const TAGGED_IMAGE_JOB_LIMIT = 160;
 const HISTORY_PAGE_SIZE = 12;
 const DEFAULT_SWARMUI_URL = "http://localhost:7801";
+const NO_CHARACTER_NEGATIVE = "people, person, character, human, humanoid, crowd, girl, boy, woman, man";
 const sessions = new Map();
 const previewCache = new Map();
 const generationControllers = new Map();
@@ -24,10 +25,12 @@ When a newly generated illustration materially improves your reply, place this e
 <swarm-image
   request="generate"
   slot="short-stable-name"
-  aspect="4:5"
+  aspect="4:3"
+  character="active"
   alt="brief accessible description"
->scene-specific SwarmUI prompt</swarm-image>
-The request="generate" marker is required. Emit the tag only as an actual image request: never quote it, explain it, demonstrate it in visible prose, or emit an empty/partial opening tag. The tag body is an image prompt, not prose or an HTML shell. Describe the scene, action, expression, framing, lighting, and environment. Do not nest another <swarm-image> tag inside it. The active character's base image tags and the user's current Studio negative prompt are applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve every such directive exactly. Supported aspect values are 1:1, 2:3, 3:2, 4:5, 5:4, 9:16, and 16:9. Do not put Markdown fences around the tag.`;
+>
+scene-specific SwarmUI prompt</swarm-image>
+The request="generate" marker is required. Emit the tag only as an actual image request: never quote it, explain it, demonstrate it in visible prose, or emit an empty/partial opening tag. The tag body is an image prompt, not prose or an HTML shell. Describe the scene, action, expression, framing, lighting, and environment. Do not nest another <swarm-image> tag inside it. Omit character or use character="active" when the active character should appear. Use character="none" for scenery, objects, establishing shots, interfaces, or any illustration that should contain no people or characters; this suppresses the chat's character tags and bound visual LoRAs and adds a no-character negative guard. The active character's base image tags and the user's current Studio negative prompt are otherwise applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve every such directive exactly. Supported aspect values are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Use 4:3 for ordinary illustrations placed between prose and 3:4 when portrait framing materially helps. Reserve 9:16 or 16:9 for content explicitly presented as phone or widescreen media; use a different ratio only when the surrounding layout clearly calls for it. Do not put Markdown fences around the tag.`;
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -1024,7 +1027,7 @@ function cleanTaggedImageJob(value) {
         slot: cleanTagSlot(record.slot) || "image",
         prompt: asString(record.prompt).slice(0, 12_000),
         negativePrompt: asString(record.negativePrompt).slice(0, 12_000),
-        aspect: asString(record.aspect).slice(0, 20),
+        aspect: cleanAspect(record.aspect) || "4:3",
         alt: asString(record.alt).slice(0, 300),
         fullMatch: asString(record.fullMatch).slice(0, 24_000),
         status,
@@ -1251,6 +1254,8 @@ function cleanAspect(value) {
         "1:1",
         "2:3",
         "3:2",
+        "3:4",
+        "4:3",
         "4:5",
         "5:4",
         "9:16",
@@ -1302,11 +1307,12 @@ function applyStudioPresetLayer(scenePrompt, profile) {
     if (missing.length) prompt = `${missing.join(", ")}, ${prompt}`;
     return prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
 }
-async function applyCharacterLayer(chatId, scenePrompt, userId) {
+async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, userId) {
     if (!spindle.permissions.has("chats")) return {
         prompt: scenePrompt,
-        negativePrompt: "",
+        negativePrompt: includeCharacter ? "" : NO_CHARACTER_NEGATIVE,
         stack: [],
+        excludedLoras: [],
         characterId: "",
         characterName: ""
     };
@@ -1315,6 +1321,16 @@ async function applyCharacterLayer(chatId, scenePrompt, userId) {
     const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.type === "chat" && folder.binding.chatId === chatId && folder.binding.enabled);
     const visualStack = visualFolder?.binding?.stackPresetId ? (await loadStackPresets(userId)).find((preset)=>preset.id === visualFolder.binding?.stackPresetId)?.items || [] : [];
     if (!characterId || !spindle.permissions.has("characters")) {
+        if (!includeCharacter) {
+            return {
+                prompt: scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
+                negativePrompt: NO_CHARACTER_NEGATIVE,
+                stack: [],
+                excludedLoras: visualStack.map((item)=>item.name),
+                characterId,
+                characterName: visualFolder?.name || ""
+            };
+        }
         const visualTags = visualFolder?.binding?.positivePrompt.trim() || "";
         const prompt = [
             visualTags,
@@ -1324,11 +1340,22 @@ async function applyCharacterLayer(chatId, scenePrompt, userId) {
             prompt,
             negativePrompt: visualFolder?.binding?.negativePrompt || "",
             stack: visualStack,
+            excludedLoras: [],
             characterId,
             characterName: ""
         };
     }
     const character = await spindle.characters.get(characterId, userId);
+    if (!includeCharacter) {
+        return {
+            prompt: scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
+            negativePrompt: NO_CHARACTER_NEGATIVE,
+            stack: [],
+            excludedLoras: visualStack.map((item)=>item.name),
+            characterId,
+            characterName: asString(character?.name).trim()
+        };
+    }
     const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora);
     const baseTags = (visualFolder?.binding?.positivePrompt || await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags)).trim();
     let prompt = scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, baseTags).trim();
@@ -1338,6 +1365,7 @@ async function applyCharacterLayer(chatId, scenePrompt, userId) {
         prompt,
         negativePrompt: visualFolder?.binding?.negativePrompt || "",
         stack: visualStack,
+        excludedLoras: [],
         characterId,
         characterName: asString(character?.name).trim()
     };
@@ -1473,12 +1501,20 @@ async function runTaggedImageJob(job, useOriginalProfile, userId) {
             }
         };
         const parameters = asRecord(input.parameters);
-        applyAspectToParameters(parameters, job.aspect);
+        applyAspectToParameters(parameters, job.aspect || "4:3");
         removeTaggedPresetOverride(parameters);
         const originalTag = parseSwarmImageTags(job.fullMatch)[0];
         const originalScenePrompt = originalTag?.content.trim() || job.prompt;
         const presetPrompt = applyStudioPresetLayer(originalScenePrompt, profile);
-        const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, userId);
+        const characterMode = asString(originalTag?.attrs.character).trim().toLowerCase();
+        const includeCharacter = ![
+            "none",
+            "off",
+            "false",
+            "no",
+            "0"
+        ].includes(characterMode);
+        const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, userId);
         input.prompt = characterLayer.prompt;
         const profileNegative = asString(profileInput.negativePrompt).trim();
         const visualNegative = characterLayer.negativePrompt.trim();
@@ -1486,9 +1522,10 @@ async function runTaggedImageJob(job, useOriginalProfile, userId) {
             visualNegative,
             profileNegative
         ].filter(Boolean).join(", ") : profileNegative;
-        if (characterLayer.stack.length) {
+        if (characterLayer.stack.length || characterLayer.excludedLoras.length) {
             const existingNames = stringList(parameters.loras, 128);
             const existingWeights = Array.isArray(parameters.loraWeights) ? parameters.loraWeights.map(Number) : [];
+            const excluded = new Set(characterLayer.excludedLoras.map((name)=>name.toLowerCase()));
             const merged = new Map();
             for (const item of characterLayer.stack.filter((item)=>item.enabled !== false)){
                 merged.set(item.name.toLowerCase(), {
@@ -1497,6 +1534,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId) {
                 });
             }
             existingNames.forEach((name, index)=>{
+                if (excluded.has(name.toLowerCase())) return;
                 merged.set(name.toLowerCase(), {
                     name,
                     weight: Number.isFinite(existingWeights[index]) ? existingWeights[index] : 1
@@ -1633,7 +1671,7 @@ async function requestTaggedImageGeneration(payload, userId) {
             slot,
             prompt: scenePrompt,
             negativePrompt: "",
-            aspect: cleanAspect(attrs.aspect),
+            aspect: cleanAspect(attrs.aspect) || "4:3",
             alt: asString(attrs.alt).trim().slice(0, 300),
             fullMatch,
             status: "requested",

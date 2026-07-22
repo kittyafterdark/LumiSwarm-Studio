@@ -342,9 +342,11 @@ Example output:
 <swarm-image
   request="generate"
   slot="instagram-photo"
-  aspect="4:5"
+  aspect="4:3"
+  character="active"
   alt="A candid city-street photo"
->outside, city street, food stall, smiling</swarm-image>`
+>
+outside, city street, food stall, smiling</swarm-image>`
 
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1"
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1"
@@ -2038,6 +2040,8 @@ const STUDIO_V3_STYLES = `
   .ss-library-search .ss-input { width: 100%; height: 30px; padding-block: 4px; font-size: 9.5px; }
   .ss-library-selection-count { min-width: 72px; color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-library-selectbar { flex: 0 0 38px; min-height: 38px; display: flex; align-items: center; gap: 7px; padding: 5px 10px; border-bottom: 1px solid var(--lumiverse-border); background: color-mix(in srgb, var(--lumiverse-fill-subtle) 72%, transparent); }
+  .ss-library-select-page { min-height: 28px; padding: 4px 9px; font-size: 9px; }
+  .ss-library-select-page[hidden] { display: none; }
   .ss-library-selectbar .ss-library-selection-actions { margin-left: auto; border-left: 0; padding-left: 0; }
   .ss-library-visual-profile {
     flex: 0 0 auto;
@@ -3103,6 +3107,8 @@ const ASPECT_PRESETS: Record<string, { label: string; width: number; height: num
   "1:1": { label: "Square · 1:1", width: 1024, height: 1024 },
   "2:3": { label: "Portrait · 2:3", width: 832, height: 1216 },
   "3:2": { label: "Landscape · 3:2", width: 1216, height: 832 },
+  "3:4": { label: "Portrait · 3:4", width: 896, height: 1152 },
+  "4:3": { label: "Landscape · 4:3", width: 1152, height: 896 },
   "4:5": { label: "Portrait · 4:5", width: 896, height: 1152 },
   "5:4": { label: "Landscape · 5:4", width: 1152, height: 896 },
   "9:16": { label: "Tall · 9:16", width: 768, height: 1344 },
@@ -4123,6 +4129,7 @@ class StudioController {
   private libraryFolderId = ""
   private libraryPage = 0
   private readonly librarySelection = new Set<string>()
+  private librarySelectionAnchorId = ""
   private librarySearchOpen = false
   private librarySelectionMode = false
   private hydratedVisualChatId = ""
@@ -4734,9 +4741,11 @@ class StudioController {
 &lt;swarm-image
   request="generate"
   slot="instagram-photo"
-  aspect="4:5"
+  aspect="4:3"
+  character="active"
   alt="A candid city-street photo"
-&gt;outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
+&gt;
+outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
                   <button class="ss-button" data-action="copy-tag-protocol">Copy protocol example</button>
                   <details class="ss-css-guide ss-macro-guide">
                     <summary>Macro and preset guide</summary>
@@ -4752,7 +4761,7 @@ class StudioController {
                       <code>{{last_genned}}</code><span>URL of the latest completed Swarm Studio image.</span>
                     </div>
                   </details>
-                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Chat-bound folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Create or edit a visual binding inside Output Library. The required request marker protects visible prose; one-line and multiline tags both work.</p>
+                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Chat-bound folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Set <code>character="none"</code> for scenery or object shots that must skip the chat character layer. Create or edit a visual binding inside Output Library. The required request marker protects visible prose; one-line and multiline tags both work.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -5286,6 +5295,7 @@ are removed when CSS is applied.</pre>
             <div class="ss-library-selectbar">
               <button class="ss-icon-button ss-library-tool-icon" data-action="toggle-library-selection" title="Select outputs" aria-label="Select outputs">${CHECK_ICON}</button>
               <span class="ss-library-selection-count" data-role="library-selection-count">Select</span>
+              <button class="ss-button ss-library-select-page" data-action="select-library-page" data-role="library-select-page" hidden>Select page</button>
               <div class="ss-library-selection-actions" data-role="library-selection-actions" hidden>
                 <button class="ss-button" data-action="bulk-move-outputs">Move…</button>
                 <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs">Delete</button>
@@ -5446,14 +5456,6 @@ are removed when CSS is applied.</pre>
         }
         return
       }
-      const libraryToggle = target.closest<HTMLInputElement>('[data-role="library-output-check"]')
-      if (libraryToggle?.dataset.imageId) {
-        if (libraryToggle.checked) this.librarySelection.add(libraryToggle.dataset.imageId)
-        else this.librarySelection.delete(libraryToggle.dataset.imageId)
-        this.updateLibrarySelectionControls()
-        libraryToggle.closest<HTMLElement>(".ss-library-output")!.dataset.selected = String(libraryToggle.checked)
-        return
-      }
     })
 
     this.root.addEventListener("pointerdown", (event) => {
@@ -5479,6 +5481,17 @@ are removed when CSS is applied.</pre>
 
     this.root.addEventListener("click", (event) => {
       const target = event.target as HTMLElement
+      const libraryToggle = target.closest<HTMLInputElement>('[data-role="library-output-check"]')
+      if (libraryToggle?.dataset.imageId) {
+        this.setLibrarySelection(
+          libraryToggle.dataset.imageId,
+          libraryToggle.checked,
+          event.shiftKey,
+        )
+        this.renderOutputLibrary()
+        event.stopPropagation()
+        return
+      }
       if (!target.closest(".ss-config-wrap")) this.closeConfigPopover()
       if (!target.closest(".ss-history-card")) this.closeHistoryMenus()
       const button = target.closest<HTMLElement>("[data-action]")
@@ -5594,6 +5607,7 @@ are removed when CSS is applied.</pre>
       if (action === "library-folder") {
         this.libraryFolderId = button.dataset.folderId || ""
         this.libraryPage = 0
+        this.librarySelectionAnchorId = ""
         this.renderOutputLibrary()
       }
       if (action === "zoom-in") this.setInspectorZoom(this.imageScale + 0.25)
@@ -8133,6 +8147,7 @@ are removed when CSS is applied.</pre>
 
   private toggleLibrarySelectionMode(): void {
     this.librarySelectionMode = !this.librarySelectionMode
+    this.librarySelectionAnchorId = ""
     if (!this.librarySelectionMode) this.librarySelection.clear()
     this.renderOutputLibrary()
   }
@@ -8245,6 +8260,7 @@ are removed when CSS is applied.</pre>
     const filtered = this.filteredLibraryOutputs()
     const pages = Math.max(1, Math.ceil(filtered.length / this.currentLibraryPageSize()))
     this.libraryPage = clamp(this.libraryPage + delta, 0, pages - 1)
+    this.librarySelectionAnchorId = ""
     this.renderOutputLibrary()
   }
 
@@ -8268,7 +8284,27 @@ are removed when CSS is applied.</pre>
       if (allSelected) this.librarySelection.delete(id)
       else this.librarySelection.add(id)
     }
+    this.librarySelectionAnchorId = ids.at(-1) || ""
     this.renderOutputLibrary()
+  }
+
+  private setLibrarySelection(imageId: string, selected: boolean, extendRange: boolean): void {
+    const pageIds = this.libraryPageOutputs().map((output) => String(output.id))
+    const anchorIndex = pageIds.indexOf(this.librarySelectionAnchorId)
+    const currentIndex = pageIds.indexOf(imageId)
+    if (extendRange && anchorIndex >= 0 && currentIndex >= 0) {
+      const start = Math.min(anchorIndex, currentIndex)
+      const end = Math.max(anchorIndex, currentIndex)
+      for (const id of pageIds.slice(start, end + 1)) {
+        if (selected) this.librarySelection.add(id)
+        else this.librarySelection.delete(id)
+      }
+    } else if (selected) {
+      this.librarySelection.add(imageId)
+    } else {
+      this.librarySelection.delete(imageId)
+    }
+    this.librarySelectionAnchorId = imageId
   }
 
   private updateLibrarySelectionControls(): void {
@@ -8277,6 +8313,12 @@ are removed when CSS is applied.</pre>
     library.dataset.selectionMode = String(this.librarySelectionMode)
     this.get<HTMLElement>('[data-role="library-selection-count"]').textContent =
       this.librarySelectionMode ? `${selected} selected` : "Select"
+    const pageIds = this.libraryPageOutputs().map((output) => String(output.id))
+    const allPageSelected = pageIds.length > 0 && pageIds.every((id) => this.librarySelection.has(id))
+    const selectPage = this.get<HTMLButtonElement>('[data-role="library-select-page"]')
+    selectPage.hidden = !this.librarySelectionMode
+    selectPage.disabled = pageIds.length === 0
+    selectPage.textContent = allPageSelected ? "Clear page" : "Select page"
     this.get<HTMLElement>('[data-role="library-selection-actions"]').hidden = selected === 0
   }
 
@@ -8449,10 +8491,9 @@ are removed when CSS is applied.</pre>
       image.src = output.url
       image.alt = output.original_filename || "Generated output"
       open.appendChild(image)
-      open.addEventListener("click", () => {
+      open.addEventListener("click", (event) => {
         if (this.librarySelectionMode) {
-          if (this.librarySelection.has(imageId)) this.librarySelection.delete(imageId)
-          else this.librarySelection.add(imageId)
+          this.setLibrarySelection(imageId, !this.librarySelection.has(imageId), event.shiftKey)
           this.renderOutputLibrary()
           return
         }
@@ -8990,6 +9031,8 @@ are removed when CSS is applied.</pre>
     const reciprocal: Record<string, string> = {
       "2:3": "3:2",
       "3:2": "2:3",
+      "3:4": "4:3",
+      "4:3": "3:4",
       "4:5": "5:4",
       "5:4": "4:5",
       "9:16": "16:9",

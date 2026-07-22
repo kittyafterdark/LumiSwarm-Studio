@@ -22,13 +22,13 @@ It adds:
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
-- Opt-in `<swarm-image>` message tags with a required `request="generate"` marker that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, dedupe against the final generation event, and replace themselves with a permanent container-filling Lumiverse image
+- Opt-in `<swarm-image>` message tags with a required `request="generate"` marker and an optional `character="none"` scenery/object mode that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, dedupe against the final generation event, and replace themselves with a permanent container-filling Lumiverse image
 - Chat visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack can follow one conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile stack controls once when that chat opens, and file that chat's Studio outputs automatically
 - Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_tags}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Append to chat / Delete menus
-- A fullscreen searchable Lumiverse output library with an anchored `+ folder` control, horizontally scrolling folder strip, conditional selection actions, collapsible chat-visual profiles, and a sticky current-folder/search/pagination rail; pages hold 30 images on desktop and 15 on mobile
+- A fullscreen searchable Lumiverse output library with an anchored `+ folder` control, horizontally scrolling folder strip, contextual Select/Clear page, Shift-range selection, conditional batch actions, collapsible chat-visual profiles, and a sticky current-folder/search/pagination rail; pages hold 30 images on desktop and 15 on mobile
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
@@ -90,14 +90,15 @@ The tag body is passed to SwarmUI as scene prompt content. Native Swarm syntax i
 <swarm-image
   request="generate"
   slot="instagram-photo"
-  aspect="4:5"
+  aspect="4:3"
+  character="active"
   alt="A candid city-street photo"
 >
 outside, city street, food stall, smiling
 </swarm-image>
 ```
 
-Attributes may instead remain on one line. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request. The final-message handler retains compatibility with older tags that include a slot plus aspect or alt metadata.
+Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; 3:4 is available for portrait framing. The protocol asks models to reserve 9:16 and 16:9 for layouts explicitly presented as phone or widescreen media. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the chat visual positive and negative, removes that binding's LoRAs from the request, and adds a no-person/character negative guard while preserving unrelated Studio style LoRAs, presets, and generation controls. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request. The final-message handler retains compatibility with older tags that include a slot plus aspect or alt metadata.
 
 The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives; tagged jobs remove the duplicate raw preset field before submission. A literal `{{swarm_preset}}` in a tag resolves to the same directive list without adding it twice. Scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. An enabled chat-folder visual binding contributes its base positive, base negative, and saved LoRA stack to both manual and tagged generation. Native Character LoRA `base_tags` remain a fallback when a binding has no positive base; the separately bound native Character LoRA is never injected.
 
