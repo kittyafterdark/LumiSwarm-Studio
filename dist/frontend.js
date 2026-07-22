@@ -733,6 +733,39 @@ const STYLES = `
     object-fit: cover !important;
     object-position: center !important;
   }
+  figure[data-swarm-studio-image="true"] { position: relative; display: block; cursor: default; isolation: isolate; }
+  figure[data-swarm-studio-image="true"] > [data-swarm-studio-inline-action] {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #b994ff) 45%, var(--lumiverse-border, #35313f));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--lumiverse-fill, #111116) 88%, transparent);
+    color: var(--lumiverse-text, #f5f5f7);
+    box-shadow: 0 4px 18px rgba(0,0,0,.38);
+    backdrop-filter: blur(8px);
+    opacity: 0;
+    transform: translateY(-3px);
+    transition: opacity .14s ease, transform .14s ease, border-color .14s ease;
+    cursor: pointer;
+    user-select: none;
+  }
+  figure[data-swarm-studio-image="true"]:hover > [data-swarm-studio-inline-action],
+  figure[data-swarm-studio-image="true"]:focus-within > [data-swarm-studio-inline-action],
+  figure[data-swarm-studio-image="true"][data-state="generating"] > [data-swarm-studio-inline-action],
+  figure[data-swarm-studio-image="true"][data-state="queued"] > [data-swarm-studio-inline-action] { opacity: 1; transform: translateY(0); }
+  figure[data-swarm-studio-image="true"] > [data-swarm-studio-inline-action]:hover { border-color: var(--lumiverse-accent, #b994ff); }
+  figure[data-swarm-studio-image="true"][data-state="generating"] > [data-swarm-studio-inline-action],
+  figure[data-swarm-studio-image="true"][data-state="queued"] > [data-swarm-studio-inline-action] { animation: ss-inline-spin 1s linear infinite; }
+  @keyframes ss-inline-spin { to { rotate: 1turn; } }
+  @media (hover: none) {
+    figure[data-swarm-studio-image="true"] > [data-swarm-studio-inline-action] { opacity: .9; transform: none; }
+  }
   .ss-config-label { color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-config-theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .ss-config-theme {
@@ -5078,7 +5111,7 @@ are removed when CSS is applied.</pre>
             const libraryToggle = target.closest('[data-role="library-output-check"]');
             if (libraryToggle?.dataset.imageId) {
                 this.setLibrarySelection(libraryToggle.dataset.imageId, libraryToggle.checked, event.shiftKey);
-                this.renderOutputLibrary();
+                this.syncVisibleLibrarySelection();
                 event.stopPropagation();
                 return;
             }
@@ -7716,7 +7749,7 @@ are removed when CSS is applied.</pre>
             else this.librarySelection.add(id);
         }
         this.librarySelectionAnchorId = ids.at(-1) || "";
-        this.renderOutputLibrary();
+        this.syncVisibleLibrarySelection();
     }
     setLibrarySelection(imageId, selected, extendRange) {
         const pageIds = this.libraryPageOutputs().map((output)=>String(output.id));
@@ -7748,6 +7781,16 @@ are removed when CSS is applied.</pre>
         selectPage.disabled = pageIds.length === 0;
         selectPage.textContent = allPageSelected ? "Clear page" : "Select page";
         this.get('[data-role="library-selection-actions"]').hidden = selected === 0;
+    }
+    syncVisibleLibrarySelection() {
+        for (const check of this.root.querySelectorAll('[data-role="library-output-check"]')){
+            const imageId = check.dataset.imageId || "";
+            const selected = this.librarySelection.has(imageId);
+            check.checked = selected;
+            const card = check.closest(".ss-library-output");
+            if (card) card.dataset.selected = String(selected);
+        }
+        this.updateLibrarySelectionControls();
     }
     bulkMoveOutputs() {
         const imageIds = [
@@ -7920,7 +7963,7 @@ are removed when CSS is applied.</pre>
             open.addEventListener("click", (event)=>{
                 if (this.librarySelectionMode) {
                     this.setLibrarySelection(imageId, !this.librarySelection.has(imageId), event.shiftKey);
-                    this.renderOutputLibrary();
+                    this.syncVisibleLibrarySelection();
                     return;
                 }
                 this.setCurrentImage(this.outputToCurrentImage(output));
@@ -8472,6 +8515,31 @@ class TaggedImageController {
     tagPayloads = new Map();
     tagFingerprints = new Map();
     cleanups = new Map();
+    handleInlineClick = (event)=>{
+        const action = event.target?.closest('[data-swarm-studio-inline-action]');
+        if (!action) return;
+        const inline = this.inlineJobFromTarget(action);
+        if (!inline) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void this.showJobMenu(inline.job, event.clientX, event.clientY);
+    };
+    handleInlineContextMenu = (event)=>{
+        const inline = this.inlineJobFromTarget(event.target);
+        if (!inline) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void this.showJobMenu(inline.job, event.clientX, event.clientY);
+    };
+    handleInlineKeyDown = (event)=>{
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const action = event.target?.closest('[data-swarm-studio-inline-action]');
+        if (!action) return;
+        const inline = this.inlineJobFromTarget(action);
+        if (!inline) return;
+        event.preventDefault();
+        void this.showJobMenu(inline.job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
+    };
     constructor(ctx, behavior, openStudioWithPrompt, openLibrary){
         this.ctx = ctx;
         this.behavior = {
@@ -8479,6 +8547,9 @@ class TaggedImageController {
         };
         this.openStudioWithPrompt = openStudioWithPrompt;
         this.openLibrary = openLibrary;
+        document.addEventListener("click", this.handleInlineClick, true);
+        document.addEventListener("contextmenu", this.handleInlineContextMenu, true);
+        document.addEventListener("keydown", this.handleInlineKeyDown, true);
     }
     setBehavior(behavior) {
         this.behavior = {
@@ -8532,6 +8603,15 @@ class TaggedImageController {
         });
     }
     onMessage(payload) {
+        if (payload?.type === "tagged_image_jobs_result") {
+            const jobs = Array.isArray(payload.data) ? payload.data : [];
+            for (const job of jobs){
+                if (!job?.id || !job?.messageId) continue;
+                this.jobs.set(job.id, job);
+                if (!job.inserted && !this.inlineFigureForJob(job.id)) this.render(job);
+            }
+            return;
+        }
         if (payload?.type === "tagged_image_job") {
             const job = payload.data;
             if (!job?.id || !job?.messageId) return;
@@ -8546,12 +8626,22 @@ class TaggedImageController {
                 ...job
             };
             this.jobs.set(job.id, next);
-            if (next.status === "ready" && next.inserted) this.remove(next);
-            else this.render(next);
+            const inlineFigure = this.inlineFigureForJob(next.id);
+            if (inlineFigure) {
+                inlineFigure.dataset.state = next.inserted ? "ready" : next.status;
+                this.remove(next);
+            } else if (next.status === "ready" && next.inserted) {
+                this.remove(next);
+            } else {
+                this.render(next);
+            }
             return;
         }
     }
     destroy() {
+        document.removeEventListener("click", this.handleInlineClick, true);
+        document.removeEventListener("contextmenu", this.handleInlineContextMenu, true);
+        document.removeEventListener("keydown", this.handleInlineKeyDown, true);
         for (const cleanup of this.cleanups.values())cleanup();
         this.cleanups.clear();
         this.jobs.clear();
@@ -8563,6 +8653,42 @@ class TaggedImageController {
     }
     widgetId(job) {
         return `swarm-studio-image-${widgetKeyHash(this.lookupKey(job.chatId, job.messageId, job.slot))}`;
+    }
+    inlineFigureForJob(jobId) {
+        for (const figure of document.querySelectorAll('figure[data-swarm-studio-image="true"]')){
+            if (figure.dataset.swarmStudioJobId === jobId) return figure;
+        }
+        return null;
+    }
+    inlineJobFromTarget(target) {
+        const figure = target?.closest('figure[data-swarm-studio-image="true"][data-swarm-studio-job-id]');
+        const jobId = figure?.dataset.swarmStudioJobId || "";
+        if (!figure || !jobId) return null;
+        const known = this.jobs.get(jobId);
+        if (known) return {
+            figure,
+            job: known
+        };
+        return {
+            figure,
+            job: {
+                id: jobId,
+                key: "",
+                chatId: "",
+                messageId: "",
+                slot: figure.dataset.swarmStudioSlot || "image",
+                prompt: "",
+                negativePrompt: "",
+                aspect: "",
+                alt: figure.querySelector("img")?.alt || "Generated illustration",
+                status: "ready",
+                clientJobId: "",
+                imageId: "",
+                imageUrl: figure.querySelector("img")?.src || "",
+                inserted: true,
+                error: ""
+            }
+        };
     }
     remove(job) {
         const id = this.widgetId(job);
@@ -8635,15 +8761,18 @@ class TaggedImageController {
             return;
         }
         if (action !== "menu") return;
+        await this.showJobMenu(job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
+    }
+    async showJobMenu(job, x, y) {
         const result = await this.ctx.ui.showContextMenu({
             position: {
-                x: Math.round(window.innerWidth / 2),
-                y: Math.round(window.innerHeight / 2)
+                x: Math.max(8, Math.round(x)),
+                y: Math.max(8, Math.round(y))
             },
             items: [
                 {
                     key: "retry-current",
-                    label: job.status === "requested" ? "Generate with current Studio settings" : "Retry with current Studio settings"
+                    label: job.inserted ? "Regenerate with current Studio settings" : job.status === "requested" ? "Generate with current Studio settings" : "Retry with current Studio settings"
                 },
                 {
                     key: "retry-original",
@@ -8652,7 +8781,8 @@ class TaggedImageController {
                 },
                 {
                     key: "edit",
-                    label: "Edit prompt in Swarm Studio"
+                    label: "Edit prompt in Swarm Studio",
+                    disabled: !job.prompt && !this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot))
                 },
                 {
                     key: "divider",
@@ -8680,19 +8810,29 @@ class TaggedImageController {
     }
     retry(job, retryMode) {
         const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot));
-        if (!tag) return;
         job.status = "queued";
         job.error = "";
-        this.render(job);
+        const inlineFigure = this.inlineFigureForJob(job.id);
+        if (inlineFigure) inlineFigure.dataset.state = "queued";
+        else this.render(job);
+        if (tag) {
+            this.ctx.sendToBackend({
+                type: "tag_generate",
+                requestId: crypto.randomUUID(),
+                chatId: tag.chatId,
+                messageId: tag.messageId,
+                fullMatch: tag.fullMatch,
+                attrs: tag.attrs,
+                content: tag.content,
+                force: true,
+                retryMode
+            });
+            return;
+        }
         this.ctx.sendToBackend({
-            type: "tag_generate",
+            type: "retry_tagged_job",
             requestId: crypto.randomUUID(),
-            chatId: tag.chatId,
-            messageId: tag.messageId,
-            fullMatch: tag.fullMatch,
-            attrs: tag.attrs,
-            content: tag.content,
-            force: true,
+            jobId: job.id,
             retryMode
         });
     }
@@ -8877,6 +9017,10 @@ export function setup(ctx) {
         miniplayer?.onMessage(payload);
         activeStudio?.onMessage(payload);
         taggedImages?.onMessage(payload);
+    });
+    ctx.sendToBackend({
+        type: "list_tagged_jobs",
+        requestId: crypto.randomUUID()
     });
     const unsubscribeProgress = ctx.events.on("IMAGE_GEN_PROGRESS", (payload)=>{
         miniplayer?.onImageGenerationEvent("progress", payload);

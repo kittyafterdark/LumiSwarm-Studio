@@ -31,6 +31,7 @@ const taggedMessage = {
   >{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition></swarm-image></article>`,
   metadata: {},
 }
+const taggedMessages = [taggedMessage]
 
 globalThis.spindle = {
   registerMacro(definition) {
@@ -181,13 +182,15 @@ globalThis.spindle = {
     },
     async getMessages(chatId) {
       assert.equal(chatId, "chat-1")
-      return [taggedMessage]
+      return taggedMessages
     },
     async updateMessage(chatId, messageId, patch) {
       assert.equal(chatId, "chat-1")
-      assert.equal(messageId, "message-tag-1")
-      taggedMessage.content = patch.content
-      taggedMessage.metadata = patch.metadata
+      const target = taggedMessages.find((message) => message.id === messageId)
+      assert.ok(target)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      target.content = patch.content
+      target.metadata = patch.metadata
     },
   },
   images: {
@@ -731,6 +734,30 @@ await eventHandlers.get("GENERATION_ENDED")({
 assert.equal(taggedGenerationCount, 1, "streaming and GENERATION_ENDED delivery must dedupe")
 assert.match(source, /\(\?\:\(\?!<swarm-image\\b\)\[\\s\\S\]\)\*\?/)
 
+const multiTaggedMessage = {
+  id: "message-tag-multi",
+  role: "assistant",
+  content: `<article><swarm-image request="generate" slot="first" aspect="4:3" alt="First">{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition></swarm-image><p>Between.</p><swarm-image request="generate" slot="second" aspect="4:3" alt="Second">{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition></swarm-image></article>`,
+  metadata: {},
+}
+taggedMessages.push(multiTaggedMessage)
+const multiMatches = [...multiTaggedMessage.content.matchAll(/<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image>/gi)]
+assert.equal(multiMatches.length, 2)
+await Promise.all(multiMatches.map((match, index) => frontendHandler({
+  type: "tag_generate",
+  requestId: `tag-generate-multi-${index}`,
+  chatId: "chat-1",
+  messageId: multiTaggedMessage.id,
+  fullMatch: match[0],
+  attrs: { request: "generate", slot: index === 0 ? "first" : "second", aspect: "4:3", alt: index === 0 ? "First" : "Second" },
+  content: match[2],
+}, "user-1")))
+assert.equal(taggedGenerationCount, 3)
+assert.equal((multiTaggedMessage.content.match(/data-swarm-studio-image="true"/g) || []).length, 2)
+assert.equal((multiTaggedMessage.content.match(/data-swarm-studio-inline-action="true"/g) || []).length, 2)
+assert.doesNotMatch(multiTaggedMessage.content, /<swarm-image\b/i)
+assert.equal(multiTaggedMessage.metadata.swarm_studio_tagged_images.length, 2)
+
 const originalOutput = await request("download_swarm_output", {
   connectionId: "swarm-1",
   swarmPath: generated.data.record.swarmPath,
@@ -747,6 +774,13 @@ assert.match(source, /const NO_CHARACTER_NEGATIVE = "people, person, character/)
 assert.match(source, /const includeCharacter = !\["none", "off", "false", "no", "0"\]\.includes\(characterMode\)/)
 assert.match(source, /excludedLoras: visualStack\.map\(\(item\) => item\.name\)/)
 assert.match(source, /if \(excluded\.has\(name\.toLowerCase\(\)\)\) return/)
+assert.match(source, /const taggedMessageFinalizeLocks = new Map<string, Promise<void>>\(\)/)
+assert.match(source, /withTaggedMessageFinalizeLock\(lockKey/)
+assert.match(source, /replaceTaggedImagePlaceholder\(content, job, markup\)/)
+assert.match(source, /data-swarm-studio-image="true"/)
+assert.match(source, /data-swarm-studio-inline-action="true"/)
+assert.match(source, /case "list_tagged_jobs"/)
+assert.match(source, /case "retry_tagged_job"/)
 
 const createdPreset = await request("add_swarm_preset", {
   connectionId: "swarm-1",

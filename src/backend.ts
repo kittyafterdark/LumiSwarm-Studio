@@ -238,6 +238,7 @@ const generationControllers = new Map<string, {
   nativeStream: boolean
 }>()
 const runningTaggedJobs = new Set<string>()
+const taggedMessageFinalizeLocks = new Map<string, Promise<void>>()
 
 const SWARM_IMAGE_PROTOCOL_BASE = `SWARM STUDIO IMAGE REQUEST PROTOCOL
 When a newly generated illustration materially improves your reply, place this exact XML-like request where the finished image should appear. Attributes may be written on one line or separate lines:
@@ -1928,37 +1929,92 @@ function escapeHtmlAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+async function withTaggedMessageFinalizeLock<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = taggedMessageFinalizeLocks.get(key) || Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  const current = previous.catch(() => {}).then(() => gate)
+  taggedMessageFinalizeLocks.set(key, current)
+  await previous.catch(() => {})
+  try {
+    return await task()
+  } finally {
+    release()
+    if (taggedMessageFinalizeLocks.get(key) === current) taggedMessageFinalizeLocks.delete(key)
+  }
+}
+
+function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, markup: string): { content: string; replaced: boolean } {
+  if (job.fullMatch && content.includes(job.fullMatch)) {
+    return { content: content.replace(job.fullMatch, markup), replaced: true }
+  }
+  const tagPattern = /<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi
+  let match: RegExpExecArray | null
+  while ((match = tagPattern.exec(content))) {
+    if (cleanTagSlot(parseTagAttributes(match[1]).slot) !== job.slot) continue
+    return {
+      content: `${content.slice(0, match.index)}${markup}${content.slice(match.index + match[0].length)}`,
+      replaced: true,
+    }
+  }
+  const existingFigure = new RegExp(
+    `<figure\\b[^>]*data-swarm-studio-job-id="${escapeRegex(job.id)}"[^>]*>[\\s\\S]*?<\\/figure>`,
+    "i",
+  )
+  if (existingFigure.test(content)) {
+    return { content: content.replace(existingFigure, markup), replaced: true }
+  }
+  return { content, replaced: false }
+}
+
 async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Promise<boolean> {
   if (!job.imageUrl || !spindle.permissions.has("chat_mutation")) return false
-  const messages = await spindle.chat.getMessages(job.chatId)
-  const target = messages.find((message: any) => asString(message?.id) === job.messageId)
-  const content = asString(target?.content)
-  if (!target || !job.fullMatch || !content.includes(job.fullMatch)) return false
-  const alt = job.alt || `Generated illustration for ${job.slot}`
-  const markup = `<img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" data-swarm-studio-fit="cover" loading="lazy" style="display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center;">`
-  const metadata = asRecord(target.metadata)
-  const previous = Array.isArray(metadata.swarm_studio_tagged_images)
-    ? metadata.swarm_studio_tagged_images.filter((item: any) => asString(item?.jobId) !== job.id)
-    : []
-  await spindle.chat.updateMessage(job.chatId, job.messageId, {
-    content: content.replace(job.fullMatch, markup),
-    metadata: {
-      ...metadata,
-      swarm_studio_tagged_images: [...previous, {
-        jobId: job.id,
-        slot: job.slot,
-        prompt: job.prompt,
-        negativePrompt: job.negativePrompt,
-        imageId: job.imageId,
-        imageUrl: job.imageUrl,
-        createdAt: job.updatedAt,
-      }],
-    },
+  const lockKey = `${userId || "default"}:${job.chatId}:${job.messageId}`
+  return withTaggedMessageFinalizeLock(lockKey, async () => {
+    const messages = await spindle.chat.getMessages(job.chatId)
+    const target = messages.find((message: any) => asString(message?.id) === job.messageId)
+    const content = asString(target?.content)
+    if (!target) return false
+    const alt = job.alt || `Generated illustration for ${job.slot}`
+    const markup = `<figure data-swarm-studio-image="true" data-swarm-studio-job-id="${escapeHtmlAttribute(job.id)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" tabindex="0" style="position:relative;display:block;width:100%;height:100%;margin:0;"><img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" data-swarm-studio-fit="cover" loading="lazy" style="display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center;"><span data-swarm-studio-inline-action="true" tabindex="0" role="button" aria-label="Illustration actions">↻</span></figure>`
+    const replacement = replaceTaggedImagePlaceholder(content, job, markup)
+    if (!replacement.replaced) {
+      if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) {
+        job.inserted = true
+        await upsertTaggedImageJob(job, userId)
+        sendTaggedJobState(job, userId)
+        return true
+      }
+      return false
+    }
+    const metadata = asRecord(target.metadata)
+    const previous = Array.isArray(metadata.swarm_studio_tagged_images)
+      ? metadata.swarm_studio_tagged_images.filter((item: any) => asString(item?.jobId) !== job.id)
+      : []
+    await spindle.chat.updateMessage(job.chatId, job.messageId, {
+      content: replacement.content,
+      metadata: {
+        ...metadata,
+        swarm_studio_tagged_images: [...previous, {
+          jobId: job.id,
+          slot: job.slot,
+          prompt: job.prompt,
+          negativePrompt: job.negativePrompt,
+          imageId: job.imageId,
+          imageUrl: job.imageUrl,
+          createdAt: job.updatedAt,
+        }],
+      },
+    })
+    job.inserted = true
+    await upsertTaggedImageJob(job, userId)
+    sendTaggedJobState(job, userId)
+    return true
   })
-  job.inserted = true
-  await upsertTaggedImageJob(job, userId)
-  sendTaggedJobState(job, userId)
-  return true
 }
 
 async function runTaggedImageJob(job: TaggedImageJob, useOriginalProfile: boolean, userId?: string): Promise<void> {
@@ -2159,12 +2215,29 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
   return job
 }
 
+async function retryTaggedImageGeneration(jobId: string, retryMode: string, userId?: string): Promise<TaggedImageJob> {
+  const job = (await loadTaggedImageJobs(userId)).find((candidate) => candidate.id === jobId)
+  if (!job) throw new Error("That inline illustration job is no longer available.")
+  if (runningTaggedJobs.has(job.id) || job.status === "generating") {
+    sendTaggedJobState(job, userId)
+    return job
+  }
+  job.status = "queued"
+  job.error = ""
+  job.inserted = false
+  await upsertTaggedImageJob(job, userId)
+  sendTaggedJobState(job, userId)
+  await runTaggedImageJob(job, retryMode === "original", userId)
+  return job
+}
+
 function cleanGeneratedMarkupForPrompt(content: string): string {
   return content
     .replace(/<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image\s*>/gi, (_match, rawAttrs, prompt) => {
       const attrs = parseTagAttributes(rawAttrs)
       return `[Illustration requested${attrs.alt ? `: ${attrs.alt}` : ""}]`
     })
+    .replace(/<figure\b[^>]*data-swarm-studio-image="true"[^>]*>[\s\S]*?<img\b[^>]*alt="([^"]*)"[^>]*>[\s\S]*?<\/figure>/gi, (_match, alt) => `[Generated illustration: ${alt}]`)
     .replace(/<img\b[^>]*data-swarm-studio-slot="[^"]*"[^>]*alt="([^"]*)"[^>]*>/gi, (_match, alt) => `[Generated illustration: ${alt}]`)
     .replace(/<img\b[^>]*alt="([^"]*)"[^>]*data-swarm-studio-slot="[^"]*"[^>]*>/gi, (_match, alt) => `[Generated illustration: ${alt}]`)
 }
@@ -2391,6 +2464,22 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
       }
       case "tag_generate": {
         await requestTaggedImageGeneration(payload, userId)
+        return
+      }
+      case "list_tagged_jobs": {
+        spindle.sendToFrontend({
+          type: "tagged_image_jobs_result",
+          requestId,
+          data: (await loadTaggedImageJobs(userId)).map(taggedJobPublic),
+        }, userId)
+        return
+      }
+      case "retry_tagged_job": {
+        await retryTaggedImageGeneration(
+          asString(payload?.jobId).trim(),
+          asString(payload?.retryMode).trim(),
+          userId,
+        )
         return
       }
       case "load_connection": {
