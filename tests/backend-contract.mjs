@@ -1,4 +1,7 @@
 import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
+
+const source = await readFile(new URL("../src/backend.ts", import.meta.url), "utf8")
 
 let frontendHandler
 const sent = []
@@ -323,6 +326,9 @@ globalThis.spindle = {
       }
     }
     if (url.endsWith("/API/ListImages")) {
+      const body = JSON.parse(options.body)
+      assert.equal(body.sortBy, "Date")
+      assert.equal(body.sortReverse, false)
       return {
         status: 200,
         statusText: "OK",
@@ -493,6 +499,8 @@ assert.equal(generated.data.record.timing.prep, "0.22 sec")
 assert.equal(generated.data.record.timing.generation, "1.78 sec")
 assert.equal(generated.data.record.timing.source, "swarm")
 assert.equal(generated.data.record.swarmPath, "2026-07-19/image-1.png")
+assert.equal(generated.data.record.swarmPathVerified, true)
+assert.match(source, /const matched = parsed\.find[\s\S]*?if \(!matched\) return fallback/)
 assert.equal(generated.data.record.initImageId, "image-source")
 assert.equal(generated.data.record.initImageLabel, "source.png")
 assert.equal(generated.data.record.parameters.seed, 987654321)

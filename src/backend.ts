@@ -81,6 +81,7 @@ interface GenerationRecord {
     source: "swarm" | "measured"
   }
   swarmPath: string
+  swarmPathVerified: boolean
   initImageId: string
   initImageLabel: string
   createdAt: number
@@ -831,6 +832,7 @@ async function saveGenerationRecord(
     resolvedNegativePrompt: string
     presets: string[]
     swarmPath: string
+    swarmPathVerified: boolean
     resolvedSeed: number | null
   },
   userId?: string,
@@ -878,6 +880,7 @@ async function saveGenerationRecord(
       source: timing.source,
     },
     swarmPath: timing.swarmPath,
+    swarmPathVerified: timing.swarmPathVerified,
     initImageId: asString(hints.initImageId),
     initImageLabel: asString(hints.initImageLabel),
     createdAt: Date.now(),
@@ -949,6 +952,7 @@ async function loadLatestSwarmGenerationMetadata(
   resolvedNegativePrompt: string
   presets: string[]
   swarmPath: string
+  swarmPathVerified: boolean
   resolvedSeed: number | null
 }> {
   const inputParameters = asRecord(input.parameters)
@@ -961,6 +965,7 @@ async function loadLatestSwarmGenerationMetadata(
     resolvedNegativePrompt: asString(input.negativePrompt),
     presets: [] as string[],
     swarmPath: "",
+    swarmPathVerified: false,
     resolvedSeed: metadataNumber(inputParameters, "seed"),
   }
   if (!spindle.permissions.has("cors_proxy")) return fallback
@@ -975,7 +980,9 @@ async function loadLatestSwarmGenerationMetadata(
         path: "",
         depth: 5,
         sortBy: "Date",
-        sortReverse: true,
+        // Swarm's Date order is newest-first by default. Reversing it selects
+        // the oldest matching image and can attach the wrong output path.
+        sortReverse: false,
       },
       token,
       "generation metadata request",
@@ -997,7 +1004,11 @@ async function loadLatestSwarmGenerationMetadata(
         metadataString(params, "prompt"),
         metadataString(extra, "original_prompt", "originalprompt"),
       ].some((prompt) => requestedPrompt && prompt === requestedPrompt)
-    }) || parsed[0]
+    })
+    // Never borrow metadata or a file path from a merely recent image. The
+    // prompt must identify this generation; otherwise the selected Lumiverse
+    // image is safer than returning another job's PNG.
+    if (!matched) return fallback
 
     const params = asRecord(matched.metadata.sui_image_params)
     const extra = asRecord(matched.metadata.sui_extra_data)
@@ -1023,6 +1034,7 @@ async function loadLatestSwarmGenerationMetadata(
         || fallback.resolvedNegativePrompt,
       presets,
       swarmPath: asString(matched.file.src),
+      swarmPathVerified: Boolean(asString(matched.file.src)),
       resolvedSeed: metadataNumber(params, "seed") ?? fallback.resolvedSeed,
     }
   } catch (error) {

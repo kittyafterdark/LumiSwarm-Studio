@@ -545,6 +545,7 @@ async function saveGenerationRecord(result, input, hints, timing, userId) {
             source: timing.source
         },
         swarmPath: timing.swarmPath,
+        swarmPathVerified: timing.swarmPathVerified,
         initImageId: asString(hints.initImageId),
         initImageLabel: asString(hints.initImageLabel),
         createdAt: Date.now()
@@ -604,6 +605,7 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
         resolvedNegativePrompt: asString(input.negativePrompt),
         presets: [],
         swarmPath: "",
+        swarmPathVerified: false,
         resolvedSeed: metadataNumber(inputParameters, "seed")
     };
     if (!spindle.permissions.has("cors_proxy")) return fallback;
@@ -615,7 +617,7 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
             path: "",
             depth: 5,
             sortBy: "Date",
-            sortReverse: true
+            sortReverse: false
         }, token, "generation metadata request");
         const files = Array.isArray(listing.files) ? listing.files.slice(0, 24) : [];
         const parsed = files.flatMap((raw)=>{
@@ -638,7 +640,8 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
                 metadataString(params, "prompt"),
                 metadataString(extra, "original_prompt", "originalprompt")
             ].some((prompt)=>requestedPrompt && prompt === requestedPrompt);
-        }) || parsed[0];
+        });
+        if (!matched) return fallback;
         const params = asRecord(matched.metadata.sui_image_params);
         const extra = asRecord(matched.metadata.sui_extra_data);
         const presetValue = extra.presets_used ?? extra.presetsused;
@@ -652,6 +655,7 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
             resolvedNegativePrompt: metadataString(params, "negativeprompt", "negative_prompt") || metadataString(params, "original_negativeprompt", "original_negative_prompt", "originalnegativeprompt") || metadataString(extra, "original_negative_prompt", "originalnegativeprompt") || fallback.resolvedNegativePrompt,
             presets,
             swarmPath: asString(matched.file.src),
+            swarmPathVerified: Boolean(asString(matched.file.src)),
             resolvedSeed: metadataNumber(params, "seed") ?? fallback.resolvedSeed
         };
     } catch (error) {

@@ -28,7 +28,7 @@ It adds:
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
-- A draggable Lumiverse float player with collapsed, compact, and maximized **Quick create** layouts; it survives closing Studio, generates from editable lightweight prompts, follows live previews and step progress, can append the latest output to chat, and can interrupt directly
+- A draggable two-state Lumiverse float player: a square image orb and a full **Quick create** panel. It survives closing Studio, generates from editable lightweight prompts, follows live previews and step progress, can append the latest output to chat, and can interrupt directly
 - Shared float-player/Studio output and draft state, so Quick create inherits the last model, dimensions, sampler, scheduler, presets, LoRAs, workflow, init image, and overrides—and the full Studio restores them when it reopens
 - The drawer’s picture-frame wall emblem reused consistently in the float player, Studio header, drawer registration, and chat input action
 
@@ -122,7 +122,10 @@ Each selected Swarm preset has an **Apply** action. It copies the preset's known
 values into the editable Studio controls, moves any LoRA filename/weight pairs
 into the visual stack, preserves unknown values as raw overrides, and removes
 the applied preset from the outgoing preset list so LoRA weights cannot be sent
-twice.
+twice. Preset and imported-stack filenames are reconciled against installed
+LoRAs by normalized full path, extensionless path, basename, and extensionless
+basename. A weak basename match is used only when it resolves to one installed
+model, so local metadata is inherited without guessing across duplicates.
 
 For newly generated images, Swarm Studio looks up SwarmUI's saved image
 metadata to display preparation time, generation time, preset names, and the
@@ -182,9 +185,10 @@ asset. Deleting a folder leaves its images intact. **Delete from Lumiverse**
 deletes the actual owned image and removes its Swarm Studio metadata and folder
 assignment. When Swarm exposes the generated file path in image metadata, the
 inspector displays it below the recorded LoRA stack as a read-only saved-path
-reference. **Download** then fetches that original Swarm file instead of the
-Lumiverse display derivative, preserving embedded PNG metadata. Older outputs
-without a saved Swarm path fall back to the normal Lumiverse image URL.
+reference. **Download** fetches that original Swarm file only when the path was
+verified for the selected generation, preserving embedded PNG metadata. Older
+or unverified outputs fall back to the selected Lumiverse image URL rather than
+risk returning a different file from Swarm's output folder.
 
 **Append to chat** verifies the selected image is owned by this extension and
 then uses Lumiverse's scoped chat-mutation API to add it to the active chat as
@@ -212,8 +216,8 @@ composition. Its dot field, broken corner ornaments, picture-frame glyph, and
 sparkle are static CSS or inline SVG, with no animated or fetched assets.
 Metadata refresh and the optional encrypted `swarm_token` live in this same
 opaque gear panel. Completion toasts are off by default and can be opted into
-from its Behavior section, which also chooses whether a desktop floating-widget
-tap opens Studio or Quick Create.
+from its Behavior section. That section also enables or disables the floating
+widget and independently opts mobile into the full Quick Create panel.
 
 ## Live generation previews and interruption
 
@@ -238,11 +242,11 @@ Then rebuild/restart Lumiverse normally. Do not apply the patch when the native
 Spindle stream hook is already present.
 
 While a generation is active, the Lumiverse float player remains visible even
-if the Studio modal is closed. Its compact layout shows the latest streamed
-preview, step-aware progress, and current workflow/model status. Maximize it for
+if the Studio modal is closed. Its square image state shows the latest streamed
+preview; expanding it reveals step-aware progress, workflow/model status, and
 **Quick create**. After Studio has been opened, Quick create inherits its full
 in-memory draft—including the connection, model, size, seed, sampler, scheduler,
-presets, LoRAs, workflow inputs, init image, and raw overrides—while its compact
+presets, LoRAs, workflow inputs, init image, and raw overrides—while its lightweight
 positive and negative fields replace only the prompt text. Before a Studio draft
 exists, it uses Lumiverse's default SwarmUI connection defaults. The stop control
 targets the active client job; clicking the preview reopens Studio with the same
@@ -251,11 +255,12 @@ locally, while generation state and draft data stay in memory only for the
 current Lumiverse session.
 On mobile, the extension mounts its own app-overlay miniplayer so the collapsed
 widget remains a complete 64 × 64 square instead of being clipped by the host's
-native 40 × 40 float-widget cap. Its image/title area is draggable and its
-collapsed preview reopens Studio. If app-overlay permission is unavailable,
+native 40 × 40 float-widget cap. Mobile Quick Create is opt-in; otherwise the
+widget stays in its square image state. If app-overlay permission is unavailable,
 Studio falls back to Lumiverse's float widget. Interactive Quick Create controls
 reserve pointer focus from the drag surface. Desktop collapsed mode remains
-56 × 56. Right-clicking the collapsed preview also reopens Studio.
+56 × 56. Right-click or long-press either state for **Expand Quick Create**,
+**Open Swarm Studio**, **Open Library**, and **Hide widget** actions.
 
 After every successful generation, `{{last_genned}}` resolves to the latest
 Lumiverse-owned output URL. This is intended for image URLs in HTML artifacts,

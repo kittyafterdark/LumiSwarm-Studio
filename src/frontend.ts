@@ -12,7 +12,8 @@ interface StudioAppearance {
 
 interface StudioBehavior {
   completionToast: boolean
-  widgetTap: "studio" | "quick"
+  widgetEnabled: boolean
+  mobileQuickCreate: boolean
 }
 
 interface LoraMetadata {
@@ -89,6 +90,7 @@ interface GenerationDetails {
     source: "swarm" | "measured"
   }
   swarmPath?: string
+  swarmPathVerified?: boolean
   initImageId?: string
   initImageLabel?: string
   createdAt: number
@@ -297,7 +299,7 @@ const THEME_STORAGE_KEY = "swarm-studio-theme-v1"
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1"
 const MINIPLAYER_STORAGE_KEY = "swarm-studio-miniplayer-v1"
 const MINIPLAYER_POSITION_STORAGE_KEY = "swarm-studio-miniplayer-position-v1"
-const BEHAVIOR_STORAGE_KEY = "swarm-studio-behavior-v2"
+const BEHAVIOR_STORAGE_KEY = "swarm-studio-behavior-v3"
 const WORKFLOW_CORE_PARAMETERS = new Set([
   "prompt",
   "negativeprompt",
@@ -2277,7 +2279,7 @@ const STUDIO_V3_STYLES = `
   .ss-workflow-modal-description { padding: 11px 15px; color: var(--lumiverse-text-muted); font-size: 10px; line-height: 1.5; }
   .ss-workflow-modal .ss-workflow-fields { min-height: 0; overflow-y: auto; padding: 4px 15px 16px; }
   .ss-workflow-modal[data-role="save-preset-modal"],
-  .ss-workflow-modal[data-role="move-folder-modal"] { z-index: 2147483007; }
+  .ss-workflow-modal[data-role="move-folder-modal"] { z-index: 2147483200; }
   .ss-save-preset-fields { min-height: 0; display: grid; gap: 10px; overflow-y: auto; padding: 13px 15px 16px; }
   .ss-save-preset-basics { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; }
   .ss-save-param-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
@@ -2379,19 +2381,6 @@ const STUDIO_V3_STYLES = `
     cursor: pointer;
   }
   .ss-miniplayer[data-collapsed="true"] .ss-mini-preview { width: 100%; height: 100%; border: 0; }
-  .ss-mini-reopen {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    color: #fff;
-    background: rgba(0, 0, 0, .46);
-    opacity: 0;
-    transition: opacity .15s ease;
-  }
-  .ss-mini-reopen svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; }
-  .ss-miniplayer[data-collapsed="true"] .ss-mini-preview:hover .ss-mini-reopen,
-  .ss-miniplayer[data-collapsed="true"] .ss-mini-preview:focus-visible .ss-mini-reopen { opacity: 1; }
   .ss-mini-preview svg { width: 30px; height: 30px; fill: currentColor; stroke: none; }
   .ss-mini-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ss-mini-preview img[hidden] { display: none; }
@@ -2478,6 +2467,40 @@ const STUDIO_V3_STYLES = `
     cursor: pointer;
   }
   .ss-mini-generate:disabled { opacity: .48; cursor: not-allowed; }
+  .ss-mini-context-menu {
+    position: fixed;
+    z-index: 2147483300;
+    width: min(210px, calc(100vw - 16px));
+    display: grid;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 34%, var(--lumiverse-border));
+    border-radius: var(--ss-control-radius, 10px);
+    color: var(--lumiverse-text, #f5f3f7);
+    background: color-mix(in srgb, var(--lumiverse-fill, #151118) 97%, #000);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, .62);
+    pointer-events: auto;
+  }
+  .ss-mini-context-menu[hidden] { display: none; }
+  .ss-mini-context-action {
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 9px;
+    border: 0;
+    border-radius: calc(var(--ss-control-radius, 8px) - 2px);
+    color: inherit;
+    background: transparent;
+    font: 600 10px/1.2 Inter, ui-sans-serif, system-ui, sans-serif;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ss-mini-context-action:hover,
+  .ss-mini-context-action:focus-visible { outline: 0; background: color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 18%, transparent); }
+  .ss-mini-context-action:disabled { opacity: .38; cursor: not-allowed; }
+  .ss-mini-context-action svg { width: 14px; height: 14px; flex: 0 0 auto; fill: currentColor; }
+  .ss-mini-context-separator { height: 1px; margin: 2px 4px; background: var(--lumiverse-border); }
 
   @media (max-width: 720px) {
     .ss-miniplayer[data-mobile-orb="true"],
@@ -2498,8 +2521,6 @@ const STUDIO_V3_STYLES = `
     .ss-miniplayer[data-mobile-orb="true"] .ss-mini-actions,
     .ss-miniplayer[data-mobile-orb="true"] .ss-mini-quick { display: none; }
     .ss-miniplayer[data-mobile-orb="true"] .ss-mini-preview { width: 100%; height: 100%; border: 0; }
-    .ss-miniplayer[data-mobile-orb="true"] .ss-mini-reopen,
-    .ss-miniplayer[data-collapsed="true"] .ss-mini-reopen { opacity: .78; }
     .ss-workflow-field-grid { grid-template-columns: 1fr; }
     .ss-workflow-field[data-wide="true"] { grid-column: auto; }
     .ss-workflow-picker { grid-template-columns: minmax(0, 1fr) auto; }
@@ -2621,6 +2642,12 @@ function createOverlayMiniplayerWidget(ctx: FrontendContext): any | null {
       surface.style.height = `${height}px`
       place()
     },
+    setVisible(visible: boolean) {
+      surface.hidden = !visible
+    },
+    isVisible() {
+      return !surface.hidden
+    },
     destroy() {
       window.removeEventListener("resize", onResize)
       mount.destroy()
@@ -2657,7 +2684,7 @@ function defaultStudioAppearance(): StudioAppearance {
 }
 
 function defaultStudioBehavior(): StudioBehavior {
-  return { completionToast: false, widgetTap: "studio" }
+  return { completionToast: false, widgetEnabled: true, mobileQuickCreate: false }
 }
 
 function storedStudioBehavior(): StudioBehavior {
@@ -2665,7 +2692,8 @@ function storedStudioBehavior(): StudioBehavior {
     const parsed = JSON.parse(window.localStorage.getItem(BEHAVIOR_STORAGE_KEY) || "{}")
     return {
       completionToast: parsed?.completionToast === true,
-      widgetTap: parsed?.widgetTap === "quick" ? "quick" : "studio",
+      widgetEnabled: parsed?.widgetEnabled !== false,
+      mobileQuickCreate: parsed?.mobileQuickCreate === true,
     }
   } catch {
     return defaultStudioBehavior()
@@ -3058,10 +3086,21 @@ class MiniPlayerController {
   private readonly widget: any
   private readonly root: HTMLElement
   private readonly openStudio: () => void
+  private readonly openLibrary: () => void
   private readonly getStudioDraft: () => StudioDraft | null
+  private readonly onBehaviorChange: (behavior: StudioBehavior) => void
   private behavior: StudioBehavior
   private collapsed = false
-  private expanded = false
+  private expanded = true
+  private longPressTimer: number | null = null
+  private suppressNextClick = false
+  private readonly onDocumentPointerDown = (event: PointerEvent) => {
+    const menu = this.root.querySelector<HTMLElement>('[data-role="mini-context-menu"]')
+    if (menu && !menu.hidden && !menu.contains(event.target as Node)) this.closeContextMenu()
+  }
+  private readonly onDocumentKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") this.closeContextMenu()
+  }
   private quickConnection: any | null = null
   private quickConnections: any[] = []
   private quickCanAppend = false
@@ -3084,8 +3123,10 @@ class MiniPlayerController {
     ctx: FrontendContext,
     widget: any,
     openStudio: () => void,
+    openLibrary: () => void,
     getStudioDraft: () => StudioDraft | null,
     behavior: StudioBehavior,
+    onBehaviorChange: (behavior: StudioBehavior) => void,
   ) {
     this.ctx = ctx
     this.widget = widget
@@ -3093,23 +3134,24 @@ class MiniPlayerController {
     this.root.style.width = "100%"
     this.root.style.height = "100%"
     this.openStudio = openStudio
+    this.openLibrary = openLibrary
     this.getStudioDraft = getStudioDraft
+    this.onBehaviorChange = onBehaviorChange
     this.behavior = { ...behavior }
     try {
       const stored = JSON.parse(window.localStorage.getItem(MINIPLAYER_STORAGE_KEY) || "{}")
-      this.collapsed = stored.collapsed === true
-      this.expanded = !this.collapsed && stored.expanded === true
+      this.collapsed = stored.collapsed === true || this.isMobileViewport()
+      this.expanded = !this.collapsed
     } catch {
-      this.collapsed = false
-      this.expanded = false
+      this.collapsed = this.isMobileViewport()
+      this.expanded = !this.collapsed
     }
     this.root.innerHTML = `
-      <div class="ss-miniplayer" data-role="miniplayer" data-state="idle" data-collapsed="false" data-expanded="false" data-indeterminate="false">
+      <div class="ss-miniplayer" data-role="miniplayer" data-state="idle" data-collapsed="false" data-expanded="true" data-indeterminate="false">
         <button class="ss-mini-preview" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">
           <span data-role="mini-placeholder">${FRAME_WALL_ICON}</span>
           <img data-role="mini-image" alt="Latest Swarm Studio preview" hidden />
           <span class="ss-mini-live-dot" aria-hidden="true"></span>
-          <span class="ss-mini-reopen" aria-hidden="true">${EXPAND_ICON}</span>
         </button>
         <div class="ss-mini-copy">
           <div class="ss-mini-title"><span>Swarm Studio</span><span class="ss-mini-state" data-role="mini-state">Ready</span></div>
@@ -3120,8 +3162,8 @@ class MiniPlayerController {
           <button class="ss-mini-button" data-action="mini-interrupt" title="Interrupt generation" aria-label="Interrupt generation" hidden>■</button>
           <button class="ss-mini-button" data-action="mini-append" title="Append latest output to chat" aria-label="Append latest output to chat" disabled>${APPEND_CHAT_ICON}</button>
           <button class="ss-mini-button" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">↗</button>
-          <button class="ss-mini-button" data-action="mini-expand" title="Open quick create" aria-label="Open quick create">⛶</button>
-          <button class="ss-mini-button" data-action="mini-collapse" title="Collapse miniplayer" aria-label="Collapse miniplayer">−</button>
+          <button class="ss-mini-button" data-action="mini-library" title="Open output library" aria-label="Open output library">${LIBRARY_ICON}</button>
+          <button class="ss-mini-button" data-action="mini-collapse" title="Minimize to image" aria-label="Minimize to image">−</button>
         </div>
         <div class="ss-mini-quick" data-role="mini-quick">
           <div class="ss-mini-quick-head"><strong>Quick create</strong><span>Scene tools will live here, too.</span></div>
@@ -3133,17 +3175,35 @@ class MiniPlayerController {
           </div>
         </div>
       </div>
+      <div class="ss-mini-context-menu" data-role="mini-context-menu" role="menu" hidden>
+        <button class="ss-mini-context-action" data-action="mini-menu-expand" role="menuitem">${EXPAND_ICON}<span>Expand Quick Create</span></button>
+        <button class="ss-mini-context-action" data-action="mini-menu-studio" role="menuitem">${FRAME_WALL_ICON}<span>Open Swarm Studio</span></button>
+        <button class="ss-mini-context-action" data-action="mini-menu-library" role="menuitem">${LIBRARY_ICON}<span>Open Library</span></button>
+        <span class="ss-mini-context-separator" aria-hidden="true"></span>
+        <button class="ss-mini-context-action" data-action="mini-menu-hide" role="menuitem"><span aria-hidden="true">×</span><span>Hide widget</span></button>
+      </div>
     `
     this.root.addEventListener("click", (event) => {
       const button = (event.target as HTMLElement).closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
+      if (this.suppressNextClick && action === "mini-open") {
+        this.suppressNextClick = false
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
+      this.suppressNextClick = false
       if (action === "mini-open") this.activateWidget()
       if (action === "mini-interrupt") this.interrupt()
       if (action === "mini-append") this.appendLatestToChat()
-      if (action === "mini-collapse") this.setCollapsed(!this.collapsed)
-      if (action === "mini-expand") this.setExpanded(!this.expanded)
+      if (action === "mini-library" || action === "mini-menu-library") this.openLibrary()
+      if (action === "mini-collapse") this.setCollapsed(true)
+      if (action === "mini-menu-expand") this.setCollapsed(false)
+      if (action === "mini-menu-studio") this.openStudio()
+      if (action === "mini-menu-hide") this.onBehaviorChange({ ...this.behavior, widgetEnabled: false })
       if (action === "mini-generate") this.quickGenerate()
+      if (action?.startsWith("mini-menu-")) this.closeContextMenu()
     })
     this.root.addEventListener("pointerdown", (event) => {
       const target = event.target as HTMLElement
@@ -3153,15 +3213,20 @@ class MiniPlayerController {
         // fields can focus and buttons do not start a widget drag.
         event.stopPropagation()
       }
+      if (event.button === 0 && target.closest('[data-action="mini-open"]')) {
+        this.scheduleLongPress(event)
+      }
     })
     this.root.addEventListener("contextmenu", (event) => {
-      if (!(this.collapsed || this.isMobileOrb()) || !(event.target as HTMLElement).closest('[data-action="mini-open"]')) return
+      if ((event.target as HTMLElement).closest("input, textarea, select")) return
       event.preventDefault()
       event.stopPropagation()
-      this.openStudio()
+      this.showContextMenu(event.clientX, event.clientY)
     })
+    document.addEventListener("pointerdown", this.onDocumentPointerDown)
+    document.addEventListener("keydown", this.onDocumentKeyDown)
     this.setCollapsed(this.collapsed)
-    if (this.expanded) this.setExpanded(true)
+    this.setBehavior(this.behavior)
     this.render()
   }
 
@@ -3171,6 +3236,9 @@ class MiniPlayerController {
 
   setBehavior(behavior: StudioBehavior): void {
     this.behavior = { ...behavior }
+    if (!this.behavior.mobileQuickCreate && this.isMobileViewport() && !this.collapsed) this.setCollapsed(true)
+    if (typeof this.widget.setVisible === "function") this.widget.setVisible(this.behavior.widgetEnabled)
+    else this.root.hidden = !this.behavior.widgetEnabled
     this.render()
   }
 
@@ -3205,7 +3273,6 @@ class MiniPlayerController {
       totalSteps: 0,
       status: label,
     }
-    if (this.collapsed) this.setCollapsed(false)
     this.render()
   }
 
@@ -3359,6 +3426,9 @@ class MiniPlayerController {
   }
 
   destroy(): void {
+    this.cancelLongPress()
+    document.removeEventListener("pointerdown", this.onDocumentPointerDown)
+    document.removeEventListener("keydown", this.onDocumentKeyDown)
     this.widget.destroy()
   }
 
@@ -3374,16 +3444,77 @@ class MiniPlayerController {
     this.render()
   }
 
-  private isMobileOrb(): boolean {
+  private isMobileViewport(): boolean {
     return window.matchMedia("(max-width: 720px)").matches
   }
 
+  private isMobileOrb(): boolean {
+    return this.isMobileViewport() && (this.collapsed || !this.behavior.mobileQuickCreate)
+  }
+
   private activateWidget(): void {
-    if (this.isMobileOrb() || this.behavior.widgetTap === "studio") {
-      this.openStudio()
-      return
+    this.openStudio()
+  }
+
+  private cancelLongPress(): void {
+    if (this.longPressTimer !== null) {
+      window.clearTimeout(this.longPressTimer)
+      this.longPressTimer = null
     }
-    this.setExpanded(true)
+  }
+
+  private scheduleLongPress(event: PointerEvent): void {
+    this.cancelLongPress()
+    const startX = event.clientX
+    const startY = event.clientY
+    const pointerId = event.pointerId
+    const cancel = () => {
+      this.cancelLongPress()
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", finish)
+      window.removeEventListener("pointercancel", finish)
+    }
+    const move = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return
+      if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 9) cancel()
+    }
+    const finish = (finishEvent: PointerEvent) => {
+      if (finishEvent.pointerId === pointerId) cancel()
+    }
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", finish)
+    window.addEventListener("pointercancel", finish)
+    this.longPressTimer = window.setTimeout(() => {
+      this.longPressTimer = null
+      this.suppressNextClick = true
+      this.showContextMenu(startX, startY)
+    }, 560)
+  }
+
+  private showContextMenu(clientX: number, clientY: number): void {
+    const menu = this.root.querySelector<HTMLElement>('[data-role="mini-context-menu"]')
+    if (!menu) return
+    const expand = menu.querySelector<HTMLButtonElement>('[data-action="mini-menu-expand"]')
+    if (expand) {
+      const blockedOnMobile = this.isMobileViewport() && !this.behavior.mobileQuickCreate
+      expand.hidden = !this.collapsed
+      expand.disabled = blockedOnMobile
+      expand.title = blockedOnMobile ? "Enable Quick Create on mobile in Studio settings" : ""
+    }
+    menu.hidden = false
+    menu.style.left = "8px"
+    menu.style.top = "8px"
+    const bounds = menu.getBoundingClientRect()
+    const left = clamp(clientX, 8, Math.max(8, window.innerWidth - bounds.width - 8))
+    const top = clamp(clientY, 8, Math.max(8, window.innerHeight - bounds.height - 8))
+    menu.style.left = `${Math.round(left)}px`
+    menu.style.top = `${Math.round(top)}px`
+    menu.querySelector<HTMLButtonElement>("button:not([hidden]):not(:disabled)")?.focus()
+  }
+
+  private closeContextMenu(): void {
+    const menu = this.root.querySelector<HTMLElement>('[data-role="mini-context-menu"]')
+    if (menu) menu.hidden = true
   }
 
   private appendLatestToChat(): void {
@@ -3486,10 +3617,11 @@ class MiniPlayerController {
   }
 
   private setCollapsed(value: boolean): void {
+    if (!value && this.isMobileViewport() && !this.behavior.mobileQuickCreate) return
     this.collapsed = value
-    if (value) this.expanded = false
+    this.expanded = !value
     try {
-      window.localStorage.setItem(MINIPLAYER_STORAGE_KEY, JSON.stringify({ collapsed: value, expanded: this.expanded }))
+      window.localStorage.setItem(MINIPLAYER_STORAGE_KEY, JSON.stringify({ collapsed: value }))
     } catch {
       // The active session can still use the chosen miniplayer size.
     }
@@ -3501,65 +3633,23 @@ class MiniPlayerController {
     this.resizeWidget()
     const toggle = this.root.querySelector<HTMLButtonElement>('[data-action="mini-collapse"]')
     if (toggle) {
-      toggle.textContent = value ? "+" : "−"
-      toggle.title = value ? "Expand miniplayer" : "Collapse miniplayer"
+      toggle.textContent = "−"
+      toggle.title = "Minimize to image"
       toggle.setAttribute("aria-label", toggle.title)
     }
-    if (!this.expanded) {
-      const expand = this.root.querySelector<HTMLButtonElement>('[data-action="mini-expand"]')
-      if (expand) {
-        expand.textContent = "⛶"
-        expand.title = "Open quick create"
-        expand.setAttribute("aria-label", expand.title)
-      }
-    }
-  }
-
-  private setExpanded(value: boolean): void {
-    if (value && this.isMobileOrb()) {
-      this.openStudio()
-      return
-    }
-    this.expanded = value
-    if (value) this.collapsed = false
-    if (value) {
+    if (!value) {
       const liveDraft = this.getStudioDraft()
       if (liveDraft) this.captureDraft(liveDraft)
     }
-    try {
-      window.localStorage.setItem(MINIPLAYER_STORAGE_KEY, JSON.stringify({ collapsed: this.collapsed, expanded: value }))
-    } catch {
-      // The active session can still use the chosen miniplayer size.
-    }
-    const mini = this.root.querySelector<HTMLElement>('[data-role="miniplayer"]')
-    if (mini) {
-      mini.dataset.collapsed = String(this.collapsed)
-      mini.dataset.expanded = String(value)
-    }
-    const toggle = this.root.querySelector<HTMLButtonElement>('[data-action="mini-expand"]')
-    if (toggle) {
-      toggle.textContent = value ? "▣" : "⛶"
-      toggle.title = value ? "Return to compact player" : "Open quick create"
-      toggle.setAttribute("aria-label", toggle.title)
-    }
-    this.resizeWidget()
   }
 
   private resizeWidget(): void {
-    if (this.isMobileOrb()) {
-      this.widget.setSize(64, 64)
-      return
-    }
     if (this.collapsed) {
-      const size = window.innerWidth <= 600 ? 40 : 56
+      const size = this.isMobileViewport() ? 64 : 56
       this.widget.setSize(size, size)
       return
     }
-    if (this.expanded) {
-      this.widget.setSize(Math.min(430, window.innerWidth - 24), window.innerWidth <= 720 ? 304 : 270)
-      return
-    }
-    this.widget.setSize(window.innerWidth <= 720 ? Math.min(318, window.innerWidth - 24) : 318, window.innerWidth <= 720 ? 72 : 94)
+    this.widget.setSize(Math.min(430, window.innerWidth - 24), this.isMobileViewport() ? 304 : 270)
   }
 
   private render(): void {
@@ -3803,8 +3893,10 @@ class StudioController {
     this.behavior = { ...behavior }
     const toast = this.root.querySelector<HTMLInputElement>('[data-role="completion-toast"]')
     if (toast) toast.checked = this.behavior.completionToast
-    const widgetTap = this.root.querySelector<HTMLSelectElement>('[data-role="widget-tap"]')
-    if (widgetTap) widgetTap.value = this.behavior.widgetTap
+    const widgetEnabled = this.root.querySelector<HTMLInputElement>('[data-role="widget-enabled"]')
+    if (widgetEnabled) widgetEnabled.checked = this.behavior.widgetEnabled
+    const mobileQuickCreate = this.root.querySelector<HTMLInputElement>('[data-role="mobile-quick-create"]')
+    if (mobileQuickCreate) mobileQuickCreate.checked = this.behavior.mobileQuickCreate
   }
 
   exportDraft(): StudioDraft | null {
@@ -4136,8 +4228,9 @@ class StudioController {
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Behavior</strong><span>Notifications and floating widget</span></div>
                   <label class="ss-config-toggle"><input type="checkbox" data-role="completion-toast" ${this.behavior.completionToast ? "checked" : ""} /><span>Toast when a generation finishes</span></label>
-                  <label class="ss-field"><span class="ss-config-label">Floating widget tap</span><select class="ss-select" data-role="widget-tap"><option value="studio">Open Studio</option><option value="quick">Open Quick Create</option></select></label>
-                  <p class="ss-muted ss-tiny">The Studio overlay keeps a complete 64px mobile orb. Drag its image/title area to reposition it; tapping the collapsed preview reopens Studio.</p>
+                  <label class="ss-config-toggle"><input type="checkbox" data-role="widget-enabled" ${this.behavior.widgetEnabled ? "checked" : ""} /><span>Enable floating Studio widget</span></label>
+                  <label class="ss-config-toggle"><input type="checkbox" data-role="mobile-quick-create" ${this.behavior.mobileQuickCreate ? "checked" : ""} /><span>Enable Quick Create on mobile</span></label>
+                  <p class="ss-muted ss-tiny">Right-click or long-press the image for Quick Create, Studio, Library, and hide actions. Mobile stays a 64px image until Quick Create is explicitly enabled.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -4689,10 +4782,16 @@ are removed when CSS is applied.</pre>
         completionToast: (event.currentTarget as HTMLInputElement).checked,
       })
     })
-    this.get<HTMLSelectElement>('[data-role="widget-tap"]').addEventListener("change", (event) => {
+    this.get<HTMLInputElement>('[data-role="widget-enabled"]').addEventListener("change", (event) => {
       this.onBehaviorChange({
         ...this.behavior,
-        widgetTap: (event.currentTarget as HTMLSelectElement).value === "quick" ? "quick" : "studio",
+        widgetEnabled: (event.currentTarget as HTMLInputElement).checked,
+      })
+    })
+    this.get<HTMLInputElement>('[data-role="mobile-quick-create"]').addEventListener("change", (event) => {
+      this.onBehaviorChange({
+        ...this.behavior,
+        mobileQuickCreate: (event.currentTarget as HTMLInputElement).checked,
       })
     })
     this.get<HTMLSelectElement>('[data-role="lora-sort"]').addEventListener("change", () => this.renderLoras())
@@ -5756,16 +5855,18 @@ are removed when CSS is applied.</pre>
 
     const extracted = lorasFromSwarmPreset(preset.paramMap)
     for (const candidate of extracted) {
-      const key = this.normalizedLoraName(candidate.name)
-      const existing = this.state.stack.find((item) => this.normalizedLoraName(item.lora.name) === key)
+      const installed = this.installedLora(candidate.name)
+      const existing = this.state.stack.find((item) => this.sameLoraName(item.lora.name, candidate.name))
       if (existing) {
+        if (installed) existing.lora = installed
         existing.weight = candidate.weight
         existing.enabled = true
       } else {
-        const lora = this.state.loras.find((item) => this.normalizedLoraName(item.name) === key) || manualLora(candidate.name)
+        const lora = installed || manualLora(candidate.name)
         this.state.stack.push({ lora, weight: candidate.weight, enabled: true, useTrigger: false })
       }
     }
+    this.missingLoras = this.missingLoras.filter((item) => !this.installedLora(item.name))
 
     const handled = new Set([
       "prompt", "negativeprompt", "model", "width", "height", "steps", "cfgscale", "cfg", "seed",
@@ -6658,10 +6759,8 @@ are removed when CSS is applied.</pre>
     try {
       if (file.size > 2 * 1024 * 1024) throw new Error("Stack files must be 2 MB or smaller.")
       const imported = this.importedStackPayload(JSON.parse(await file.text()))
-      const localByName = new Map(this.state.loras.map((lora) => [this.normalizedLoraName(lora.name), lora]))
       this.state.stack = imported.items.map((item) => {
-        const lora = localByName.get(this.normalizedLoraName(item.name))
-          || manualLora(item.name, item.title, item.sourceUrl)
+        const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl)
         return {
           lora,
           weight: item.weight,
@@ -6669,7 +6768,7 @@ are removed when CSS is applied.</pre>
           useTrigger: Boolean(item.useTrigger && lora.triggerPhrase),
         }
       })
-      this.missingLoras = imported.items.filter((item) => !localByName.has(this.normalizedLoraName(item.name)))
+      this.missingLoras = imported.items.filter((item) => !this.installedLora(item.name))
       this.renderStack()
       this.renderLoras()
       this.setRunStatus(`Imported “${imported.name}” with ${imported.items.length} LoRA${imported.items.length === 1 ? "" : "s"}.`)
@@ -6680,12 +6779,52 @@ are removed when CSS is applied.</pre>
   }
 
   private normalizedLoraName(name: string): string {
-    return String(name || "").trim().replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase()
+    return String(name || "")
+      .trim()
+      .replace(/^<lora:/i, "")
+      .replace(/:[+-]?(?:\d+(?:\.\d*)?|\.\d+)>$/i, "")
+      .replace(/>$/, "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .toLowerCase()
+  }
+
+  private loraNameParts(name: string): { full: string; stem: string; base: string; baseStem: string } {
+    const full = this.normalizedLoraName(name)
+    const stem = full.replace(/\.(?:safetensors|ckpt|pt|pth|bin)$/i, "")
+    const base = full.split("/").pop() || full
+    const baseStem = base.replace(/\.(?:safetensors|ckpt|pt|pth|bin)$/i, "")
+    return { full, stem, base, baseStem }
+  }
+
+  private loraMatchScore(left: string, right: string): number {
+    const a = this.loraNameParts(left)
+    const b = this.loraNameParts(right)
+    if (!a.full || !b.full) return 0
+    if (a.full === b.full) return 100
+    if (a.stem === b.stem) return 80
+    if (a.base === b.base) return 60
+    if (a.baseStem === b.baseStem) return 40
+    return 0
+  }
+
+  private sameLoraName(left: string, right: string): boolean {
+    return this.loraMatchScore(left, right) > 0
   }
 
   private installedLora(name: string): LoraMetadata | null {
-    const normalized = this.normalizedLoraName(name)
-    return this.state.loras.find((item) => this.normalizedLoraName(item.name) === normalized) || null
+    let bestScore = 0
+    let best: LoraMetadata[] = []
+    for (const item of this.state.loras) {
+      const score = this.loraMatchScore(name, item.name)
+      if (score > bestScore) {
+        bestScore = score
+        best = [item]
+      } else if (score > 0 && score === bestScore) {
+        best.push(item)
+      }
+    }
+    return bestScore > 0 && best.length === 1 ? best[0] : null
   }
 
   private showMissingLoras(): void {
@@ -6882,7 +7021,7 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="inspector-loras"]').textContent = details?.loras?.length
       ? details.loras.map((lora) => `${lora.name} · ${lora.weight}`).join("\n")
       : "No LoRAs recorded."
-    const path = details?.swarmPath || ""
+    const path = details?.swarmPathVerified ? details.swarmPath || "" : ""
     this.get<HTMLElement>('[data-role="inspector-path"]').hidden = !path
     this.get<HTMLElement>('[data-role="inspector-path-value"]').textContent = path
     this.get<HTMLButtonElement>('[data-action="reuse-parameters"]').disabled = !details
@@ -7792,7 +7931,8 @@ are removed when CSS is applied.</pre>
 
   private downloadCurrent(): void {
     if (!this.state.currentImage) return
-    const swarmPath = this.state.currentImage.details?.swarmPath
+    const details = this.state.currentImage.details
+    const swarmPath = details?.swarmPathVerified ? details.swarmPath : ""
     if (swarmPath && this.state.connection?.id) {
       this.send("download_swarm_output", {
         connectionId: this.state.connection.id,
@@ -8010,8 +8150,10 @@ export function setup(ctx: FrontendContext): () => void {
         ctx,
         widget,
         () => openStudio("studio"),
+        () => openStudio("library"),
         () => activeStudio?.exportDraft() || null,
         behavior,
+        updateBehavior,
       )
       miniplayer.setAppearance(appearance)
     } catch {
