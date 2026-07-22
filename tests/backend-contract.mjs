@@ -703,6 +703,24 @@ const storedFoldersAfterTag = userFiles.get("output-folders.json")
 assert.equal(storedFoldersAfterTag[0].id, "character:char-1")
 assert.equal(storedFoldersAfterTag[0].name, "Lior")
 assert.deepEqual(storedFoldersAfterTag[0].imageIds, ["image-tag-1"])
+assert.equal(storedFoldersAfterTag[0].binding.type, "chat")
+assert.equal(storedFoldersAfterTag[0].binding.chatId, "chat-1")
+assert.equal(storedFoldersAfterTag[0].binding.characterId, "char-1")
+assert.equal(storedFoldersAfterTag[0].binding.positivePrompt, "1boy, black hair, red eyes")
+
+const visualFolders = await request("update_output_folder_profile", {
+  folderId: storedFoldersAfterTag[0].id,
+  profile: {
+    positivePrompt: "1boy, red eyes, black hair, signature coat",
+    negativePrompt: "wrong eye color",
+    stackPresetId: savedStack.data[0].id,
+    enabled: false,
+  },
+})
+assert.equal(visualFolders.data[0].binding.positivePrompt, "1boy, red eyes, black hair, signature coat")
+assert.equal(visualFolders.data[0].binding.negativePrompt, "wrong eye color")
+assert.equal(visualFolders.data[0].binding.stackPresetId, savedStack.data[0].id)
+assert.equal(visualFolders.data[0].binding.enabled, false)
 
 await eventHandlers.get("GENERATION_ENDED")({
   chatId: "chat-1",
@@ -755,6 +773,7 @@ assert.equal(page.data.limit, 12)
 
 const createdFolders = await request("create_output_folder", { name: "Favorites" })
 assert.equal(createdFolders.data[0].name, "Favorites")
+assert.equal(createdFolders.data[0].binding, null)
 const folderId = createdFolders.data[0].id
 
 const movedFolders = await request("move_output_to_folder", {

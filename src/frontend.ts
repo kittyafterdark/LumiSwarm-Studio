@@ -167,6 +167,15 @@ interface OutputFolder {
   id: string
   name: string
   imageIds: string[]
+  binding: {
+    type: "chat"
+    chatId: string
+    characterId: string
+    positivePrompt: string
+    negativePrompt: string
+    stackPresetId: string
+    enabled: boolean
+  } | null
   updatedAt: number
 }
 
@@ -287,6 +296,18 @@ const IMPORT_ICON = `
 
 const SETTINGS_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.82 2.82-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.36a1.7 1.7 0 0 0-1.88.34l-.06.06-2.82-2.82.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3v-4h.04A1.7 1.7 0 0 0 4.6 8.92a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.82-2.82.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3V3h4v.08a1.7 1.7 0 0 0 1.04 1.48 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.82 2.82-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+`
+
+const SEARCH_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+`
+
+const CHECK_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+`
+
+const NEW_FOLDER_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v10h-17z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
 `
 
 const EXPAND_ICON = `
@@ -1508,6 +1529,28 @@ const STUDIO_V3_STYLES = `
     text-transform: none;
   }
   .ss-active-preset-pill[hidden] { display: none; }
+  .ss-active-visual-pill {
+    min-width: 0;
+    max-width: 190px;
+    overflow: hidden;
+    padding: 2px 7px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent) 38%, var(--ss-outline));
+    border-radius: 999px;
+    color: color-mix(in srgb, var(--lumiverse-accent) 72%, var(--lumiverse-text));
+    background: color-mix(in srgb, var(--lumiverse-accent) 12%, var(--ss-canvas));
+    font-size: 8px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-transform: none;
+  }
+  .ss-active-visual-pill[hidden] { display: none; }
+  .ss-active-visual-pill[data-enabled="false"] {
+    border-color: color-mix(in srgb, var(--ss-outline) 82%, #000);
+    color: var(--lumiverse-text-dim, var(--lumiverse-text-muted));
+    background: color-mix(in srgb, var(--ss-canvas) 92%, #000);
+    opacity: .68;
+  }
   .ss-prompt-head {
     min-height: 31px;
     margin: -8px -9px 7px;
@@ -1901,14 +1944,14 @@ const STUDIO_V3_STYLES = `
     inset: 0;
     z-index: 2147483008;
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    grid-template-rows: 52px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 52px 50px minmax(0, 1fr);
     background: color-mix(in srgb, var(--ss-canvas-bg, var(--lumiverse-bg, #050608)) 98%, transparent);
     backdrop-filter: blur(12px);
   }
   .ss-output-library[hidden] { display: none; }
   .ss-library-head {
-    grid-column: 1 / -1;
+    grid-column: 1;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1919,20 +1962,32 @@ const STUDIO_V3_STYLES = `
   .ss-library-head strong { font-size: 14px; }
   .ss-library-head .ss-muted { flex: 1; }
   .ss-library-folders {
-    min-height: 0;
-    overflow-y: auto;
-    padding: 10px;
-    border-right: 1px solid var(--lumiverse-border);
-    background: var(--lumiverse-fill-subtle);
+    grid-row: 2;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    overflow: hidden;
+    padding: 7px 9px;
+    border-top: 1px solid var(--lumiverse-border);
+    background: color-mix(in srgb, var(--ss-header-bg, var(--lumiverse-fill-subtle)) 94%, transparent);
+    box-shadow: 0 -10px 28px rgba(0,0,0,.18);
   }
+  .ss-library-folder-anchor { flex: 0 0 auto; }
+  .ss-library-folder-anchor svg,
+  .ss-library-tool-icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .ss-library-folder-scroll { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; overflow-x: auto; scrollbar-width: thin; }
+  .ss-library-selection-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; padding-left: 7px; border-left: 1px solid var(--lumiverse-border); }
+  .ss-library-selection-actions[hidden] { display: none; }
   .ss-library-folder {
-    width: 100%;
+    width: auto;
+    min-width: max-content;
     min-height: 34px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 7px;
-    margin-bottom: 5px;
+    margin: 0;
     padding: 6px 8px;
     border: 1px solid transparent;
     border-radius: 7px;
@@ -1946,9 +2001,8 @@ const STUDIO_V3_STYLES = `
     background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 10%, transparent);
   }
   .ss-library-folder span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ss-library-folder-tools { display: flex; gap: 5px; margin: 10px 0; }
-  .ss-library-folder-tools .ss-button { flex: 1; min-width: max-content; white-space: nowrap; }
   .ss-library-main {
+    grid-row: 3;
     min-width: 0;
     min-height: 0;
     display: flex;
@@ -1963,6 +2017,7 @@ const STUDIO_V3_STYLES = `
     padding: 7px 10px;
     border-bottom: 1px solid var(--lumiverse-border);
   }
+  .ss-library-currentbar { flex: 0 0 auto; border-top: 1px solid var(--lumiverse-border); border-bottom: 0; background: color-mix(in srgb, var(--ss-header-bg) 90%, transparent); }
   .ss-library-toolbar .ss-muted { flex: 0 0 auto; }
   .ss-library-search {
     min-width: 150px;
@@ -1970,19 +2025,32 @@ const STUDIO_V3_STYLES = `
     flex: 1 1 260px;
     margin-left: auto;
   }
+  .ss-library-search[hidden] { display: none; }
   .ss-library-search .ss-input { width: 100%; height: 30px; padding-block: 4px; font-size: 9.5px; }
-  .ss-library-bulkbar {
-    min-height: 40px;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--lumiverse-border);
-    background: color-mix(in srgb, var(--lumiverse-fill-subtle) 80%, transparent);
-  }
-  .ss-library-bulkbar .ss-select { width: min(230px, 28vw); height: 30px; }
-  .ss-library-bulkbar .ss-button { min-height: 30px; padding-block: 4px; }
   .ss-library-selection-count { min-width: 72px; color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-library-selectbar { flex: 0 0 38px; min-height: 38px; display: flex; align-items: center; gap: 7px; padding: 5px 10px; border-bottom: 1px solid var(--lumiverse-border); background: color-mix(in srgb, var(--lumiverse-fill-subtle) 72%, transparent); }
+  .ss-library-selectbar .ss-library-selection-actions { margin-left: auto; border-left: 0; padding-left: 0; }
+  .ss-library-visual-profile {
+    flex: 0 0 auto;
+    margin: 7px 10px 0;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent) 28%, var(--lumiverse-border));
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--lumiverse-accent) 5%, var(--lumiverse-fill));
+  }
+  .ss-library-visual-profile[hidden] { display: none; }
+  .ss-library-visual-profile summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; cursor: pointer; }
+  .ss-library-visual-profile summary > span:first-child { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .ss-library-visual-profile summary small { color: var(--lumiverse-text-muted); font-size: 8px; }
+  .ss-library-visual-profile summary > span:last-child { color: var(--lumiverse-accent); font-size: 8px; }
+  .ss-library-visual-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(150px, .6fr) auto; gap: 7px; align-items: end; padding: 0 10px 10px; }
+  .ss-library-visual-fields .ss-textarea { min-height: 58px; max-height: 110px; resize: vertical; }
+  .ss-library-visual-fields .ss-button { min-height: 32px; }
+  .ss-new-folder-card { width: min(520px, calc(100vw - 28px)); }
+  .ss-new-folder-types { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .ss-new-folder-types label { display: flex; align-items: flex-start; gap: 8px; padding: 9px; border: 1px solid var(--lumiverse-border); border-radius: var(--ss-control-radius); background: var(--lumiverse-fill); cursor: pointer; }
+  .ss-new-folder-types input { margin-top: 2px; accent-color: var(--lumiverse-accent); }
+  .ss-new-folder-types span { display: grid; gap: 2px; }
+  .ss-new-folder-types small { color: var(--lumiverse-text-muted); font-size: 8.5px; line-height: 1.35; }
   .ss-output-library-grid {
     min-height: 0;
     flex: 1;
@@ -2021,6 +2089,7 @@ const STUDIO_V3_STYLES = `
     box-shadow: 0 3px 10px rgba(0,0,0,.35);
   }
   .ss-library-output-check input { width: 14px; height: 14px; accent-color: var(--lumiverse-accent, #7dd3fc); }
+  .ss-output-library[data-selection-mode="false"] .ss-library-output-check { display: none; }
   .ss-library-output-button {
     width: 100%;
     aspect-ratio: 1;
@@ -2221,29 +2290,15 @@ const STUDIO_V3_STYLES = `
     .ss-inspector-details { border-left: 0; border-top: 1px solid var(--lumiverse-border); padding: 13px; }
     .ss-output-library {
       grid-template-columns: 1fr;
-      grid-template-rows: 50px auto minmax(0, 1fr);
+      grid-template-rows: 50px 52px minmax(0, 1fr);
     }
     .ss-library-head { grid-column: 1; }
-    .ss-library-folders {
-      display: flex;
-      gap: 5px;
-      overflow-x: auto;
-      overflow-y: hidden;
-      padding: 7px;
-      border-right: 0;
-      border-bottom: 1px solid var(--lumiverse-border);
-    }
-    .ss-library-folder { width: auto; min-width: max-content; margin: 0; }
-    .ss-library-folder-tools { min-width: max-content; flex: 0 0 auto; margin: 0; }
-    .ss-library-folder-tools .ss-button { min-width: 92px; }
+    .ss-library-folders { padding-inline: 2.2vw; }
     .ss-library-toolbar { flex-wrap: wrap; }
     .ss-library-search { order: 5; min-width: 100%; max-width: none; flex-basis: 100%; margin-left: 0; }
-    .ss-library-bulkbar {
-      overflow-x: auto;
-      padding-inline: 2.2vw;
-    }
-    .ss-library-bulkbar > * { flex: 0 0 auto; }
-    .ss-library-bulkbar .ss-select { width: 42vw; }
+    .ss-library-selection-actions .ss-button { padding-inline: 8px; }
+    .ss-library-visual-fields { grid-template-columns: 1fr; }
+    .ss-library-visual-profile summary > span:first-child { display: grid; gap: 2px; }
     .ss-output-library-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       grid-auto-rows: max-content;
@@ -2362,7 +2417,7 @@ const STUDIO_V3_STYLES = `
   .ss-workflow-modal .ss-workflow-fields { min-height: 0; overflow-y: auto; padding: 4px 15px 16px; }
   .ss-workflow-modal[data-role="save-preset-modal"],
   .ss-workflow-modal[data-role="preset-manager-modal"],
-  .ss-workflow-modal[data-role="move-folder-modal"] { z-index: 2147483200; }
+  .ss-workflow-modal:is([data-role="move-folder-modal"], [data-role="new-folder-modal"]) { z-index: 2147483200; }
   .ss-save-preset-fields { min-height: 0; display: grid; gap: 10px; overflow-y: auto; padding: 13px 15px 16px; }
   .ss-save-preset-basics { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; }
   .ss-save-param-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
@@ -4056,6 +4111,9 @@ class StudioController {
   private libraryFolderId = ""
   private libraryPage = 0
   private readonly librarySelection = new Set<string>()
+  private librarySearchOpen = false
+  private librarySelectionMode = false
+  private pendingCreatedFolder: { name: string; bindingType: "unbound" | "chat" } | null = null
   private missingLoras: StackPresetItem[] = []
   private pendingPresetParamMap: Record<string, string> = {}
   private pendingMoveImageIds: string[] = []
@@ -4069,6 +4127,12 @@ class StudioController {
     const config = this.root.querySelector<HTMLElement>('[data-role="config-popover"]')
     if (config && !config.hidden) {
       this.closeConfigPopover()
+      event.stopPropagation()
+      return
+    }
+    const newFolder = this.root.querySelector<HTMLElement>('[data-role="new-folder-modal"]')
+    if (newFolder && !newFolder.hidden) {
+      this.closeNewFolderModal()
       event.stopPropagation()
       return
     }
@@ -4257,10 +4321,10 @@ class StudioController {
     } catch {
       rawRequestOverride = this.get<HTMLTextAreaElement>('[data-role="raw-override"]').value.trim() || undefined
     }
-    const enabled = this.state.stack.filter((item) => item.enabled)
+    const enabled = this.effectiveStack().filter((item) => item.enabled)
     const parameters = this.collectGenerationParameters(rawRequestOverride, enabled)
     const prompt = this.finalPrompt()
-    const negativePrompt = this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim()
+    const negativePrompt = this.finalNegativePrompt()
     const model = this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
     const resolved = this.resolvedPrompts()
     return {
@@ -4327,11 +4391,11 @@ class StudioController {
   private syncStudioProfile(): void {
     const draft = this.exportDraft()
     if (!draft) return
-    const parameters = { ...draft.details.parameters }
-    delete parameters.referenceImages
-    delete parameters.resolvedSourceImages
-    delete parameters.resolvedReferenceImages
-    delete parameters.denoise
+    const parameters = this.baseStudioProfileParameters(
+      typeof draft.details.parameters.rawRequestOverride === "string"
+        ? draft.details.parameters.rawRequestOverride
+        : undefined,
+    )
     if (typeof parameters.rawRequestOverride === "string") {
       try {
         const override = JSON.parse(parameters.rawRequestOverride)
@@ -4348,8 +4412,8 @@ class StudioController {
     }
     this.send("sync_studio_profile", {
       input: {
-        prompt: draft.details.prompt,
-        negativePrompt: draft.details.negativePrompt,
+        prompt: this.get<HTMLTextAreaElement>('[data-role="positive"]').value.trim(),
+        negativePrompt: this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim(),
         connection_id: draft.connectionId,
         model: draft.details.model,
         parameters,
@@ -4675,16 +4739,7 @@ class StudioController {
                       <code>{{last_genned}}</code><span>URL of the latest completed Swarm Studio image.</span>
                     </div>
                   </details>
-                  <div class="ss-character-tags-editor" data-role="character-base-tags-editor" aria-disabled="true">
-                    <div class="ss-config-section-head"><strong>Character base tags</strong><span data-role="character-base-tags-status">Open a character chat</span></div>
-                    <textarea class="ss-textarea" data-role="character-base-tags" maxlength="12000" disabled placeholder="1girl, long hair, green eyes…"></textarea>
-                    <div class="ss-character-tags-actions">
-                      <button class="ss-button ss-button-danger" data-action="clear-character-base-tags" disabled>Clear Studio tags</button>
-                      <button class="ss-button ss-button-primary" data-action="save-character-base-tags" disabled>Save for character</button>
-                    </div>
-                    <p class="ss-muted ss-tiny">Stored by Swarm Studio for this character. These are prompt tags only: Studio never changes or injects Lumiverse's separately bound Character LoRA.</p>
-                  </div>
-                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character base tags, the current Studio LoRA stack, active presets, and the current negative prompt are inherited. The required request marker protects visible prose; one-line and multiline tags both work.</p>
+                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Chat-bound folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Create or edit a visual binding inside Output Library. The required request marker protects visible prose; one-line and multiline tags both work.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -4965,7 +5020,7 @@ are removed when CSS is applied.</pre>
               <div class="ss-prompt-grid">
                 <div class="ss-field">
                   <div class="ss-prompt-field-head">
-                    <label class="ss-positive-label" for="ss-positive-v3"><span>Positive</span><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span></label>
+                    <div class="ss-positive-label"><label for="ss-positive-v3">Positive</label><button class="ss-active-visual-pill" data-role="active-visual-pill" data-action="toggle-active-visual" type="button" hidden></button><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span></div>
                     <button class="ss-prompt-editor-button" data-action="edit-prompt" data-prompt-role="positive" title="Open positive prompt in Lumiverse editor" aria-label="Expand positive prompt">${EXPAND_ICON}</button>
                   </div>
                   <textarea id="ss-positive-v3" class="ss-textarea" data-role="positive" placeholder="Describe the image…"></textarea>
@@ -5142,6 +5197,22 @@ are removed when CSS is applied.</pre>
           </section>
         </div>
 
+        <div class="ss-workflow-modal" data-role="new-folder-modal" hidden>
+          <section class="ss-workflow-modal-card ss-new-folder-card" role="dialog" aria-modal="true" aria-labelledby="ss-new-folder-title">
+            <header class="ss-workflow-modal-head">
+              <div class="ss-workflow-modal-title"><span class="ss-eyebrow">OUTPUT LIBRARY</span><strong id="ss-new-folder-title">Create folder</strong></div>
+              <button class="ss-icon-button" data-action="close-new-folder" aria-label="Close new folder popup">×</button>
+            </header>
+            <label class="ss-field"><span>Name</span><input class="ss-input" data-role="new-folder-name" maxlength="80" placeholder="Folder name" /></label>
+            <div class="ss-new-folder-types">
+              <label><input type="radio" name="ss-new-folder-type" data-role="new-folder-type" value="unbound" checked /><span><strong>Unbound</strong><small>A simple library folder.</small></span></label>
+              <label><input type="radio" name="ss-new-folder-type" data-role="new-folder-type" value="chat" /><span><strong>Chat folder</strong><small>Bind prompts and a LoRA stack to the active chat.</small></span></label>
+            </div>
+            <p class="ss-muted ss-tiny" data-role="new-folder-chat-hint">Chat folders use the active conversation and character.</p>
+            <footer class="ss-workflow-modal-actions"><button class="ss-button" data-action="close-new-folder">Cancel</button><button class="ss-button ss-button-primary" data-action="confirm-new-folder">Create folder</button></footer>
+          </section>
+        </div>
+
         <div class="ss-inspector" data-role="inspector" hidden>
           <div class="ss-inspector-stage" data-role="inspector-stage">
             <div class="ss-inspector-toolbar">
@@ -5180,7 +5251,7 @@ are removed when CSS is applied.</pre>
           </aside>
         </div>
 
-        <div class="ss-output-library" data-role="output-library" hidden>
+        <div class="ss-output-library" data-role="output-library" data-selection-mode="false" hidden>
           <header class="ss-library-head">
             <strong>Output library</strong>
             <span class="ss-muted ss-tiny">Lumiverse-owned Swarm Studio images and virtual folders</span>
@@ -5190,24 +5261,36 @@ are removed when CSS is applied.</pre>
             <div class="ss-empty">Loading folders…</div>
           </aside>
           <main class="ss-library-main">
-            <div class="ss-library-toolbar">
+            <details class="ss-library-visual-profile" data-role="library-visual-profile" hidden>
+              <summary><span><strong data-role="visual-profile-title">Chat visuals</strong><small>Positive · negative · LoRA stack</small></span><span data-role="visual-profile-state">Active</span></summary>
+              <div class="ss-library-visual-fields">
+                <label class="ss-field"><span>Positive base</span><textarea class="ss-textarea" data-role="visual-positive" placeholder="Character identity and consistent visual tags…"></textarea></label>
+                <label class="ss-field"><span>Negative base</span><textarea class="ss-textarea" data-role="visual-negative" placeholder="Things to consistently avoid…"></textarea></label>
+                <label class="ss-field"><span>Base LoRA stack</span><select class="ss-select" data-role="visual-stack"><option value="">No bound stack</option></select></label>
+                <button class="ss-button ss-button-primary" data-action="save-visual-profile">Save visual binding</button>
+              </div>
+            </details>
+            <div class="ss-library-selectbar">
+              <button class="ss-icon-button ss-library-tool-icon" data-action="toggle-library-selection" title="Select outputs" aria-label="Select outputs">${CHECK_ICON}</button>
+              <span class="ss-library-selection-count" data-role="library-selection-count">Select</span>
+              <div class="ss-library-selection-actions" data-role="library-selection-actions" hidden>
+                <button class="ss-button" data-action="bulk-move-outputs">Move…</button>
+                <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs">Delete</button>
+              </div>
+            </div>
+            <div class="ss-output-library-grid" data-role="library-grid">
+              <div class="ss-empty">Loading outputs…</div>
+            </div>
+            <div class="ss-library-toolbar ss-library-currentbar">
               <strong class="ss-tiny" data-role="library-title">All outputs</strong>
               <span class="ss-muted ss-tiny" data-role="library-count">0 images</span>
-              <label class="ss-library-search">
+              <label class="ss-library-search" data-role="library-search-wrap" hidden>
                 <input class="ss-input" data-role="library-search" type="search" placeholder="Search prompts, model, LoRAs, presets…" aria-label="Search output metadata" />
               </label>
               <button class="ss-button" data-action="library-prev" disabled>‹</button>
               <span class="ss-history-page-label" data-role="library-page">1 / 1</span>
               <button class="ss-button" data-action="library-next" disabled>›</button>
-            </div>
-            <div class="ss-library-bulkbar">
-              <button class="ss-button" data-action="select-library-page">Select page</button>
-              <span class="ss-library-selection-count" data-role="library-selection-count">0 selected</span>
-              <button class="ss-button" data-action="bulk-move-outputs" disabled>Move…</button>
-              <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs" disabled>Delete selected</button>
-            </div>
-            <div class="ss-output-library-grid" data-role="library-grid">
-              <div class="ss-empty">Loading outputs…</div>
+              <button class="ss-icon-button ss-library-tool-icon" data-action="toggle-library-search" title="Search this folder" aria-label="Search this folder">${SEARCH_ICON}</button>
             </div>
           </main>
         </div>
@@ -5476,8 +5559,14 @@ are removed when CSS is applied.</pre>
       if (action === "delete-output") this.deleteCurrentOutput()
       if (action === "open-output-library") this.openOutputLibrary()
       if (action === "close-output-library") this.closeOutputLibrary()
-      if (action === "create-output-folder") this.createOutputFolder()
+      if (action === "create-output-folder") this.openNewFolderModal()
+      if (action === "close-new-folder") this.closeNewFolderModal()
+      if (action === "confirm-new-folder") this.createOutputFolder()
       if (action === "delete-output-folder") this.deleteSelectedOutputFolder()
+      if (action === "toggle-library-search") this.toggleLibrarySearch()
+      if (action === "toggle-library-selection") this.toggleLibrarySelectionMode()
+      if (action === "save-visual-profile") this.saveVisualProfile()
+      if (action === "toggle-active-visual") this.toggleActiveVisualBinding()
       if (action === "library-prev") this.changeLibraryPage(-1)
       if (action === "library-next") this.changeLibraryPage(1)
       if (action === "select-library-page") this.toggleLibraryPageSelection()
@@ -5536,6 +5625,7 @@ are removed when CSS is applied.</pre>
         this.populateConnections()
         this.renderOutputs()
         this.renderStackPresets()
+        this.updateActiveVisualPill()
         break
       case "character_base_tags_result":
         this.acceptCharacterBaseTags(data)
@@ -5638,6 +5728,7 @@ are removed when CSS is applied.</pre>
         this.currentJobConnectionId = ""
         this.setGenerating(false)
         this.acceptOutputPage(data)
+        if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
         if (data.result?.imageDataUrl) {
           this.setCurrentImage({
             id: data.result.imageId || data.record?.imageId,
@@ -5650,10 +5741,12 @@ are removed when CSS is applied.</pre>
         this.pendingGeneration = null
         this.preGenerationImage = null
         this.renderOutputs()
+        this.updateActiveVisualPill()
         this.setRunStatus("Generation complete. Output saved to Lumiverse.")
         break
       case "tagged_generation_result": {
         this.acceptOutputPage(data)
+        if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
         const imageSrc = String(data.result?.imageDataUrl || data.result?.imageUrl || data.record?.imageUrl || "")
         if (imageSrc) {
           this.setCurrentImage({
@@ -5665,6 +5758,7 @@ are removed when CSS is applied.</pre>
           })
         }
         this.renderOutputs()
+        this.updateActiveVisualPill()
         this.setRunStatus("Message illustration complete. Output synced to Studio.")
         break
       }
@@ -5724,12 +5818,23 @@ are removed when CSS is applied.</pre>
             if (!available.has(imageId)) this.librarySelection.delete(imageId)
           }
         }
+        this.updateActiveVisualPill()
         this.renderOutputLibrary()
         break
       case "output_folders_result":
         this.state.outputFolders = Array.isArray(data) ? data : []
+        if (this.pendingCreatedFolder) {
+          const pending = this.pendingCreatedFolder
+          const created = pending.bindingType === "chat"
+            ? this.activeVisualFolder()
+            : this.state.outputFolders.find((folder) => folder.name.toLowerCase() === pending.name.toLowerCase())
+          if (created) this.libraryFolderId = created.id
+          this.pendingCreatedFolder = null
+        }
         this.librarySelection.clear()
+        this.librarySelectionMode = false
         this.renderOutputLibrary()
+        this.updateActiveVisualPill()
         this.setRunStatus("Output folders updated.")
         break
       case "output_appended_to_chat":
@@ -5768,9 +5873,12 @@ are removed when CSS is applied.</pre>
       case "stack_presets_result":
         this.state.stackPresets = Array.isArray(data) ? data : []
         this.renderStackPresets()
+        if (!this.get<HTMLElement>('[data-role="output-library"]').hidden) this.renderOutputLibrary()
+        this.updateActiveVisualPill()
         this.setRunStatus("Saved LoRA stacks updated.")
         break
       case "studio_error":
+        if (payload.operation === "create_output_folder") this.pendingCreatedFolder = null
         if (payload.operation === "load_swarm_workflow") {
           this.workflowRequestId = ""
           this.state.selectedWorkflow = null
@@ -6732,7 +6840,7 @@ are removed when CSS is applied.</pre>
     const titles = presets.map((preset) => preset.title)
     return {
       prompt: this.finalPrompt(),
-      negativePrompt: this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim(),
+      negativePrompt: this.finalNegativePrompt(),
       presets: titles,
     }
   }
@@ -7934,6 +8042,8 @@ are removed when CSS is applied.</pre>
 
   private openOutputLibrary(): void {
     this.closeInspector()
+    const activeFolder = this.activeVisualFolder()
+    if (!this.libraryFolderId && activeFolder) this.libraryFolderId = activeFolder.id
     this.get<HTMLElement>('[data-role="output-library"]').hidden = false
     this.get<HTMLElement>('[data-role="library-grid"]').replaceChildren(
       element("div", "ss-empty", "Loading Lumiverse outputs…"),
@@ -7944,12 +8054,138 @@ are removed when CSS is applied.</pre>
   private closeOutputLibrary(): void {
     this.get<HTMLElement>('[data-role="output-library"]').hidden = true
     this.librarySelection.clear()
+    this.librarySelectionMode = false
+    this.closeNewFolderModal()
+  }
+
+  private openNewFolderModal(): void {
+    const name = this.get<HTMLInputElement>('[data-role="new-folder-name"]')
+    name.value = ""
+    const unbound = this.root.querySelector<HTMLInputElement>('[data-role="new-folder-type"][value="unbound"]')
+    if (unbound) unbound.checked = true
+    const chat = this.state.activeChat
+    this.get<HTMLElement>('[data-role="new-folder-chat-hint"]').textContent = chat?.id
+      ? "Chat folder will bind to the active conversation and inherit the character's current base tags."
+      : "Open a chat before choosing Chat folder."
+    const chatOption = this.root.querySelector<HTMLInputElement>('[data-role="new-folder-type"][value="chat"]')
+    if (chatOption) chatOption.disabled = !chat?.id
+    this.get<HTMLElement>('[data-role="new-folder-modal"]').hidden = false
+    window.setTimeout(() => name.focus(), 0)
+  }
+
+  private closeNewFolderModal(): void {
+    const modal = this.root.querySelector<HTMLElement>('[data-role="new-folder-modal"]')
+    if (modal) modal.hidden = true
   }
 
   private createOutputFolder(): void {
-    const name = window.prompt("Name this output folder:")
-    if (!name?.trim()) return
-    this.send("create_output_folder", { name: name.trim() })
+    const name = this.get<HTMLInputElement>('[data-role="new-folder-name"]').value.trim()
+    const bindingType = this.root.querySelector<HTMLInputElement>('[data-role="new-folder-type"]:checked')?.value === "chat"
+      ? "chat"
+      : "unbound"
+    if (!name && bindingType === "unbound") {
+      this.setRunStatus("Give the unbound folder a name.", true)
+      return
+    }
+    this.pendingCreatedFolder = { name, bindingType }
+    this.send("create_output_folder", { name, bindingType })
+    this.closeNewFolderModal()
+    this.setRunStatus(bindingType === "chat" ? "Creating chat visual folder…" : `Creating folder “${name}”…`)
+  }
+
+  private toggleLibrarySearch(): void {
+    this.librarySearchOpen = !this.librarySearchOpen
+    const wrap = this.get<HTMLElement>('[data-role="library-search-wrap"]')
+    wrap.hidden = !this.librarySearchOpen
+    const input = this.get<HTMLInputElement>('[data-role="library-search"]')
+    if (this.librarySearchOpen) window.setTimeout(() => input.focus(), 0)
+    else if (input.value) {
+      input.value = ""
+      this.libraryPage = 0
+      this.renderOutputLibrary()
+    }
+  }
+
+  private toggleLibrarySelectionMode(): void {
+    this.librarySelectionMode = !this.librarySelectionMode
+    if (!this.librarySelectionMode) this.librarySelection.clear()
+    this.renderOutputLibrary()
+  }
+
+  private activeVisualFolder(): OutputFolder | null {
+    const chatId = String(this.state.activeChat?.id || "")
+    if (!chatId) return null
+    return this.state.outputFolders.find((folder) => folder.binding?.type === "chat" && folder.binding.chatId === chatId) || null
+  }
+
+  private saveVisualProfile(): void {
+    const folder = this.state.outputFolders.find((candidate) => candidate.id === this.libraryFolderId)
+    if (!folder?.binding) return
+    const profile = {
+      positivePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value,
+      negativePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value,
+      stackPresetId: this.get<HTMLSelectElement>('[data-role="visual-stack"]').value,
+      enabled: folder.binding.enabled,
+    }
+    folder.binding = { ...folder.binding, ...profile }
+    this.send("update_output_folder_profile", { folderId: folder.id, profile })
+    this.updateActiveVisualPill()
+    this.updateTriggerSummary()
+    this.scheduleStudioProfileSync()
+    this.setRunStatus(`Saving visual binding for “${folder.name}”…`)
+  }
+
+  private toggleActiveVisualBinding(): void {
+    const folder = this.activeVisualFolder()
+    if (!folder?.binding) return
+    const enabled = !folder.binding.enabled
+    folder.binding = { ...folder.binding, enabled }
+    this.send("update_output_folder_profile", {
+      folderId: folder.id,
+      profile: { ...folder.binding, enabled },
+    })
+    this.updateActiveVisualPill()
+    this.updateTriggerSummary()
+    this.scheduleStudioProfileSync()
+    if (!this.get<HTMLElement>('[data-role="output-library"]').hidden) this.renderOutputLibrary()
+    this.setRunStatus(`${folder.name} visuals ${enabled ? "enabled" : "disabled"}.`)
+  }
+
+  private updateActiveVisualPill(): void {
+    const pill = this.root.querySelector<HTMLButtonElement>('[data-role="active-visual-pill"]')
+    if (!pill) return
+    const folder = this.activeVisualFolder()
+    pill.hidden = !folder?.binding
+    if (!folder?.binding) return
+    pill.textContent = `Visuals: ${folder.name}`
+    pill.dataset.enabled = String(folder.binding.enabled)
+    pill.title = folder.binding.enabled
+      ? `Using “${folder.name}” chat visuals. Click to disable for this chat.`
+      : `“${folder.name}” chat visuals are disabled. Click to enable.`
+  }
+
+  private renderVisualProfile(): void {
+    const panel = this.get<HTMLDetailsElement>('[data-role="library-visual-profile"]')
+    const folder = this.state.outputFolders.find((candidate) => candidate.id === this.libraryFolderId)
+    panel.hidden = !folder?.binding
+    if (!folder?.binding) return
+    this.get<HTMLElement>('[data-role="visual-profile-title"]').textContent = `${folder.name} visuals`
+    this.get<HTMLElement>('[data-role="visual-profile-state"]').textContent = folder.binding.enabled ? "Active" : "Disabled"
+    this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value = folder.binding.positivePrompt
+    this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value = folder.binding.negativePrompt
+    const stack = this.get<HTMLSelectElement>('[data-role="visual-stack"]')
+    stack.replaceChildren()
+    const none = element("option", "", "No bound stack")
+    none.value = ""
+    stack.appendChild(none)
+    for (const preset of this.state.stackPresets) {
+      const option = element("option", "", `${preset.name} · ${preset.items.length}`)
+      option.value = preset.id
+      stack.appendChild(option)
+    }
+    stack.value = this.state.stackPresets.some((preset) => preset.id === folder.binding?.stackPresetId)
+      ? folder.binding.stackPresetId
+      : ""
   }
 
   private deleteSelectedOutputFolder(): void {
@@ -7992,14 +8228,11 @@ are removed when CSS is applied.</pre>
 
   private updateLibrarySelectionControls(): void {
     const selected = this.librarySelection.size
+    const library = this.get<HTMLElement>('[data-role="output-library"]')
+    library.dataset.selectionMode = String(this.librarySelectionMode)
     this.get<HTMLElement>('[data-role="library-selection-count"]').textContent =
-      `${selected} selected`
-    this.get<HTMLButtonElement>('[data-action="bulk-move-outputs"]').disabled = selected === 0
-    this.get<HTMLButtonElement>('[data-action="bulk-delete-outputs"]').disabled = selected === 0
-    const pageIds = this.libraryPageOutputs().map((output) => String(output.id))
-    const allPageSelected = pageIds.length > 0 && pageIds.every((id) => this.librarySelection.has(id))
-    this.get<HTMLButtonElement>('[data-action="select-library-page"]').textContent =
-      allPageSelected ? "Clear page" : "Select page"
+      this.librarySelectionMode ? `${selected} selected` : "Select"
+    this.get<HTMLElement>('[data-role="library-selection-actions"]').hidden = selected === 0
   }
 
   private bulkMoveOutputs(): void {
@@ -8086,16 +8319,22 @@ are removed when CSS is applied.</pre>
     })
   }
 
-  private renderOutputLibrary(): void {
+  private renderLibraryFolderStrip(): void {
     const folderPane = this.get<HTMLElement>('[data-role="library-folders"]')
     folderPane.replaceChildren()
+    const create = element("button", "ss-icon-button ss-library-folder-anchor")
+    create.dataset.action = "create-output-folder"
+    create.title = "Create output folder"
+    create.setAttribute("aria-label", "Create output folder")
+    create.innerHTML = NEW_FOLDER_ICON
+    const scroll = element("div", "ss-library-folder-scroll")
     const appendFolder = (id: string, name: string, count: number) => {
       const button = element("button", "ss-library-folder")
       button.dataset.action = "library-folder"
       button.dataset.folderId = id
       button.dataset.active = String(this.libraryFolderId === id)
       button.append(element("span", "", name), element("span", "ss-muted ss-tiny", String(count)))
-      folderPane.appendChild(button)
+      scroll.appendChild(button)
     }
     appendFolder("", "All outputs", this.state.libraryOutputs.length)
     const assigned = new Set(this.state.outputFolders.flatMap((folder) => folder.imageIds))
@@ -8106,16 +8345,26 @@ are removed when CSS is applied.</pre>
     )
     for (const folder of this.state.outputFolders) {
       const ids = new Set(folder.imageIds)
-      appendFolder(folder.id, folder.name, this.state.libraryOutputs.filter((output) => ids.has(String(output.id))).length)
+      appendFolder(
+        folder.id,
+        folder.binding ? `✦ ${folder.name}` : folder.name,
+        this.state.libraryOutputs.filter((output) => ids.has(String(output.id))).length,
+      )
     }
-    const tools = element("div", "ss-library-folder-tools")
-    const create = element("button", "ss-button", "New folder")
-    create.dataset.action = "create-output-folder"
-    const remove = element("button", "ss-button ss-button-danger", "Delete")
-    remove.dataset.action = "delete-output-folder"
-    remove.disabled = !this.state.outputFolders.some((folder) => folder.id === this.libraryFolderId)
-    tools.append(create, remove)
-    folderPane.appendChild(tools)
+    folderPane.append(create, scroll)
+    if (this.state.outputFolders.some((folder) => folder.id === this.libraryFolderId)) {
+      const remove = element("button", "ss-icon-button ss-library-folder-anchor", "×")
+      remove.dataset.action = "delete-output-folder"
+      remove.title = "Delete selected folder"
+      remove.setAttribute("aria-label", "Delete selected folder")
+      folderPane.appendChild(remove)
+    }
+  }
+
+  private renderOutputLibrary(): void {
+    this.renderLibraryFolderStrip()
+    this.renderVisualProfile()
+    this.get<HTMLElement>('[data-role="output-library"]').dataset.selectionMode = String(this.librarySelectionMode)
 
     const filtered = this.filteredLibraryOutputs()
     const pages = Math.max(1, Math.ceil(filtered.length / this.currentLibraryPageSize()))
@@ -8155,17 +8404,17 @@ are removed when CSS is applied.</pre>
       image.alt = output.original_filename || "Generated output"
       open.appendChild(image)
       open.addEventListener("click", () => {
+        if (this.librarySelectionMode) {
+          if (this.librarySelection.has(imageId)) this.librarySelection.delete(imageId)
+          else this.librarySelection.add(imageId)
+          this.renderOutputLibrary()
+          return
+        }
         this.setCurrentImage(this.outputToCurrentImage(output))
         this.openInspector()
       })
       const meta = element("div", "ss-library-output-meta")
       meta.appendChild(element("div", "ss-library-output-name", output.original_filename || `Output ${output.id}`))
-      const folder = this.state.outputFolders.find((candidate) => candidate.imageIds.includes(String(output.id)))
-      const move = element("button", "ss-button", `Move · ${folder?.name || "Unfiled"}`)
-      move.dataset.action = "move-library-output"
-      move.dataset.imageId = String(output.id)
-      move.title = "Choose a destination folder"
-      meta.appendChild(move)
       card.append(checkLabel, open, meta)
       grid.appendChild(card)
     }
@@ -8175,7 +8424,7 @@ are removed when CSS is applied.</pre>
   private inheritedTriggers(): string[] {
     const seen = new Set<string>()
     const result: string[] = []
-    for (const item of this.state.stack) {
+    for (const item of this.effectiveStack()) {
       const trigger = item.lora.triggerPhrase.trim()
       const key = trigger.toLowerCase()
       if (item.enabled && item.useTrigger && trigger && !seen.has(key)) {
@@ -8184,6 +8433,25 @@ are removed when CSS is applied.</pre>
       }
     }
     return result
+  }
+
+  private effectiveStack(): StackItem[] {
+    const folder = this.activeVisualFolder()
+    const preset = folder?.binding?.enabled && folder.binding.stackPresetId
+      ? this.state.stackPresets.find((candidate) => candidate.id === folder.binding?.stackPresetId)
+      : null
+    const merged = new Map<string, StackItem>()
+    for (const item of preset?.items || []) {
+      const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl)
+      merged.set(normalizeModelName(item.name), {
+        lora,
+        weight: clamp(Number(item.weight) || 1, -10, 10),
+        enabled: item.enabled !== false,
+        useTrigger: Boolean(item.useTrigger && lora.triggerPhrase),
+      })
+    }
+    for (const item of this.state.stack) merged.set(normalizeModelName(item.lora.name), item)
+    return [...merged.values()]
   }
 
   private updateTriggerSummary(): void {
@@ -8195,8 +8463,21 @@ are removed when CSS is applied.</pre>
 
   private finalPrompt(): string {
     const prompt = this.get<HTMLTextAreaElement>('[data-role="positive"]').value.trim()
-    const triggers = this.inheritedTriggers().filter((trigger) => !prompt.toLowerCase().includes(trigger.toLowerCase()))
-    return [triggers.join(", "), prompt].filter(Boolean).join(", ")
+    const folder = this.activeVisualFolder()
+    const visual = folder?.binding?.enabled ? folder.binding.positivePrompt.trim() : ""
+    const layeredPrompt = visual && !prompt.toLowerCase().includes(visual.toLowerCase())
+      ? [visual, prompt].filter(Boolean).join(", ")
+      : prompt
+    const triggers = this.inheritedTriggers().filter((trigger) => !layeredPrompt.toLowerCase().includes(trigger.toLowerCase()))
+    return [triggers.join(", "), layeredPrompt].filter(Boolean).join(", ")
+  }
+
+  private finalNegativePrompt(): string {
+    const prompt = this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim()
+    const folder = this.activeVisualFolder()
+    const visual = folder?.binding?.enabled ? folder.binding.negativePrompt.trim() : ""
+    if (!visual || prompt.toLowerCase().includes(visual.toLowerCase())) return prompt
+    return [visual, prompt].filter(Boolean).join(", ")
   }
 
   private buildRawOverride(): string | undefined {
@@ -8220,7 +8501,7 @@ are removed when CSS is applied.</pre>
 
   private collectGenerationParameters(
     rawRequestOverride: string | undefined,
-    enabled = this.state.stack.filter((item) => item.enabled),
+    enabled = this.effectiveStack().filter((item) => item.enabled),
   ): Record<string, unknown> {
     const optional = (role: string): string =>
       this.get<HTMLInputElement | HTMLSelectElement>(`[data-role="${role}"]`).value.trim()
@@ -8255,6 +8536,18 @@ are removed when CSS is applied.</pre>
     return parameters
   }
 
+  private baseStudioProfileParameters(rawRequestOverride: string | undefined): Record<string, unknown> {
+    const parameters = this.collectGenerationParameters(
+      rawRequestOverride,
+      this.state.stack.filter((item) => item.enabled),
+    )
+    delete parameters.referenceImages
+    delete parameters.resolvedSourceImages
+    delete parameters.resolvedReferenceImages
+    delete parameters.denoise
+    return parameters
+  }
+
   private generate(): void {
     if (this.generating || !this.state.connection) return
     const selectedWorkflowName = this.get<HTMLSelectElement>('[data-role="workflow-select"]').value
@@ -8276,12 +8569,19 @@ are removed when CSS is applied.</pre>
       return
     }
 
-    const enabled = this.state.stack.filter((item) => item.enabled)
+    const enabled = this.effectiveStack().filter((item) => item.enabled)
     const parameters = this.collectGenerationParameters(rawRequestOverride, enabled)
 
-    const clientJobId = crypto.randomUUID()
-    const negativePrompt = this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim()
     const model = this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
+    const clientJobId = crypto.randomUUID()
+    const negativePrompt = this.finalNegativePrompt()
+    const profileInput = {
+      prompt: this.get<HTMLTextAreaElement>('[data-role="positive"]').value.trim(),
+      negativePrompt: this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim(),
+      connection_id: this.state.connection.id,
+      model,
+      parameters: this.baseStudioProfileParameters(rawRequestOverride),
+    }
     const resolved = this.resolvedPrompts()
     this.pendingGeneration = {
       prompt,
@@ -8315,6 +8615,7 @@ are removed when CSS is applied.</pre>
       : `Generating with ${enabled.length} LoRA${enabled.length === 1 ? "" : "s"}…`)
     if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create")
     this.send("generate", {
+      profileInput,
       input: {
         prompt,
         negativePrompt: negativePrompt || undefined,

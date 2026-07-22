@@ -23,12 +23,12 @@ It adds:
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, dedupe against the final generation event, and replace themselves with a permanent container-filling Lumiverse image
-- Character-image continuity for tagged scenes: Studio stores prompt-only base tags per character (with Lumiverse Character LoRA `base_tags` as a read-only fallback), LoRAs come exclusively from the Studio stack, and outputs enter an automatic character library folder
+- Chat visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack can follow one conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, and file that chat's Studio outputs automatically
 - Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_tags}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Append to chat / Delete menus
-- A fullscreen searchable Lumiverse output library with reusable virtual folders, 30 images per desktop page, 15 per mobile page, and bulk folder/delete actions
+- A fullscreen searchable Lumiverse output library with an anchored `+ folder` control, horizontally scrolling folder strip, conditional selection actions, collapsible chat-visual profiles, and a sticky current-folder/search/pagination rail; pages hold 30 images on desktop and 15 on mobile
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
@@ -99,20 +99,20 @@ outside, city street, food stall, smiling
 
 Attributes may instead remain on one line. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request. The final-message handler retains compatibility with older tags that include a slot plus aspect or alt metadata.
 
-The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives; tagged jobs remove the duplicate raw preset field before submission. A literal `{{swarm_preset}}` in a tag resolves to the same directive list without adding it twice. Scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. Studio settings lets you save prompt-only base tags for the active character without creating a native Character LoRA binding. If no Studio tags exist, a native binding may contribute only its `base_tags`; its separately bound LoRA is never injected into tagged jobs.
+The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives; tagged jobs remove the duplicate raw preset field before submission. A literal `{{swarm_preset}}` in a tag resolves to the same directive list without adding it twice. Scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. An enabled chat-folder visual binding contributes its base positive, base negative, and saved LoRA stack to both manual and tagged generation. Native Character LoRA `base_tags` remain a fallback when a binding has no positive base; the separately bound native Character LoRA is never injected.
 
 Each request is keyed by chat, message, slot, and tag content. Delivery from both streaming tag interception and Lumiverse's final generation event is therefore safe. The in-message card stays at a fixed size with a static spinner instead of remounting for every progress step. Right-click or long-press a pending/failed card for current-profile retry, original-profile retry, prompt editing in Studio, or the output library. Finished tags are frozen to their specific Lumiverse image URL rather than leaving the global `{{last_genned}}` macro in old messages.
 
 Profile macros resolve to raw values so authored HTML and display regexes remain presentation-only:
 
 - `{{char_profile}}` / `{{user_profile}}` — authenticated avatar image URLs
-- `{{char_tags}}` — Studio's active per-character base tags, falling back to native Character LoRA base tags when present
+- `{{char_tags}}` — the active character's legacy Studio/native base tags; chat-folder positives are applied directly by the visual-binding layer
 - `{{swarm_negative}}` — current literal Studio negative prompt
 - `{{swarm_preset}}` — enabled Studio presets as comma-separated native `<preset:exact saved name>` tokens
 - `{{swarm_checkpoint}}` / `{{swarm_aspect}}` — current profile details
 - `{{last_genned}}` — latest successful Studio output URL
 
-The same reference and per-character base-tag editor are available behind **Studio settings → In-message images**.
+The macro reference remains behind **Studio settings → In-message images**. Chat visuals live in Output Library so the settings popover stays compact.
 
 ## Metadata behavior
 
@@ -217,17 +217,26 @@ ellipsis-safe line so they cannot squeeze the generation controls.
 History is scoped to the active chat and paged in groups of 12. The output
 library, opened from the Studio header, drawer, or inspector, walks Lumiverse's
 paginated image API to show all extension-owned images across chats, 30 at a
-time on
-desktop and 15 on mobile. Search matches every entered keyword across submitted
-positive and negative prompts, model, LoRAs, presets, render parameters,
-filename, and Swarm path; quoted phrases stay together. Select a page or
-individual cards to move many outputs into a virtual folder or delete them
-together. **Move** opens a focused folder chooser for either one card or the
-current bulk selection.
+time on desktop and 15 on mobile. Its layout is header, folder strip, selection
+row, gallery, then a sticky current-folder rail containing image count,
+pagination, and an on-demand search icon. The `+ folder` SVG stays anchored at
+the left while folder chips scroll. Search matches every entered keyword across
+submitted positive and negative prompts, model, LoRAs, presets, render
+parameters, filename, and Swarm path; quoted phrases stay together. The
+checkmark enters selection mode, and **Move** / **Delete** appear only after an
+image is selected.
 
-Folders are lightweight per-user collections stored by the extension; moving
-an output into one does not move or duplicate Lumiverse's underlying image
-asset. Deleting a folder leaves its images intact. **Delete from Lumiverse**
+New folders can be unbound collections or bound to the active chat. A chat
+folder exposes a collapsible visual strip with base positive, base negative,
+and a saved LoRA-stack selector. Its pill above Studio's positive prompt can be
+tapped to disable or re-enable all three layers without deleting their settings
+or the gallery. Manual and tagged generations from that chat are filed into the
+folder automatically. Duplicate LoRA filenames are normalized; the ordinary
+Studio stack wins when it intentionally overrides a bound-stack item.
+
+Folders remain lightweight per-user collections stored by the extension;
+moving an output into one does not move or duplicate Lumiverse's underlying
+image asset. Deleting a folder leaves its images intact. **Delete from Lumiverse**
 deletes the actual owned image and removes its Swarm Studio metadata and folder
 assignment. When Swarm exposes the generated file path in image metadata, the
 inspector displays it below the recorded LoRA stack as a read-only saved-path

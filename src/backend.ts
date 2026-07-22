@@ -151,7 +151,18 @@ interface OutputFolder {
   id: string
   name: string
   imageIds: string[]
+  binding: OutputFolderBinding | null
   updatedAt: number
+}
+
+interface OutputFolderBinding {
+  type: "chat"
+  chatId: string
+  characterId: string
+  positivePrompt: string
+  negativePrompt: string
+  stackPresetId: string
+  enabled: boolean
 }
 
 interface TagAutomationConfig {
@@ -779,11 +790,25 @@ function cleanOutputFolders(value: unknown): OutputFolder[] {
     const id = asString(item.id).trim()
     const name = asString(item.name).trim().slice(0, 80)
     if (!id || !name || seen.has(id)) return []
+    const rawBinding = asRecord(item.binding)
+    const chatId = asString(rawBinding.chatId).trim().slice(0, 200)
+    const binding: OutputFolderBinding | null = rawBinding.type === "chat" && chatId
+      ? {
+          type: "chat",
+          chatId,
+          characterId: asString(rawBinding.characterId).trim().slice(0, 200),
+          positivePrompt: asString(rawBinding.positivePrompt).trim().slice(0, 12_000),
+          negativePrompt: asString(rawBinding.negativePrompt).trim().slice(0, 12_000),
+          stackPresetId: asString(rawBinding.stackPresetId).trim().slice(0, 200),
+          enabled: asBoolean(rawBinding.enabled, true),
+        }
+      : null
     seen.add(id)
     return [{
       id,
       name,
       imageIds: [...new Set(stringList(item.imageIds, 500))],
+      binding,
       updatedAt: Number(item.updatedAt) || Date.now(),
     }]
   })
@@ -802,10 +827,45 @@ async function persistOutputFolders(folders: OutputFolder[], userId?: string): P
   return cleaned
 }
 
-async function createOutputFolder(name: string, userId?: string): Promise<OutputFolder[]> {
-  const cleanName = name.trim().slice(0, 80)
-  if (!cleanName) throw new Error("Give the output folder a name.")
+async function createOutputFolder(name: string, bindingType: string, userId?: string): Promise<OutputFolder[]> {
   const folders = await loadOutputFolders(userId)
+  let cleanName = name.trim().slice(0, 80)
+  let binding: OutputFolderBinding | null = null
+  if (bindingType === "chat") {
+    if (!spindle.permissions.has("chats")) throw new Error("Grant Chats permission to bind a visual folder.")
+    const chat = await spindle.chats.getActive(userId)
+    const chatId = asString(chat?.id).trim()
+    const characterId = asString(chat?.character_id).trim()
+    if (!chatId) throw new Error("Open a chat before creating a chat-bound folder.")
+    if (folders.some((folder) => folder.binding?.chatId === chatId)) {
+      throw new Error("This chat already has a visual folder.")
+    }
+    let characterName = ""
+    if (characterId && spindle.permissions.has("characters")) {
+      characterName = asString((await spindle.characters.get(characterId, userId))?.name).trim()
+    }
+    if (!cleanName) cleanName = characterName.slice(0, 80) || "Chat visuals"
+    const tagState = await characterBaseTagState(characterId, userId)
+    binding = {
+      type: "chat",
+      chatId,
+      characterId,
+      positivePrompt: asString(tagState.tags).trim().slice(0, 12_000),
+      negativePrompt: "",
+      stackPresetId: "",
+      enabled: true,
+    }
+    const legacy = characterId
+      ? folders.find((folder) => folder.id === `character:${characterId}` && !folder.binding)
+      : null
+    if (legacy) {
+      legacy.name = cleanName
+      legacy.binding = binding
+      legacy.updatedAt = Date.now()
+      return persistOutputFolders(folders, userId)
+    }
+  }
+  if (!cleanName) throw new Error("Give the output folder a name.")
   if (folders.some((folder) => folder.name.toLowerCase() === cleanName.toLowerCase())) {
     throw new Error(`An output folder named “${cleanName}” already exists.`)
   }
@@ -813,9 +873,34 @@ async function createOutputFolder(name: string, userId?: string): Promise<Output
     id: crypto.randomUUID(),
     name: cleanName,
     imageIds: [],
+    binding,
     updatedAt: Date.now(),
   })
   return persistOutputFolders(folders.slice(0, OUTPUT_FOLDER_LIMIT), userId)
+}
+
+async function updateOutputFolderProfile(
+  folderId: string,
+  value: unknown,
+  userId?: string,
+): Promise<OutputFolder[]> {
+  const folders = await loadOutputFolders(userId)
+  const folder = folders.find((candidate) => candidate.id === folderId)
+  if (!folder?.binding) throw new Error("Choose a chat-bound visual folder first.")
+  const input = asRecord(value)
+  const stackPresetId = asString(input.stackPresetId).trim().slice(0, 200)
+  if (stackPresetId && !(await loadStackPresets(userId)).some((preset) => preset.id === stackPresetId)) {
+    throw new Error("That saved LoRA stack no longer exists.")
+  }
+  folder.binding = {
+    ...folder.binding,
+    positivePrompt: asString(input.positivePrompt).trim().slice(0, 12_000),
+    negativePrompt: asString(input.negativePrompt).trim().slice(0, 12_000),
+    stackPresetId,
+    enabled: asBoolean(input.enabled, folder.binding.enabled),
+  }
+  folder.updatedAt = Date.now()
+  return persistOutputFolders(folders, userId)
 }
 
 async function deleteOutputFolder(folderId: string, userId?: string): Promise<OutputFolder[]> {
@@ -1696,37 +1781,91 @@ async function applyCharacterLayer(
   chatId: string,
   scenePrompt: string,
   userId?: string,
-): Promise<{ prompt: string; characterId: string; characterName: string }> {
-  if (!spindle.permissions.has("chats")) return { prompt: scenePrompt, characterId: "", characterName: "" }
+): Promise<{ prompt: string; negativePrompt: string; stack: StackPresetItem[]; characterId: string; characterName: string }> {
+  if (!spindle.permissions.has("chats")) return { prompt: scenePrompt, negativePrompt: "", stack: [], characterId: "", characterName: "" }
   const chat = await spindle.chats.get(chatId, userId)
   const characterId = asString(chat?.character_id)
+  const visualFolder = (await loadOutputFolders(userId)).find((folder) =>
+    folder.binding?.type === "chat" && folder.binding.chatId === chatId && folder.binding.enabled,
+  )
+  const visualStack = visualFolder?.binding?.stackPresetId
+    ? (await loadStackPresets(userId)).find((preset) => preset.id === visualFolder.binding?.stackPresetId)?.items || []
+    : []
   if (!characterId || !spindle.permissions.has("characters")) {
-    return { prompt: scenePrompt, characterId, characterName: "" }
+    const visualTags = visualFolder?.binding?.positivePrompt.trim() || ""
+    const prompt = [visualTags, scenePrompt].filter(Boolean).join(", ")
+    return {
+      prompt,
+      negativePrompt: visualFolder?.binding?.negativePrompt || "",
+      stack: visualStack,
+      characterId,
+      characterName: "",
+    }
   }
   const character = await spindle.characters.get(characterId, userId)
   const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora)
-  const baseTags = (await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags)).trim()
+  const baseTags = (
+    visualFolder?.binding?.positivePrompt
+    || await extensionCharacterBaseTags(characterId, userId)
+    || asString(portable.base_tags)
+  ).trim()
   let prompt = scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, baseTags).trim()
   if (baseTags && !prompt.toLowerCase().includes(baseTags.toLowerCase())) prompt = `${baseTags}, ${prompt}`
   prompt = prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim()
-  return { prompt, characterId, characterName: asString(character?.name).trim() }
+  return {
+    prompt,
+    negativePrompt: visualFolder?.binding?.negativePrompt || "",
+    stack: visualStack,
+    characterId,
+    characterName: asString(character?.name).trim(),
+  }
 }
 
 async function ensureCharacterOutputFolder(
+  chatId: string,
   characterId: string,
   characterName: string,
   imageId: string,
   userId?: string,
 ): Promise<void> {
   if (!characterId || !characterName || !imageId) return
-  const folderId = `character:${characterId}`
   const folders = await loadOutputFolders(userId)
-  let folder = folders.find((candidate) => candidate.id === folderId)
+  const inheritedTags = asString((await characterBaseTagState(characterId, userId)).tags).trim()
+  const folderId = `character:${characterId}`
+  let folder = folders.find((candidate) => candidate.binding?.chatId === chatId)
+    || folders.find((candidate) => candidate.id === folderId && !candidate.binding)
   if (!folder) {
-    folder = { id: folderId, name: characterName.slice(0, 80), imageIds: [], updatedAt: Date.now() }
+    folder = {
+      id: folders.some((candidate) => candidate.id === folderId) ? `chat:${chatId}` : folderId,
+      name: characterName.slice(0, 80),
+      imageIds: [],
+      binding: {
+        type: "chat",
+        chatId,
+        characterId,
+        positivePrompt: inheritedTags,
+        negativePrompt: "",
+        stackPresetId: "",
+        enabled: true,
+      },
+      updatedAt: Date.now(),
+    }
     folders.unshift(folder)
   }
-  folder.name = characterName.slice(0, 80)
+  if (!folder.binding) {
+    folder.binding = {
+      type: "chat",
+      chatId,
+      characterId,
+      positivePrompt: inheritedTags,
+      negativePrompt: "",
+      stackPresetId: "",
+      enabled: true,
+    }
+  }
+  if (folder.id === folderId && folder.name === characterName.slice(0, 80)) {
+    folder.name = characterName.slice(0, 80)
+  }
   folder.imageIds = [imageId, ...folder.imageIds.filter((id) => id !== imageId)].slice(0, 500)
   folder.updatedAt = Date.now()
   await persistOutputFolders(folders, userId)
@@ -1820,7 +1959,27 @@ async function runTaggedImageJob(job: TaggedImageJob, useOriginalProfile: boolea
     const presetPrompt = applyStudioPresetLayer(originalScenePrompt, profile)
     const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, userId)
     input.prompt = characterLayer.prompt
-    input.negativePrompt = asString(profileInput.negativePrompt)
+    const profileNegative = asString(profileInput.negativePrompt).trim()
+    const visualNegative = characterLayer.negativePrompt.trim()
+    input.negativePrompt = visualNegative && !profileNegative.toLowerCase().includes(visualNegative.toLowerCase())
+      ? [visualNegative, profileNegative].filter(Boolean).join(", ")
+      : profileNegative
+    if (characterLayer.stack.length) {
+      const existingNames = stringList(parameters.loras, 128)
+      const existingWeights = Array.isArray(parameters.loraWeights) ? parameters.loraWeights.map(Number) : []
+      const merged = new Map<string, { name: string; weight: number }>()
+      for (const item of characterLayer.stack.filter((item) => item.enabled !== false)) {
+        merged.set(item.name.toLowerCase(), { name: item.name, weight: item.weight })
+      }
+      existingNames.forEach((name, index) => {
+        merged.set(name.toLowerCase(), {
+          name,
+          weight: Number.isFinite(existingWeights[index]) ? existingWeights[index] : 1,
+        })
+      })
+      parameters.loras = [...merged.values()].map((item) => item.name)
+      parameters.loraWeights = [...merged.values()].map((item) => item.weight)
+    }
     input.parameters = parameters
     input.clientJobId = crypto.randomUUID()
     job.prompt = characterLayer.prompt
@@ -1874,7 +2033,7 @@ async function runTaggedImageJob(job: TaggedImageJob, useOriginalProfile: boolea
     job.error = ""
     await upsertTaggedImageJob(job, userId)
     spindle.updateMacroValue("last_genned", job.imageUrl)
-    await ensureCharacterOutputFolder(characterLayer.characterId, characterLayer.characterName, job.imageId, userId)
+    await ensureCharacterOutputFolder(job.chatId, characterLayer.characterId, characterLayer.characterName, job.imageId, userId)
     const taggedChat = spindle.permissions.has("chats")
       ? await spindle.chats.get(job.chatId, userId)
       : { id: job.chatId }
@@ -1886,6 +2045,7 @@ async function runTaggedImageJob(job: TaggedImageJob, useOriginalProfile: boolea
         result,
         record,
         taggedJob: taggedJobPublic(job),
+        outputFolders: await loadOutputFolders(userId),
         ...outputPage,
       },
     }, userId)
@@ -2341,7 +2501,11 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           throw new Error("Grant the Image Generation permission to generate.")
         }
         const input = asRecord(payload?.input)
-        await saveStudioGenerationProfile(input, payload?.recordHints, userId)
+        await saveStudioGenerationProfile(
+          Object.keys(asRecord(payload?.profileInput)).length ? payload.profileInput : input,
+          payload?.recordHints,
+          userId,
+        )
         const activeChat = spindle.permissions.has("chats")
           ? await spindle.chats.getActive(userId)
           : null
@@ -2410,6 +2574,10 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         } catch (error) {
           spindle.log.warn(`Could not persist Swarm Studio generation details: ${error instanceof Error ? error.message : String(error)}`)
         }
+        if (record?.imageId && activeChat?.id) {
+          const visualFolder = (await loadOutputFolders(userId)).find((folder) => folder.binding?.chatId === activeChat.id)
+          if (visualFolder) await moveOutputToFolder(record.imageId, visualFolder.id, userId)
+        }
         const outputPage = await listOutputs(userId, activeChat)
         spindle.sendToFrontend({
           type: "generation_result",
@@ -2418,6 +2586,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           data: {
             result,
             record,
+            outputFolders: await loadOutputFolders(userId),
             ...outputPage,
           },
         }, userId)
@@ -2610,7 +2779,24 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         return
       }
       case "create_output_folder": {
-        const folders = await createOutputFolder(asString(payload?.name), userId)
+        const folders = await createOutputFolder(
+          asString(payload?.name),
+          asString(payload?.bindingType),
+          userId,
+        )
+        spindle.sendToFrontend({
+          type: "output_folders_result",
+          requestId,
+          data: folders,
+        }, userId)
+        return
+      }
+      case "update_output_folder_profile": {
+        const folders = await updateOutputFolderProfile(
+          asString(payload?.folderId),
+          payload?.profile,
+          userId,
+        )
         spindle.sendToFrontend({
           type: "output_folders_result",
           requestId,
