@@ -30,6 +30,15 @@ globalThis.spindle = {
       completionToast = message
     },
   },
+  textEditor: {
+    async open(options) {
+      assert.equal(options.title, "Swarm Studio · Positive prompt")
+      assert.equal(options.value, "ink style, portrait")
+      assert.equal(options.placeholder, "Describe the image…")
+      assert.equal(options.userId, "user-1")
+      return { text: "ink style, portrait, expanded", cancelled: false }
+    },
+  },
   permissions: {
     has(permission) {
       return permissions.has(permission)
@@ -411,6 +420,16 @@ assert.equal(bootstrap.data.offset, 0)
 assert.equal(bootstrap.data.limit, 12)
 assert.deepEqual(bootstrap.data.stackPresets, [])
 assert.deepEqual(bootstrap.data.outputFolders, [])
+
+const expandedPrompt = await request("open_text_editor", {
+  editorId: "studio-positive",
+  title: "Swarm Studio · Positive prompt",
+  value: "ink style, portrait",
+  placeholder: "Describe the image…",
+})
+assert.equal(expandedPrompt.data.editorId, "studio-positive")
+assert.equal(expandedPrompt.data.text, "ink style, portrait, expanded")
+assert.equal(expandedPrompt.data.cancelled, false)
 
 const connection = await request("load_connection", { connectionId: "swarm-1" })
 assert.equal(connection.data.loras.length, 1)

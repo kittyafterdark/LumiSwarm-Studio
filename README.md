@@ -18,6 +18,7 @@ It adds:
 - Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, reusable saved stack presets, and one-click materialization of a Swarm preset into editable Studio controls
 - Shareable Studio stack JSON, direct in-app application to Lumiverse Image Gen LoRA presets, and a missing-file handoff with Civitai source links for SwarmUI's Model Downloader
 - A prompt-header generation action on desktop and a persistent mobile generation action
+- Native Lumiverse expanded text editors for Studio and Quick Create positive/negative prompts, including the host's macro-aware editing tools
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
@@ -28,7 +29,7 @@ It adds:
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
-- A draggable two-state Lumiverse float player: a square image orb and a full **Quick create** panel. It survives closing Studio, generates from editable lightweight prompts, follows live previews and step progress, can append the latest output to chat, and can interrupt directly
+- A draggable two-state Lumiverse float player: a square image orb and a full **Quick create** panel. It survives closing Studio, generates from editable lightweight prompts, follows live previews and step progress, can append the latest output to chat, and turns its stable Generate action into Stop while rendering
 - Shared float-player/Studio output and draft state, so Quick create inherits the last model, dimensions, sampler, scheduler, presets, LoRAs, workflow, init image, and overrides—and the full Studio restores them when it reopens
 - The drawer’s picture-frame wall emblem reused consistently in the float player, Studio header, drawer registration, and chat input action
 
@@ -259,7 +260,8 @@ native 40 × 40 float-widget cap. Mobile Quick Create is opt-in; otherwise the
 widget stays in its square image state. If app-overlay permission is unavailable,
 Studio falls back to Lumiverse's float widget. Interactive Quick Create controls
 reserve pointer focus from the drag surface. Desktop collapsed mode remains
-56 × 56. Right-click or long-press either state for **Expand Quick Create**,
+56 × 56. Right-click or long-press either state for **Expand Quick Create** or
+**Minimize Quick Create**, depending on its current state, alongside
 **Open Swarm Studio**, **Open Library**, and **Hide widget** actions.
 
 After every successful generation, `{{last_genned}}` resolves to the latest

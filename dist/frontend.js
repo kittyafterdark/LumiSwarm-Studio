@@ -37,6 +37,11 @@ const EXPAND_ICON = `
     <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"/>
   </svg>
 `;
+const MINIMIZE_ICON = `
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M3 8h5V3M21 8h-5V3M21 16h-5v5M3 16h5v5"/>
+  </svg>
+`;
 const FRAME_WALL_ICON = `
   <svg viewBox="0 0 457.667 457.667" fill="currentColor" aria-hidden="true">
     <path d="M116.352 141.241h108.759v-38.686H116.352v38.686Zm7-31.686h94.759v24.686h-94.759v-24.686ZM348.908 102.555v38.686h108.759v-38.686H348.908Zm101.759 31.686h-94.759v-24.686h94.759v24.686ZM348.908 277.929h108.759V149.746H348.908v128.183Zm7-121.183h94.759V270.93h-94.759V156.746ZM116.352 355.111h108.759v-38.686H116.352v38.686Zm7-31.685h94.759v24.686h-94.759v-24.686ZM232.704 355.111h224.962v-70.11H232.704v70.11Zm7-63.11h210.962v56.11H239.704v-56.11ZM0 186.087h108.759v-83.531H0v83.531Zm7-76.532h94.759v69.531H7v-69.531ZM341.463 102.555H232.704v83.531h108.759v-83.531Zm-7 76.532h-94.759v-69.531h94.759v69.531ZM341.463 194.398H232.704v83.531h108.759v-83.531Zm-7 76.531h-94.759v-69.531h94.759v69.531ZM0 355.111h108.759V194.398H0v160.713Zm7-153.713h94.759v146.713H7V201.398ZM116.352 309.189h108.759V148.476H116.352v160.713Zm7-153.713h94.759v146.713h-94.759V155.476Z"/>
@@ -1188,6 +1193,15 @@ const STUDIO_V3_STYLES = `
   .ss-prompt-panel { padding: 8px 9px; min-height: 0; overflow-y: auto; }
   .ss-prompt-panel .ss-textarea { min-height: 70px; max-height: 150px; }
   .ss-prompt-grid { grid-template-columns: 1.25fr 1fr; }
+  .ss-prompt-field-head { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+  .ss-prompt-field-head > label { min-width: 0; }
+  .ss-prompt-editor-button {
+    width: 22px;
+    height: 20px;
+    flex: 0 0 auto;
+    border-radius: 6px;
+  }
+  .ss-prompt-editor-button svg { width: 11px; height: 11px; }
   .ss-positive-label { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .ss-active-preset-pill {
     min-width: 0;
@@ -2132,6 +2146,8 @@ const STUDIO_V3_STYLES = `
     border-color: color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 68%, var(--lumiverse-border));
   }
   .ss-miniplayer[data-expanded="true"] {
+    width: 100%;
+    height: 100%;
     grid-template-columns: 82px minmax(0, 1fr) auto;
     grid-template-rows: auto minmax(0, 1fr);
     align-items: stretch;
@@ -2206,7 +2222,6 @@ const STUDIO_V3_STYLES = `
   .ss-mini-button:hover { color: var(--lumiverse-text); border-color: var(--lumiverse-accent, var(--lumiverse-primary)); }
   .ss-mini-button:disabled { opacity: .36; cursor: not-allowed; }
   .ss-mini-button svg { width: 13px; height: 13px; fill: currentColor; }
-  .ss-mini-button[data-action="mini-interrupt"] { color: #ff8b96; }
   .ss-mini-button[hidden] { display: none; }
   .ss-mini-quick {
     grid-column: 1 / -1;
@@ -2218,9 +2233,34 @@ const STUDIO_V3_STYLES = `
     border-top: 1px solid color-mix(in srgb, var(--lumiverse-border) 70%, transparent);
   }
   .ss-miniplayer[data-expanded="true"] .ss-mini-quick { display: grid; }
-  .ss-mini-quick-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .ss-mini-quick-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .ss-mini-quick-head strong { font: 600 13px/1 Georgia, "Times New Roman", serif; }
   .ss-mini-quick-head span { color: var(--lumiverse-text-muted); font-size: 8px; }
+  .ss-mini-editor-actions { display: flex; align-items: center; gap: 4px; }
+  .ss-mini-editor-button,
+  .ss-prompt-editor-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 0;
+    border: 1px solid transparent;
+    color: var(--lumiverse-text-muted);
+    background: transparent;
+    cursor: pointer;
+  }
+  .ss-mini-editor-button { width: 28px; height: 20px; border-radius: 6px; }
+  .ss-mini-editor-button:hover,
+  .ss-mini-editor-button:focus-visible,
+  .ss-prompt-editor-button:hover,
+  .ss-prompt-editor-button:focus-visible {
+    outline: 0;
+    color: var(--lumiverse-accent, var(--lumiverse-primary));
+    border-color: color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 42%, transparent);
+    background: color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 9%, transparent);
+  }
+  .ss-mini-editor-button svg { width: 10px; height: 10px; }
+  .ss-mini-editor-key { font-size: 7px; font-weight: 800; letter-spacing: .06em; }
   .ss-mini-prompt,
   .ss-mini-negative {
     width: 100%;
@@ -2251,6 +2291,11 @@ const STUDIO_V3_STYLES = `
     cursor: pointer;
   }
   .ss-mini-generate:disabled { opacity: .48; cursor: not-allowed; }
+  .ss-mini-generate[data-running="true"] {
+    color: #fff;
+    border-color: color-mix(in srgb, #ff6f7c 70%, var(--lumiverse-border));
+    background: color-mix(in srgb, #d83749 74%, var(--ss-button-bg));
+  }
   .ss-mini-context-menu {
     position: fixed;
     z-index: 2147483300;
@@ -2312,6 +2357,8 @@ const STUDIO_V3_STYLES = `
     .ss-miniplayer { grid-template-columns: 58px minmax(0, 1fr) auto; padding: 6px; }
     .ss-mini-preview { width: 58px; height: 58px; }
     .ss-miniplayer[data-expanded="true"] { grid-template-columns: 60px minmax(0, 1fr) auto; }
+    .ss-mini-prompt { font-size: 9px; }
+    .ss-mini-negative { font-size: 8px; }
     .ss-workflow-modal { padding: 8px; place-items: stretch; }
     .ss-workflow-modal-card { width: 100%; max-height: calc(100dvh - 16px); }
     .ss-save-preset-basics,
@@ -2889,14 +2936,19 @@ class MiniPlayerController {
           <div class="ss-mini-track"><span class="ss-mini-fill"></span></div>
         </div>
         <div class="ss-mini-actions">
-          <button class="ss-mini-button" data-action="mini-interrupt" title="Interrupt generation" aria-label="Interrupt generation" hidden>■</button>
           <button class="ss-mini-button" data-action="mini-append" title="Append latest output to chat" aria-label="Append latest output to chat" disabled>${APPEND_CHAT_ICON}</button>
           <button class="ss-mini-button" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">↗</button>
           <button class="ss-mini-button" data-action="mini-library" title="Open output library" aria-label="Open output library">${LIBRARY_ICON}</button>
           <button class="ss-mini-button" data-action="mini-collapse" title="Minimize to image" aria-label="Minimize to image">−</button>
         </div>
         <div class="ss-mini-quick" data-role="mini-quick">
-          <div class="ss-mini-quick-head"><strong>Quick create</strong><span>Scene tools will live here, too.</span></div>
+          <div class="ss-mini-quick-head">
+            <strong>Quick create</strong>
+            <div class="ss-mini-editor-actions" aria-label="Expanded prompt editors">
+              <button class="ss-mini-editor-button" data-action="mini-edit-prompt" data-prompt-role="positive" title="Open positive prompt in Lumiverse editor" aria-label="Expand positive prompt"><span class="ss-mini-editor-key">P</span>${EXPAND_ICON}</button>
+              <button class="ss-mini-editor-button" data-action="mini-edit-prompt" data-prompt-role="negative" title="Open negative prompt in Lumiverse editor" aria-label="Expand negative prompt"><span class="ss-mini-editor-key">N</span>${EXPAND_ICON}</button>
+            </div>
+          </div>
           <textarea class="ss-mini-prompt" data-role="mini-prompt" placeholder="Describe a quick image…" aria-label="Quick image prompt"></textarea>
           <input class="ss-mini-negative" data-role="mini-negative" placeholder="Negative prompt (optional)" aria-label="Quick negative prompt" />
           <div class="ss-mini-quick-actions">
@@ -2906,7 +2958,7 @@ class MiniPlayerController {
         </div>
       </div>
       <div class="ss-mini-context-menu" data-role="mini-context-menu" role="menu" hidden>
-        <button class="ss-mini-context-action" data-action="mini-menu-expand" role="menuitem">${EXPAND_ICON}<span>Expand Quick Create</span></button>
+        <button class="ss-mini-context-action" data-action="mini-menu-toggle" role="menuitem"><span data-role="mini-menu-size-icon">${EXPAND_ICON}</span><span data-role="mini-menu-size-label">Expand Quick Create</span></button>
         <button class="ss-mini-context-action" data-action="mini-menu-studio" role="menuitem">${FRAME_WALL_ICON}<span>Open Swarm Studio</span></button>
         <button class="ss-mini-context-action" data-action="mini-menu-library" role="menuitem">${LIBRARY_ICON}<span>Open Library</span></button>
         <span class="ss-mini-context-separator" aria-hidden="true"></span>
@@ -2925,17 +2977,17 @@ class MiniPlayerController {
             }
             this.suppressNextClick = false;
             if (action === "mini-open") this.activateWidget();
-            if (action === "mini-interrupt") this.interrupt();
             if (action === "mini-append") this.appendLatestToChat();
             if (action === "mini-library" || action === "mini-menu-library") this.openLibrary();
             if (action === "mini-collapse") this.setCollapsed(true);
-            if (action === "mini-menu-expand") this.setCollapsed(false);
+            if (action === "mini-menu-toggle") this.setCollapsed(!this.collapsed);
             if (action === "mini-menu-studio") this.openStudio();
             if (action === "mini-menu-hide") this.onBehaviorChange({
                 ...this.behavior,
                 widgetEnabled: false
             });
-            if (action === "mini-generate") this.quickGenerate();
+            if (action === "mini-generate") this.snapshotValue.active ? this.interrupt() : this.quickGenerate();
+            if (action === "mini-edit-prompt") this.openPromptEditor(button.dataset.promptRole || "");
             if (action?.startsWith("mini-menu-")) this.closeContextMenu();
         });
         this.root.addEventListener("pointerdown", (event)=>{
@@ -3104,6 +3156,12 @@ class MiniPlayerController {
             this.render();
             return;
         }
+        if (payload?.type === "text_editor_result" && String(data.editorId || "").startsWith("mini-")) {
+            const role = String(data.editorId).slice(5);
+            const input = role === "positive" ? this.root.querySelector('[data-role="mini-prompt"]') : role === "negative" ? this.root.querySelector('[data-role="mini-negative"]') : null;
+            if (input && data.cancelled !== true) input.value = String(data.text || "");
+            return;
+        }
         if (payload?.type === "generation_interrupt_requested" && payload.clientJobId === this.snapshotValue.jobId) {
             this.snapshotValue.status = "Interrupt requested…";
             this.render();
@@ -3115,6 +3173,11 @@ class MiniPlayerController {
         }
         if (payload?.type === "studio_error" && payload.operation === "generate") {
             this.fail(String(payload.clientJobId || ""), String(payload.error || "Generation failed."));
+            return;
+        }
+        if (payload?.type === "studio_error" && payload.operation === "open_text_editor") {
+            this.snapshotValue.status = String(payload.error || "Could not open Lumiverse’s text editor.");
+            this.render();
         }
     }
     onImageGenerationEvent(type, payload) {
@@ -3146,6 +3209,19 @@ class MiniPlayerController {
         });
         this.snapshotValue.status = "Interrupt requested…";
         this.render();
+    }
+    openPromptEditor(role) {
+        const positive = role === "positive";
+        const input = positive ? this.root.querySelector('[data-role="mini-prompt"]') : role === "negative" ? this.root.querySelector('[data-role="mini-negative"]') : null;
+        if (!input) return;
+        this.ctx.sendToBackend({
+            type: "open_text_editor",
+            requestId: crypto.randomUUID(),
+            editorId: `mini-${role}`,
+            title: positive ? "Swarm Studio · Positive prompt" : "Swarm Studio · Negative prompt",
+            value: input.value,
+            placeholder: input.placeholder
+        });
     }
     isMobileViewport() {
         return window.matchMedia("(max-width: 720px)").matches;
@@ -3192,12 +3268,15 @@ class MiniPlayerController {
     showContextMenu(clientX, clientY) {
         const menu = this.root.querySelector('[data-role="mini-context-menu"]');
         if (!menu) return;
-        const expand = menu.querySelector('[data-action="mini-menu-expand"]');
-        if (expand) {
-            const blockedOnMobile = this.isMobileViewport() && !this.behavior.mobileQuickCreate;
-            expand.hidden = !this.collapsed;
-            expand.disabled = blockedOnMobile;
-            expand.title = blockedOnMobile ? "Enable Quick Create on mobile in Studio settings" : "";
+        const toggle = menu.querySelector('[data-action="mini-menu-toggle"]');
+        if (toggle) {
+            const blockedOnMobile = this.collapsed && this.isMobileViewport() && !this.behavior.mobileQuickCreate;
+            toggle.disabled = blockedOnMobile;
+            toggle.title = blockedOnMobile ? "Enable Quick Create on mobile in Studio settings" : "";
+            const label = toggle.querySelector('[data-role="mini-menu-size-label"]');
+            const icon = toggle.querySelector('[data-role="mini-menu-size-icon"]');
+            if (label) label.textContent = this.collapsed ? "Expand Quick Create" : "Minimize Quick Create";
+            if (icon) icon.innerHTML = this.collapsed ? EXPAND_ICON : MINIMIZE_ICON;
         }
         menu.hidden = false;
         menu.style.left = "8px";
@@ -3313,12 +3392,13 @@ class MiniPlayerController {
                 collapsed: value
             }));
         } catch  {}
+        this.resizeWidget();
         const mini = this.root.querySelector('[data-role="miniplayer"]');
         if (mini) {
             mini.dataset.collapsed = String(value);
             mini.dataset.expanded = String(this.expanded);
+            void mini.offsetWidth;
         }
-        this.resizeWidget();
         const toggle = this.root.querySelector('[data-action="mini-collapse"]');
         if (toggle) {
             toggle.textContent = "−";
@@ -3331,12 +3411,22 @@ class MiniPlayerController {
         }
     }
     resizeWidget() {
-        if (this.collapsed) {
-            const size = this.isMobileViewport() ? 64 : 56;
-            this.widget.setSize(size, size);
-            return;
+        const width = this.collapsed ? this.isMobileViewport() ? 64 : 56 : Math.min(430, window.innerWidth - 24);
+        const height = this.collapsed ? width : this.isMobileViewport() ? 304 : 270;
+        this.widget.setSize(width, height);
+        if (this.root.classList.contains("ss-miniplayer-app-surface")) {
+            this.root.style.width = `${width}px`;
+            this.root.style.height = `${height}px`;
         }
-        this.widget.setSize(Math.min(430, window.innerWidth - 24), this.isMobileViewport() ? 304 : 270);
+        const expectedCollapsed = this.collapsed;
+        window.requestAnimationFrame(()=>{
+            if (this.collapsed !== expectedCollapsed) return;
+            this.widget.setSize(width, height);
+            if (this.root.classList.contains("ss-miniplayer-app-surface")) {
+                this.root.style.width = `${width}px`;
+                this.root.style.height = `${height}px`;
+            }
+        });
     }
     render() {
         const mini = this.root.querySelector('[data-role="miniplayer"]');
@@ -3367,11 +3457,14 @@ class MiniPlayerController {
             image.hidden = true;
             placeholder.hidden = false;
         }
-        this.root.querySelector('[data-action="mini-interrupt"]').hidden = !this.snapshotValue.active;
         const append = this.root.querySelector('[data-action="mini-append"]');
         if (append) append.disabled = !this.quickCanAppend || !this.snapshotValue.latestImage?.id;
         const quickButton = this.root.querySelector('[data-action="mini-generate"]');
-        if (quickButton) quickButton.disabled = this.snapshotValue.active || !this.quickConnection;
+        if (quickButton) {
+            quickButton.disabled = !this.snapshotValue.active && !this.quickConnection;
+            quickButton.dataset.running = String(this.snapshotValue.active);
+            quickButton.textContent = this.snapshotValue.active ? "Stop generation" : "Generate quick image";
+        }
         const connection = this.root.querySelector('[data-role="mini-connection"]');
         if (connection) {
             connection.textContent = this.quickConnection ? `${String(this.quickConnection.name || "SwarmUI")} · ${String(this.quickConnection.model || "connection default")}` : "No Lumiverse SwarmUI connection found";
@@ -4185,12 +4278,18 @@ are removed when CSS is applied.</pre>
               </div>
               <div class="ss-prompt-grid">
                 <div class="ss-field">
-                  <label class="ss-positive-label" for="ss-positive-v3"><span>Positive</span><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span></label>
+                  <div class="ss-prompt-field-head">
+                    <label class="ss-positive-label" for="ss-positive-v3"><span>Positive</span><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span></label>
+                    <button class="ss-prompt-editor-button" data-action="edit-prompt" data-prompt-role="positive" title="Open positive prompt in Lumiverse editor" aria-label="Expand positive prompt">${EXPAND_ICON}</button>
+                  </div>
                   <textarea id="ss-positive-v3" class="ss-textarea" data-role="positive" placeholder="Describe the image…"></textarea>
                   <div class="ss-field-help" data-role="trigger-summary">No inherited trigger phrases.</div>
                 </div>
                 <div class="ss-field">
-                  <label for="ss-negative-v3">Negative</label>
+                  <div class="ss-prompt-field-head">
+                    <label for="ss-negative-v3">Negative</label>
+                    <button class="ss-prompt-editor-button" data-action="edit-prompt" data-prompt-role="negative" title="Open negative prompt in Lumiverse editor" aria-label="Expand negative prompt">${EXPAND_ICON}</button>
+                  </div>
                   <textarea id="ss-negative-v3" class="ss-textarea" data-role="negative" placeholder="What should not appear…"></textarea>
                   <div class="ss-field-help">Passed through Lumiverse's SwarmUI provider.</div>
                 </div>
@@ -4626,6 +4725,7 @@ are removed when CSS is applied.</pre>
             if (action === "confirm-save-preset") this.confirmSavePreset();
             if (action === "close-move-folder") this.closeMoveFolderModal();
             if (action === "move-folder-choice") this.confirmMoveFolder(button.dataset.folderId || "");
+            if (action === "edit-prompt") this.openPromptEditor(button.dataset.promptRole || "");
             if (action === "generate") this.generate();
             if (action === "interrupt-generation") this.interruptGeneration();
             if (action === "refresh-outputs") this.refreshOutputs();
@@ -4677,6 +4777,16 @@ are removed when CSS is applied.</pre>
         });
         return requestId;
     }
+    openPromptEditor(role) {
+        if (role !== "positive" && role !== "negative") return;
+        const input = this.get(`[data-role="${role}"]`);
+        this.send("open_text_editor", {
+            editorId: `studio-${role}`,
+            title: role === "positive" ? "Swarm Studio · Positive prompt" : "Swarm Studio · Negative prompt",
+            value: input.value,
+            placeholder: input.placeholder
+        });
+    }
     onMessage(payload) {
         if (this.disposed) return;
         const data = payload?.data || {};
@@ -4715,6 +4825,16 @@ are removed when CSS is applied.</pre>
                     this.updatePreviewImages(payload.name, payload.dataUrl);
                 }
                 break;
+            case "text_editor_result":
+                {
+                    const editorId = String(data.editorId || "");
+                    if (!editorId.startsWith("studio-") || data.cancelled === true) break;
+                    const role = editorId.slice(7);
+                    if (role !== "positive" && role !== "negative") break;
+                    this.get(`[data-role="${role}"]`).value = String(data.text || "");
+                    this.activity?.captureDraft(this.exportDraft());
+                    break;
+                }
             case "swarm_output_download":
                 {
                     const dataUrl = String(data.dataUrl || "");

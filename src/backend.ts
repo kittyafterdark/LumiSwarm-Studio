@@ -1435,6 +1435,29 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         }, userId)
         return
       }
+      case "open_text_editor": {
+        if (typeof spindle.textEditor?.open !== "function") {
+          throw new Error("This Lumiverse build does not expose the expanded text editor.")
+        }
+        const editorId = asString(payload?.editorId).trim().slice(0, 80)
+        if (!editorId) throw new Error("No prompt editor target was supplied.")
+        const result = await spindle.textEditor.open({
+          title: asString(payload?.title).trim().slice(0, 120) || "Swarm Studio prompt",
+          value: asString(payload?.value).slice(0, 200_000),
+          placeholder: asString(payload?.placeholder).slice(0, 500),
+          userId,
+        })
+        spindle.sendToFrontend({
+          type: "text_editor_result",
+          requestId,
+          data: {
+            editorId,
+            text: asString(result?.text),
+            cancelled: result?.cancelled === true,
+          },
+        }, userId)
+        return
+      }
       case "preview": {
         const connectionId = asString(payload?.connectionId)
         const previewRef = asString(payload?.previewRef)
