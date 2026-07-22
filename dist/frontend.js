@@ -2891,6 +2891,7 @@ class MiniPlayerController {
     ctx;
     widget;
     root;
+    sizeTarget;
     openStudio;
     openLibrary;
     getStudioDraft;
@@ -2899,6 +2900,9 @@ class MiniPlayerController {
     studioOpen = false;
     collapsed = false;
     expanded = true;
+    expectedWidth = 318;
+    expectedHeight = 94;
+    sizeObserver = null;
     longPressTimer = null;
     suppressNextClick = false;
     onDocumentPointerDown = (event)=>{
@@ -2937,6 +2941,7 @@ class MiniPlayerController {
         this.ctx = ctx;
         this.widget = widget;
         this.root = widget.root;
+        this.sizeTarget = this.root.classList.contains("ss-miniplayer-app-surface") ? this.root : this.root.parentElement || this.root;
         this.root.style.width = "100%";
         this.root.style.height = "100%";
         this.openStudio = openStudio;
@@ -2948,10 +2953,10 @@ class MiniPlayerController {
         };
         try {
             const stored = JSON.parse(window.localStorage.getItem(MINIPLAYER_STORAGE_KEY) || "{}");
-            this.collapsed = stored.collapsed === true || this.isMobileViewport();
+            this.collapsed = this.isMobileViewport() ? !this.behavior.mobileQuickCreate : stored.collapsed === true;
             this.expanded = !this.collapsed;
         } catch  {
-            this.collapsed = this.isMobileViewport();
+            this.collapsed = this.isMobileViewport() && !this.behavior.mobileQuickCreate;
             this.expanded = !this.collapsed;
         }
         this.root.innerHTML = `
@@ -3039,6 +3044,19 @@ class MiniPlayerController {
         document.addEventListener("pointerdown", this.onDocumentPointerDown);
         document.addEventListener("keydown", this.onDocumentKeyDown);
         window.addEventListener("resize", this.onWindowResize);
+        if (typeof ResizeObserver === "function") {
+            this.sizeObserver = new ResizeObserver((entries)=>{
+                if (this.studioOpen || !this.behavior.widgetEnabled) return;
+                for (const entry of entries){
+                    const { width, height } = entry.contentRect;
+                    if (width <= 0 || height <= 0) continue;
+                    if (Math.abs(width - this.expectedWidth) > 2 || Math.abs(height - this.expectedHeight) > 2) {
+                        this.applyWidgetSize(this.expectedWidth, this.expectedHeight);
+                    }
+                }
+            });
+            this.sizeObserver.observe(this.sizeTarget);
+        }
         this.setCollapsed(this.collapsed);
         this.setBehavior(this.behavior);
         this.render();
@@ -3047,10 +3065,14 @@ class MiniPlayerController {
         applyAppearanceVariables(this.root, appearance);
     }
     setBehavior(behavior) {
+        const enabledMobileQuickCreate = !this.behavior.mobileQuickCreate && behavior.mobileQuickCreate;
         this.behavior = {
             ...behavior
         };
-        if (!this.behavior.mobileQuickCreate && this.isMobileViewport() && !this.collapsed) this.setCollapsed(true);
+        if (this.isMobileViewport()) {
+            if (!this.behavior.mobileQuickCreate && !this.collapsed) this.setCollapsed(true);
+            else if (enabledMobileQuickCreate && this.collapsed) this.setCollapsed(false);
+        }
         this.syncVisibility();
         this.render();
     }
@@ -3234,6 +3256,7 @@ class MiniPlayerController {
         document.removeEventListener("pointerdown", this.onDocumentPointerDown);
         document.removeEventListener("keydown", this.onDocumentKeyDown);
         window.removeEventListener("resize", this.onWindowResize);
+        this.sizeObserver?.disconnect();
         this.widget.destroy();
     }
     syncVisibility() {
@@ -3266,10 +3289,10 @@ class MiniPlayerController {
         });
     }
     isMobileViewport() {
-        return window.matchMedia("(max-width: 720px)").matches;
+        return (this.root.ownerDocument.documentElement.clientWidth || window.innerWidth) <= 720;
     }
     isMobileOrb() {
-        return this.isMobileViewport() && (this.collapsed || !this.behavior.mobileQuickCreate);
+        return this.isMobileViewport() && this.collapsed;
     }
     activateWidget() {
         this.openStudio();
@@ -3453,23 +3476,27 @@ class MiniPlayerController {
         }
     }
     resizeWidget() {
-        const compact = this.collapsed || this.isMobileOrb();
-        const width = compact ? this.isMobileViewport() ? 64 : 56 : Math.min(430, window.innerWidth - 24);
+        const compact = this.collapsed;
+        const viewportWidth = this.root.ownerDocument.documentElement.clientWidth || window.innerWidth;
+        const width = compact ? this.isMobileViewport() ? 64 : 56 : Math.min(430, viewportWidth - 24);
         const height = compact ? width : this.isMobileViewport() ? 304 : 270;
-        this.widget.setSize(width, height);
-        if (this.root.classList.contains("ss-miniplayer-app-surface")) {
-            this.root.style.width = `${width}px`;
-            this.root.style.height = `${height}px`;
-        }
+        this.expectedWidth = width;
+        this.expectedHeight = height;
+        this.applyWidgetSize(width, height);
         const expectedCompact = compact;
         window.requestAnimationFrame(()=>{
-            if ((this.collapsed || this.isMobileOrb()) !== expectedCompact) return;
-            this.widget.setSize(width, height);
-            if (this.root.classList.contains("ss-miniplayer-app-surface")) {
-                this.root.style.width = `${width}px`;
-                this.root.style.height = `${height}px`;
-            }
+            if (this.collapsed !== expectedCompact) return;
+            this.applyWidgetSize(width, height);
         });
+    }
+    applyWidgetSize(width, height) {
+        this.widget.setSize?.(width, height);
+        this.sizeTarget.style.setProperty("width", `${width}px`, "important");
+        this.sizeTarget.style.setProperty("height", `${height}px`, "important");
+        if (this.root.classList.contains("ss-miniplayer-app-surface")) {
+            this.root.style.setProperty("width", `${width}px`, "important");
+            this.root.style.setProperty("height", `${height}px`, "important");
+        }
     }
     render() {
         const mini = this.root.querySelector('[data-role="miniplayer"]');
@@ -3479,8 +3506,8 @@ class MiniPlayerController {
         mini.dataset.state = this.state;
         const mobileOrb = this.isMobileOrb();
         mini.dataset.mobileOrb = String(mobileOrb);
-        mini.dataset.collapsed = String(this.collapsed || mobileOrb);
-        mini.dataset.expanded = String(this.expanded && !mobileOrb);
+        mini.dataset.collapsed = String(this.collapsed);
+        mini.dataset.expanded = String(this.expanded);
         mini.dataset.indeterminate = String(this.state === "running" && !hasTotal);
         mini.style.setProperty("--ss-mini-progress", `${percentage}%`);
         const labels = {
@@ -7813,14 +7840,14 @@ export function setup(ctx) {
     };
     if (typeof document !== "undefined") {
         try {
-            const mobile = window.innerWidth <= 720;
-            const widget = createOverlayMiniplayerWidget() || (typeof ctx.ui.createFloatWidget === "function" ? ctx.ui.createFloatWidget({
+            const mobile = (document.documentElement.clientWidth || window.innerWidth) <= 720;
+            const widget = (typeof ctx.ui.createFloatWidget === "function" ? ctx.ui.createFloatWidget({
                 width: mobile ? 64 : 318,
                 height: mobile ? 64 : 94,
                 snapToEdge: true,
                 tooltip: "Swarm Studio miniplayer",
                 chromeless: true
-            }) : null);
+            }) : null) || createOverlayMiniplayerWidget();
             if (!widget) throw new Error("No supported miniplayer surface");
             miniplayer = new MiniPlayerController(ctx, widget, ()=>openStudio("studio"), ()=>openStudio("library"), ()=>activeStudio?.exportDraft() || null, behavior, updateBehavior);
             miniplayer.setAppearance(appearance);
