@@ -1204,7 +1204,10 @@ async function fetchSwarmOutput(
     throw new Error("SwarmUI returned an invalid output file path.")
   }
   relative = segments.map((segment) => encodeURIComponent(segment)).join("/")
-  const target = `${baseUrl}/ViewSpecial/Output/${relative}`
+  // SwarmUI serves generated files from /Output/{path}. /ViewSpecial is its
+  // model/preset preview route and returns a JSON error for output paths,
+  // which Lumiverse's image-only proxy correctly refuses to pass through.
+  const target = `${baseUrl}/Output/${relative}`
   const headers: Record<string, string> = { "Accept": "image/*" }
   if (token) headers.Cookie = `swarm_token=${token}`
   const response = await spindle.cors(target, {
@@ -1286,10 +1289,21 @@ async function listLibraryOutputs(userId?: string): Promise<{
   total: number
   folders: OutputFolder[]
 }> {
-  const page = await listOutputs(userId, null, 0, 200, true)
+  const outputs: any[] = []
+  let offset = 0
+  let total = 0
+  // The image service caps each call at 200. Walk every page so the library
+  // itself is not silently capped at the first 200 owned outputs.
+  for (let pageIndex = 0; pageIndex < 100; pageIndex++) {
+    const page = await listOutputs(userId, null, offset, 200, true)
+    outputs.push(...page.outputs)
+    total = Math.max(total, page.total)
+    offset += page.outputs.length
+    if (!page.outputs.length || page.outputs.length < page.limit || offset >= total) break
+  }
   return {
-    outputs: page.outputs,
-    total: page.total,
+    outputs,
+    total: Math.max(total, outputs.length),
     folders: await loadOutputFolders(userId),
   }
 }
@@ -1575,7 +1589,9 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         }, userId)
         const latestUrl = record?.imageUrl || asString(result.imageUrl)
         if (latestUrl) spindle.updateMacroValue("last_genned", latestUrl)
-        if (payload?.showCompletionToast !== false && typeof spindle.toast?.success === "function") {
+        // Completion notifications are intentionally opt-in. Older clients that
+        // omit the flag must stay quiet instead of inheriting the former default.
+        if (payload?.showCompletionToast === true && typeof spindle.toast?.success === "function") {
           spindle.toast.success(`Swarm Studio finished ${record?.model || asString(result.model) || "your image"}.`)
         }
         return

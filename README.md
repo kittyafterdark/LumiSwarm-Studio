@@ -15,8 +15,8 @@ It adds:
 - Context-aware orientation and seed actions that flip to the useful next state, with fixed-seed reuse from the selected output
 - A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
-- Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, reusable saved stack presets, and extraction from enabled Swarm presets
-- Shareable Studio stack JSON, Lumiverse Image Gen LoRA-preset import/export, and a missing-file handoff with Civitai source links for SwarmUI's Model Downloader
+- Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, reusable saved stack presets, and one-click materialization of a Swarm preset into editable Studio controls
+- Shareable Studio stack JSON, direct in-app application to Lumiverse Image Gen LoRA presets, and a missing-file handoff with Civitai source links for SwarmUI's Model Downloader
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
@@ -51,6 +51,7 @@ Generation itself goes through `spindle.imageGen.generate()`. That means it cont
    - `chats` — tags outputs to the active chat and character
    - `chat_mutation` — explicitly appends a selected output to the active chat
    - `ui_panels` — the persistent generation miniplayer
+   - `app_manipulation` — the unclipped, draggable 64px mobile miniplayer overlay
 
 4. Make sure Lumiverse already has a working **SwarmUI** image generation connection.
 5. Open **Swarm Studio** from its drawer tab or the chat input's Extras menu.
@@ -87,9 +88,11 @@ per-user extension storage. Generation details are associated with the
 persisted Lumiverse image ID so History can show the prompts used by recent
 Swarm Studio outputs.
 
-The stack toolbar can export a portable Studio JSON file or a valid Lumiverse
-Image Gen config containing one active LoRA preset. **Import stack** accepts
-either format, including configs exported by Lumiverse. If the current Swarm
+The stack toolbar can export a portable Studio JSON file. **Apply to Lumi**
+merges the enabled stack into Lumiverse Image Gen's saved LoRA presets and
+activates it in-app; reopening an already-mounted native Image Gen tab makes it
+reload those saved settings. **Import stack** accepts either the portable Studio
+format or a config exported by Lumiverse. If the current Swarm
 library lacks a referenced filename, Studio keeps it in the stack and shows
 the metadata source link when available so it can be pasted into SwarmUI's
 Model Downloader. The extension does not silently trigger Swarm's WebSocket
@@ -110,13 +113,16 @@ metadata calls are unavailable, the controls fall back to common values and
 generation remains available.
 
 When `ListT2IParams` exposes a usable schema and the SwarmUI account has
-`manage_presets`, **Save current** appears beside the preset selector. It saves
-the current prompts and recognized render controls through SwarmUI's
-`AddNewPreset` API, then selects the new preset in Studio.
+`manage_presets`, **Save current** appears beside the preset selector. It opens
+a checklist built from the current schema so prompt, model, sizing, sampling,
+LoRAs, workflow, overrides, and seed can be included or omitted individually
+before Studio calls SwarmUI's `AddNewPreset` API.
 
-Enabled Swarm presets that expose LoRA filename and weight parameters also
-enable **Extract LoRAs**, which merges those references into Studio's visual
-stack.
+Each selected Swarm preset has an **Apply** action. It copies the preset's known
+values into the editable Studio controls, moves any LoRA filename/weight pairs
+into the visual stack, preserves unknown values as raw overrides, and removes
+the applied preset from the outgoing preset list so LoRA weights cannot be sent
+twice.
 
 For newly generated images, Swarm Studio looks up SwarmUI's saved image
 metadata to display preparation time, generation time, preset names, and the
@@ -160,13 +166,15 @@ ellipsis-safe line so they cannot squeeze the generation controls.
 ## Output library and folders
 
 History is scoped to the active chat and paged in groups of 12. The output
-library, opened from the drawer, History, or inspector, can show up to 200
-recent extension-owned Lumiverse images across chats, paged in groups of 30 on
+library, opened from the Studio header, drawer, or inspector, walks Lumiverse's
+paginated image API to show all extension-owned images across chats, 30 at a
+time on
 desktop and 15 on mobile. Search matches every entered keyword across submitted
 positive and negative prompts, model, LoRAs, presets, render parameters,
 filename, and Swarm path; quoted phrases stay together. Select a page or
 individual cards to move many outputs into a virtual folder or delete them
-together.
+together. **Move** opens a focused folder chooser for either one card or the
+current bulk selection.
 
 Folders are lightweight per-user collections stored by the extension; moving
 an output into one does not move or duplicate Lumiverse's underlying image
@@ -203,8 +211,9 @@ keep overrides inside the Studio, or use `.ss-launcher` to style its drawer
 composition. Its dot field, broken corner ornaments, picture-frame glyph, and
 sparkle are static CSS or inline SVG, with no animated or fetched assets.
 Metadata refresh and the optional encrypted `swarm_token` live in this same
-opaque gear panel. Its Behavior section can enable or disable completion toasts
-and choose whether a desktop floating-widget tap opens Studio or Quick Create.
+opaque gear panel. Completion toasts are off by default and can be opted into
+from its Behavior section, which also chooses whether a desktop floating-widget
+tap opens Studio or Quick Create.
 
 ## Live generation previews and interruption
 
@@ -240,12 +249,13 @@ targets the active client job; clicking the preview reopens Studio with the same
 live or completed output and draft already restored. Size preferences are stored
 locally, while generation state and draft data stay in memory only for the
 current Lumiverse session.
-On mobile, collapsed mode matches Lumiverse's native 40 × 40 float-widget cap;
-the complete border-box is rendered inside that cap, its preview exposes a
-visible reopen glyph, and its tap is reserved from the host drag gesture.
-Interactive Quick Create controls likewise reserve pointer focus from the
-widget drag surface. Desktop collapsed mode remains 56 × 56. Right-clicking the
-collapsed preview also reopens Studio.
+On mobile, the extension mounts its own app-overlay miniplayer so the collapsed
+widget remains a complete 64 × 64 square instead of being clipped by the host's
+native 40 × 40 float-widget cap. Its image/title area is draggable and its
+collapsed preview reopens Studio. If app-overlay permission is unavailable,
+Studio falls back to Lumiverse's float widget. Interactive Quick Create controls
+reserve pointer focus from the drag surface. Desktop collapsed mode remains
+56 × 56. Right-clicking the collapsed preview also reopens Studio.
 
 After every successful generation, `{{last_genned}}` resolves to the latest
 Lumiverse-owned output URL. This is intended for image URLs in HTML artifacts,

@@ -296,7 +296,8 @@ const SPARKLE_ICON = `
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1"
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1"
 const MINIPLAYER_STORAGE_KEY = "swarm-studio-miniplayer-v1"
-const BEHAVIOR_STORAGE_KEY = "swarm-studio-behavior-v1"
+const MINIPLAYER_POSITION_STORAGE_KEY = "swarm-studio-miniplayer-position-v1"
+const BEHAVIOR_STORAGE_KEY = "swarm-studio-behavior-v2"
 const WORKFLOW_CORE_PARAMETERS = new Set([
   "prompt",
   "negativeprompt",
@@ -1346,7 +1347,7 @@ const STUDIO_V3_STYLES = `
   .ss-preset-row {
     min-width: 0;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
     gap: 5px;
     align-items: center;
     padding: 5px 6px;
@@ -1357,6 +1358,7 @@ const STUDIO_V3_STYLES = `
   .ss-preset-row input { accent-color: var(--lumiverse-accent, #7dd3fc); }
   .ss-preset-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
   .ss-preset-row .ss-icon-button { min-width: 25px; min-height: 25px; height: 25px; padding: 2px 5px; }
+  .ss-preset-apply { min-height: 25px; padding: 3px 7px; font-size: 9px; }
   .ss-center {
     min-width: 0;
     min-height: 0;
@@ -1656,6 +1658,14 @@ const STUDIO_V3_STYLES = `
     color: #e0a458;
     font-weight: 500;
   }
+  .ss-stack-row[data-missing="true"] {
+    border-color: color-mix(in srgb, #ff7f8b 62%, var(--lumiverse-border));
+  }
+  .ss-stack-row[data-missing="true"] .ss-stack-name strong::after {
+    content: " · missing";
+    color: #ff8b96;
+    font-weight: 600;
+  }
   .ss-shell.ss-loras-collapsed .ss-lora-dock { flex-basis: 32px; }
   .ss-shell.ss-loras-collapsed .ss-dock-resizer,
   .ss-shell.ss-loras-collapsed .ss-library-tools,
@@ -1938,7 +1948,7 @@ const STUDIO_V3_STYLES = `
   .ss-library-output-button img { width: 100%; height: 100%; display: block; object-fit: cover; }
   .ss-library-output-meta { display: grid; gap: 5px; padding: 6px; }
   .ss-library-output-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
-  .ss-library-output-meta .ss-select { height: 28px; font-size: 9px; }
+  .ss-library-output-meta :is(.ss-select, .ss-button) { width: 100%; height: 28px; min-height: 28px; padding-block: 3px; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
   .ss-token-popover { z-index: 30; }
 
   @media (max-width: 1000px) and (min-width: 721px) {
@@ -2266,6 +2276,29 @@ const STUDIO_V3_STYLES = `
   .ss-workflow-modal-title strong { overflow: hidden; font: 600 18px/1.15 Georgia, "Times New Roman", serif; text-overflow: ellipsis; white-space: nowrap; }
   .ss-workflow-modal-description { padding: 11px 15px; color: var(--lumiverse-text-muted); font-size: 10px; line-height: 1.5; }
   .ss-workflow-modal .ss-workflow-fields { min-height: 0; overflow-y: auto; padding: 4px 15px 16px; }
+  .ss-workflow-modal[data-role="save-preset-modal"],
+  .ss-workflow-modal[data-role="move-folder-modal"] { z-index: 2147483007; }
+  .ss-save-preset-fields { min-height: 0; display: grid; gap: 10px; overflow-y: auto; padding: 13px 15px 16px; }
+  .ss-save-preset-basics { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; }
+  .ss-save-param-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .ss-save-param {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 7px;
+    align-items: start;
+    padding: 8px;
+    border: 1px solid var(--ss-outline);
+    border-radius: var(--ss-control-radius);
+    background: color-mix(in srgb, var(--ss-button-bg) 54%, transparent);
+  }
+  .ss-save-param input { margin-top: 2px; accent-color: var(--lumiverse-accent); }
+  .ss-save-param-copy { min-width: 0; display: grid; gap: 3px; }
+  .ss-save-param-copy strong,
+  .ss-save-param-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-save-param-copy span { color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-move-folder-list { min-height: 0; display: grid; gap: 6px; overflow-y: auto; padding: 13px 15px 16px; }
+  .ss-move-folder-choice { justify-content: space-between; text-align: left; }
   .ss-workflow-configure { width: 28px; height: 28px; padding: 6px; }
   .ss-workflow-configure svg { width: 14px; height: 14px; }
 
@@ -2292,6 +2325,23 @@ const STUDIO_V3_STYLES = `
     backdrop-filter: blur(var(--ss-backdrop-blur, 12px));
     font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   }
+  .ss-miniplayer-app-mount {
+    position: fixed !important;
+    inset: 0;
+    z-index: 9998;
+    pointer-events: none;
+  }
+  .ss-miniplayer-app-surface {
+    position: fixed;
+    left: 18px;
+    top: 18px;
+    width: 318px;
+    height: 94px;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+  .ss-miniplayer-app-surface .ss-mini-preview,
+  .ss-miniplayer-app-surface .ss-mini-title { touch-action: none; }
   .ss-miniplayer[data-state="running"] {
     border-color: color-mix(in srgb, var(--lumiverse-accent, var(--lumiverse-primary)) 68%, var(--lumiverse-border));
   }
@@ -2435,8 +2485,8 @@ const STUDIO_V3_STYLES = `
       display: grid;
       grid-template-columns: 1fr;
       place-items: center;
-      width: 40px;
-      height: 40px;
+      width: 64px;
+      height: 64px;
       max-width: 100%;
       max-height: 100%;
       box-sizing: border-box;
@@ -2459,6 +2509,8 @@ const STUDIO_V3_STYLES = `
     .ss-miniplayer[data-expanded="true"] { grid-template-columns: 60px minmax(0, 1fr) auto; }
     .ss-workflow-modal { padding: 8px; place-items: stretch; }
     .ss-workflow-modal-card { width: 100%; max-height: calc(100dvh - 16px); }
+    .ss-save-preset-basics,
+    .ss-save-param-list { grid-template-columns: 1fr; }
   }
 
   @media (max-width: 470px) {
@@ -2486,6 +2538,94 @@ function element<K extends keyof HTMLElementTagNameMap>(
   if (className) node.className = className
   if (text !== undefined) node.textContent = text
   return node
+}
+
+function createOverlayMiniplayerWidget(ctx: FrontendContext): any | null {
+  if (typeof ctx.ui.mountApp !== "function") return null
+  let mount: any
+  try {
+    mount = ctx.ui.mountApp({ position: "app-overlay", className: "ss-miniplayer-app-mount" })
+  } catch {
+    return null
+  }
+  const surface = element("div", "ss-miniplayer-app-surface")
+  mount.root.appendChild(surface)
+  let width = 318
+  let height = 94
+  let x = Math.max(8, window.innerWidth - width - 18)
+  let y = Math.max(8, window.innerHeight - height - 92)
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(MINIPLAYER_POSITION_STORAGE_KEY) || "{}")
+    if (Number.isFinite(saved?.x)) x = Number(saved.x)
+    if (Number.isFinite(saved?.y)) y = Number(saved.y)
+  } catch {
+    // Start near the lower-right corner when storage is unavailable.
+  }
+  const place = (persist = false) => {
+    x = clamp(x, 8, Math.max(8, window.innerWidth - width - 8))
+    y = clamp(y, 8, Math.max(8, window.innerHeight - height - 8))
+    surface.style.left = `${Math.round(x)}px`
+    surface.style.top = `${Math.round(y)}px`
+    if (persist) {
+      try {
+        window.localStorage.setItem(MINIPLAYER_POSITION_STORAGE_KEY, JSON.stringify({ x, y }))
+      } catch {
+        // Position persistence is a convenience, not a runtime requirement.
+      }
+    }
+  }
+  const onResize = () => place()
+  window.addEventListener("resize", onResize)
+  surface.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (!target.closest(".ss-mini-preview, .ss-mini-title")) return
+    const startX = event.clientX
+    const startY = event.clientY
+    const originX = x
+    const originY = y
+    let moved = false
+    const move = (moveEvent: PointerEvent) => {
+      const dx = moveEvent.clientX - startX
+      const dy = moveEvent.clientY - startY
+      if (!moved && Math.hypot(dx, dy) < 5) return
+      moved = true
+      moveEvent.preventDefault()
+      x = originX + dx
+      y = originY + dy
+      place()
+    }
+    const stop = () => {
+      document.removeEventListener("pointermove", move, true)
+      document.removeEventListener("pointerup", stop, true)
+      document.removeEventListener("pointercancel", stop, true)
+      if (moved) {
+        place(true)
+        surface.addEventListener("click", (clickEvent) => {
+          clickEvent.preventDefault()
+          clickEvent.stopPropagation()
+        }, { capture: true, once: true })
+      }
+    }
+    document.addEventListener("pointermove", move, true)
+    document.addEventListener("pointerup", stop, true)
+    document.addEventListener("pointercancel", stop, true)
+  })
+  place()
+  return {
+    root: surface,
+    setSize(nextWidth: number, nextHeight: number) {
+      width = Math.max(40, Math.round(nextWidth))
+      height = Math.max(40, Math.round(nextHeight))
+      surface.style.width = `${width}px`
+      surface.style.height = `${height}px`
+      place()
+    },
+    destroy() {
+      window.removeEventListener("resize", onResize)
+      mount.destroy()
+    },
+  }
 }
 
 function storedStudioTheme(): StudioTheme {
@@ -2517,14 +2657,14 @@ function defaultStudioAppearance(): StudioAppearance {
 }
 
 function defaultStudioBehavior(): StudioBehavior {
-  return { completionToast: true, widgetTap: "studio" }
+  return { completionToast: false, widgetTap: "studio" }
 }
 
 function storedStudioBehavior(): StudioBehavior {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(BEHAVIOR_STORAGE_KEY) || "{}")
     return {
-      completionToast: parsed?.completionToast !== false,
+      completionToast: parsed?.completionToast === true,
       widgetTap: parsed?.widgetTap === "quick" ? "quick" : "studio",
     }
   } catch {
@@ -3407,7 +3547,7 @@ class MiniPlayerController {
 
   private resizeWidget(): void {
     if (this.isMobileOrb()) {
-      this.widget.setSize(40, 40)
+      this.widget.setSize(64, 64)
       return
     }
     if (this.collapsed) {
@@ -3497,6 +3637,8 @@ class StudioController {
   private libraryPage = 0
   private readonly librarySelection = new Set<string>()
   private missingLoras: StackPresetItem[] = []
+  private pendingPresetParamMap: Record<string, string> = {}
+  private pendingMoveImageIds: string[] = []
   private outputResizeObserver: ResizeObserver | null = null
   private inspectorResizeObserver: ResizeObserver | null = null
   private stopActiveResize: (() => void) | null = null
@@ -3513,6 +3655,18 @@ class StudioController {
     const workflow = this.root.querySelector<HTMLElement>('[data-role="workflow-modal"]')
     if (workflow && !workflow.hidden) {
       this.closeWorkflowSetup()
+      event.stopPropagation()
+      return
+    }
+    const savePreset = this.root.querySelector<HTMLElement>('[data-role="save-preset-modal"]')
+    if (savePreset && !savePreset.hidden) {
+      this.closeSavePresetModal()
+      event.stopPropagation()
+      return
+    }
+    const moveFolder = this.root.querySelector<HTMLElement>('[data-role="move-folder-modal"]')
+    if (moveFolder && !moveFolder.hidden) {
+      this.closeMoveFolderModal()
       event.stopPropagation()
       return
     }
@@ -3983,7 +4137,7 @@ class StudioController {
                   <div class="ss-config-section-head"><strong>Behavior</strong><span>Notifications and floating widget</span></div>
                   <label class="ss-config-toggle"><input type="checkbox" data-role="completion-toast" ${this.behavior.completionToast ? "checked" : ""} /><span>Toast when a generation finishes</span></label>
                   <label class="ss-field"><span class="ss-config-label">Floating widget tap</span><select class="ss-select" data-role="widget-tap"><option value="studio">Open Studio</option><option value="quick">Open Quick Create</option></select></label>
-                  <p class="ss-muted ss-tiny">On mobile Lumiverse gives floating widgets a 40px orb; tapping it always opens Studio.</p>
+                  <p class="ss-muted ss-tiny">The Studio overlay keeps a complete 64px mobile orb. Drag its image/title area to reposition it; tapping the collapsed preview reopens Studio.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -4179,7 +4333,6 @@ are removed when CSS is applied.</pre>
                     <label>Swarm preset stack</label>
                     <div class="ss-preset-picker">
                       <select class="ss-select" data-role="presets"><option value="">Add a preset…</option></select>
-                      <button class="ss-button" data-action="extract-preset-loras" data-role="extract-preset-loras" disabled>Extract LoRAs</button>
                       <button class="ss-button" data-action="add-swarm-preset" data-role="add-swarm-preset" hidden>Save current</button>
                     </div>
                     <div class="ss-preset-stack" data-role="preset-stack">
@@ -4287,7 +4440,6 @@ are removed when CSS is applied.</pre>
             <div class="ss-pane-head">
               <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny"><span data-role="output-count">0</span> saved outputs</div></div>
               <div>
-                <button class="ss-icon-button ss-pane-toggle" data-action="open-output-library" title="Open folders and all Swarm Studio outputs" aria-label="Open output library">▦</button>
                 <button class="ss-icon-button ss-pane-toggle" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
                 <button class="ss-icon-button ss-pane-toggle" data-action="toggle-history" title="Collapse history sidebar" aria-label="Collapse history sidebar">›</button>
               </div>
@@ -4349,7 +4501,7 @@ are removed when CSS is applied.</pre>
               <div class="ss-stack-share-tools">
                 <button class="ss-button" data-action="export-stack" title="Export the current LoRA stack as shareable JSON">${EXPORT_ICON}<span>Export stack</span></button>
                 <button class="ss-button" data-action="import-stack" title="Import a shared LoRA stack JSON file">${IMPORT_ICON}<span>Import stack</span></button>
-                <button class="ss-button" data-action="export-lumi-stack" title="Export a config that Lumiverse Image Gen can import">${EXPORT_ICON}<span>For Lumi</span></button>
+                <button class="ss-button" data-action="apply-lumi-stack" title="Merge this stack into Lumiverse Image Gen and activate it">${EXPORT_ICON}<span>Apply to Lumi</span></button>
                 <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
               </div>
               <div class="ss-stack-list" data-role="stack-list">
@@ -4391,6 +4543,36 @@ are removed when CSS is applied.</pre>
             <p class="ss-muted">The stack was imported. These files are not in the current Swarm library yet; use their source links with SwarmUI’s Model Downloader, then refresh metadata.</p>
             <div class="ss-missing-lora-list" data-role="missing-lora-list"></div>
             <footer><button class="ss-button" data-action="copy-missing-loras">Copy missing list</button><button class="ss-button ss-button-primary" data-action="close-missing-loras">Done</button></footer>
+          </section>
+        </div>
+
+        <div class="ss-workflow-modal" data-role="save-preset-modal" hidden>
+          <section class="ss-workflow-modal-card" role="dialog" aria-modal="true" aria-labelledby="ss-save-preset-title">
+            <header class="ss-workflow-modal-head">
+              <div class="ss-workflow-modal-title"><span class="ss-eyebrow">SWARM PRESET</span><strong id="ss-save-preset-title">Choose what to save</strong></div>
+              <button class="ss-icon-button" data-action="close-save-preset" aria-label="Close save preset popup">×</button>
+            </header>
+            <div class="ss-save-preset-fields">
+              <div class="ss-save-preset-basics">
+                <label class="ss-field"><span>Name</span><input class="ss-input" data-role="save-preset-name" maxlength="120" placeholder="Preset name" /></label>
+                <label class="ss-field"><span>Description</span><input class="ss-input" data-role="save-preset-description" maxlength="500" placeholder="Optional description" /></label>
+              </div>
+              <div class="ss-muted ss-tiny">Only checked values are written to SwarmUI. Seed starts unchecked so a reusable preset does not freeze one composition by accident.</div>
+              <div class="ss-save-param-list" data-role="save-preset-fields"></div>
+            </div>
+            <footer class="ss-workflow-modal-actions"><button class="ss-button" data-action="close-save-preset">Cancel</button><button class="ss-button ss-button-primary" data-action="confirm-save-preset">Save preset</button></footer>
+          </section>
+        </div>
+
+        <div class="ss-workflow-modal" data-role="move-folder-modal" hidden>
+          <section class="ss-workflow-modal-card" role="dialog" aria-modal="true" aria-labelledby="ss-move-folder-title">
+            <header class="ss-workflow-modal-head">
+              <div class="ss-workflow-modal-title"><span class="ss-eyebrow">OUTPUT LIBRARY</span><strong id="ss-move-folder-title">Move outputs</strong></div>
+              <button class="ss-icon-button" data-action="close-move-folder" aria-label="Close move popup">×</button>
+            </header>
+            <div class="ss-workflow-modal-description" data-role="move-folder-description">Choose a destination.</div>
+            <div class="ss-move-folder-list" data-role="move-folder-list"></div>
+            <footer class="ss-workflow-modal-actions"><button class="ss-button" data-action="close-move-folder">Cancel</button></footer>
           </section>
         </div>
 
@@ -4455,10 +4637,7 @@ are removed when CSS is applied.</pre>
             <div class="ss-library-bulkbar">
               <button class="ss-button" data-action="select-library-page">Select page</button>
               <span class="ss-library-selection-count" data-role="library-selection-count">0 selected</span>
-              <select class="ss-select" data-role="bulk-folder" aria-label="Folder for selected outputs">
-                <option value="">Move to Unfiled</option>
-              </select>
-              <button class="ss-button" data-action="bulk-move-outputs" disabled>Move selected</button>
+              <button class="ss-button" data-action="bulk-move-outputs" disabled>Move…</button>
               <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs" disabled>Delete selected</button>
             </div>
             <div class="ss-output-library-grid" data-role="library-grid">
@@ -4595,13 +4774,6 @@ are removed when CSS is applied.</pre>
         libraryToggle.closest<HTMLElement>(".ss-library-output")!.dataset.selected = String(libraryToggle.checked)
         return
       }
-      const select = (event.target as HTMLElement).closest<HTMLSelectElement>('[data-role="library-folder-select"]')
-      if (select?.dataset.imageId) {
-        this.send("move_output_to_folder", {
-          imageId: select.dataset.imageId,
-          folderId: select.value,
-        })
-      }
     })
 
     this.root.addEventListener("pointerdown", (event) => {
@@ -4678,12 +4850,15 @@ are removed when CSS is applied.</pre>
       if (action === "save-stack") this.saveStackPreset()
       if (action === "load-stack") this.loadStackPreset()
       if (action === "delete-stack") this.deleteStackPreset()
-      if (action === "extract-preset-loras") this.extractPresetLoras()
       if (action === "export-stack") this.exportStack()
       if (action === "import-stack") this.get<HTMLInputElement>('[data-role="stack-import-file"]').click()
-      if (action === "export-lumi-stack") this.exportLumiverseStack()
+      if (action === "apply-lumi-stack") void this.applyLumiverseStack()
       if (action === "close-missing-loras") this.closeMissingLoras()
       if (action === "copy-missing-loras") void this.copyMissingLoras()
+      if (action === "close-save-preset") this.closeSavePresetModal()
+      if (action === "confirm-save-preset") this.confirmSavePreset()
+      if (action === "close-move-folder") this.closeMoveFolderModal()
+      if (action === "move-folder-choice") this.confirmMoveFolder(button.dataset.folderId || "")
       if (action === "generate") this.generate()
       if (action === "interrupt-generation") this.interruptGeneration()
       if (action === "refresh-outputs") this.refreshOutputs()
@@ -4707,8 +4882,10 @@ are removed when CSS is applied.</pre>
       if (action === "bulk-delete-outputs") this.bulkDeleteOutputs()
       if (action === "preset-up") this.moveSelectedPreset(Number(button.dataset.presetIndex), -1)
       if (action === "preset-down") this.moveSelectedPreset(Number(button.dataset.presetIndex), 1)
+      if (action === "preset-apply") this.applySelectedPreset(Number(button.dataset.presetIndex))
       if (action === "preset-remove") this.removeSelectedPreset(Number(button.dataset.presetIndex))
-      if (action === "add-swarm-preset") this.addSwarmPreset()
+      if (action === "add-swarm-preset") this.openSavePresetModal()
+      if (action === "move-library-output" && button.dataset.imageId) this.openMoveFolderModal([button.dataset.imageId])
       if (action === "library-folder") {
         this.libraryFolderId = button.dataset.folderId || ""
         this.libraryPage = 0
@@ -5068,6 +5245,11 @@ are removed when CSS is applied.</pre>
     this.state.models = Array.isArray(data.models) ? data.models : []
     this.state.checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints : []
     this.state.loras = Array.isArray(data.loras) ? data.loras : []
+    this.state.stack = this.state.stack.map((item) => ({
+      ...item,
+      lora: this.installedLora(item.lora.name) || item.lora,
+    }))
+    this.missingLoras = this.missingLoras.filter((item) => !this.installedLora(item.name))
     this.state.hasMetadataToken = Boolean(data.hasMetadataToken)
     this.acceptSwarmOptions(data.swarmOptions)
     this.populateModels()
@@ -5434,11 +5616,7 @@ are removed when CSS is applied.</pre>
     this.renderPresetStack()
   }
 
-  private addSwarmPreset(): void {
-    if (!this.state.connection || !this.state.canManagePresets || !this.state.swarmParameters.length) return
-    const title = window.prompt("Name this SwarmUI preset:", "")?.trim()
-    if (!title) return
-    const description = window.prompt("Optional preset description:", "")?.trim() || ""
+  private buildCurrentPresetParamMap(): Record<string, string> {
     const schemaIds = new Map(
       this.state.swarmParameters.map((parameter) => [parameter.id.toLowerCase(), parameter.id]),
     )
@@ -5461,8 +5639,68 @@ are removed when CSS is applied.</pre>
     add("vae", this.get<HTMLInputElement>('[data-role="vae"]').value)
     add("automaticvae", this.get<HTMLInputElement>('[data-role="vae"]').value)
     add("refinermodel", this.get<HTMLInputElement>('[data-role="unet"]').value)
-    if (!Object.keys(paramMap).length) {
+    const enabledLoras = this.state.stack.filter((item) => item.enabled)
+    if (enabledLoras.length) {
+      add("loras", JSON.stringify(enabledLoras.map((item) => item.lora.name)))
+      add("loraweights", JSON.stringify(enabledLoras.map((item) => clamp(Number(item.weight) || 1, -10, 10))))
+    }
+    if (this.state.selectedWorkflow) add("comfyuicustomworkflow", this.state.selectedWorkflow.name)
+    return paramMap
+  }
+
+  private openSavePresetModal(): void {
+    if (!this.state.connection || !this.state.canManagePresets || !this.state.swarmParameters.length) return
+    this.pendingPresetParamMap = this.buildCurrentPresetParamMap()
+    if (!Object.keys(this.pendingPresetParamMap).length) {
       this.setRunStatus("SwarmUI's schema did not expose any of Studio's current controls.", true)
+      return
+    }
+    this.get<HTMLInputElement>('[data-role="save-preset-name"]').value = ""
+    this.get<HTMLInputElement>('[data-role="save-preset-description"]').value = ""
+    const fields = this.get<HTMLElement>('[data-role="save-preset-fields"]')
+    fields.replaceChildren()
+    const schemaById = new Map(this.state.swarmParameters.map((parameter) => [parameter.id, parameter]))
+    for (const [id, value] of Object.entries(this.pendingPresetParamMap)) {
+      const parameter = schemaById.get(id)
+      const normalized = id.toLowerCase().replace(/[^a-z0-9]/g, "")
+      const label = element("label", "ss-save-param")
+      const checkbox = element("input")
+      checkbox.type = "checkbox"
+      checkbox.checked = normalized !== "seed"
+      checkbox.dataset.role = "save-preset-param"
+      checkbox.dataset.paramId = id
+      const copy = element("span", "ss-save-param-copy")
+      copy.append(
+        element("strong", "", parameter?.name || id),
+        element("span", "", String(value).length > 120 ? `${String(value).slice(0, 117)}…` : String(value)),
+      )
+      label.append(checkbox, copy)
+      fields.appendChild(label)
+    }
+    this.get<HTMLElement>('[data-role="save-preset-modal"]').hidden = false
+    this.get<HTMLInputElement>('[data-role="save-preset-name"]').focus()
+  }
+
+  private closeSavePresetModal(): void {
+    this.get<HTMLElement>('[data-role="save-preset-modal"]').hidden = true
+    this.pendingPresetParamMap = {}
+  }
+
+  private confirmSavePreset(): void {
+    if (!this.state.connection || !this.state.canManagePresets) return
+    const title = this.get<HTMLInputElement>('[data-role="save-preset-name"]').value.trim()
+    if (!title) {
+      this.setRunStatus("Give the Swarm preset a name first.", true)
+      return
+    }
+    const description = this.get<HTMLInputElement>('[data-role="save-preset-description"]').value.trim()
+    const paramMap: Record<string, string> = {}
+    for (const input of this.root.querySelectorAll<HTMLInputElement>('[data-role="save-preset-param"]')) {
+      const id = input.dataset.paramId || ""
+      if (input.checked && id && this.pendingPresetParamMap[id] !== undefined) paramMap[id] = this.pendingPresetParamMap[id]
+    }
+    if (!Object.keys(paramMap).length) {
+      this.setRunStatus("Choose at least one value to save in the preset.", true)
       return
     }
     this.send("add_swarm_preset", {
@@ -5471,7 +5709,89 @@ are removed when CSS is applied.</pre>
       description,
       paramMap,
     })
+    this.closeSavePresetModal()
     this.setRunStatus(`Saving SwarmUI preset “${title}”…`)
+  }
+
+  private applySelectedPreset(index: number): void {
+    const selected = this.state.selectedPresets[index]
+    const preset = selected && this.state.swarmPresets.find((candidate) => candidate.title === selected.title)
+    if (!preset) return
+    const normalized = new Map(
+      Object.entries(preset.paramMap).map(([key, value]) => [key.toLowerCase().replace(/[^a-z0-9]/g, ""), { key, value }]),
+    )
+    const take = (...ids: string[]): string => {
+      for (const id of ids) {
+        const value = normalized.get(id.toLowerCase().replace(/[^a-z0-9]/g, ""))?.value
+        if (value !== undefined) return String(value)
+      }
+      return ""
+    }
+    const setInput = (role: string, value: string) => {
+      if (!value) return
+      this.get<HTMLInputElement>(`[data-role="${role}"]`).value = value
+    }
+    const setSelect = (role: string, value: string) => {
+      if (!value) return
+      const select = this.get<HTMLSelectElement>(`[data-role="${role}"]`)
+      if (![...select.options].some((option) => option.value === value)) {
+        const option = element("option", "", `${value} · preset`)
+        option.value = value
+        select.appendChild(option)
+      }
+      select.value = value
+    }
+    setInput("positive", take("prompt"))
+    setInput("negative", take("negativeprompt", "negative_prompt"))
+    setSelect("model", take("model"))
+    setInput("width", take("width"))
+    setInput("height", take("height"))
+    setInput("steps", take("steps"))
+    setInput("cfg", take("cfgscale", "cfg"))
+    setInput("seed", take("seed"))
+    setSelect("sampler", take("sampler"))
+    setSelect("scheduler", take("scheduler"))
+    setInput("vae", take("vae", "automaticvae"))
+    setInput("unet", take("refinermodel", "unet"))
+
+    const extracted = lorasFromSwarmPreset(preset.paramMap)
+    for (const candidate of extracted) {
+      const key = this.normalizedLoraName(candidate.name)
+      const existing = this.state.stack.find((item) => this.normalizedLoraName(item.lora.name) === key)
+      if (existing) {
+        existing.weight = candidate.weight
+        existing.enabled = true
+      } else {
+        const lora = this.state.loras.find((item) => this.normalizedLoraName(item.name) === key) || manualLora(candidate.name)
+        this.state.stack.push({ lora, weight: candidate.weight, enabled: true, useTrigger: false })
+      }
+    }
+
+    const handled = new Set([
+      "prompt", "negativeprompt", "model", "width", "height", "steps", "cfgscale", "cfg", "seed",
+      "sampler", "scheduler", "vae", "automaticvae", "refinermodel", "unet", "loras", "loraweights",
+    ])
+    let raw: Record<string, unknown> = {}
+    try {
+      raw = JSON.parse(this.get<HTMLTextAreaElement>('[data-role="raw-override"]').value || "{}")
+    } catch {
+      raw = {}
+    }
+    for (const [key, value] of Object.entries(preset.paramMap)) {
+      if (!handled.has(key.toLowerCase().replace(/[^a-z0-9]/g, ""))) raw[key] = value
+    }
+    this.get<HTMLTextAreaElement>('[data-role="raw-override"]').value = Object.keys(raw).length ? JSON.stringify(raw, null, 2) : ""
+    this.state.selectedPresets.splice(index, 1)
+    this.get<HTMLSelectElement>('[data-role="aspect"]').value = "custom"
+    this.renderPresetStack()
+    this.renderStack()
+    this.renderLoras()
+    this.updatePreviewAspect(
+      numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024),
+      numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024),
+    )
+    this.updateContextControls()
+    this.setRunStatus(`Applied “${preset.title}” to Studio and removed it from the preset stack${extracted.length ? ` · ${extracted.length} LoRA${extracted.length === 1 ? "" : "s"} moved into the LoRA stack` : ""}.`)
   }
 
   private renderPresetStack(): void {
@@ -5503,11 +5823,16 @@ are removed when CSS is applied.</pre>
       down.dataset.presetIndex = String(index)
       down.disabled = index === this.state.selectedPresets.length - 1
       down.title = "Apply later"
+      const apply = element("button", "ss-button ss-preset-apply", "Apply")
+      apply.dataset.action = "preset-apply"
+      apply.dataset.presetIndex = String(index)
+      apply.disabled = !metadata
+      apply.title = "Apply these values to Studio, then remove this preset to prevent duplicate LoRA weights"
       const remove = element("button", "ss-icon-button ss-button-danger", "×")
       remove.dataset.action = "preset-remove"
       remove.dataset.presetIndex = String(index)
       remove.title = "Remove preset"
-      row.append(toggle, name, up, down, remove)
+      row.append(toggle, name, up, down, apply, remove)
       root.appendChild(row)
     })
     this.updateResolvedPresetSummary()
@@ -5702,15 +6027,6 @@ are removed when CSS is applied.</pre>
     const status = this.get<HTMLElement>('[data-role="preset-resolved"]')
     const pill = this.get<HTMLElement>('[data-role="active-preset-pill"]')
     const enabled = this.state.selectedPresets.filter((preset) => preset.enabled)
-    const extract = this.get<HTMLButtonElement>('[data-role="extract-preset-loras"]')
-    const extractable = enabled.reduce((count, selected) => {
-      const preset = this.state.swarmPresets.find((candidate) => candidate.title === selected.title)
-      return count + (preset ? lorasFromSwarmPreset(preset.paramMap).length : 0)
-    }, 0)
-    extract.disabled = extractable === 0
-    extract.title = extractable
-      ? `Add ${extractable} LoRA reference${extractable === 1 ? "" : "s"} found in the enabled Swarm preset stack`
-      : "No enabled Swarm preset exposes LoRA parameters"
     if (!enabled.length) {
       status.textContent = "No enabled Swarm presets; prompts pass through unchanged."
       pill.hidden = true
@@ -6023,8 +6339,10 @@ are removed when CSS is applied.</pre>
 
   private makeStackRow(item: StackItem, index: number): HTMLElement {
     const row = element("div", "ss-stack-row")
+    const installed = Boolean(this.installedLora(item.lora.name))
     row.dataset.disabled = String(!item.enabled)
-    row.dataset.incompatible = String(!this.isLoraCompatible(item.lora))
+    row.dataset.missing = String(!installed)
+    row.dataset.incompatible = String(installed && !this.isLoraCompatible(item.lora))
 
     const enabled = element("input") as HTMLInputElement
     enabled.type = "checkbox"
@@ -6181,8 +6499,7 @@ are removed when CSS is applied.</pre>
     const preset = this.state.stackPresets.find((item) => item.id === presetId)
     if (!preset) return
     this.state.stack = preset.items.map((item) => {
-      const lora = this.state.loras.find((candidate) => candidate.name === item.name)
-        || manualLora(item.name, item.title, item.sourceUrl)
+      const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl)
       return {
         lora,
         weight: clamp(Number(item.weight) || 1, -10, 10),
@@ -6226,38 +6543,69 @@ are removed when CSS is applied.</pre>
     this.setRunStatus(`Exported LoRA stack “${name}”.`)
   }
 
-  private exportLumiverseStack(): void {
+  private async applyLumiverseStack(): Promise<void> {
     const enabled = this.state.stack.filter((item) => item.enabled)
     if (!enabled.length) {
-      this.setRunStatus("Enable at least one LoRA before exporting for Lumiverse Image Gen.", true)
+      this.setRunStatus("Enable at least one LoRA before applying this stack to Lumiverse Image Gen.", true)
       return
     }
     const name = this.stackName()
-    const id = `swarm-studio-${crypto.randomUUID()}`
     const baseTags = enabled
       .filter((item) => item.useTrigger && item.lora.triggerPhrase)
       .map((item) => item.lora.triggerPhrase.trim())
       .filter(Boolean)
       .join(", ")
-    downloadJson({
-      version: 1,
-      type: "lumiverse_image_gen_config",
-      exported_at: Math.floor(Date.now() / 1000),
-      settings: {
-        loraPresets: [{
-          id,
-          name,
-          loras: enabled.map((item) => ({
-            lora_name: item.lora.name,
-            weight_model: clamp(Number(item.weight) || 1, -10, 10),
-            weight_clip: clamp(Number(item.weight) || 1, -10, 10),
-          })),
-          ...(baseTags ? { base_tags: baseTags } : {}),
-        }],
-        activeLoraPresetId: id,
-      },
-    }, `${name}-lumiverse-image-gen.json`)
-    this.setRunStatus(`Exported “${name}” for Lumiverse Image Gen’s config importer.`)
+    const button = this.get<HTMLButtonElement>('[data-action="apply-lumi-stack"]')
+    button.disabled = true
+    this.setRunStatus(`Applying “${name}” to Lumiverse Image Gen…`)
+    try {
+      const exportResponse = await fetch("/api/v1/image-gen/export", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          include_settings: true,
+          include_presets: false,
+          include_connections: false,
+          include_parameters: false,
+        }),
+      })
+      const exported = await exportResponse.json().catch(() => ({}))
+      if (!exportResponse.ok) throw new Error(String(exported?.error || `Could not read Lumiverse Image Gen settings (${exportResponse.status}).`))
+      const existing = Array.isArray(exported?.settings?.loraPresets) ? exported.settings.loraPresets : []
+      const sameName = existing.find((preset: any) => String(preset?.name || "").trim().toLowerCase() === name.trim().toLowerCase())
+      const id = String(sameName?.id || `swarm-studio-${crypto.randomUUID()}`)
+      const nextPreset = {
+        id,
+        name,
+        loras: enabled.map((item) => ({
+          lora_name: item.lora.name,
+          weight_model: clamp(Number(item.weight) || 1, -10, 10),
+          weight_clip: clamp(Number(item.weight) || 1, -10, 10),
+        })),
+        ...(baseTags ? { base_tags: baseTags } : {}),
+      }
+      const merged = existing.filter((preset: any) => String(preset?.id || "") !== id && String(preset?.name || "").trim().toLowerCase() !== name.trim().toLowerCase())
+      merged.push(nextPreset)
+      const importResponse = await fetch("/api/v1/image-gen/import", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          version: 1,
+          type: "lumiverse_image_gen_config",
+          exported_at: Math.floor(Date.now() / 1000),
+          settings: { loraPresets: merged, activeLoraPresetId: id },
+        }),
+      })
+      const imported = await importResponse.json().catch(() => ({}))
+      if (!importResponse.ok) throw new Error(String(imported?.error || `Lumiverse rejected the stack (${importResponse.status}).`))
+      this.setRunStatus(`Applied and activated “${name}” in Lumiverse Image Gen. Reopen the native tab if it was already open so it reloads the saved settings.`)
+    } catch (error) {
+      this.setRunStatus(error instanceof Error ? error.message : "Could not apply this stack to Lumiverse Image Gen.", true)
+    } finally {
+      button.disabled = false
+    }
   }
 
   private importedStackPayload(payload: unknown): { name: string; items: StackPresetItem[] } {
@@ -6310,9 +6658,9 @@ are removed when CSS is applied.</pre>
     try {
       if (file.size > 2 * 1024 * 1024) throw new Error("Stack files must be 2 MB or smaller.")
       const imported = this.importedStackPayload(JSON.parse(await file.text()))
-      const localByName = new Map(this.state.loras.map((lora) => [lora.name.replace(/\\/g, "/").toLowerCase(), lora]))
+      const localByName = new Map(this.state.loras.map((lora) => [this.normalizedLoraName(lora.name), lora]))
       this.state.stack = imported.items.map((item) => {
-        const lora = localByName.get(item.name.replace(/\\/g, "/").toLowerCase())
+        const lora = localByName.get(this.normalizedLoraName(item.name))
           || manualLora(item.name, item.title, item.sourceUrl)
         return {
           lora,
@@ -6321,7 +6669,7 @@ are removed when CSS is applied.</pre>
           useTrigger: Boolean(item.useTrigger && lora.triggerPhrase),
         }
       })
-      this.missingLoras = imported.items.filter((item) => !localByName.has(item.name.replace(/\\/g, "/").toLowerCase()))
+      this.missingLoras = imported.items.filter((item) => !localByName.has(this.normalizedLoraName(item.name)))
       this.renderStack()
       this.renderLoras()
       this.setRunStatus(`Imported “${imported.name}” with ${imported.items.length} LoRA${imported.items.length === 1 ? "" : "s"}.`)
@@ -6331,32 +6679,13 @@ are removed when CSS is applied.</pre>
     }
   }
 
-  private extractPresetLoras(): void {
-    const extracted = this.state.selectedPresets
-      .filter((selected) => selected.enabled)
-      .flatMap((selected) => {
-        const preset = this.state.swarmPresets.find((candidate) => candidate.title === selected.title)
-        return preset ? lorasFromSwarmPreset(preset.paramMap) : []
-      })
-    let added = 0
-    for (const candidate of extracted) {
-      const normalized = candidate.name.replace(/\\/g, "/").toLowerCase()
-      const existing = this.state.stack.find((item) => item.lora.name.replace(/\\/g, "/").toLowerCase() === normalized)
-      if (existing) {
-        existing.weight = candidate.weight
-        existing.enabled = true
-        continue
-      }
-      const lora = this.state.loras.find((item) => item.name.replace(/\\/g, "/").toLowerCase() === normalized)
-        || manualLora(candidate.name)
-      this.state.stack.push({ lora, weight: candidate.weight, enabled: true, useTrigger: false })
-      added++
-    }
-    this.renderStack()
-    this.renderLoras()
-    this.setRunStatus(extracted.length
-      ? `Extracted ${extracted.length} LoRA reference${extracted.length === 1 ? "" : "s"}; ${added} added to the stack.`
-      : "The enabled Swarm presets do not expose LoRA parameters.", extracted.length === 0)
+  private normalizedLoraName(name: string): string {
+    return String(name || "").trim().replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase()
+  }
+
+  private installedLora(name: string): LoraMetadata | null {
+    const normalized = this.normalizedLoraName(name)
+    return this.state.loras.find((item) => this.normalizedLoraName(item.name) === normalized) || null
   }
 
   private showMissingLoras(): void {
@@ -6863,11 +7192,39 @@ are removed when CSS is applied.</pre>
   private bulkMoveOutputs(): void {
     const imageIds = [...this.librarySelection]
     if (!imageIds.length) return
-    this.send("bulk_move_outputs", {
-      imageIds,
-      folderId: this.get<HTMLSelectElement>('[data-role="bulk-folder"]').value,
-    })
-    this.setRunStatus(`Moving ${imageIds.length} selected output${imageIds.length === 1 ? "" : "s"}…`)
+    this.openMoveFolderModal(imageIds)
+  }
+
+  private openMoveFolderModal(imageIds: string[]): void {
+    this.pendingMoveImageIds = [...new Set(imageIds.map(String).filter(Boolean))]
+    if (!this.pendingMoveImageIds.length) return
+    this.get<HTMLElement>('[data-role="move-folder-description"]').textContent =
+      `Move ${this.pendingMoveImageIds.length} output${this.pendingMoveImageIds.length === 1 ? "" : "s"} to:`
+    const list = this.get<HTMLElement>('[data-role="move-folder-list"]')
+    list.replaceChildren()
+    const addChoice = (folderId: string, label: string, count = "") => {
+      const button = element("button", "ss-button ss-move-folder-choice")
+      button.dataset.action = "move-folder-choice"
+      button.dataset.folderId = folderId
+      button.append(element("span", "", label), element("span", "ss-muted ss-tiny", count))
+      list.appendChild(button)
+    }
+    addChoice("", "Unfiled")
+    for (const folder of this.state.outputFolders) addChoice(folder.id, folder.name, `${folder.imageIds.length} images`)
+    this.get<HTMLElement>('[data-role="move-folder-modal"]').hidden = false
+  }
+
+  private closeMoveFolderModal(): void {
+    this.get<HTMLElement>('[data-role="move-folder-modal"]').hidden = true
+    this.pendingMoveImageIds = []
+  }
+
+  private confirmMoveFolder(folderId: string): void {
+    const imageIds = [...this.pendingMoveImageIds]
+    if (!imageIds.length) return
+    this.send("bulk_move_outputs", { imageIds, folderId })
+    this.closeMoveFolderModal()
+    this.setRunStatus(`Moving ${imageIds.length} output${imageIds.length === 1 ? "" : "s"}…`)
   }
 
   private bulkDeleteOutputs(): void {
@@ -6957,21 +7314,6 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="library-page"]').textContent = `${this.libraryPage + 1} / ${pages}`
     this.get<HTMLButtonElement>('[data-action="library-prev"]').disabled = this.libraryPage <= 0
     this.get<HTMLButtonElement>('[data-action="library-next"]').disabled = this.libraryPage >= pages - 1
-    const bulkFolder = this.get<HTMLSelectElement>('[data-role="bulk-folder"]')
-    const previousBulkFolder = bulkFolder.value
-    bulkFolder.replaceChildren()
-    const unfiledBulk = element("option", "", "Move to Unfiled")
-    unfiledBulk.value = ""
-    bulkFolder.appendChild(unfiledBulk)
-    for (const folder of this.state.outputFolders) {
-      const option = element("option", "", `Move to ${folder.name}`)
-      option.value = folder.id
-      bulkFolder.appendChild(option)
-    }
-    bulkFolder.value = this.state.outputFolders.some((folder) => folder.id === previousBulkFolder)
-      ? previousBulkFolder
-      : ""
-
     const grid = this.get<HTMLElement>('[data-role="library-grid"]')
     grid.replaceChildren()
     const page = this.libraryPageOutputs()
@@ -7005,19 +7347,12 @@ are removed when CSS is applied.</pre>
       })
       const meta = element("div", "ss-library-output-meta")
       meta.appendChild(element("div", "ss-library-output-name", output.original_filename || `Output ${output.id}`))
-      const folderSelect = element("select", "ss-select")
-      folderSelect.dataset.role = "library-folder-select"
-      folderSelect.dataset.imageId = String(output.id)
-      const unfiled = element("option", "", "Unfiled")
-      unfiled.value = ""
-      folderSelect.appendChild(unfiled)
-      for (const folder of this.state.outputFolders) {
-        const option = element("option", "", folder.name)
-        option.value = folder.id
-        folderSelect.appendChild(option)
-      }
-      folderSelect.value = this.state.outputFolders.find((folder) => folder.imageIds.includes(String(output.id)))?.id || ""
-      meta.appendChild(folderSelect)
+      const folder = this.state.outputFolders.find((candidate) => candidate.imageIds.includes(String(output.id)))
+      const move = element("button", "ss-button", `Move · ${folder?.name || "Unfiled"}`)
+      move.dataset.action = "move-library-output"
+      move.dataset.imageId = String(output.id)
+      move.title = "Choose a destination folder"
+      meta.appendChild(move)
       card.append(checkLabel, open, meta)
       grid.appendChild(card)
     }
@@ -7658,16 +7993,19 @@ export function setup(ctx: FrontendContext): () => void {
     })
   }
 
-  if (typeof ctx.ui.createFloatWidget === "function") {
+  if (typeof ctx.ui.mountApp === "function" || typeof ctx.ui.createFloatWidget === "function") {
     try {
       const mobile = window.innerWidth <= 720
-      const widget = ctx.ui.createFloatWidget({
-        width: mobile ? Math.min(318, window.innerWidth - 24) : 318,
-        height: mobile ? 72 : 94,
-        snapToEdge: true,
-        tooltip: "Swarm Studio miniplayer",
-        chromeless: true,
-      })
+      const widget = createOverlayMiniplayerWidget(ctx) || (typeof ctx.ui.createFloatWidget === "function"
+        ? ctx.ui.createFloatWidget({
+            width: mobile ? 64 : 318,
+            height: mobile ? 64 : 94,
+            snapToEdge: true,
+            tooltip: "Swarm Studio miniplayer",
+            chromeless: true,
+          })
+        : null)
+      if (!widget) throw new Error("No supported miniplayer surface")
       miniplayer = new MiniPlayerController(
         ctx,
         widget,

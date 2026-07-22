@@ -782,7 +782,7 @@ async function fetchSwarmOutput(connection, swarmPath, token) {
         throw new Error("SwarmUI returned an invalid output file path.");
     }
     relative = segments.map((segment)=>encodeURIComponent(segment)).join("/");
-    const target = `${baseUrl}/ViewSpecial/Output/${relative}`;
+    const target = `${baseUrl}/Output/${relative}`;
     const headers = {
         "Accept": "image/*"
     };
@@ -857,10 +857,19 @@ async function listOutputs(userId, activeChat, offset = 0, limit = HISTORY_PAGE_
     };
 }
 async function listLibraryOutputs(userId) {
-    const page = await listOutputs(userId, null, 0, 200, true);
+    const outputs = [];
+    let offset = 0;
+    let total = 0;
+    for(let pageIndex = 0; pageIndex < 100; pageIndex++){
+        const page = await listOutputs(userId, null, offset, 200, true);
+        outputs.push(...page.outputs);
+        total = Math.max(total, page.total);
+        offset += page.outputs.length;
+        if (!page.outputs.length || page.outputs.length < page.limit || offset >= total) break;
+    }
     return {
-        outputs: page.outputs,
-        total: page.total,
+        outputs,
+        total: Math.max(total, outputs.length),
         folders: await loadOutputFolders(userId)
     };
 }
@@ -1114,7 +1123,7 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     const latestUrl = record?.imageUrl || asString(result.imageUrl);
                     if (latestUrl) spindle.updateMacroValue("last_genned", latestUrl);
-                    if (payload?.showCompletionToast !== false && typeof spindle.toast?.success === "function") {
+                    if (payload?.showCompletionToast === true && typeof spindle.toast?.success === "function") {
                         spindle.toast.success(`Swarm Studio finished ${record?.model || asString(result.model) || "your image"}.`);
                     }
                     return;

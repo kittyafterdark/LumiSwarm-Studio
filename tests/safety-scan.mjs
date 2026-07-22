@@ -16,4 +16,6 @@ const checks = [
 
 const blocked = checks.filter(([, pattern]) => pattern.test(source)).map(([label]) => label)
 assert.deepEqual(blocked, [])
+assert.match(source, /showCompletionToast\s*===\s*true/)
+assert.match(source, /\/Output\//)
 console.log("backend safety patterns: clear")

@@ -140,6 +140,15 @@
           let clickHandler = () => {}
           return { onClick(handler) { clickHandler = handler; return () => { clickHandler = () => {} } }, destroy() {} }
         },
+        mountApp() {
+          const root = document.createElement("div")
+          document.body.appendChild(root)
+          return {
+            root,
+            setVisible(value) { root.hidden = !value },
+            destroy() { root.remove() },
+          }
+        },
         createFloatWidget(options = {}) {
           const root = document.createElement("div")
           root.className = "host-widget"

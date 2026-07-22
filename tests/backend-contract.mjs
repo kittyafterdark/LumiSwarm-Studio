@@ -348,8 +348,19 @@ globalThis.spindle = {
         }),
       }
     }
+    if (url.includes("/Output/")) {
+      downloadedSwarmUrl = url
+      assert.equal(options.responseType, "arraybuffer")
+      assert.equal(options.mediaType, "image")
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "Content-Type": "image/png" },
+        body: "QUJD",
+        encoding: "base64",
+      }
+    }
     if (url.includes("/ViewSpecial/")) {
-      if (url.includes("/ViewSpecial/Output/")) downloadedSwarmUrl = url
       assert.equal(options.responseType, "arraybuffer")
       assert.equal(options.mediaType, "image")
       return {
@@ -442,6 +453,7 @@ const preview = await request("preview", {
 assert.equal(preview.dataUrl, "data:image/png;base64,QUJD")
 
 const generated = await request("generate", {
+  showCompletionToast: true,
   input: {
     prompt: "ink style, portrait",
     negativePrompt: "blurry",
@@ -506,7 +518,7 @@ const originalOutput = await request("download_swarm_output", {
 })
 assert.equal(originalOutput.data.dataUrl, "data:image/png;base64,QUJD")
 assert.equal(originalOutput.data.filename, "image-1.png")
-assert.equal(downloadedSwarmUrl, "http://localhost:7801/ViewSpecial/Output/2026-07-19/image-1.png")
+assert.equal(downloadedSwarmUrl, "http://localhost:7801/Output/2026-07-19/image-1.png")
 
 const createdPreset = await request("add_swarm_preset", {
   connectionId: "swarm-1",
