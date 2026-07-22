@@ -251,7 +251,59 @@ globalThis.spindle = {
     },
   },
   async cors(url, options) {
-    assert.equal(new URL(url).origin, "http://localhost:7801")
+    const target = new URL(url)
+    if (target.hostname === "image.civitai.com") {
+      assert.equal(options.responseType, "arraybuffer")
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "image/jpeg" },
+        encoding: "base64",
+        body: "VEhVTUJOQUlM",
+      }
+    }
+    if (target.origin === "https://civitai.com" && target.pathname === "/api/v1/model-versions/12345") {
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: 12345,
+          modelId: 678,
+          name: "v1.0",
+          createdAt: "2026-07-22T00:00:00Z",
+          baseModel: "Illustrious",
+          trainedWords: ["ink style", "dramatic linework"],
+          files: [{ name: "new-ink.safetensors", downloadUrl: "https://civitai.com/api/download/models/12345" }],
+          images: [{ type: "image", url: "https://image.civitai.com/example.jpg" }],
+        }),
+      }
+    }
+    if (target.origin === "https://civitai.com" && target.pathname === "/api/v1/models/678") {
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: 678,
+          name: "New Ink",
+          description: "Full model description",
+          creator: { username: "Artist" },
+          tags: ["style", "ink"],
+          modelVersions: [{
+            id: 12345,
+            name: "v1.0",
+            description: "Version description",
+            createdAt: "2026-07-22T00:00:00Z",
+            baseModel: "Illustrious",
+            trainedWords: ["ink style", "dramatic linework"],
+            files: [{ name: "new-ink.safetensors", downloadUrl: "https://civitai.com/api/download/models/12345" }],
+            images: [{ type: "image", url: "https://image.civitai.com/example.jpg" }],
+          }],
+        }),
+      }
+    }
+    assert.equal(target.origin, "http://localhost:7801")
     if (url.endsWith("/API/GetNewSession")) {
       return {
         status: 200,
@@ -554,6 +606,13 @@ assert.equal(loraDownload.data.sessionId, "session-1")
 assert.equal(loraDownload.data.url, "https://civitai.com/api/download/models/12345")
 assert.equal(loraDownload.data.name, "styles/new-ink")
 assert.equal(loraDownload.data.type, "LoRA")
+const loraDownloadMetadata = JSON.parse(loraDownload.data.metadata)
+assert.equal(loraDownloadMetadata["modelspec.title"], "New Ink - v1.0")
+assert.equal(loraDownloadMetadata["modelspec.author"], "Artist")
+assert.equal(loraDownloadMetadata["modelspec.trigger_phrase"], "ink style; dramatic linework")
+assert.equal(loraDownloadMetadata["modelspec.tags"], "style, ink")
+assert.equal(loraDownloadMetadata["modelspec.usage_hint"], "Illustrious")
+assert.equal(loraDownloadMetadata["modelspec.thumbnail"], "data:image/jpeg;base64,VEhVTUJOQUlM")
 assert.equal(connection.data.loras[0].defaultWeight, 0.75)
 assert.equal(connection.data.checkpoints[0].compatClass, "stable-diffusion-xl-v1")
 assert.deepEqual(connection.data.swarmOptions.samplers, ["euler", "dpmpp_2m_sde_gpu"])

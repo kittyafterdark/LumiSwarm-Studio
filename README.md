@@ -144,7 +144,13 @@ the metadata source link when available. **Download selected** explicitly
 hands checked Civitai/Hugging Face URLs to SwarmUI's permission-checked
 `DoModelDownloadWS` endpoint, shows live progress, downloads sequentially, and
 refreshes Studio metadata afterward. Civitai model-page links are resolved to
-the matching filename's version when possible. Downloads never start merely
+the matching filename's version when possible. Before the model transfer,
+Studio maps Civitai's title/version, creator, descriptions, date, trained
+words, tags, base-model hint, source link, and first preview into Swarm's
+ModelSpec sidecar payload; the preview is reduced to a compact JPEG in the
+browser before the WebSocket request. Metadata enrichment is best-effort, so
+an unavailable Civitai API or preview never prevents the model itself from
+downloading. Downloads never start merely
 because a stack was imported.
 
 The inspector treats the exact prompt text sent by Studio as the authoritative

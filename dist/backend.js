@@ -193,6 +193,129 @@ async function approvedLoraDownloadUrl(value, requestedName) {
     }
     throw new Error("Only Civitai and Hugging Face LoRA downloads are allowed here.");
 }
+async function publicJson(url, operation) {
+    const response = await spindle.cors(url, {
+        method: "GET",
+        headers: {
+            "Accept": "application/json"
+        }
+    });
+    if (Number(response?.status) < 200 || Number(response?.status) >= 300) {
+        throw new Error(`${operation} failed (${response?.status || "network error"}).`);
+    }
+    try {
+        return asRecord(JSON.parse(String(response?.body || "{}")));
+    } catch  {
+        throw new Error(`${operation} returned invalid JSON.`);
+    }
+}
+async function civitaiPreviewDataUrl(value) {
+    const raw = asString(value).trim();
+    if (!raw) return "";
+    let target;
+    try {
+        target = new URL(raw);
+    } catch  {
+        return "";
+    }
+    const host = target.hostname.toLowerCase();
+    if (target.protocol !== "https:" || host !== "civitai.com" && !host.endsWith(".civitai.com")) return "";
+    const response = await spindle.cors(target.href, {
+        method: "GET",
+        headers: {
+            "Accept": "image/jpeg,image/png,image/webp,image/*"
+        },
+        responseType: "arraybuffer",
+        mediaType: "image"
+    });
+    if (Number(response?.status) < 200 || Number(response?.status) >= 300 || response?.encoding !== "base64") return "";
+    const mime = headerValue(response.headers, "content-type").split(";")[0].trim().toLowerCase();
+    if (!new Set([
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/webp"
+    ]).has(mime)) return "";
+    const body = String(response.body || "");
+    if (!body || body.length > 7_500_000) return "";
+    return `data:${mime};base64,${body}`;
+}
+async function civitaiLoraDownloadMetadata(downloadUrl, requestedName) {
+    const parsed = new URL(downloadUrl);
+    if (!parsed.hostname.toLowerCase().replace(/^www\./, "").match(/^civitai\.(?:com|red)$/)) {
+        return {
+            metadata: "",
+            fileName: ""
+        };
+    }
+    const versionId = parsed.pathname.match(/^\/api\/download\/models\/(\d+)/i)?.[1];
+    if (!versionId) return {
+        metadata: "",
+        fileName: ""
+    };
+    const token = parsed.searchParams.get("token");
+    const apiUrl = (path)=>{
+        const url = new URL(`https://civitai.com/api/v1/${path}`);
+        if (token) url.searchParams.set("token", token);
+        return url.href;
+    };
+    const version = await publicJson(apiUrl(`model-versions/${versionId}`), "Civitai version metadata request");
+    const modelId = String(version.modelId || "");
+    if (!/^\d+$/.test(modelId)) return {
+        metadata: "",
+        fileName: ""
+    };
+    const model = await publicJson(apiUrl(`models/${modelId}`), "Civitai model metadata request");
+    const versions = Array.isArray(model.modelVersions) ? model.modelVersions.map(asRecord) : [];
+    const fullVersion = versions.find((candidate)=>String(candidate.id || "") === versionId) || version;
+    const files = Array.isArray(fullVersion.files) ? fullVersion.files.map(asRecord) : Array.isArray(version.files) ? version.files.map(asRecord) : [];
+    const wanted = asString(requestedName).toLowerCase().replace(/\\/g, "/").split("/").pop()?.replace(/\.[^.]+$/, "") || "";
+    const safeFiles = files.filter((file)=>/\.(?:safetensors|sft|gguf)$/i.test(asString(file.name)));
+    const file = safeFiles.find((candidate)=>{
+        const filename = asString(candidate.name).toLowerCase().replace(/\.[^.]+$/, "");
+        return Boolean(wanted && filename && (filename === wanted || filename.includes(wanted) || wanted.includes(filename)));
+    }) || safeFiles[0] || asRecord(files[0]);
+    const fileName = asString(file.name).trim().slice(0, 300);
+    const sourceUrl = `https://civitai.com/models/${modelId}?modelVersionId=${versionId}`;
+    const cleanText = (value, limit)=>asString(value).trim().slice(0, limit);
+    const modelName = cleanText(model.name, 500);
+    const versionName = cleanText(fullVersion.name || version.name, 500);
+    const creator = cleanText(asRecord(model.creator).username, 500);
+    const trainedWords = (Array.isArray(fullVersion.trainedWords) ? fullVersion.trainedWords : Array.isArray(version.trainedWords) ? version.trainedWords : []).map(asString).map((word)=>word.trim()).filter(Boolean).slice(0, 128);
+    const tags = (Array.isArray(model.tags) ? model.tags : []).map(asString).map((tag)=>tag.trim()).filter(Boolean).slice(0, 128);
+    const images = (Array.isArray(fullVersion.images) ? fullVersion.images : Array.isArray(version.images) ? version.images : []).map(asRecord).filter((image)=>asString(image.type).toLowerCase() === "image");
+    let thumbnail = "";
+    try {
+        thumbnail = await civitaiPreviewDataUrl(images[0]?.url);
+    } catch  {}
+    const descriptionParts = [
+        `From <a href="${sourceUrl}" target="_blank" rel="noreferrer noopener">${sourceUrl}</a>`,
+        cleanText(fullVersion.description || version.description, 12_000),
+        cleanText(model.description, 20_000)
+    ].filter(Boolean);
+    const metadata = {
+        "modelspec.sai_model_spec": "1.0.0",
+        "modelspec.title": [
+            modelName,
+            versionName
+        ].filter(Boolean).join(" - ") || fileName,
+        "modelspec.description": descriptionParts.join("\n").slice(0, 32_000),
+        "modelspec.date": cleanText(fullVersion.createdAt || version.createdAt, 200),
+        "modelspec.author": creator,
+        "modelspec.trigger_phrase": trainedWords.join("; "),
+        "modelspec.tags": tags.join(", "),
+        "modelspec.usage_hint": cleanText(fullVersion.baseModel || version.baseModel, 500),
+        "modelspec.source": sourceUrl
+    };
+    if (thumbnail) metadata["modelspec.thumbnail"] = thumbnail;
+    for (const [key, value] of Object.entries(metadata)){
+        if (value === "") delete metadata[key];
+    }
+    return {
+        metadata: JSON.stringify(metadata),
+        fileName
+    };
+}
 function cleanLoraDownloadName(value, url) {
     let name = asString(value).trim().replace(/\\/g, "/");
     if (!name) {
@@ -213,7 +336,16 @@ async function prepareLoraDownload(payload, userId) {
     const connectionId = asString(payload?.connectionId).trim();
     const connection = await getConnection(connectionId, userId);
     const url = await approvedLoraDownloadUrl(payload?.url, payload?.name);
-    const name = cleanLoraDownloadName(payload?.name, url);
+    let richMetadata = {
+        metadata: "",
+        fileName: ""
+    };
+    try {
+        richMetadata = await civitaiLoraDownloadMetadata(url, payload?.name);
+    } catch (error) {
+        spindle.log.warn(`Could not enrich LoRA download metadata: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const name = cleanLoraDownloadName(payload?.name || richMetadata.fileName, url);
     const token = await getMetadataToken(connectionId, userId);
     const sessionId = await getSession(connection, token, userId);
     const baseUrl = normalizeBaseUrl(connection.api_url);
@@ -222,7 +354,8 @@ async function prepareLoraDownload(payload, userId) {
         sessionId,
         url,
         name,
-        type: "LoRA"
+        type: "LoRA",
+        metadata: richMetadata.metadata
     };
 }
 function parseTags(value) {

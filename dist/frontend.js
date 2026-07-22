@@ -5413,7 +5413,7 @@ are removed when CSS is applied.</pre>
                 break;
             case "lora_download_ready":
                 if (payload.requestId !== this.loraDownloadRequestId) break;
-                this.openLoraDownloadSocket(data);
+                void this.openLoraDownloadSocket(data);
                 break;
             case "preview_result":
                 if (payload?.name && payload?.dataUrl) {
@@ -6920,7 +6920,39 @@ are removed when CSS is applied.</pre>
             name: item.name
         });
     }
-    openLoraDownloadSocket(data) {
+    async compactLoraDownloadMetadata(value) {
+        const raw = String(value || "");
+        if (!raw) return "";
+        let metadata;
+        try {
+            metadata = JSON.parse(raw);
+        } catch  {
+            return "";
+        }
+        const thumbnail = String(metadata["modelspec.thumbnail"] || "");
+        if (!thumbnail.startsWith("data:image/")) return JSON.stringify(metadata);
+        try {
+            const image = new Image();
+            await new Promise((resolve, reject)=>{
+                image.onload = ()=>resolve();
+                image.onerror = ()=>reject(new Error("Preview image could not be decoded."));
+                image.src = thumbnail;
+            });
+            const targetPixels = 256 * 256;
+            const ratio = Math.min(1, Math.sqrt(targetPixels / Math.max(1, image.naturalWidth * image.naturalHeight)));
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
+            canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
+            const context = canvas.getContext("2d");
+            if (!context) throw new Error("Preview canvas is unavailable.");
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            metadata["modelspec.thumbnail"] = canvas.toDataURL("image/jpeg", 0.84);
+        } catch  {
+            delete metadata["modelspec.thumbnail"];
+        }
+        return JSON.stringify(metadata);
+    }
+    async openLoraDownloadSocket(data) {
         const wsUrl = String(data.wsUrl || "");
         if (!/^wss?:\/\//i.test(wsUrl)) {
             this.loraDownloadQueue = [];
@@ -6929,6 +6961,8 @@ are removed when CSS is applied.</pre>
         }
         const item = this.loraDownloadQueue[0];
         if (!item) return;
+        const metadata = await this.compactLoraDownloadMetadata(data.metadata);
+        if (this.loraDownloadQueue[0] !== item) return;
         let finished = false;
         const socket = new WebSocket(wsUrl);
         this.loraDownloadSocket = socket;
@@ -6937,7 +6971,8 @@ are removed when CSS is applied.</pre>
                 session_id: String(data.sessionId || ""),
                 url: String(data.url || ""),
                 type: "LoRA",
-                name: String(data.name || item.name || "downloaded-lora")
+                name: String(data.name || item.name || "downloaded-lora"),
+                metadata
             }));
             this.setLoraDownloadStatus(`Downloading ${item.title || labelFromName(item.name)}…`, false, 0);
         });
