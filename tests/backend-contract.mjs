@@ -28,6 +28,7 @@ let completionToast = ""
 let downloadedSwarmUrl = ""
 let avatarUpdate = null
 let appliedPalette = null
+let connectionsAvailable = true
 
 globalThis.spindle = {
   registerMacro(definition) {
@@ -58,6 +59,7 @@ globalThis.spindle = {
   },
   imageGen: {
     async listConnections() {
+      if (!connectionsAvailable) return []
       return [
         {
           id: "swarm-1",
@@ -485,6 +487,15 @@ async function request(type, extra = {}) {
   return response.payload
 }
 
+async function requestError(type, extra = {}) {
+  const requestId = `${type}-error-${sent.length}`
+  await frontendHandler({ type, requestId, ...extra }, "user-1")
+  const response = sent.find((entry) => entry.payload.requestId === requestId)
+  assert.ok(response, `Missing error response for ${type}`)
+  assert.equal(response.payload.type, "studio_error")
+  return response.payload
+}
+
 const bootstrap = await request("bootstrap")
 assert.equal(bootstrap.data.connections.length, 1)
 assert.equal(bootstrap.data.connections[0].provider, "swarmui")
@@ -522,6 +533,33 @@ assert.equal(connection.data.swarmOptions.canManagePresets, true)
 assert.equal(connection.data.swarmOptions.parameters.some((parameter) => parameter.id === "prompt"), true)
 assert.equal(connection.data.swarmOptions.workflows[0].name, "Portrait/Inpaint")
 assert.equal(connection.data.swarmOptions.workflowError, "")
+
+const visualOptions = await request("visual_editor_options")
+assert.deepEqual(visualOptions.data.connection, {
+  id: "swarm-1",
+  name: "Local Swarm",
+  model: "base.safetensors",
+  isDefault: true,
+})
+assert.equal(visualOptions.data.checkpoints[0].name, "base.safetensors")
+assert.equal(visualOptions.data.swarmPresets[0].title, "Cinematic")
+assert.deepEqual(visualOptions.data.stackPresets, [])
+assert.equal(visualOptions.data.metadataError, "")
+
+connectionsAvailable = false
+const noConnectionVisualOptions = await request("visual_editor_options")
+assert.equal(noConnectionVisualOptions.data.connection, null)
+assert.deepEqual(noConnectionVisualOptions.data.checkpoints, [])
+assert.match(noConnectionVisualOptions.data.metadataError, /Configure a SwarmUI/i)
+connectionsAvailable = true
+
+permissions.delete("cors_proxy")
+const metadataBlockedVisualOptions = await request("visual_editor_options")
+assert.equal(metadataBlockedVisualOptions.data.connection.id, "swarm-1")
+assert.deepEqual(metadataBlockedVisualOptions.data.checkpoints, [])
+assert.deepEqual(metadataBlockedVisualOptions.data.swarmPresets, [])
+assert.match(metadataBlockedVisualOptions.data.metadataError, /CORS Proxy/i)
+permissions.add("cors_proxy")
 
 const workflow = await request("load_swarm_workflow", {
   connectionId: "swarm-1",
@@ -606,6 +644,11 @@ const storedWorkflowOverride = JSON.parse(generated.data.record.parameters.rawRe
 assert.equal(storedWorkflowOverride.comfyuicustomworkflow, "Portrait/Inpaint")
 assert.equal(storedWorkflowOverride.comfyrawworkflowinputimageinitc, "[workflow image omitted from history]")
 assert.equal(generated.data.outputs[0].studioMetadata.imageId, "image-1")
+assert.equal(generated.data.outputFolders[0].id, "character:char-1")
+assert.equal(generated.data.outputFolders[0].name, "Mira")
+assert.equal(generated.data.outputFolders[0].kind, "character")
+assert.equal(generated.data.outputFolders[0].characterId, "char-1")
+assert.deepEqual(generated.data.outputFolders[0].imageIds, ["image-1"])
 const started = sent.find((entry) => entry.payload.type === "generation_started")
 assert.equal(started.payload.clientJobId, "studio-job-1")
 assert.equal(started.payload.data.connectionId, "swarm-1")
@@ -666,6 +709,10 @@ const movedFolders = await request("move_output_to_folder", {
   folderId,
 })
 assert.deepEqual(movedFolders.data[0].imageIds, ["image-1"])
+assert.deepEqual(
+  movedFolders.data.find((folder) => folder.id === "character:char-1").imageIds,
+  ["image-1"],
+)
 
 const library = await request("list_library_outputs")
 assert.equal(library.data.outputs.length, 1)
@@ -673,7 +720,14 @@ assert.equal(library.data.folders[0].name, "Favorites")
 
 const characterGallery = await request("list_character_gallery", { characterId: "char-1" })
 assert.equal(characterGallery.data.characterId, "char-1")
+assert.equal(characterGallery.data.folderId, "character:char-1")
 assert.equal(characterGallery.data.outputs[0].id, "image-1")
+assert.equal(characterGallery.data.total, 1)
+
+const protectedCharacterFolder = await requestError("delete_output_folder", {
+  folderId: "character:char-1",
+})
+assert.match(protectedCharacterFolder.error, /managed automatically/i)
 
 const bulkMoved = await request("bulk_move_outputs", {
   imageIds: ["image-1"],
@@ -709,5 +763,9 @@ assert.deepEqual(deleted.data.deletedIds, ["image-1"])
 assert.deepEqual(deleted.data.failedIds, [])
 assert.equal(deleted.data.outputs.length, 0)
 assert.deepEqual(deleted.data.folders[0].imageIds, [])
+assert.deepEqual(
+  deleted.data.folders.find((folder) => folder.id === "character:char-1").imageIds,
+  [],
+)
 
 console.log("backend contract: ok")

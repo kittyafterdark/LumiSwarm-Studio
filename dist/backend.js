@@ -423,6 +423,8 @@ function cleanOutputFolders(value) {
         const id = asString(item.id).trim();
         const name = asString(item.name).trim().slice(0, 80);
         if (!id || !name || seen.has(id)) return [];
+        const characterId = asString(item.characterId).trim().slice(0, 200);
+        const isCharacterFolder = item.kind === "character" && Boolean(characterId);
         seen.add(id);
         return [
             {
@@ -431,10 +433,17 @@ function cleanOutputFolders(value) {
                 imageIds: [
                     ...new Set(stringList(item.imageIds, 500))
                 ],
-                updatedAt: Number(item.updatedAt) || Date.now()
+                updatedAt: Number(item.updatedAt) || Date.now(),
+                ...isCharacterFolder ? {
+                    kind: "character",
+                    characterId
+                } : {}
             }
         ];
     });
+}
+function characterOutputFolderId(characterId) {
+    return `character:${characterId}`;
 }
 async function loadOutputFolders(userId) {
     return cleanOutputFolders(await spindle.userStorage.getJson(OUTPUT_FOLDERS_FILE, {
@@ -466,7 +475,45 @@ async function createOutputFolder(name, userId) {
     return persistOutputFolders(folders.slice(0, OUTPUT_FOLDER_LIMIT), userId);
 }
 async function deleteOutputFolder(folderId, userId) {
-    return persistOutputFolders((await loadOutputFolders(userId)).filter((folder)=>folder.id !== folderId), userId);
+    const folders = await loadOutputFolders(userId);
+    const folder = folders.find((item)=>item.id === folderId);
+    if (folder?.kind === "character") {
+        throw new Error("Character output folders are managed automatically and cannot be deleted.");
+    }
+    return persistOutputFolders(folders.filter((item)=>item.id !== folderId), userId);
+}
+async function ensureCharacterOutputFolder(imageIds, characterId, characterName, userId) {
+    const cleanImageIds = [
+        ...new Set(imageIds.map((id)=>id.trim()).filter(Boolean))
+    ].slice(0, 500);
+    const cleanCharacterId = characterId.trim().slice(0, 200);
+    if (!cleanCharacterId) return loadOutputFolders(userId);
+    const folderId = characterOutputFolderId(cleanCharacterId);
+    const folderName = characterName.trim().slice(0, 80) || "Character";
+    const folders = await loadOutputFolders(userId);
+    let folder = folders.find((item)=>item.id === folderId || item.kind === "character" && item.characterId === cleanCharacterId);
+    if (!folder) {
+        folder = {
+            id: folderId,
+            name: folderName,
+            imageIds: [],
+            updatedAt: Date.now(),
+            kind: "character",
+            characterId: cleanCharacterId
+        };
+        folders.unshift(folder);
+    }
+    folder.id = folderId;
+    folder.name = folderName;
+    folder.kind = "character";
+    folder.characterId = cleanCharacterId;
+    const assigned = new Set(cleanImageIds);
+    folder.imageIds = [
+        ...cleanImageIds,
+        ...folder.imageIds.filter((id)=>!assigned.has(id))
+    ];
+    folder.updatedAt = Date.now();
+    return persistOutputFolders(folders.slice(0, OUTPUT_FOLDER_LIMIT), userId);
 }
 async function moveOutputToFolder(imageId, folderId, userId) {
     return moveOutputsToFolder([
@@ -482,11 +529,28 @@ async function moveOutputsToFolder(imageIds, folderId, userId) {
     if (folderId && !folders.some((folder)=>folder.id === folderId)) {
         throw new Error("That output folder no longer exists.");
     }
+    const targetFolder = folders.find((folder)=>folder.id === folderId);
+    if (targetFolder?.kind === "character") {
+        throw new Error("Character output folders are managed automatically.");
+    }
     const moved = new Set(cleanIds);
     for (const folder of folders){
+        if (folder.kind === "character") continue;
         folder.imageIds = folder.imageIds.filter((id)=>!moved.has(id));
         if (folder.id === folderId) folder.imageIds.unshift(...cleanIds);
         folder.updatedAt = Date.now();
+    }
+    return persistOutputFolders(folders, userId);
+}
+async function removeOutputsFromAllFolders(imageIds, userId) {
+    const removed = new Set(imageIds.map((id)=>id.trim()).filter(Boolean));
+    const folders = await loadOutputFolders(userId);
+    for (const folder of folders){
+        const nextIds = folder.imageIds.filter((id)=>!removed.has(id));
+        if (nextIds.length !== folder.imageIds.length) {
+            folder.imageIds = nextIds;
+            folder.updatedAt = Date.now();
+        }
     }
     return persistOutputFolders(folders, userId);
 }
@@ -919,6 +983,87 @@ async function bootstrap(userId) {
         outputFolders: await loadOutputFolders(userId)
     };
 }
+async function loadVisualEditorOptions(userId) {
+    const errors = [];
+    let stackPresets = [];
+    try {
+        stackPresets = await loadStackPresets(userId);
+    } catch (error) {
+        errors.push(`Saved LoRA stacks: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!spindle.permissions.has("image_gen")) {
+        return {
+            connection: null,
+            checkpoints: [],
+            swarmPresets: [],
+            stackPresets,
+            metadataError: "Grant the Image Generation permission to load Visuals options."
+        };
+    }
+    let connections = [];
+    try {
+        const listed = await spindle.imageGen.listConnections(userId);
+        connections = (Array.isArray(listed) ? listed : []).filter((connection)=>connection?.provider === "swarmui");
+    } catch (error) {
+        errors.push(`Swarm connection: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const listedDefault = connections.find((connection)=>connection?.is_default) || connections[0];
+    if (!listedDefault) {
+        errors.push("Configure a SwarmUI image generation connection to use character Visuals.");
+        return {
+            connection: null,
+            checkpoints: [],
+            swarmPresets: [],
+            stackPresets,
+            metadataError: errors.join(" ")
+        };
+    }
+    let connection;
+    try {
+        connection = await getConnection(asString(listedDefault.id), userId);
+    } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+        return {
+            connection: null,
+            checkpoints: [],
+            swarmPresets: [],
+            stackPresets,
+            metadataError: errors.join(" ")
+        };
+    }
+    let checkpoints = [];
+    let swarmPresets = [];
+    if (!spindle.permissions.has("cors_proxy")) {
+        errors.push("Grant the CORS Proxy permission to load SwarmUI checkpoints and presets.");
+    } else {
+        const token = await getMetadataToken(connection.id, userId).catch((error)=>{
+            errors.push(`Metadata token: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        });
+        try {
+            checkpoints = await listCheckpoints(connection, token, userId);
+        } catch (error) {
+            errors.push(`Checkpoints: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        try {
+            swarmPresets = (await loadSwarmOptions(connection, token, userId)).presets;
+        } catch (error) {
+            errors.push(`Swarm presets: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    return {
+        connection: {
+            id: connection.id,
+            name: connection.name,
+            model: connection.model,
+            isDefault: connection.is_default
+        },
+        checkpoints,
+        swarmPresets,
+        stackPresets,
+        metadataError: errors.join(" ")
+    };
+}
 async function loadConnection(connectionId, userId) {
     const connection = await getConnection(connectionId, userId);
     const models = await spindle.imageGen.getModels(connectionId, userId);
@@ -976,6 +1121,15 @@ async function handleMessage(payload, userId) {
                         type: "bootstrap_result",
                         requestId,
                         data: await bootstrap(userId)
+                    }, userId);
+                    return;
+                }
+            case "visual_editor_options":
+                {
+                    spindle.sendToFrontend({
+                        type: "visual_editor_options_result",
+                        requestId,
+                        data: await loadVisualEditorOptions(userId)
                     }, userId);
                     return;
                 }
@@ -1165,6 +1319,30 @@ async function handleMessage(payload, userId) {
                     } catch (error) {
                         spindle.log.warn(`Could not persist Swarm Studio generation details: ${error instanceof Error ? error.message : String(error)}`);
                     }
+                    let outputFolders;
+                    const generatedImageId = record?.imageId || asString(result.imageId);
+                    const activeCharacterId = asString(activeChat?.character_id).trim();
+                    if (generatedImageId && activeCharacterId) {
+                        let characterName = "Character";
+                        if (spindle.permissions.has("characters")) {
+                            try {
+                                const character = await spindle.characters.get(activeCharacterId, userId);
+                                characterName = asString(character?.name).trim() || characterName;
+                            } catch (error) {
+                                spindle.log.warn(`Could not resolve the active character name: ${error instanceof Error ? error.message : String(error)}`);
+                            }
+                        }
+                        try {
+                            outputFolders = await ensureCharacterOutputFolder([
+                                generatedImageId
+                            ], activeCharacterId, characterName, userId);
+                        } catch (error) {
+                            spindle.log.warn(`Could not assign the output to its character folder: ${error instanceof Error ? error.message : String(error)}`);
+                            outputFolders = await loadOutputFolders(userId);
+                        }
+                    } else {
+                        outputFolders = await loadOutputFolders(userId);
+                    }
                     const outputPage = await listOutputs(userId, activeChat);
                     spindle.sendToFrontend({
                         type: "generation_result",
@@ -1173,6 +1351,7 @@ async function handleMessage(payload, userId) {
                         data: {
                             result,
                             record,
+                            outputFolders,
                             ...outputPage
                         }
                     }, userId);
@@ -1333,13 +1512,25 @@ async function handleMessage(payload, userId) {
                         offset: 0,
                         userId
                     });
+                    const outputs = Array.isArray(result?.data) ? result.data : [];
+                    let characterName = "Character";
+                    if (spindle.permissions.has("characters")) {
+                        try {
+                            const character = await spindle.characters.get(characterId, userId);
+                            characterName = asString(character?.name).trim() || characterName;
+                        } catch (error) {
+                            spindle.log.warn(`Could not resolve the character gallery name: ${error instanceof Error ? error.message : String(error)}`);
+                        }
+                    }
+                    await ensureCharacterOutputFolder(outputs.map((output)=>asString(output?.id)), characterId, characterName, userId);
                     spindle.sendToFrontend({
                         type: "character_gallery_result",
                         requestId,
                         data: {
                             characterId,
-                            outputs: Array.isArray(result?.data) ? result.data : [],
-                            total: Number(result?.total) || 0
+                            folderId: characterOutputFolderId(characterId),
+                            outputs,
+                            total: Math.max(outputs.length, Number(result?.total) || 0)
                         }
                     }, userId);
                     return;
@@ -1535,7 +1726,9 @@ async function handleMessage(payload, userId) {
                     const deleted = await spindle.images.delete(imageId, userId);
                     if (!deleted) throw new Error("Lumiverse could not delete that output.");
                     await deleteGenerationRecord(imageId, userId);
-                    const folders = await moveOutputToFolder(imageId, "", userId);
+                    const folders = await removeOutputsFromAllFolders([
+                        imageId
+                    ], userId);
                     const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
                     spindle.sendToFrontend({
                         type: "output_deleted",
@@ -1566,7 +1759,7 @@ async function handleMessage(payload, userId) {
                         }
                     }
                     if (deletedIds.length) await deleteGenerationRecords(deletedIds, userId);
-                    const folders = deletedIds.length ? await moveOutputsToFolder(deletedIds, "", userId) : await loadOutputFolders(userId);
+                    const folders = deletedIds.length ? await removeOutputsFromAllFolders(deletedIds, userId) : await loadOutputFolders(userId);
                     const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
                     spindle.sendToFrontend({
                         type: "outputs_bulk_deleted",

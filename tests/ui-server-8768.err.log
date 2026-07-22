@@ -1,0 +1,24 @@
+127.0.0.1 - - [22/Jul/2026 04:43:28] "GET /tests/ui-harness.html?visuals=1 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:43:29] "GET /dist/frontend.js HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:43:29] code 404, message File not found
+127.0.0.1 - - [22/Jul/2026 04:43:29] "GET /favicon.ico HTTP/1.1" 404 -
+127.0.0.1 - - [22/Jul/2026 04:44:03] "GET /tests/ui-harness.html?visuals=1 HTTP/1.1" 304 -
+127.0.0.1 - - [22/Jul/2026 04:44:03] "GET /dist/frontend.js HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:46:03] "GET /tests/ui-harness.html?visuals=1 HTTP/1.1" 304 -
+127.0.0.1 - - [22/Jul/2026 04:46:03] "GET /dist/frontend.js HTTP/1.1" 304 -
+127.0.0.1 - - [22/Jul/2026 04:47:07] "GET /tests/ui-harness.html?visuals=1 HTTP/1.1" 304 -
+127.0.0.1 - - [22/Jul/2026 04:47:07] "GET /dist/frontend.js HTTP/1.1" 304 -
+127.0.0.1 - - [22/Jul/2026 04:48:17] "GET /tests/ui-harness.html?visuals=1 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:48:17] "GET /dist/frontend.js HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:50:27] "GET /tests/ui-harness.html?visuals=1&folder-proof=1 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:50:27] "GET /dist/frontend.js?v=0.17.0 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:51:23] "GET /tests/ui-harness.html?visuals=1&folder-proof=2 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:51:23] "GET /dist/frontend.js?v=0.17.0 HTTP/1.1" 304 -
+127.0.0.1 - - [22/Jul/2026 04:52:43] "GET /tests/ui-harness.html?visuals=1&folder-proof=3 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:52:43] "GET /dist/frontend.js?v=0.17.0-visuals HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:54:17] "GET /tests/ui-harness.html?visuals=1&folder-proof=4 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:54:17] "GET /dist/frontend.js?v=0.17.0-visuals-2 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:54:59] "GET /tests/ui-harness.html?visuals=1&folder-proof=5 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:54:59] "GET /dist/frontend.js?v=0.17.0-visuals-3 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:55:47] "GET /tests/ui-harness.html?visuals=1&final-proof=1 HTTP/1.1" 200 -
+127.0.0.1 - - [22/Jul/2026 04:55:47] "GET /dist/frontend.js?v=0.17.0-visuals-final HTTP/1.1" 200 -

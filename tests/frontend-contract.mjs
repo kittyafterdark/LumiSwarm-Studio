@@ -31,10 +31,15 @@ assert.deepEqual(
     preserveTraits: ["red eyes", 123, "left cheek scar"],
   }),
   {
-    version: 1,
+    version: 2,
+    mode: "custom",
+    connectionId: "",
+    presetStack: [],
     canonicalPrompt: "waist-length black hair, red eyes",
     canonicalNegativePrompt: "",
     preferredCheckpoint: "",
+    baseLoraStackId: "",
+    baseLoraStackName: "",
     baseLoraStack: [{
       name: "characters/mira.safetensors",
       title: undefined,
@@ -45,10 +50,7 @@ assert.deepEqual(
     }],
     referenceImages: [],
     defaultAspectRatio: "",
-    outfits: [{ id: "formal", name: "Formal", prompt: "black suit", negativePrompt: "" }],
-    activeOutfitId: "",
-    styles: [],
-    activeStyleId: "",
+    profiles: [{ id: "formal", name: "Formal", prompt: "black suit", negativePrompt: "", enabled: false }],
     preserveTraits: ["red eyes", "123", "left cheek scar"],
   },
 )
@@ -369,6 +371,12 @@ assert.match(source, /registerCharacterEditorTab\(\{ id: "visuals", title: "Visu
 assert.match(source, /Character Visual Bible/)
 assert.match(source, /characterEditor\.updateExtensions/)
 assert.match(source, /visualBible: cleanCharacterVisualBible\(recipe\)/)
+assert.match(source, /visual_editor_options/)
+assert.match(source, /Swarm presets/)
+assert.match(source, /Custom bible/)
+assert.match(source, /dataset\.visualStackPreset/)
+assert.match(source, /dataset\.visualProfileEnabled/)
+assert.match(source, /Visuals: \$\{this\.state\.activeCharacter/)
 assert.match(source, /list_character_gallery/)
 assert.match(source, /registerPresetEditorTab\(\{ id: "visual-style", title: "Visual Style" \}\)/)
 assert.match(source, /Loom Visual Style/)

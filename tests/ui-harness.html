@@ -25,15 +25,21 @@
     .host-header button { border: 0; background: transparent; color: var(--lumiverse-text-muted); font-size: 22px; }
     .host-body { padding: 13px; overflow: hidden; }
     .host-widget { position: fixed; right: 18px; bottom: 18px; z-index: 80; }
+    .character-editor-harness { width: min(980px, calc(100vw - 28px)); height: calc(100vh - 28px); margin: 14px auto; overflow: auto; border: 1px solid var(--lumiverse-border); border-radius: 14px; background: #0b0d12; }
     #drawer { display: none; }
   </style>
 </head>
 <body>
   <div id="drawer"></div>
+  <div id="character-editor" class="character-editor-harness" hidden></div>
   <script type="module">
-    import { setup } from "../dist/frontend.js"
+    import { setup } from "../dist/frontend.js?v=0.17.0-visuals-final"
 
     const handlers = []
+    const visualHarness = new URLSearchParams(location.search).has("visuals")
+    const characterEditorRoot = document.querySelector("#character-editor")
+    let characterExtensions = {}
+    const characterEditorListeners = []
     const later = (payload) => setTimeout(() => handlers.forEach((handler) => handler(payload)), 0)
     const svg = (label, a, b) => `data:image/svg+xml,${encodeURIComponent(`
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">
@@ -98,6 +104,13 @@
       }
     })
     let outputFolders = [{
+      id: "character:char-1",
+      name: "Lior",
+      kind: "character",
+      characterId: "char-1",
+      imageIds: historyOutputs.slice(0, 8).map((output) => output.id),
+      updatedAt: Date.now(),
+    }, {
       id: "favorites",
       name: "Favorites",
       imageIds: ["image-32", "image-29", "image-24"],
@@ -115,6 +128,20 @@
         },
       },
       ui: {
+        characterEditor: {
+          getState() { return { open: visualHarness, characterId: visualHarness ? "char-1" : null, activeTabId: visualHarness ? "visuals" : null, extensions: characterExtensions, character: { name: "Lior" } } },
+          onChange(handler) { characterEditorListeners.push(handler); return () => {} },
+          updateExtensions(mutator) {
+            characterExtensions = mutator(characterExtensions)
+            characterEditorListeners.forEach((handler) => handler())
+          },
+        },
+        registerCharacterEditorTab() {
+          characterEditorRoot.hidden = !visualHarness
+          const activateHandlers = []
+          if (visualHarness) setTimeout(() => activateHandlers.forEach((handler) => handler()), 0)
+          return { root: characterEditorRoot, destroy() {}, onActivate(handler) { activateHandlers.push(handler); return () => {} } }
+        },
         showModal({ title }) {
           const host = document.createElement("div")
           host.className = "host-modal"
@@ -170,7 +197,32 @@
       onBackendMessage(handler) { handlers.push(handler); return () => {} },
       events: { on() { return () => {} } },
       sendToBackend(message) {
-        if (message.type === "bootstrap") {
+        if (message.type === "visual_editor_options") {
+          later({ type: "visual_editor_options_result", requestId: message.requestId, data: {
+            connection: { id: "swarm-1", name: "Local SwarmUI", model: "anima-semi-v10.safetensors", isDefault: true },
+            checkpoints: [
+              { name: "anima-semi-v10.safetensors", title: "Anima Semi v1.0", architecture: "anima-v1/base", className: "checkpoint", compatClass: "anima-v1" },
+              { name: "illustrious-xl-v15.safetensors", title: "Illustrious XL v1.5", architecture: "illustrious/base", className: "checkpoint", compatClass: "illustrious-v1" },
+            ],
+            swarmPresets: [
+              { title: "Cinematic", description: "Movie lighting", paramMap: {} },
+              { title: "Clean anime", description: "Crisp Anima baseline", paramMap: {} },
+              { title: "Character portrait", description: "Portrait framing", paramMap: {} },
+            ],
+            stackPresets: [
+              { id: "portrait-stack", name: "Anima portrait", updatedAt: Date.now(), items: [{ name: "anima/soft-portrait.safetensors", title: "Soft Portrait · Anima", weight: .65, enabled: true, useTrigger: false }] },
+              { id: "ink-stack", name: "Ink + rim light", updatedAt: Date.now(), items: [{ name: "anima/cinematic-ink.safetensors", title: "Cinematic Ink · Anima", weight: .8, enabled: true, useTrigger: false }, { name: "anima/neon-rim.safetensors", title: "Neon Rim · Anima", weight: .55, enabled: true, useTrigger: false }] },
+            ],
+            metadataError: "",
+          }})
+        } else if (message.type === "list_character_gallery") {
+          later({ type: "character_gallery_result", requestId: message.requestId, data: {
+            characterId: "char-1",
+            folderId: "character:char-1",
+            outputs: historyOutputs.slice(0, 8),
+            total: 8,
+          }})
+        } else if (message.type === "bootstrap") {
           later({ type: "bootstrap_result", requestId: message.requestId, data: {
             permissions: { imageGen: true, metadata: true, images: true, chats: true },
             connections: [{ id: "swarm-1", name: "Local SwarmUI", provider: "swarmui", api_url: "http://127.0.0.1:7801", model: "anima-semi-v10.safetensors", is_default: true, default_parameters: { width: 768, height: 1152, steps: 28, cfgScale: 4.5, sampler: "dpmpp_2m", scheduler: "beta57" } }],
@@ -358,7 +410,7 @@
     }
 
     setup(ctx)
-    drawerRoot.querySelector("button").click()
+    if (!visualHarness) drawerRoot.querySelector("button").click()
   </script>
 </body>
 </html>

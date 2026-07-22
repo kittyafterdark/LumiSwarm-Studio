@@ -9,6 +9,7 @@ interface VisualProfile {
   name: string
   prompt: string
   negativePrompt: string
+  enabled: boolean
 }
 
 interface VisualLoraItem {
@@ -21,17 +22,19 @@ interface VisualLoraItem {
 }
 
 interface CharacterVisualBible {
-  version: 1
+  version: 2
+  mode: "preset" | "custom"
+  connectionId: string
+  presetStack: SelectedPreset[]
   canonicalPrompt: string
   canonicalNegativePrompt: string
   preferredCheckpoint: string
+  baseLoraStackId: string
+  baseLoraStackName: string
   baseLoraStack: VisualLoraItem[]
   referenceImages: string[]
   defaultAspectRatio: string
-  outfits: VisualProfile[]
-  activeOutfitId: string
-  styles: VisualProfile[]
-  activeStyleId: string
+  profiles: VisualProfile[]
   preserveTraits: string[]
 }
 
@@ -211,6 +214,8 @@ interface OutputFolder {
   name: string
   imageIds: string[]
   updatedAt: number
+  kind?: "character"
+  characterId?: string
 }
 
 interface InitImage {
@@ -230,6 +235,7 @@ interface WorkflowDraft {
 
 interface StudioDraft {
   connectionId: string
+  characterId?: string
   details: GenerationDetails
   stack: StackPresetItem[]
   selectedPresets: SelectedPreset[]
@@ -2650,10 +2656,63 @@ const STUDIO_V3_STYLES = `
     border-radius: var(--lumiverse-radius-md, 12px);
     background: color-mix(in srgb, var(--lumiverse-fill-subtle) 82%, transparent);
   }
+  .ss-visual-card[hidden] { display: none; }
   .ss-visual-card[data-wide="true"] { grid-column: 1 / -1; }
   .ss-visual-card-head { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
   .ss-visual-card-head strong { font-size: 12px; }
   .ss-visual-card-head span { color: var(--lumiverse-text-dim); font-size: 9px; }
+  .ss-visual-mode-card { background: color-mix(in srgb, var(--lumiverse-primary) 6%, var(--lumiverse-fill-subtle)); }
+  .ss-visual-mode-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .ss-visual-mode-option {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    padding: 11px 12px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: var(--lumiverse-radius-sm, 8px);
+    color: var(--lumiverse-text);
+    background: var(--lumiverse-bg-deep);
+    text-align: left;
+    cursor: pointer;
+  }
+  .ss-visual-mode-option strong { font-size: 11px; }
+  .ss-visual-mode-option span { color: var(--lumiverse-text-dim); font-size: 9px; line-height: 1.4; }
+  .ss-visual-mode-option[data-active="true"] {
+    border-color: color-mix(in srgb, var(--lumiverse-primary) 68%, var(--lumiverse-border));
+    background: color-mix(in srgb, var(--lumiverse-primary) 13%, var(--lumiverse-bg-deep));
+    box-shadow: inset 3px 0 0 var(--lumiverse-primary);
+  }
+  .ss-visual-picker-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+  .ss-visual-layer-list { display: grid; gap: 6px; }
+  .ss-visual-layer-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) repeat(3, 28px);
+    gap: 5px;
+    align-items: center;
+    min-height: 34px;
+    padding: 4px 5px 4px 9px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: var(--lumiverse-radius-sm, 8px);
+    background: var(--lumiverse-bg-deep);
+  }
+  .ss-visual-layer-row input { accent-color: var(--lumiverse-primary); }
+  .ss-visual-layer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+  .ss-visual-layer-name[data-missing="true"] { color: var(--lumiverse-warning, #e0a458); }
+  .ss-visual-layer-action {
+    width: 28px;
+    height: 28px;
+    border: 1px solid transparent;
+    border-radius: calc(var(--lumiverse-radius-sm, 8px) - 2px);
+    color: var(--lumiverse-text-muted);
+    background: transparent;
+    cursor: pointer;
+  }
+  .ss-visual-layer-action:hover:not(:disabled) { color: var(--lumiverse-text); border-color: var(--lumiverse-border); background: var(--lumiverse-fill-hover); }
+  .ss-visual-layer-action:disabled { opacity: .28; cursor: default; }
+  .ss-visual-options-error { color: var(--lumiverse-warning, #e0a458); font-size: 9px; line-height: 1.45; }
+  .ss-visual-stack-summary,
+  .ss-visual-profile-hint { margin: 0; color: var(--lumiverse-text-dim); font-size: 9px; line-height: 1.45; }
   .ss-visual-field { min-width: 0; display: grid; gap: 5px; }
   .ss-visual-field > span { color: var(--lumiverse-text-muted); font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
   .ss-visual-input,
@@ -2676,11 +2735,18 @@ const STUDIO_V3_STYLES = `
   .ss-visual-profile-list { display: grid; gap: 8px; }
   .ss-visual-profile {
     display: grid;
-    grid-template-columns: minmax(120px, .65fr) minmax(0, 1.5fr) minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(110px, .6fr) minmax(0, 1.5fr) minmax(0, 1fr) auto;
     gap: 7px;
     align-items: start;
+    padding: 8px;
+    border: 1px solid var(--lumiverse-border);
+    border-radius: var(--lumiverse-radius-sm, 8px);
+    background: var(--lumiverse-bg-deep);
   }
   .ss-visual-profile textarea { min-height: 56px; }
+  .ss-visual-profile-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-visual-profile-toggle input { accent-color: var(--lumiverse-primary); }
+  .ss-visual-profile-actions { display: flex; gap: 3px; align-items: center; }
   .ss-visual-button {
     min-height: 32px;
     display: inline-flex;
@@ -2697,8 +2763,11 @@ const STUDIO_V3_STYLES = `
   }
   .ss-visual-button:hover { border-color: var(--lumiverse-border-hover); background: var(--lumiverse-fill-hover); }
   .ss-visual-button[data-danger="true"] { color: var(--lumiverse-danger); }
+  .ss-visual-gallery-actions { display: flex; justify-content: flex-start; }
   .ss-visual-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
-  .ss-visual-gallery img { width: 100%; aspect-ratio: 1; display: block; object-fit: cover; border-radius: var(--lumiverse-radius-sm, 8px); border: 1px solid var(--lumiverse-border); }
+  .ss-visual-gallery-image { padding: 0; border: 0; border-radius: var(--lumiverse-radius-sm, 8px); background: transparent; cursor: pointer; }
+  .ss-visual-gallery-image img { width: 100%; aspect-ratio: 1; display: block; object-fit: cover; border-radius: inherit; border: 1px solid var(--lumiverse-border); }
+  .ss-visual-gallery-image:hover img { border-color: var(--lumiverse-primary); }
   .ss-visual-gallery-empty { padding: 18px; color: var(--lumiverse-text-dim); text-align: center; font-size: 10px; }
   .ss-visual-recipe-pill { display: inline-flex; align-items: center; gap: 5px; color: var(--lumiverse-primary); font-size: 9px; }
   .ss-use-lumiverse { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--lumiverse-border); }
@@ -2709,6 +2778,8 @@ const STUDIO_V3_STYLES = `
   @media (max-width: 720px) {
     .ss-visual-editor { padding: 12px; }
     .ss-visual-grid { grid-template-columns: 1fr; }
+    .ss-visual-mode-switch,
+    .ss-visual-picker-row { grid-template-columns: 1fr; }
     .ss-visual-card[data-wide="true"] { grid-column: auto; }
     .ss-visual-profile { grid-template-columns: 1fr; }
     .ss-visual-profile .ss-visual-button { justify-self: end; }
@@ -2819,28 +2890,60 @@ function cleanVisualProfiles(value: unknown): VisualProfile[] {
       name: String(item.name || `Profile ${index + 1}`).trim().slice(0, 120) || `Profile ${index + 1}`,
       prompt: String(item.prompt || "").slice(0, 8000),
       negativePrompt: String(item.negativePrompt || "").slice(0, 8000),
+      enabled: item.enabled !== false,
     }
   })
 }
 
+function cleanVisualPresetStack(value: unknown): SelectedPreset[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const output: SelectedPreset[] = []
+  for (const entry of value.slice(0, 30)) {
+    const item = visualRecord(entry)
+    const title = (typeof entry === "string" ? entry : item.title)
+      ? String(typeof entry === "string" ? entry : item.title).trim().slice(0, 300)
+      : ""
+    const key = title.toLowerCase()
+    if (!title || seen.has(key)) continue
+    seen.add(key)
+    output.push({ title, enabled: typeof entry === "string" || item.enabled !== false })
+  }
+  return output
+}
+
 export function cleanCharacterVisualBible(value: unknown): CharacterVisualBible {
   const raw = visualRecord(value)
-  const outfits = cleanVisualProfiles(raw.outfits)
-  const styles = cleanVisualProfiles(raw.styles)
-  const activeOutfitId = String(raw.activeOutfitId || "")
-  const activeStyleId = String(raw.activeStyleId || "")
+  const presetStack = cleanVisualPresetStack(raw.presetStack || raw.swarmPresets)
+  let profiles = cleanVisualProfiles(raw.profiles)
+  if (!Array.isArray(raw.profiles)) {
+    const activeOutfitId = String(raw.activeOutfitId || "")
+    const activeStyleId = String(raw.activeStyleId || "")
+    profiles = [
+      ...cleanVisualProfiles(raw.outfits).map((profile) => ({
+        ...profile,
+        enabled: Boolean(activeOutfitId && profile.id === activeOutfitId),
+      })),
+      ...cleanVisualProfiles(raw.styles).map((profile) => ({
+        ...profile,
+        enabled: Boolean(activeStyleId && profile.id === activeStyleId),
+      })),
+    ]
+  }
   return {
-    version: 1,
+    version: 2,
+    mode: raw.mode === "preset" ? "preset" : "custom",
+    connectionId: String(raw.connectionId || "").trim().slice(0, 200),
+    presetStack,
     canonicalPrompt: String(raw.canonicalPrompt || "").slice(0, 12000),
     canonicalNegativePrompt: String(raw.canonicalNegativePrompt || "").slice(0, 12000),
     preferredCheckpoint: String(raw.preferredCheckpoint || "").trim().slice(0, 500),
+    baseLoraStackId: String(raw.baseLoraStackId || "").trim().slice(0, 200),
+    baseLoraStackName: String(raw.baseLoraStackName || "").trim().slice(0, 200),
     baseLoraStack: cleanVisualLoras(raw.baseLoraStack),
     referenceImages: visualStrings(raw.referenceImages, 40).map((item) => item.slice(0, 2000)),
     defaultAspectRatio: String(raw.defaultAspectRatio || "").trim().slice(0, 40),
-    outfits,
-    activeOutfitId: outfits.some((item) => item.id === activeOutfitId) ? activeOutfitId : "",
-    styles,
-    activeStyleId: styles.some((item) => item.id === activeStyleId) ? activeStyleId : "",
+    profiles,
     preserveTraits: visualStrings(raw.preserveTraits, 100).map((item) => item.slice(0, 500)),
   }
 }
@@ -2913,9 +3016,29 @@ function visualCard(title: string, hint = "", wide = false): HTMLElement {
   return card
 }
 
-function registerVisualRecipeEditors(ctx: FrontendContext): {
+interface VisualEditorOptions {
+  connection: { id: string; name: string; model?: string; isDefault?: boolean } | null
+  checkpoints: CheckpointMetadata[]
+  swarmPresets: SwarmPreset[]
+  stackPresets: StackPreset[]
+  metadataError: string
+}
+
+interface VisualEditorActions {
+  openStudio: (context: VisualLaunchContext) => void
+  openLibrary: (folderId: string) => void
+}
+
+interface VisualLaunchContext {
+  characterId: string
+  characterName: string
+  visualBible: CharacterVisualBible
+}
+
+function registerVisualRecipeEditors(ctx: FrontendContext, actions: VisualEditorActions): {
   getPresetContext: () => { id: string; name: string; recipe: LoomVisualRecipe | null }
   onBackendMessage: (payload: any) => void
+  refresh: () => void
   destroy: () => void
 } {
   let currentPresetId = ""
@@ -2923,10 +3046,25 @@ function registerVisualRecipeEditors(ctx: FrontendContext): {
   let currentPresetRecipe: LoomVisualRecipe | null = null
   let currentCharacterId = ""
   let galleryCharacterId = ""
+  let galleryFolderId = ""
   let galleryOutputs: any[] = []
   let galleryRoot: HTMLElement | null = null
+  let rerenderCharacterEditor: (() => void) | null = null
+  let optionsRequestId = ""
+  let editorOptions: VisualEditorOptions = {
+    connection: null,
+    checkpoints: [],
+    swarmPresets: [],
+    stackPresets: [],
+    metadataError: "",
+  }
   const cleanups: Array<() => void> = []
   const handles: any[] = []
+
+  const requestEditorOptions = () => {
+    optionsRequestId = crypto.randomUUID()
+    ctx.sendToBackend({ type: "visual_editor_options", requestId: optionsRequestId })
+  }
 
   const requestCharacterGallery = (characterId: string) => {
     if (!characterId) return
@@ -2945,11 +3083,16 @@ function registerVisualRecipeEditors(ctx: FrontendContext): {
       return
     }
     for (const output of galleryOutputs.slice(0, 24)) {
+      const button = element("button", "ss-visual-gallery-image")
+      button.type = "button"
+      button.title = "Open this character's folder in Output Library"
       const image = element("img")
       image.src = String(output.url || "")
       image.alt = String(output.original_filename || "Character output")
       image.loading = "lazy"
-      galleryRoot.appendChild(image)
+      button.appendChild(image)
+      button.addEventListener("click", () => actions.openLibrary(galleryFolderId || `character:${galleryCharacterId}`))
+      galleryRoot.appendChild(button)
     }
   }
 
@@ -2981,7 +3124,73 @@ function registerVisualRecipeEditors(ctx: FrontendContext): {
       shell.appendChild(header)
       const grid = element("div", "ss-visual-grid")
 
+      const mode = visualCard("Visual source", "Choose one", true)
+      mode.classList.add("ss-visual-mode-card")
+      const modeButtons = element("div", "ss-visual-mode-switch")
+      for (const [value, label, hint] of [
+        ["preset", "Swarm presets", "Use an ordered stack of reusable SwarmUI presets."],
+        ["custom", "Custom bible", "Keep this character's prompts, model, LoRAs, and aspect ratio here."],
+      ] as const) {
+        const button = element("button", "ss-visual-mode-option")
+        button.type = "button"
+        button.dataset.visualMode = value
+        button.dataset.active = String(recipe.mode === value)
+        button.append(element("strong", "", label), element("span", "", hint))
+        modeButtons.appendChild(button)
+      }
+      mode.appendChild(modeButtons)
+
+      const presetSource = visualCard("Preset stack", "Applied from top to bottom", true)
+      presetSource.hidden = recipe.mode !== "preset"
+      const presetPicker = element("div", "ss-visual-picker-row")
+      const addPreset = element("select", "ss-visual-select")
+      addPreset.dataset.visualAddPreset = "true"
+      addPreset.appendChild(element("option", "", editorOptions.swarmPresets.length ? "Add a Swarm preset…" : "No Swarm presets found"))
+      for (const preset of editorOptions.swarmPresets) {
+        const option = element("option", "", preset.title)
+        option.value = preset.title
+        option.disabled = recipe.presetStack.some((item) => item.title.toLowerCase() === preset.title.toLowerCase())
+        addPreset.appendChild(option)
+      }
+      const openPresetStudio = element("button", "ss-visual-button", "Create or manage presets")
+      openPresetStudio.type = "button"
+      openPresetStudio.dataset.visualOpenStudio = "presets"
+      presetPicker.append(addPreset, openPresetStudio)
+      presetSource.appendChild(presetPicker)
+      const presetList = element("div", "ss-visual-layer-list")
+      for (const [index, selected] of recipe.presetStack.entries()) {
+        const row = element("div", "ss-visual-layer-row")
+        const toggle = element("input")
+        toggle.type = "checkbox"
+        toggle.checked = selected.enabled
+        toggle.dataset.visualPresetToggle = String(index)
+        const name = element("span", "ss-visual-layer-name", selected.title)
+        if (!editorOptions.swarmPresets.some((preset) => preset.title.toLowerCase() === selected.title.toLowerCase())) {
+          name.dataset.missing = "true"
+          name.title = "This preset is not available on the current SwarmUI connection"
+        }
+        const up = element("button", "ss-visual-layer-action", "↑")
+        up.type = "button"
+        up.disabled = index === 0
+        up.dataset.visualPresetMove = String(index)
+        up.dataset.delta = "-1"
+        const down = element("button", "ss-visual-layer-action", "↓")
+        down.type = "button"
+        down.disabled = index === recipe.presetStack.length - 1
+        down.dataset.visualPresetMove = String(index)
+        down.dataset.delta = "1"
+        const remove = element("button", "ss-visual-layer-action", "×")
+        remove.type = "button"
+        remove.dataset.visualRemovePreset = String(index)
+        row.append(toggle, name, up, down, remove)
+        presetList.appendChild(row)
+      }
+      if (!recipe.presetStack.length) presetList.appendChild(element("div", "ss-visual-gallery-empty", "Add one or more Swarm presets for this character."))
+      presetSource.appendChild(presetList)
+      if (editorOptions.metadataError) presetSource.appendChild(element("div", "ss-visual-options-error", editorOptions.metadataError))
+
       const identity = visualCard("Canonical appearance", "Character-owned", true)
+      identity.hidden = recipe.mode !== "custom"
       const positive = visualTextarea(recipe.canonicalPrompt, "Hair, eyes, silhouette, age, body type, defining features…")
       positive.dataset.visualField = "canonicalPrompt"
       const negative = visualTextarea(recipe.canonicalNegativePrompt, "Things that should never drift for this character…")
@@ -2989,8 +3198,24 @@ function registerVisualRecipeEditors(ctx: FrontendContext): {
       identity.append(visualField("Positive", positive), visualField("Negative", negative))
 
       const renderDefaults = visualCard("Render defaults", "Applied on a fresh Studio draft")
-      const checkpoint = visualInput(recipe.preferredCheckpoint, "Checkpoint filename or title")
+      renderDefaults.hidden = recipe.mode !== "custom"
+      const checkpoint = element("select", "ss-visual-select")
       checkpoint.dataset.visualField = "preferredCheckpoint"
+      const checkpointDefault = element("option", "", editorOptions.connection?.model ? `Connection default · ${editorOptions.connection.model}` : "Connection default")
+      checkpointDefault.value = ""
+      checkpoint.appendChild(checkpointDefault)
+      const hasCheckpoint = editorOptions.checkpoints.some((item) => item.name === recipe.preferredCheckpoint)
+      if (recipe.preferredCheckpoint && !hasCheckpoint) {
+        const unavailable = element("option", "", `${recipe.preferredCheckpoint} · unavailable`)
+        unavailable.value = recipe.preferredCheckpoint
+        checkpoint.appendChild(unavailable)
+      }
+      for (const item of editorOptions.checkpoints) {
+        const option = element("option", "", item.title || item.name)
+        option.value = item.name
+        checkpoint.appendChild(option)
+      }
+      checkpoint.value = recipe.preferredCheckpoint
       const aspect = element("select", "ss-visual-select")
       aspect.dataset.visualField = "defaultAspectRatio"
       for (const [value, label] of [["", "Connection default"], ["1:1", "Square · 1:1"], ["2:3", "Portrait · 2:3"], ["3:2", "Landscape · 3:2"], ["9:16", "Tall · 9:16"], ["16:9", "Wide · 16:9"]]) {
@@ -3002,77 +3227,116 @@ function registerVisualRecipeEditors(ctx: FrontendContext): {
       renderDefaults.append(visualField("Preferred checkpoint", checkpoint), visualField("Default aspect ratio", aspect))
 
       const traits = visualCard("Always preserve", "Comma or newline separated")
+      traits.hidden = recipe.mode !== "custom"
       const preserve = visualTextarea(recipe.preserveTraits.join(", "), "red eyes, left cheek scar, black waist-length hair")
       preserve.dataset.visualField = "preserveTraits"
       traits.appendChild(visualField("Traits", preserve))
 
       const references = visualCard("Reference images", "Lumiverse image IDs or URLs")
+      references.hidden = recipe.mode !== "custom"
       const referenceInput = visualTextarea(recipe.referenceImages.join("\n"), "One image ID or URL per line")
       referenceInput.dataset.visualField = "referenceImages"
       references.appendChild(visualField("References", referenceInput))
 
-      const loras = visualCard("Base LoRA stack", "path | weight | trigger", true)
-      const loraInput = visualTextarea(formatVisualLoraLines(recipe.baseLoraStack), "characters/name.safetensors | 0.8 | trigger")
-      loraInput.dataset.visualField = "baseLoraStack"
-      loras.appendChild(visualField("One LoRA per line", loraInput))
+      const loras = visualCard("Base LoRA stack", "Saved in Swarm Studio", true)
+      loras.hidden = recipe.mode !== "custom"
+      const loraPicker = element("div", "ss-visual-picker-row")
+      const loraStack = element("select", "ss-visual-select")
+      loraStack.dataset.visualStackPreset = "true"
+      const noStack = element("option", "", "No base LoRA stack")
+      noStack.value = ""
+      loraStack.appendChild(noStack)
+      const hasStack = editorOptions.stackPresets.some((item) => item.id === recipe.baseLoraStackId)
+      if (recipe.baseLoraStackId && !hasStack) {
+        const unavailable = element("option", "", `${recipe.baseLoraStackName || "Saved stack"} · unavailable (snapshot kept)`)
+        unavailable.value = recipe.baseLoraStackId
+        loraStack.appendChild(unavailable)
+      }
+      for (const stack of editorOptions.stackPresets) {
+        const option = element("option", "", `${stack.name} · ${stack.items.length} LoRA${stack.items.length === 1 ? "" : "s"}`)
+        option.value = stack.id
+        loraStack.appendChild(option)
+      }
+      loraStack.value = recipe.baseLoraStackId
+      const openStackStudio = element("button", "ss-visual-button", "Build a stack in Studio")
+      openStackStudio.type = "button"
+      openStackStudio.dataset.visualOpenStudio = "stack"
+      loraPicker.append(loraStack, openStackStudio)
+      loras.appendChild(loraPicker)
+      if (recipe.baseLoraStack.length) {
+        loras.appendChild(element("div", "ss-visual-stack-summary", `${recipe.baseLoraStack.length} LoRA${recipe.baseLoraStack.length === 1 ? "" : "s"} stored with this character for portability.`))
+      }
 
-      const buildProfiles = (kind: "outfits" | "styles", title: string, items: VisualProfile[], activeId: string) => {
-        const card = visualCard(title, "Optional profile layers", true)
-        const active = element("select", "ss-visual-select")
-        active.dataset.visualActive = kind
-        const none = element("option", "", "No default profile")
-        none.value = ""
-        active.appendChild(none)
-        for (const profile of items) {
-          const option = element("option", "", profile.name)
-          option.value = profile.id
-          active.appendChild(option)
-        }
-        active.value = activeId
-        card.appendChild(visualField("Default selection", active))
+      const buildProfiles = (items: VisualProfile[]) => {
+        const card = visualCard("Profiles", "Toggle any combination", true)
+        const hint = element("p", "ss-visual-profile-hint", "Add reusable outfit, expression, mood, or camera prompt layers. Enabled profiles load with this character.")
+        card.appendChild(hint)
         const list = element("div", "ss-visual-profile-list")
         for (const [index, profile] of items.entries()) {
           const row = element("div", "ss-visual-profile")
+          const enabled = element("label", "ss-visual-profile-toggle")
+          const checkbox = element("input")
+          checkbox.type = "checkbox"
+          checkbox.checked = profile.enabled
+          checkbox.dataset.visualProfileEnabled = String(index)
+          enabled.append(checkbox, element("span", "", "On"))
+          row.appendChild(enabled)
           for (const [field, value, placeholder] of [
-            ["name", profile.name, kind === "outfits" ? "Outfit name" : "Style name"],
+            ["name", profile.name, "Profile name"],
             ["prompt", profile.prompt, "Positive additions"],
             ["negativePrompt", profile.negativePrompt, "Negative additions"],
           ] as const) {
             const control = field === "name" ? visualInput(value, placeholder) : visualTextarea(value, placeholder)
-            control.dataset.visualProfileKind = kind
             control.dataset.visualProfileIndex = String(index)
             control.dataset.visualProfileField = field
             row.appendChild(control)
           }
+          const controls = element("div", "ss-visual-profile-actions")
+          for (const [label, delta] of [["↑", -1], ["↓", 1]] as const) {
+            const move = element("button", "ss-visual-layer-action", label)
+            move.type = "button"
+            move.disabled = delta < 0 ? index === 0 : index === items.length - 1
+            move.dataset.visualProfileMove = String(index)
+            move.dataset.delta = String(delta)
+            controls.appendChild(move)
+          }
           const remove = element("button", "ss-visual-button", "Remove")
           remove.type = "button"
-          remove.dataset.visualRemoveProfile = kind
+          remove.dataset.visualRemoveProfile = String(index)
           remove.dataset.visualProfileIndex = String(index)
           remove.dataset.danger = "true"
-          row.appendChild(remove)
+          controls.appendChild(remove)
+          row.appendChild(controls)
           list.appendChild(row)
         }
-        if (!items.length) list.appendChild(element("div", "ss-visual-gallery-empty", `No ${title.toLowerCase()} yet.`))
+        if (!items.length) list.appendChild(element("div", "ss-visual-gallery-empty", "No profiles yet."))
         card.appendChild(list)
-        const add = element("button", "ss-visual-button", `Add ${kind === "outfits" ? "outfit" : "style"}`)
+        const add = element("button", "ss-visual-button", "Add profile")
         add.type = "button"
-        add.dataset.visualAddProfile = kind
+        add.dataset.visualAddProfile = "true"
         card.appendChild(add)
         return card
       }
 
       const gallery = visualCard("Character output gallery", "Lumiverse-owned · newest first", true)
+      const galleryActions = element("div", "ss-visual-gallery-actions")
+      const openGallery = element("button", "ss-visual-button", "Open character folder")
+      openGallery.type = "button"
+      openGallery.dataset.visualOpenGallery = "true"
+      galleryActions.appendChild(openGallery)
+      gallery.appendChild(galleryActions)
       galleryRoot = element("div", "ss-visual-gallery")
       gallery.appendChild(galleryRoot)
 
       grid.append(
+        mode,
+        presetSource,
         identity,
         renderDefaults,
         traits,
         references,
         loras,
-        buildProfiles("outfits", "Outfit profiles", recipe.outfits, recipe.activeOutfitId),
-        buildProfiles("styles", "Style profiles", recipe.styles, recipe.activeStyleId),
+        buildProfiles(recipe.profiles),
         gallery,
       )
       shell.appendChild(grid)
@@ -3097,36 +3361,99 @@ function registerVisualRecipeEditors(ctx: FrontendContext): {
         if (field === "defaultAspectRatio") recipe.defaultAspectRatio = target.value
         if (field === "preserveTraits") recipe.preserveTraits = splitVisualLines(target.value)
         if (field === "referenceImages") recipe.referenceImages = target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
-        if (field === "baseLoraStack") recipe.baseLoraStack = parseVisualLoraLines(target.value)
-        const kind = target.dataset.visualProfileKind as "outfits" | "styles" | undefined
         const index = Number(target.dataset.visualProfileIndex)
         const profileField = target.dataset.visualProfileField as keyof VisualProfile | undefined
-        if (kind && Number.isInteger(index) && profileField && recipe[kind][index]) {
-          ;(recipe[kind][index] as any)[profileField] = target.value
+        if (Number.isInteger(index) && profileField && recipe.profiles[index]) {
+          ;(recipe.profiles[index] as any)[profileField] = target.value
         }
         write()
       })
       shell.addEventListener("change", (event) => {
-        const target = event.target as HTMLSelectElement
-        if (target.dataset.visualActive === "outfits") recipe.activeOutfitId = target.value
-        if (target.dataset.visualActive === "styles") recipe.activeStyleId = target.value
+        const target = event.target as HTMLInputElement | HTMLSelectElement
+        if (target.dataset.visualAddPreset) {
+          const title = target.value
+          if (title && !recipe.presetStack.some((item) => item.title.toLowerCase() === title.toLowerCase())) {
+            recipe.presetStack.push({ title, enabled: true })
+            write(true)
+          }
+          return
+        }
+        if (target.dataset.visualStackPreset) {
+          const stack = editorOptions.stackPresets.find((item) => item.id === target.value)
+          recipe.baseLoraStackId = stack?.id || ""
+          recipe.baseLoraStackName = stack?.name || ""
+          recipe.baseLoraStack = cleanVisualLoras(stack?.items || [])
+          write(true)
+          return
+        }
+        const presetIndex = Number(target.dataset.visualPresetToggle)
+        if (Number.isInteger(presetIndex) && target instanceof HTMLInputElement && recipe.presetStack[presetIndex]) {
+          recipe.presetStack[presetIndex].enabled = target.checked
+          write()
+          return
+        }
+        const profileIndex = Number(target.dataset.visualProfileEnabled)
+        if (Number.isInteger(profileIndex) && target instanceof HTMLInputElement && recipe.profiles[profileIndex]) {
+          recipe.profiles[profileIndex].enabled = target.checked
+          write()
+          return
+        }
         write()
       })
       shell.addEventListener("click", (event) => {
         const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button")
         if (!button) return
-        const addKind = button.dataset.visualAddProfile as "outfits" | "styles" | undefined
-        const removeKind = button.dataset.visualRemoveProfile as "outfits" | "styles" | undefined
-        if (addKind) {
-          recipe[addKind].push({ id: crypto.randomUUID(), name: addKind === "outfits" ? "New outfit" : "New style", prompt: "", negativePrompt: "" })
+        if (button.dataset.visualMode) {
+          recipe.mode = button.dataset.visualMode === "preset" ? "preset" : "custom"
           write(true)
+          return
         }
-        if (removeKind) {
-          const index = Number(button.dataset.visualProfileIndex)
-          const removed = recipe[removeKind][index]
-          recipe[removeKind].splice(index, 1)
-          if (removeKind === "outfits" && recipe.activeOutfitId === removed?.id) recipe.activeOutfitId = ""
-          if (removeKind === "styles" && recipe.activeStyleId === removed?.id) recipe.activeStyleId = ""
+        if (button.dataset.visualOpenStudio) {
+          actions.openStudio({
+            characterId: currentCharacterId,
+            characterName: String((ctx.ui.characterEditor.getState() as any)?.character?.name || "Character"),
+            visualBible: cleanCharacterVisualBible(recipe),
+          })
+          return
+        }
+        if (button.dataset.visualOpenGallery) {
+          actions.openLibrary(galleryFolderId || `character:${currentCharacterId}`)
+          return
+        }
+        if (button.dataset.visualAddProfile) {
+          recipe.profiles.push({ id: crypto.randomUUID(), name: "New profile", prompt: "", negativePrompt: "", enabled: true })
+          write(true)
+          return
+        }
+        if (button.dataset.visualRemoveProfile !== undefined) {
+          const index = Number(button.dataset.visualRemoveProfile)
+          if (Number.isInteger(index)) recipe.profiles.splice(index, 1)
+          write(true)
+          return
+        }
+        if (button.dataset.visualProfileMove !== undefined) {
+          const index = Number(button.dataset.visualProfileMove)
+          const target = index + Number(button.dataset.delta)
+          if (Number.isInteger(index) && target >= 0 && target < recipe.profiles.length) {
+            const [profile] = recipe.profiles.splice(index, 1)
+            recipe.profiles.splice(target, 0, profile)
+          }
+          write(true)
+          return
+        }
+        if (button.dataset.visualRemovePreset !== undefined) {
+          const index = Number(button.dataset.visualRemovePreset)
+          if (Number.isInteger(index)) recipe.presetStack.splice(index, 1)
+          write(true)
+          return
+        }
+        if (button.dataset.visualPresetMove !== undefined) {
+          const index = Number(button.dataset.visualPresetMove)
+          const target = index + Number(button.dataset.delta)
+          if (Number.isInteger(index) && target >= 0 && target < recipe.presetStack.length) {
+            const [preset] = recipe.presetStack.splice(index, 1)
+            recipe.presetStack.splice(target, 0, preset)
+          }
           write(true)
         }
       })
@@ -3135,8 +3462,12 @@ function registerVisualRecipeEditors(ctx: FrontendContext): {
       renderGallery()
       requestCharacterGallery(currentCharacterId)
     }
+    rerenderCharacterEditor = () => render(true)
     cleanups.push(ctx.ui.characterEditor.onChange(() => render()))
-    cleanups.push(tab.onActivate(() => render(true)))
+    cleanups.push(tab.onActivate(() => {
+      requestEditorOptions()
+      render(true)
+    }))
     render()
     } catch {
       // A denied Characters placement must not prevent the independent Loom
@@ -3238,10 +3569,44 @@ function registerVisualRecipeEditors(ctx: FrontendContext): {
 
   return {
     getPresetContext: () => ({ id: currentPresetId, name: currentPresetName, recipe: currentPresetRecipe }),
+    refresh() {
+      requestEditorOptions()
+      rerenderCharacterEditor?.()
+    },
     onBackendMessage(payload: any) {
+      if (payload?.type === "visual_editor_options_result" && (!optionsRequestId || payload.requestId === optionsRequestId)) {
+        const data = payload?.data || {}
+        editorOptions = {
+          connection: data.connection || null,
+          checkpoints: Array.isArray(data.checkpoints) ? data.checkpoints : [],
+          swarmPresets: Array.isArray(data.swarmPresets) ? data.swarmPresets : [],
+          stackPresets: Array.isArray(data.stackPresets) ? data.stackPresets : [],
+          metadataError: String(data.metadataError || ""),
+        }
+        optionsRequestId = ""
+        if (currentCharacterId) {
+          const state = ctx.ui?.characterEditor?.getState?.()
+          if (state?.open && String(state.characterId || "") === currentCharacterId) {
+            const namespace = visualRecord(state.extensions?.[EXTENSION_NAMESPACE])
+            const recipe = cleanCharacterVisualBible(namespace.visualBible)
+            if (!recipe.connectionId && editorOptions.connection?.id) {
+              ctx.ui.characterEditor.updateExtensions((extensions: Record<string, any>) => ({
+                ...extensions,
+                [EXTENSION_NAMESPACE]: {
+                  ...visualRecord(extensions?.[EXTENSION_NAMESPACE]),
+                  visualBible: { ...recipe, connectionId: editorOptions.connection?.id || "" },
+                },
+              }))
+            }
+          }
+          rerenderCharacterEditor?.()
+        }
+        return
+      }
       if (payload?.type !== "character_gallery_result") return
       const data = payload?.data || {}
       if (String(data.characterId || "") !== galleryCharacterId) return
+      galleryFolderId = String(data.folderId || `character:${galleryCharacterId}`)
       galleryOutputs = Array.isArray(data.outputs) ? data.outputs : []
       renderGallery()
     },
@@ -3249,7 +3614,9 @@ function registerVisualRecipeEditors(ctx: FrontendContext): {
       for (const cleanup of cleanups.splice(0)) cleanup()
       for (const handle of handles.splice(0)) handle.destroy()
       currentCharacterId = ""
+      galleryFolderId = ""
       galleryRoot = null
+      rerenderCharacterEditor = null
     },
   }
 }
@@ -4582,8 +4949,9 @@ class StudioController {
   private currentJobConnectionId = ""
   private progressStep = 0
   private pendingDraftRestore: StudioDraft | null = null
-  private readonly hadDraftAtOpen: boolean
+  private hadDraftAtOpen: boolean
   private readonly loomVisualContext: { id: string; name: string; recipe: LoomVisualRecipe | null }
+  private readonly visualLaunchContext: VisualLaunchContext | null
   private visualContextApplied = false
   private pendingWorkflowRestore: WorkflowDraft | null = null
   private workflowOpenOnLoad = true
@@ -4670,6 +5038,7 @@ class StudioController {
     onBehaviorChange: (behavior: StudioBehavior) => void,
     activity: MiniPlayerController | null = null,
     loomVisualContext: { id: string; name: string; recipe: LoomVisualRecipe | null } = { id: "", name: "", recipe: null },
+    visualLaunchContext: VisualLaunchContext | null = null,
   ) {
     this.ctx = ctx
     this.modal = modal
@@ -4684,6 +5053,11 @@ class StudioController {
       name: loomVisualContext.name,
       recipe: loomVisualContext.recipe ? cleanLoomVisualRecipe(loomVisualContext.recipe) : null,
     }
+    this.visualLaunchContext = visualLaunchContext ? {
+      characterId: visualLaunchContext.characterId,
+      characterName: visualLaunchContext.characterName,
+      visualBible: cleanCharacterVisualBible(visualLaunchContext.visualBible),
+    } : null
     this.state = {
       connections: [],
       connection: null,
@@ -4801,6 +5175,7 @@ class StudioController {
     const resolved = this.resolvedPrompts()
     return {
       connectionId: String(this.state.connection.id || ""),
+      characterId: String(this.state.activeCharacter?.id || this.visualLaunchContext?.characterId || ""),
       details: {
         prompt,
         negativePrompt,
@@ -4883,7 +5258,9 @@ class StudioController {
     }
   }
 
-  openLibrary(): void {
+  openLibrary(folderId = ""): void {
+    this.libraryFolderId = folderId
+    this.libraryPage = 0
     this.openOutputLibrary()
   }
 
@@ -5948,9 +6325,26 @@ are removed when CSS is applied.</pre>
         this.state.outputFolders = Array.isArray(data.outputFolders) ? data.outputFolders : []
         this.state.activeChat = data.activeChat || null
         this.state.activeCharacter = data.activeCharacter || null
-        this.state.characterVisual = Object.keys(visualRecord(data.characterVisual)).length
-          ? cleanCharacterVisualBible(data.characterVisual)
-          : null
+        {
+          const activeCharacterId = String(this.state.activeCharacter?.id || "")
+          const launched = this.visualLaunchContext
+          const launchMatches = Boolean(launched && (!activeCharacterId || launched.characterId === activeCharacterId))
+          this.state.characterVisual = launchMatches
+            ? cleanCharacterVisualBible(launched?.visualBible)
+            : Object.keys(visualRecord(data.characterVisual)).length
+              ? cleanCharacterVisualBible(data.characterVisual)
+              : null
+          const draftCharacterId = String(this.pendingDraftRestore?.characterId || "")
+          if (
+            this.pendingDraftRestore
+            && activeCharacterId
+            && this.state.characterVisual
+            && draftCharacterId !== activeCharacterId
+          ) {
+            this.pendingDraftRestore = null
+            this.hadDraftAtOpen = false
+          }
+        }
         this.state.permissions = data.permissions || {}
         this.renderPermissions()
         this.populateConnections()
@@ -6046,6 +6440,7 @@ are removed when CSS is applied.</pre>
         this.currentJobConnectionId = ""
         this.setGenerating(false)
         this.acceptOutputPage(data)
+        this.state.outputFolders = Array.isArray(data.outputFolders) ? data.outputFolders : this.state.outputFolders
         if (data.result?.imageDataUrl) {
           this.setCurrentImage({
             id: data.result.imageId || data.record?.imageId,
@@ -6341,8 +6736,8 @@ are removed when CSS is applied.</pre>
     const loom = this.loomVisualContext.recipe
     if (!character && !loom) return
 
-    const activeOutfit = character?.outfits.find((profile) => profile.id === character.activeOutfitId) || null
-    const activeStyle = character?.styles.find((profile) => profile.id === character.activeStyleId) || null
+    const enabledProfiles = character?.profiles.filter((profile) => profile.enabled) || []
+    const customCharacter = character?.mode !== "preset" ? character : null
     const joinUnique = (parts: Array<string | undefined>): string => {
       const seen = new Set<string>()
       const output: string[] = []
@@ -6357,19 +6752,17 @@ are removed when CSS is applied.</pre>
     }
     this.get<HTMLTextAreaElement>('[data-role="positive"]').value = joinUnique([
       loom?.positiveAddition,
-      character?.canonicalPrompt,
-      character?.preserveTraits.join(", "),
-      activeOutfit?.prompt,
-      activeStyle?.prompt,
+      customCharacter?.canonicalPrompt,
+      customCharacter?.preserveTraits.join(", "),
+      ...enabledProfiles.map((profile) => profile.prompt),
     ])
     this.get<HTMLTextAreaElement>('[data-role="negative"]').value = joinUnique([
       loom?.negativeAddition,
-      character?.canonicalNegativePrompt,
-      activeOutfit?.negativePrompt,
-      activeStyle?.negativePrompt,
+      customCharacter?.canonicalNegativePrompt,
+      ...enabledProfiles.map((profile) => profile.negativePrompt),
     ])
 
-    const requestedCheckpoint = character?.preferredCheckpoint || loom?.preferredCheckpoint || ""
+    const requestedCheckpoint = customCharacter?.preferredCheckpoint || loom?.preferredCheckpoint || ""
     if (requestedCheckpoint) {
       const normalize = (value: string) => value.toLowerCase().replace(/\\/g, "/").replace(/\.(safetensors|ckpt|pt)$/i, "").trim()
       const requested = normalize(requestedCheckpoint)
@@ -6382,24 +6775,31 @@ are removed when CSS is applied.</pre>
       if (match) model.value = match.value
     }
 
-    if (character?.defaultAspectRatio) {
+    if (customCharacter?.defaultAspectRatio) {
       const aspect = this.get<HTMLSelectElement>('[data-role="aspect"]')
-      if ([...aspect.options].some((option) => option.value === character.defaultAspectRatio)) {
-        aspect.value = character.defaultAspectRatio
-        const dimensions = dimensionsForAspect(character.defaultAspectRatio)
+      if ([...aspect.options].some((option) => option.value === customCharacter.defaultAspectRatio)) {
+        aspect.value = customCharacter.defaultAspectRatio
+        const dimensions = dimensionsForAspect(customCharacter.defaultAspectRatio, 1024)
         this.setDimensions(dimensions.width, dimensions.height)
       }
     } else if (loom?.width && loom?.height) {
       this.setDimensions(loom.width, loom.height)
     }
 
-    const wantedPresets = loom?.swarmPresets || []
-    this.state.selectedPresets = wantedPresets.map((wanted) => {
-      const available = this.state.swarmPresets.find((preset) => preset.title.toLowerCase() === wanted.toLowerCase())
-      return { title: available?.title || wanted, enabled: Boolean(available) }
+    const wantedPresets: SelectedPreset[] = [
+      ...(loom?.swarmPresets || []).map((title) => ({ title, enabled: true })),
+      ...(character?.mode === "preset" ? character.presetStack : []),
+    ]
+    const seenPresets = new Set<string>()
+    this.state.selectedPresets = wantedPresets.flatMap((wanted) => {
+      const key = wanted.title.toLowerCase()
+      if (!key || seenPresets.has(key)) return []
+      seenPresets.add(key)
+      const available = this.state.swarmPresets.find((preset) => preset.title.toLowerCase() === key)
+      return [{ title: available?.title || wanted.title, enabled: Boolean(available && wanted.enabled) }]
     })
 
-    const combinedLoras = cleanVisualLoras([...(loom?.loraStack || []), ...(character?.baseLoraStack || [])])
+    const combinedLoras = cleanVisualLoras([...(loom?.loraStack || []), ...(customCharacter?.baseLoraStack || [])])
     this.state.stack = combinedLoras.map((saved) => {
       const lora = this.installedLora(saved.name) || manualLora(saved.name, saved.title || saved.name)
       return {
@@ -6415,7 +6815,7 @@ are removed when CSS is applied.</pre>
     this.updateContextControls()
     const labels = [
       loom ? this.loomVisualContext.name || "Loom visual style" : "",
-      character ? this.state.activeCharacter?.name || "character bible" : "",
+      character ? `Visuals: ${this.state.activeCharacter?.name || this.visualLaunchContext?.characterName || "character"}` : "",
     ].filter(Boolean)
     this.setRunStatus(`Loaded visual recipe · ${labels.join(" + ")}.`)
   }
@@ -6743,10 +7143,11 @@ are removed when CSS is applied.</pre>
       let value = this.workflowValues.get(parameter.id)
       if (typeof value === "string") value = value.slice(0, 65_536)
       if (typeof value === "number") {
-        if (!Number.isFinite(value)) continue
-        if (parameter.min !== null) value = Math.max(parameter.min, value)
-        if (parameter.max !== null) value = Math.min(parameter.max, value)
-        if (parameter.type === "integer") value = Math.trunc(value)
+        let numericValue = value
+        if (!Number.isFinite(numericValue)) continue
+        if (parameter.min !== null) numericValue = Math.max(parameter.min, numericValue)
+        if (parameter.max !== null) numericValue = Math.min(parameter.max, numericValue)
+        value = parameter.type === "integer" ? Math.trunc(numericValue) : numericValue
       }
       if (value !== undefined && value !== null) result[parameter.id] = value
     }
@@ -7231,22 +7632,26 @@ are removed when CSS is applied.</pre>
     const status = this.get<HTMLElement>('[data-role="preset-resolved"]')
     const pill = this.get<HTMLElement>('[data-role="active-preset-pill"]')
     const enabled = this.state.selectedPresets.filter((preset) => preset.enabled)
+    const characterLabel = this.state.characterVisual
+      ? `Visuals: ${this.state.activeCharacter?.name || this.visualLaunchContext?.characterName || "Character"}`
+      : ""
+    const loomLabel = this.loomVisualContext.recipe
+      ? this.loomVisualContext.name || "Loom visual style"
+      : ""
     if (!enabled.length) {
       status.textContent = "No enabled Swarm presets; prompts pass through unchanged."
-      const recipeLabel = this.loomVisualContext.recipe
-        ? this.loomVisualContext.name || "Loom visual style"
-        : this.state.characterVisual
-          ? this.state.activeCharacter?.name || "Character bible"
-          : ""
+      const recipeLabel = characterLabel || loomLabel
       pill.hidden = !recipeLabel
       pill.textContent = recipeLabel
       pill.title = recipeLabel ? "Visual recipe loaded into this fresh Studio draft" : ""
       return
     }
     pill.hidden = false
-    pill.textContent = enabled.length === 1 ? enabled[0].title : `${enabled.length} presets`
+    const presetLabel = enabled.length === 1 ? enabled[0].title : `${enabled.length} presets`
+    pill.textContent = characterLabel ? `${characterLabel} · ${presetLabel}` : presetLabel
     pill.title = [
-      this.loomVisualContext.recipe ? this.loomVisualContext.name || "Loom visual style" : "",
+      characterLabel,
+      loomLabel,
       ...enabled.map((preset) => preset.title),
     ].filter(Boolean).join(" → ")
     status.textContent =
@@ -8431,7 +8836,7 @@ are removed when CSS is applied.</pre>
 
   private deleteSelectedOutputFolder(): void {
     const folder = this.state.outputFolders.find((item) => item.id === this.libraryFolderId)
-    if (!folder || !window.confirm(`Delete folder “${folder.name}”? Its images stay in Lumiverse.`)) return
+    if (!folder || folder.kind === "character" || !window.confirm(`Delete folder “${folder.name}”? Its images stay in Lumiverse.`)) return
     this.send("delete_output_folder", { folderId: folder.id })
     this.libraryFolderId = ""
     this.libraryPage = 0
@@ -8500,7 +8905,9 @@ are removed when CSS is applied.</pre>
       list.appendChild(button)
     }
     addChoice("", "Unfiled")
-    for (const folder of this.state.outputFolders) addChoice(folder.id, folder.name, `${folder.imageIds.length} images`)
+    for (const folder of this.state.outputFolders.filter((item) => item.kind !== "character")) {
+      addChoice(folder.id, folder.name, `${folder.imageIds.length} images`)
+    }
     this.get<HTMLElement>('[data-role="move-folder-modal"]').hidden = false
   }
 
@@ -8566,12 +8973,13 @@ are removed when CSS is applied.</pre>
   private renderOutputLibrary(): void {
     const folderPane = this.get<HTMLElement>('[data-role="library-folders"]')
     folderPane.replaceChildren()
-    const appendFolder = (id: string, name: string, count: number) => {
+    const appendFolder = (id: string, name: string, count: number, character = false) => {
       const button = element("button", "ss-library-folder")
       button.dataset.action = "library-folder"
       button.dataset.folderId = id
       button.dataset.active = String(this.libraryFolderId === id)
-      button.append(element("span", "", name), element("span", "ss-muted ss-tiny", String(count)))
+      button.append(element("span", "", character ? `Visuals · ${name}` : name), element("span", "ss-muted ss-tiny", String(count)))
+      if (character) button.title = "Automatically grouped by character ownership"
       folderPane.appendChild(button)
     }
     appendFolder("", "All outputs", this.state.libraryOutputs.length)
@@ -8583,14 +8991,16 @@ are removed when CSS is applied.</pre>
     )
     for (const folder of this.state.outputFolders) {
       const ids = new Set(folder.imageIds)
-      appendFolder(folder.id, folder.name, this.state.libraryOutputs.filter((output) => ids.has(String(output.id))).length)
+      appendFolder(folder.id, folder.name, this.state.libraryOutputs.filter((output) => ids.has(String(output.id))).length, folder.kind === "character")
     }
     const tools = element("div", "ss-library-folder-tools")
     const create = element("button", "ss-button", "New folder")
     create.dataset.action = "create-output-folder"
     const remove = element("button", "ss-button ss-button-danger", "Delete")
     remove.dataset.action = "delete-output-folder"
-    remove.disabled = !this.state.outputFolders.some((folder) => folder.id === this.libraryFolderId)
+    remove.disabled = !this.state.outputFolders.some((folder) => folder.id === this.libraryFolderId && folder.kind !== "character")
+    const activeFolder = this.state.outputFolders.find((folder) => folder.id === this.libraryFolderId)
+    if (activeFolder?.kind === "character") remove.title = "Character folders are maintained automatically"
     tools.append(create, remove)
     folderPane.appendChild(tools)
 
@@ -8599,7 +9009,9 @@ are removed when CSS is applied.</pre>
     this.libraryPage = clamp(this.libraryPage, 0, pages - 1)
     const selectedFolder = this.state.outputFolders.find((folder) => folder.id === this.libraryFolderId)
     this.get<HTMLElement>('[data-role="library-title"]').textContent =
-      selectedFolder?.name || (this.libraryFolderId === "__unfiled__" ? "Unfiled" : "All outputs")
+      selectedFolder
+        ? selectedFolder.kind === "character" ? `Visuals · ${selectedFolder.name}` : selectedFolder.name
+        : this.libraryFolderId === "__unfiled__" ? "Unfiled" : "All outputs"
     this.get<HTMLElement>('[data-role="library-count"]').textContent = `${filtered.length} image${filtered.length === 1 ? "" : "s"}`
     this.get<HTMLElement>('[data-role="library-page"]').textContent = `${this.libraryPage + 1} / ${pages}`
     this.get<HTMLButtonElement>('[data-action="library-prev"]').disabled = this.libraryPage <= 0
@@ -8637,7 +9049,7 @@ are removed when CSS is applied.</pre>
       })
       const meta = element("div", "ss-library-output-meta")
       meta.appendChild(element("div", "ss-library-output-name", output.original_filename || `Output ${output.id}`))
-      const folder = this.state.outputFolders.find((candidate) => candidate.imageIds.includes(String(output.id)))
+      const folder = this.state.outputFolders.find((candidate) => candidate.kind !== "character" && candidate.imageIds.includes(String(output.id)))
       const move = element("button", "ss-button", `Move · ${folder?.name || "Unfiled"}`)
       move.dataset.action = "move-library-output"
       move.dataset.imageId = String(output.id)
@@ -9253,12 +9665,6 @@ export function setup(ctx: FrontendContext): () => void {
     ? ctx.dom.addStyle(appearance.customCss)
     : null
   let visualEditors: ReturnType<typeof registerVisualRecipeEditors> | null = null
-  try {
-    visualEditors = registerVisualRecipeEditors(ctx)
-  } catch {
-    // Editor placements disappear automatically when their permissions are not
-    // granted. Studio remains usable with its existing extension-local tools.
-  }
 
   const setThemeState = (theme: StudioTheme) => {
     currentTheme = theme
@@ -9292,9 +9698,13 @@ export function setup(ctx: FrontendContext): () => void {
     activeStudio?.setBehavior(behavior)
   }
 
-  const openStudio = (initialView: "studio" | "library" = "studio") => {
+  const openStudio = (
+    initialView: "studio" | "library" = "studio",
+    visualLaunchContext: VisualLaunchContext | null = null,
+    libraryFolderId = "",
+  ) => {
     if (activeModal) {
-      if (initialView === "library") activeStudio?.openLibrary()
+      if (initialView === "library") activeStudio?.openLibrary(libraryFolderId)
       return
     }
     miniplayer?.setStudioOpen(true)
@@ -9320,11 +9730,12 @@ export function setup(ctx: FrontendContext): () => void {
       updateBehavior,
       miniplayer,
       visualEditors?.getPresetContext() || { id: "", name: "", recipe: null },
+      visualLaunchContext,
     )
     activeStudio.setAppearance(appearance)
     activeStudio.setTheme(currentTheme)
     activeStudio.setBehavior(behavior)
-    if (initialView === "library") activeStudio.openLibrary()
+    if (initialView === "library") activeStudio.openLibrary(libraryFolderId)
     modal.onDismiss(() => {
       miniplayer?.captureDraft(activeStudio?.exportDraft() || null)
       activeStudio?.dispose()
@@ -9332,6 +9743,16 @@ export function setup(ctx: FrontendContext): () => void {
       activeModal = null
       miniplayer?.setStudioOpen(false)
     })
+  }
+
+  try {
+    visualEditors = registerVisualRecipeEditors(ctx, {
+      openStudio: (context) => openStudio("studio", context),
+      openLibrary: (folderId) => openStudio("library", null, folderId),
+    })
+  } catch {
+    // Editor placements disappear automatically when their permissions are not
+    // granted. Studio remains usable with its existing extension-local tools.
   }
 
   if (typeof document !== "undefined") {
@@ -9412,6 +9833,7 @@ export function setup(ctx: FrontendContext): () => void {
     miniplayer?.onMessage(payload)
     activeStudio?.onMessage(payload)
   })
+  visualEditors?.refresh()
   const unsubscribeProgress = ctx.events.on("IMAGE_GEN_PROGRESS", (payload: any) => {
     miniplayer?.onImageGenerationEvent("progress", payload)
     activeStudio?.onImageGenerationEvent("progress", payload)

@@ -80,13 +80,25 @@ If metadata access is unavailable, generation still works and exact LoRA filenam
 
 The **Visuals** tab is registered directly in Lumiverse's character editor. Its
 data is saved under `character.extensions.swarm_studio.visualBible`, so it
-travels with the character card without modifying Lumiverse-owned fields.
-Canonical prompt layers, always-preserved traits, the selected outfit, and the
-selected style are composed into a fresh Studio prompt. The character's
-preferred checkpoint and aspect ratio override the Loom recipe; compatible
-base LoRAs are merged without duplicating normalized filenames. Reference image
-IDs and URLs are retained as the character's visual source list but are not
-silently sent as img2img inputs.
+travels with the character card without modifying Lumiverse-owned fields. A
+character can use either an ordered, toggleable Swarm preset stack or a custom
+bible with positive/negative prompts, a real checkpoint picker, a saved base
+LoRA stack, and a default aspect ratio. Saved LoRA assignments include both the
+per-user stack ID and a normalized item snapshot, so exported characters remain
+portable even when the original saved stack is unavailable.
+
+Reusable profiles add independently toggleable outfit, expression, mood,
+camera, or other positive/negative prompt layers. On a fresh Studio draft the
+active character recipe loads automatically and is identified by a
+`Visuals: Character` pill. Drafts are character-aware, so a Quick Create draft
+from another chat cannot silently replace the new character's bible.
+
+Final outputs are already owned by Lumiverse rather than embedded in the
+character card. Swarm Studio additionally maintains a protected
+`Visuals · Character` virtual folder for every character it generates for; the
+character editor gallery and Studio Library both point to that same grouping.
+Deleting an output removes it from the folder, while manual organization never
+breaks its character membership.
 
 The Loom preset editor's **Visual Style** tab stores
 `swarm_studio.visualRecipe` through Lumiverse's scoped preset metadata helper.
