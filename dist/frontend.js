@@ -3311,10 +3311,6 @@ class MiniPlayerController {
         return this.isMobileViewport() && this.collapsed;
     }
     activateWidget() {
-        if (this.collapsed && this.isMobileViewport() && this.behavior.mobileQuickCreate) {
-            this.setCollapsed(false);
-            return;
-        }
         this.openStudio();
     }
     cancelLongPress() {
@@ -3495,6 +3491,7 @@ class MiniPlayerController {
             const liveDraft = this.getStudioDraft();
             if (liveDraft) this.captureDraft(liveDraft);
         }
+        this.render();
     }
     resizeWidget() {
         const compact = this.collapsed;

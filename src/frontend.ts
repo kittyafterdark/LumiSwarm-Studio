@@ -3641,10 +3641,6 @@ class MiniPlayerController {
   }
 
   private activateWidget(): void {
-    if (this.collapsed && this.isMobileViewport() && this.behavior.mobileQuickCreate) {
-      this.setCollapsed(false)
-      return
-    }
     this.openStudio()
   }
 
@@ -3841,6 +3837,10 @@ class MiniPlayerController {
       const liveDraft = this.getStudioDraft()
       if (liveDraft) this.captureDraft(liveDraft)
     }
+    // Commit every state-derived attribute together. Without this, an expand
+    // could leave data-mobile-orb="true" beside data-expanded="true" until a
+    // later drag or Studio round-trip happened to render the controller.
+    this.render()
   }
 
   private resizeWidget(): void {
