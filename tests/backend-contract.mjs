@@ -23,7 +23,12 @@ let taggedGenerationCount = 0
 const taggedMessage = {
   id: "message-tag-1",
   role: "assistant",
-  content: '<article><swarm-image slot="post" aspect="4:5" alt="Street food">{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition></swarm-image></article>',
+  content: `<article><swarm-image
+    request="generate"
+    slot="post"
+    aspect="4:5"
+    alt="Street food"
+  >{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition></swarm-image></article>`,
   metadata: {},
 }
 
@@ -103,7 +108,7 @@ globalThis.spindle = {
         assert.equal(rawOverride.comfyrawworkflowinputimageinitc, "data:image/png;base64,QUJD")
       } else {
         taggedGenerationCount += 1
-        assert.match(input.prompt, /^1girl, long brown hair, pink dress, <preset:Cinematic>, outside, city street/)
+        assert.match(input.prompt, /^1boy, black hair, red eyes, <preset:Cinematic>, outside, city street/)
         assert.match(input.prompt, /<preset:composition>/)
         assert.equal((input.prompt.match(/<preset:Cinematic>/g) || []).length, 1)
         assert.doesNotMatch(input.prompt, /\{\{swarm_preset\}\}/)
@@ -512,6 +517,10 @@ assert.equal(bootstrap.data.offset, 0)
 assert.equal(bootstrap.data.limit, 12)
 assert.deepEqual(bootstrap.data.stackPresets, [])
 assert.deepEqual(bootstrap.data.outputFolders, [])
+assert.equal(bootstrap.data.characterBaseTags.characterId, "char-1")
+assert.equal(bootstrap.data.characterBaseTags.characterName, "Lior")
+assert.equal(bootstrap.data.characterBaseTags.source, "lumiverse")
+assert.equal(bootstrap.data.characterBaseTags.tags, "1girl, long brown hair, pink dress")
 
 const expandedPrompt = await request("open_text_editor", {
   editorId: "studio-positive",
@@ -641,6 +650,16 @@ const tagConfig = await request("set_tag_automation", {
   config: { autoGenerate: true, injectProtocol: true, completionToast: false },
 })
 assert.deepEqual(tagConfig.data, { autoGenerate: true, injectProtocol: true, completionToast: false })
+const characterBaseTags = await request("set_character_base_tags", {
+  characterId: "char-1",
+  tags: "1boy, black hair, red eyes",
+})
+assert.equal(characterBaseTags.data.characterId, "char-1")
+assert.equal(characterBaseTags.data.characterName, "Lior")
+assert.equal(characterBaseTags.data.source, "studio")
+assert.equal(characterBaseTags.data.tags, "1boy, black hair, red eyes")
+assert.equal(macroValues.get("char_tags"), "1boy, black hair, red eyes")
+assert.equal(userFiles.get("character-base-tags.json")[0].characterId, "char-1")
 const intercepted = await interceptorHandler([
   {
     role: "assistant",
@@ -650,6 +669,8 @@ const intercepted = await interceptorHandler([
 ], { chatId: "chat-1" })
 assert.equal(intercepted.messages[0].role, "system")
 assert.match(intercepted.messages[0].content, /SWARM STUDIO IMAGE REQUEST PROTOCOL/)
+assert.match(intercepted.messages[0].content, /request="generate"/)
+assert.match(intercepted.messages[0].content, /Attributes may be written on one line or separate lines/)
 assert.match(intercepted.messages[0].content, /<preset:Cinematic>/)
 assert.doesNotMatch(intercepted.messages[0].content, /Use at most two image tags/)
 assert.match(intercepted.messages[1].content, /\[Illustration requested: Street food\]/)
@@ -663,7 +684,7 @@ await frontendHandler({
   chatId: "chat-1",
   messageId: "message-tag-1",
   fullMatch: tagMatch[0],
-  attrs: { slot: "post", aspect: "4:5", alt: "Street food" },
+  attrs: { request: "generate", slot: "post", aspect: "4:5", alt: "Street food" },
   content: tagMatch[2],
 }, "user-1")
 const tagError = sent.find((entry) => entry.payload.requestId === "tag-generate-1" && entry.payload.type === "studio_error")
@@ -674,6 +695,8 @@ assert.equal(taggedResult.payload.data.record.imageId, "image-tag-1")
 assert.equal(taggedResult.payload.data.taggedJob.status, "ready")
 assert.match(taggedMessage.content, /<img src="\/api\/v1\/image-gen\/results\/image-tag-1"/)
 assert.match(taggedMessage.content, /data-swarm-studio-slot="post"/)
+assert.match(taggedMessage.content, /data-swarm-studio-fit="cover"/)
+assert.match(taggedMessage.content, /object-fit:cover/)
 assert.equal(taggedMessage.metadata.swarm_studio_tagged_images[0].imageId, "image-tag-1")
 assert.equal(macroValues.get("last_genned"), "/api/v1/image-gen/results/image-tag-1")
 const storedFoldersAfterTag = userFiles.get("output-folders.json")
@@ -688,6 +711,7 @@ await eventHandlers.get("GENERATION_ENDED")({
   generationType: "normal",
 }, "user-1")
 assert.equal(taggedGenerationCount, 1, "streaming and GENERATION_ENDED delivery must dedupe")
+assert.match(source, /\(\?\:\(\?!<swarm-image\\b\)\[\\s\\S\]\)\*\?/)
 
 const originalOutput = await request("download_swarm_output", {
   connectionId: "swarm-1",

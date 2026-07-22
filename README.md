@@ -22,8 +22,8 @@ It adds:
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
-- Opt-in `<swarm-image>` message tags that can begin generating as soon as a complete tag streams, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, dedupe against the final generation event, and replace themselves with a permanent Lumiverse image
-- Native character-image continuity for tagged scenes: Lumiverse Character LoRA `base_tags` are prepended while LoRAs come exclusively from the Studio stack, and outputs enter an automatic character library folder
+- Opt-in `<swarm-image>` message tags with a required `request="generate"` marker that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, dedupe against the final generation event, and replace themselves with a permanent container-filling Lumiverse image
+- Character-image continuity for tagged scenes: Studio stores prompt-only base tags per character (with Lumiverse Character LoRA `base_tags` as a read-only fallback), LoRAs come exclusively from the Studio stack, and outputs enter an automatic character library folder
 - Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_tags}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
@@ -87,25 +87,32 @@ Studio settings contains two independent, default-off controls:
 The tag body is passed to SwarmUI as scene prompt content. Native Swarm syntax is preserved. Preset names are user-defined and opaque: a saved preset literally named `Cinematic Portrait` is invoked as `<preset:Cinematic Portrait>`.
 
 ```html
-<swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo">
+<swarm-image
+  request="generate"
+  slot="instagram-photo"
+  aspect="4:5"
+  alt="A candid city-street photo"
+>
 outside, city street, food stall, smiling
 </swarm-image>
 ```
 
-The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives; tagged jobs remove the duplicate raw preset field before submission. A literal `{{swarm_preset}}` in a tag resolves to the same directive list without adding it twice. Scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. A native Lumiverse Character LoRA binding contributes only its `base_tags`; its separately bound LoRA is never injected into tagged jobs.
+Attributes may instead remain on one line. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request. The final-message handler retains compatibility with older tags that include a slot plus aspect or alt metadata.
+
+The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives; tagged jobs remove the duplicate raw preset field before submission. A literal `{{swarm_preset}}` in a tag resolves to the same directive list without adding it twice. Scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. Studio settings lets you save prompt-only base tags for the active character without creating a native Character LoRA binding. If no Studio tags exist, a native binding may contribute only its `base_tags`; its separately bound LoRA is never injected into tagged jobs.
 
 Each request is keyed by chat, message, slot, and tag content. Delivery from both streaming tag interception and Lumiverse's final generation event is therefore safe. The in-message card stays at a fixed size with a static spinner instead of remounting for every progress step. Right-click or long-press a pending/failed card for current-profile retry, original-profile retry, prompt editing in Studio, or the output library. Finished tags are frozen to their specific Lumiverse image URL rather than leaving the global `{{last_genned}}` macro in old messages.
 
 Profile macros resolve to raw values so authored HTML and display regexes remain presentation-only:
 
 - `{{char_profile}}` / `{{user_profile}}` — authenticated avatar image URLs
-- `{{char_tags}}` — active character Character LoRA base tags
+- `{{char_tags}}` — Studio's active per-character base tags, falling back to native Character LoRA base tags when present
 - `{{swarm_negative}}` — current literal Studio negative prompt
 - `{{swarm_preset}}` — enabled Studio presets as comma-separated native `<preset:exact saved name>` tokens
 - `{{swarm_checkpoint}}` / `{{swarm_aspect}}` — current profile details
 - `{{last_genned}}` — latest successful Studio output URL
 
-The same reference is available behind **Studio settings → In-message images → Macro and preset guide**.
+The same reference and per-character base-tag editor are available behind **Studio settings → In-message images**.
 
 ## Metadata behavior
 

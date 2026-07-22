@@ -53,7 +53,12 @@ const SPARKLE_ICON = `
 const SWARM_IMAGE_PROTOCOL_EXAMPLE = `{{swarm_image_protocol}}
 
 Example output:
-<swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo">outside, city street, food stall, smiling</swarm-image>`;
+<swarm-image
+  request="generate"
+  slot="instagram-photo"
+  aspect="4:5"
+  alt="A candid city-street photo"
+>outside, city street, food stall, smiling</swarm-image>`;
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1";
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1";
 const MINIPLAYER_STORAGE_KEY = "swarm-studio-miniplayer-v1";
@@ -682,6 +687,15 @@ const STYLES = `
   .ss-config-section-head span { color: var(--lumiverse-text-muted); font-size: 8.5px; }
   .ss-config-toggle { display: flex; align-items: center; gap: 7px; color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-config-toggle input { accent-color: var(--lumiverse-accent, #7dd3fc); }
+  .ss-character-tags-editor { display: grid; gap: 6px; }
+  .ss-character-tags-editor .ss-textarea {
+    min-height: 72px;
+    resize: vertical;
+    font-size: 9px;
+    line-height: 1.45;
+  }
+  .ss-character-tags-editor[aria-disabled="true"] { opacity: .58; }
+  .ss-character-tags-actions { display: flex; justify-content: flex-end; gap: 6px; }
   .ss-tag-protocol-example {
     display: block;
     max-height: 74px;
@@ -693,6 +707,17 @@ const STYLES = `
     background: color-mix(in srgb, var(--ss-canvas, #090a0d) 78%, transparent);
     color: var(--lumiverse-text-muted);
     font: 8.5px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  img[data-swarm-studio-slot] {
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 100% !important;
+    min-height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    object-fit: cover !important;
+    object-position: center !important;
   }
   .ss-config-label { color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-config-theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
@@ -3351,6 +3376,7 @@ class MiniPlayerController {
         const startX = event.clientX;
         const startY = event.clientY;
         const pointerId = event.pointerId;
+        let dragged = false;
         const cancel = ()=>{
             this.cancelLongPress();
             window.removeEventListener("pointermove", move);
@@ -3359,7 +3385,14 @@ class MiniPlayerController {
         };
         const move = (moveEvent)=>{
             if (moveEvent.pointerId !== pointerId) return;
-            if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 9) cancel();
+            if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 7) {
+                dragged = true;
+                this.suppressNextClick = true;
+                cancel();
+                window.setTimeout(()=>{
+                    if (dragged) this.suppressNextClick = false;
+                }, 450);
+            }
         };
         const finish = (finishEvent)=>{
             if (finishEvent.pointerId === pointerId) cancel();
@@ -3754,7 +3787,13 @@ class StudioController {
             permissions: {},
             hasMetadataToken: false,
             currentImage: null,
-            initImage: null
+            initImage: null,
+            characterBaseTags: {
+                characterId: "",
+                characterName: "",
+                tags: "",
+                source: "none"
+            }
         };
         this.buildV3();
         this.bind();
@@ -4232,7 +4271,12 @@ class StudioController {
                   <label class="ss-config-toggle"><input type="checkbox" data-role="tag-prompt-injection" ${this.behavior.tagPromptInjection ? "checked" : ""} /><span>Teach the model the Swarm image-tag protocol</span></label>
                   <code class="ss-tag-protocol-example">{{swarm_image_protocol}}
 
-&lt;swarm-image slot="instagram-photo" aspect="4:5" alt="A candid city-street photo"&gt;outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
+&lt;swarm-image
+  request="generate"
+  slot="instagram-photo"
+  aspect="4:5"
+  alt="A candid city-street photo"
+&gt;outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
                   <button class="ss-button" data-action="copy-tag-protocol">Copy protocol example</button>
                   <details class="ss-css-guide ss-macro-guide">
                     <summary>Macro and preset guide</summary>
@@ -4248,7 +4292,16 @@ class StudioController {
                       <code>{{last_genned}}</code><span>URL of the latest completed Swarm Studio image.</span>
                     </div>
                   </details>
-                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character base tags, the current Studio LoRA stack, active presets, and the current negative prompt are inherited. A character's separately bound LoRA is never added.</p>
+                  <div class="ss-character-tags-editor" data-role="character-base-tags-editor" aria-disabled="true">
+                    <div class="ss-config-section-head"><strong>Character base tags</strong><span data-role="character-base-tags-status">Open a character chat</span></div>
+                    <textarea class="ss-textarea" data-role="character-base-tags" maxlength="12000" disabled placeholder="1girl, long hair, green eyes…"></textarea>
+                    <div class="ss-character-tags-actions">
+                      <button class="ss-button ss-button-danger" data-action="clear-character-base-tags" disabled>Clear Studio tags</button>
+                      <button class="ss-button ss-button-primary" data-action="save-character-base-tags" disabled>Save for character</button>
+                    </div>
+                    <p class="ss-muted ss-tiny">Stored by Swarm Studio for this character. These are prompt tags only: Studio never changes or injects Lumiverse's separately bound Character LoRA.</p>
+                  </div>
+                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character base tags, the current Studio LoRA stack, active presets, and the current negative prompt are inherited. The required request marker protects visible prose; one-line and multiline tags both work.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -4943,6 +4996,8 @@ are removed when CSS is applied.</pre>
             if (action === "refresh-metadata") this.refreshMetadata();
             if (action === "toggle-config") this.toggleConfigPopover(button);
             if (action === "copy-tag-protocol") void this.copyTagProtocol();
+            if (action === "save-character-base-tags") this.saveCharacterBaseTags();
+            if (action === "clear-character-base-tags") this.clearCharacterBaseTags();
             if (action === "set-theme") {
                 const theme = button.dataset.themeValue;
                 if (STUDIO_THEMES.some((item)=>item.id === theme)) this.onThemeChange(theme);
@@ -5084,10 +5139,15 @@ are removed when CSS is applied.</pre>
                 this.state.outputFolders = Array.isArray(data.outputFolders) ? data.outputFolders : [];
                 this.state.activeChat = data.activeChat || null;
                 this.state.permissions = data.permissions || {};
+                this.acceptCharacterBaseTags(data.characterBaseTags);
                 this.renderPermissions();
                 this.populateConnections();
                 this.renderOutputs();
                 this.renderStackPresets();
+                break;
+            case "character_base_tags_result":
+                this.acceptCharacterBaseTags(data);
+                this.setRunStatus(this.state.characterBaseTags.source === "studio" ? `Saved base tags for ${this.state.characterBaseTags.characterName || "this character"}.` : this.state.characterBaseTags.source === "lumiverse" ? "Studio tags cleared; using Lumiverse's native base tags as a fallback." : "Character base tags cleared.");
                 break;
             case "connection_result":
                 if (payload.requestId !== this.connectionRequestId) return;
@@ -6276,6 +6336,51 @@ are removed when CSS is applied.</pre>
         } catch  {
             this.setRunStatus("The browser blocked clipboard access.", true);
         }
+    }
+    acceptCharacterBaseTags(value) {
+        const source = value?.source === "studio" || value?.source === "lumiverse" ? value.source : "none";
+        this.state.characterBaseTags = {
+            characterId: String(value?.characterId || ""),
+            characterName: String(value?.characterName || ""),
+            tags: String(value?.tags || ""),
+            source
+        };
+        const editor = this.root.querySelector('[data-role="character-base-tags-editor"]');
+        const input = this.root.querySelector('[data-role="character-base-tags"]');
+        const status = this.root.querySelector('[data-role="character-base-tags-status"]');
+        const canEdit = Boolean(this.state.characterBaseTags.characterId && this.state.permissions?.characters !== false);
+        if (editor) editor.setAttribute("aria-disabled", String(!canEdit));
+        if (input) {
+            input.disabled = !canEdit;
+            input.value = this.state.characterBaseTags.tags;
+        }
+        for (const button of this.root.querySelectorAll('[data-action="save-character-base-tags"], [data-action="clear-character-base-tags"]'))button.disabled = !canEdit;
+        if (status) {
+            status.textContent = !canEdit ? "Open a character chat" : this.state.characterBaseTags.source === "studio" ? `${this.state.characterBaseTags.characterName || "Character"} · Studio` : this.state.characterBaseTags.source === "lumiverse" ? `${this.state.characterBaseTags.characterName || "Character"} · Lumiverse fallback` : `${this.state.characterBaseTags.characterName || "Character"} · not set`;
+        }
+    }
+    saveCharacterBaseTags() {
+        const state = this.state.characterBaseTags;
+        if (!state.characterId) {
+            this.setRunStatus("Open a character chat before saving base tags.", true);
+            return;
+        }
+        const tags = this.get('[data-role="character-base-tags"]').value;
+        this.send("set_character_base_tags", {
+            characterId: state.characterId,
+            tags
+        });
+        this.setRunStatus(`Saving base tags for ${state.characterName || "this character"}…`);
+    }
+    clearCharacterBaseTags() {
+        const state = this.state.characterBaseTags;
+        if (!state.characterId) return;
+        this.get('[data-role="character-base-tags"]').value = "";
+        this.send("set_character_base_tags", {
+            characterId: state.characterId,
+            tags: ""
+        });
+        this.setRunStatus(`Clearing Studio base tags for ${state.characterName || "this character"}…`);
     }
     saveToken() {
         if (!this.state.connection) return;
@@ -8330,6 +8435,9 @@ export function setup(ctx) {
     });
     const unregisterTagInterceptor = ctx.messages.registerTagInterceptor({
         tagName: "swarm-image",
+        attrs: {
+            request: "generate"
+        },
         removeFromMessage: true
     }, (payload)=>taggedImages?.handleTag(payload));
     if (typeof document !== "undefined") {

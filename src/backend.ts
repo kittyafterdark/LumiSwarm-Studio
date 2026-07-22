@@ -160,6 +160,12 @@ interface TagAutomationConfig {
   completionToast: boolean
 }
 
+interface CharacterBaseTagEntry {
+  characterId: string
+  tags: string
+  updatedAt: number
+}
+
 type TaggedImageJobStatus = "requested" | "queued" | "generating" | "ready" | "failed" | "cancelled"
 
 interface TaggedImageJob {
@@ -206,6 +212,7 @@ const OUTPUT_FOLDERS_FILE = "output-folders.json"
 const TAG_AUTOMATION_CONFIG_FILE = "tag-automation-config.json"
 const TAGGED_IMAGE_JOBS_FILE = "tagged-image-jobs.json"
 const STUDIO_GENERATION_PROFILE_FILE = "studio-generation-profile.json"
+const CHARACTER_BASE_TAGS_FILE = "character-base-tags.json"
 const STACK_PRESET_LIMIT = 40
 const GENERATION_RECORD_LIMIT = 100
 const OUTPUT_FOLDER_LIMIT = 80
@@ -221,9 +228,14 @@ const generationControllers = new Map<string, {
 const runningTaggedJobs = new Set<string>()
 
 const SWARM_IMAGE_PROTOCOL_BASE = `SWARM STUDIO IMAGE REQUEST PROTOCOL
-When a newly generated illustration materially improves your reply, place this exact XML-like tag where the finished image should appear:
-<swarm-image slot="short-stable-name" aspect="4:5" alt="brief accessible description">scene-specific SwarmUI prompt</swarm-image>
-The tag body is an image prompt, not prose for the user. Describe the scene, action, expression, framing, lighting, and environment. The active character's base image tags and the user's current Studio negative prompt are applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve every such directive exactly. Supported aspect values are 1:1, 2:3, 3:2, 4:5, 5:4, 9:16, and 16:9. Do not put Markdown fences around the tag.`
+When a newly generated illustration materially improves your reply, place this exact XML-like request where the finished image should appear. Attributes may be written on one line or separate lines:
+<swarm-image
+  request="generate"
+  slot="short-stable-name"
+  aspect="4:5"
+  alt="brief accessible description"
+>scene-specific SwarmUI prompt</swarm-image>
+The request="generate" marker is required. Emit the tag only as an actual image request: never quote it, explain it, demonstrate it in visible prose, or emit an empty/partial opening tag. The tag body is an image prompt, not prose or an HTML shell. Describe the scene, action, expression, framing, lighting, and environment. Do not nest another <swarm-image> tag inside it. The active character's base image tags and the user's current Studio negative prompt are applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve every such directive exactly. Supported aspect values are 1:1, 2:3, 3:2, 4:5, 5:4, 9:16, and 16:9. Do not put Markdown fences around the tag.`
 
 function asRecord(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -1312,6 +1324,69 @@ async function saveTagAutomationConfig(value: unknown, userId?: string): Promise
   return config
 }
 
+function cleanCharacterBaseTagEntries(value: unknown): CharacterBaseTagEntry[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const entries: CharacterBaseTagEntry[] = []
+  for (const raw of value) {
+    const record = asRecord(raw)
+    const characterId = asString(record.characterId).trim().slice(0, 200)
+    const tags = asString(record.tags).trim().slice(0, 12_000)
+    if (!characterId || !tags || seen.has(characterId)) continue
+    seen.add(characterId)
+    entries.push({ characterId, tags, updatedAt: Number(record.updatedAt) || Date.now() })
+    if (entries.length >= 500) break
+  }
+  return entries
+}
+
+async function loadCharacterBaseTagEntries(userId?: string): Promise<CharacterBaseTagEntry[]> {
+  return cleanCharacterBaseTagEntries(await spindle.userStorage.getJson(CHARACTER_BASE_TAGS_FILE, {
+    fallback: [],
+    userId,
+  }))
+}
+
+async function extensionCharacterBaseTags(characterId: string, userId?: string): Promise<string> {
+  if (!characterId) return ""
+  return (await loadCharacterBaseTagEntries(userId)).find((entry) => entry.characterId === characterId)?.tags || ""
+}
+
+async function characterBaseTagState(characterId: string, userId?: string): Promise<JsonObject> {
+  if (!characterId || !spindle.permissions.has("characters")) {
+    return { characterId: "", characterName: "", tags: "", source: "none" }
+  }
+  const character = await spindle.characters.get(characterId, userId)
+  const extensionTags = await extensionCharacterBaseTags(characterId, userId)
+  const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora)
+  const portableTags = asString(portable.base_tags).trim()
+  return {
+    characterId,
+    characterName: asString(character?.name).trim(),
+    tags: extensionTags || portableTags,
+    source: extensionTags ? "studio" : portableTags ? "lumiverse" : "none",
+  }
+}
+
+async function activeCharacterBaseTagState(userId?: string): Promise<JsonObject> {
+  if (!spindle.permissions.has("chats")) return characterBaseTagState("", userId)
+  const chat = await spindle.chats.getActive(userId)
+  return characterBaseTagState(asString(chat?.character_id), userId)
+}
+
+async function saveCharacterBaseTags(characterId: string, tags: string, userId?: string): Promise<JsonObject> {
+  if (!characterId) throw new Error("Open a character chat before saving base tags.")
+  if (!spindle.permissions.has("characters")) throw new Error("Grant Characters permission to save character base tags.")
+  await spindle.characters.get(characterId, userId)
+  const cleanTags = tags.trim().slice(0, 12_000)
+  const entries = (await loadCharacterBaseTagEntries(userId)).filter((entry) => entry.characterId !== characterId)
+  if (cleanTags) entries.unshift({ characterId, tags: cleanTags, updatedAt: Date.now() })
+  await spindle.userStorage.setJson(CHARACTER_BASE_TAGS_FILE, entries, { indent: 2, userId })
+  const state = await characterBaseTagState(characterId, userId)
+  spindle.updateMacroValue("char_tags", asString(state.tags))
+  return state
+}
+
 function stableTextHash(value: string): string {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {
@@ -1527,7 +1602,9 @@ async function refreshContextMacros(userId?: string): Promise<void> {
     }
   }
   const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora)
-  spindle.updateMacroValue("char_tags", asString(portable.base_tags))
+  const characterId = asString(character?.id)
+  const tags = await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags)
+  spindle.updateMacroValue("char_tags", tags)
   spindle.updateMacroValue("char_profile", await imageUrlForMacro(asString(character?.image_id), userId))
   spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId))
 }
@@ -1544,10 +1621,16 @@ function parseTagAttributes(raw: string): Record<string, string> {
 
 function parseSwarmImageTags(content: string): Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> {
   const tags: Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> = []
-  const pattern = /<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image\s*>/gi
+  // Match innermost complete requests. A model occasionally mentions a bare
+  // <swarm-image> token before emitting the real request; a naive lazy regex
+  // then swallows the whole explanation through the real closing tag.
+  const pattern = /<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi
   let match: RegExpExecArray | null
   while ((match = pattern.exec(content)) && tags.length < 6) {
-    tags.push({ fullMatch: match[0], attrs: parseTagAttributes(match[1]), content: match[2] })
+    const attrs = parseTagAttributes(match[1])
+    const strict = attrs.request?.toLowerCase() === "generate"
+    const legacy = Boolean(attrs.slot && (attrs.aspect || attrs.alt))
+    if (strict || legacy) tags.push({ fullMatch: match[0], attrs, content: match[2] })
   }
   return tags
 }
@@ -1622,7 +1705,7 @@ async function applyCharacterLayer(
   }
   const character = await spindle.characters.get(characterId, userId)
   const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora)
-  const baseTags = asString(portable.base_tags).trim()
+  const baseTags = (await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags)).trim()
   let prompt = scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, baseTags).trim()
   if (baseTags && !prompt.toLowerCase().includes(baseTags.toLowerCase())) prompt = `${baseTags}, ${prompt}`
   prompt = prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim()
@@ -1687,7 +1770,7 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Pro
   const content = asString(target?.content)
   if (!target || !job.fullMatch || !content.includes(job.fullMatch)) return false
   const alt = job.alt || `Generated illustration for ${job.slot}`
-  const markup = `<img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" loading="lazy">`
+  const markup = `<img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" data-swarm-studio-fit="cover" loading="lazy" style="display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center;">`
   const metadata = asRecord(target.metadata)
   const previous = Array.isArray(metadata.swarm_studio_tagged_images)
     ? metadata.swarm_studio_tagged_images.filter((item: any) => asString(item?.jobId) !== job.id)
@@ -1829,6 +1912,11 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
   const fullMatch = asString(payload?.fullMatch).slice(0, 24_000)
   const attrs = asRecord(payload?.attrs)
   const scenePrompt = asString(payload?.content).trim().slice(0, 12_000)
+  const strictRequest = asString(attrs.request).toLowerCase() === "generate"
+  const compatibleLegacyRequest = Boolean(asString(attrs.slot) && (asString(attrs.aspect) || asString(attrs.alt)))
+  if (!strictRequest && !compatibleLegacyRequest) {
+    throw new Error("Ignored a Swarm image tag that was missing request=\"generate\" and the legacy slot/aspect metadata.")
+  }
   if (!chatId || !messageId || !fullMatch || !scenePrompt) {
     throw new Error("The Swarm image tag is missing its chat, message, or prompt content.")
   }
@@ -2014,6 +2102,7 @@ async function bootstrap(userId?: string): Promise<JsonObject> {
     stackPresets: await loadStackPresets(userId),
     outputFolders: await loadOutputFolders(userId),
     tagAutomation: await loadTagAutomationConfig(userId),
+    characterBaseTags: await characterBaseTagState(asString(activeChat?.character_id), userId),
   }
 }
 
@@ -2085,6 +2174,19 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           type: "tag_automation_result",
           requestId,
           data: config,
+        }, userId)
+        return
+      }
+      case "set_character_base_tags": {
+        const data = await saveCharacterBaseTags(
+          asString(payload?.characterId).trim(),
+          asString(payload?.tags),
+          userId,
+        )
+        spindle.sendToFrontend({
+          type: "character_base_tags_result",
+          requestId,
+          data,
         }, userId)
         return
       }
