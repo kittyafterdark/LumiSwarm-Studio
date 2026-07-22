@@ -1062,7 +1062,15 @@ const STUDIO_V3_STYLES = `
   .ss-preset-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
   .ss-preset-picker .ss-button[hidden] { display: none; }
   .ss-preset-manage { width: 32px; min-width: 32px; height: 32px; }
-  .ss-preset-manage svg { width: 14px; height: 14px; }
+  .ss-preset-manage svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   .ss-aspect-controls {
     grid-column: 1 / -1;
     display: grid;
@@ -2152,6 +2160,7 @@ const STUDIO_V3_STYLES = `
   }
   .ss-miniplayer-app-surface {
     position: fixed;
+    z-index: 2147483000;
     left: 18px;
     top: 18px;
     width: 318px;
@@ -2418,7 +2427,7 @@ function createOverlayMiniplayerWidget(ctx) {
         return null;
     }
     const surface = element("div", "ss-miniplayer-app-surface");
-    document.body.appendChild(surface);
+    document.documentElement.appendChild(surface);
     let width = 318;
     let height = 94;
     let x = Math.max(8, window.innerWidth - width - 18);
