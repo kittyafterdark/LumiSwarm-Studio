@@ -152,8 +152,6 @@ interface OutputFolder {
   name: string
   imageIds: string[]
   updatedAt: number
-  kind?: "character"
-  characterId?: string
 }
 
 interface SessionCacheEntry {
@@ -721,21 +719,14 @@ function cleanOutputFolders(value: unknown): OutputFolder[] {
     const id = asString(item.id).trim()
     const name = asString(item.name).trim().slice(0, 80)
     if (!id || !name || seen.has(id)) return []
-    const characterId = asString(item.characterId).trim().slice(0, 200)
-    const isCharacterFolder = item.kind === "character" && Boolean(characterId)
     seen.add(id)
     return [{
       id,
       name,
       imageIds: [...new Set(stringList(item.imageIds, 500))],
       updatedAt: Number(item.updatedAt) || Date.now(),
-      ...(isCharacterFolder ? { kind: "character" as const, characterId } : {}),
     }]
   })
-}
-
-function characterOutputFolderId(characterId: string): string {
-  return `character:${characterId}`
 }
 
 async function loadOutputFolders(userId?: string): Promise<OutputFolder[]> {
@@ -768,53 +759,10 @@ async function createOutputFolder(name: string, userId?: string): Promise<Output
 }
 
 async function deleteOutputFolder(folderId: string, userId?: string): Promise<OutputFolder[]> {
-  const folders = await loadOutputFolders(userId)
-  const folder = folders.find((item) => item.id === folderId)
-  if (folder?.kind === "character") {
-    throw new Error("Character output folders are managed automatically and cannot be deleted.")
-  }
   return persistOutputFolders(
-    folders.filter((item) => item.id !== folderId),
+    (await loadOutputFolders(userId)).filter((folder) => folder.id !== folderId),
     userId,
   )
-}
-
-async function ensureCharacterOutputFolder(
-  imageIds: string[],
-  characterId: string,
-  characterName: string,
-  userId?: string,
-): Promise<OutputFolder[]> {
-  const cleanImageIds = [...new Set(imageIds.map((id) => id.trim()).filter(Boolean))].slice(0, 500)
-  const cleanCharacterId = characterId.trim().slice(0, 200)
-  if (!cleanCharacterId) return loadOutputFolders(userId)
-
-  const folderId = characterOutputFolderId(cleanCharacterId)
-  const folderName = characterName.trim().slice(0, 80) || "Character"
-  const folders = await loadOutputFolders(userId)
-  let folder = folders.find((item) =>
-    item.id === folderId
-    || (item.kind === "character" && item.characterId === cleanCharacterId)
-  )
-  if (!folder) {
-    folder = {
-      id: folderId,
-      name: folderName,
-      imageIds: [],
-      updatedAt: Date.now(),
-      kind: "character",
-      characterId: cleanCharacterId,
-    }
-    folders.unshift(folder)
-  }
-  folder.id = folderId
-  folder.name = folderName
-  folder.kind = "character"
-  folder.characterId = cleanCharacterId
-  const assigned = new Set(cleanImageIds)
-  folder.imageIds = [...cleanImageIds, ...folder.imageIds.filter((id) => !assigned.has(id))]
-  folder.updatedAt = Date.now()
-  return persistOutputFolders(folders.slice(0, OUTPUT_FOLDER_LIMIT), userId)
 }
 
 async function moveOutputToFolder(
@@ -836,31 +784,11 @@ async function moveOutputsToFolder(
   if (folderId && !folders.some((folder) => folder.id === folderId)) {
     throw new Error("That output folder no longer exists.")
   }
-  const targetFolder = folders.find((folder) => folder.id === folderId)
-  if (targetFolder?.kind === "character") {
-    throw new Error("Character output folders are managed automatically.")
-  }
   const moved = new Set(cleanIds)
   for (const folder of folders) {
-    // Character folders are a virtual, automatic view. Manual organization is
-    // independent, so moving an output never strips its character membership.
-    if (folder.kind === "character") continue
     folder.imageIds = folder.imageIds.filter((id) => !moved.has(id))
     if (folder.id === folderId) folder.imageIds.unshift(...cleanIds)
     folder.updatedAt = Date.now()
-  }
-  return persistOutputFolders(folders, userId)
-}
-
-async function removeOutputsFromAllFolders(imageIds: string[], userId?: string): Promise<OutputFolder[]> {
-  const removed = new Set(imageIds.map((id) => id.trim()).filter(Boolean))
-  const folders = await loadOutputFolders(userId)
-  for (const folder of folders) {
-    const nextIds = folder.imageIds.filter((id) => !removed.has(id))
-    if (nextIds.length !== folder.imageIds.length) {
-      folder.imageIds = nextIds
-      folder.updatedAt = Date.now()
-    }
   }
   return persistOutputFolders(folders, userId)
 }
@@ -1321,24 +1249,7 @@ function permissionSnapshot(): Record<string, boolean> {
     images: spindle.permissions.has("images"),
     chats: spindle.permissions.has("chats"),
     chatMutation: spindle.permissions.has("chat_mutation"),
-    characters: spindle.permissions.has("characters"),
-    presets: spindle.permissions.has("presets"),
-    theme: spindle.permissions.has("app_manipulation"),
-    wallpaper: typeof spindle.wallpapers?.setChat === "function",
   }
-}
-
-function parseImageDataUrl(value: unknown): { data: Uint8Array; mimeType: string } {
-  const input = asString(value).trim()
-  const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i.exec(input)
-  if (!match) throw new Error("Lumiverse did not receive a valid image payload.")
-  const base64 = match[2].replace(/\s+/g, "")
-  if (base64.length > 24_000_000) throw new Error("That image is too large to use as a character avatar.")
-  const decoded = atob(base64)
-  const data = new Uint8Array(decoded.length)
-  for (let index = 0; index < decoded.length; index += 1) data[index] = decoded.charCodeAt(index)
-  if (!data.byteLength) throw new Error("The selected output was empty.")
-  return { data, mimeType: match[1].toLowerCase() }
 }
 
 function markdownImageMessage(label: string, url: string): string {
@@ -1420,111 +1331,15 @@ async function bootstrap(userId?: string): Promise<JsonObject> {
   const activeChat = permissions.chats
     ? await spindle.chats.getActive(userId)
     : null
-  const activeCharacter = permissions.characters && activeChat?.character_id
-    ? await spindle.characters.get(activeChat.character_id, userId)
-    : null
-  const characterNamespace = asRecord(activeCharacter?.extensions?.swarm_studio)
   const outputPage = await listOutputs(userId, activeChat)
 
   return {
     permissions,
     connections,
     activeChat,
-    activeCharacter: activeCharacter
-      ? { id: activeCharacter.id, name: activeCharacter.name, image_id: activeCharacter.image_id }
-      : null,
-    characterVisual: asRecord(characterNamespace.visualBible),
     ...outputPage,
     stackPresets: await loadStackPresets(userId),
     outputFolders: await loadOutputFolders(userId),
-  }
-}
-
-async function loadVisualEditorOptions(userId?: string): Promise<JsonObject> {
-  const errors: string[] = []
-  let stackPresets: StackPreset[] = []
-  try {
-    stackPresets = await loadStackPresets(userId)
-  } catch (error) {
-    errors.push(`Saved LoRA stacks: ${error instanceof Error ? error.message : String(error)}`)
-  }
-
-  if (!spindle.permissions.has("image_gen")) {
-    return {
-      connection: null,
-      checkpoints: [],
-      swarmPresets: [],
-      stackPresets,
-      metadataError: "Grant the Image Generation permission to load Visuals options.",
-    }
-  }
-
-  let connections: any[] = []
-  try {
-    const listed = await spindle.imageGen.listConnections(userId)
-    connections = (Array.isArray(listed) ? listed : [])
-      .filter((connection: any) => connection?.provider === "swarmui")
-  } catch (error) {
-    errors.push(`Swarm connection: ${error instanceof Error ? error.message : String(error)}`)
-  }
-  const listedDefault = connections.find((connection: any) => connection?.is_default) || connections[0]
-  if (!listedDefault) {
-    errors.push("Configure a SwarmUI image generation connection to use character Visuals.")
-    return {
-      connection: null,
-      checkpoints: [],
-      swarmPresets: [],
-      stackPresets,
-      metadataError: errors.join(" "),
-    }
-  }
-
-  let connection: SwarmConnection
-  try {
-    connection = await getConnection(asString(listedDefault.id), userId)
-  } catch (error) {
-    errors.push(error instanceof Error ? error.message : String(error))
-    return {
-      connection: null,
-      checkpoints: [],
-      swarmPresets: [],
-      stackPresets,
-      metadataError: errors.join(" "),
-    }
-  }
-
-  let checkpoints: CheckpointMetadata[] = []
-  let swarmPresets: SwarmPreset[] = []
-  if (!spindle.permissions.has("cors_proxy")) {
-    errors.push("Grant the CORS Proxy permission to load SwarmUI checkpoints and presets.")
-  } else {
-    const token = await getMetadataToken(connection.id, userId).catch((error: unknown) => {
-      errors.push(`Metadata token: ${error instanceof Error ? error.message : String(error)}`)
-      return null
-    })
-    try {
-      checkpoints = await listCheckpoints(connection, token, userId)
-    } catch (error) {
-      errors.push(`Checkpoints: ${error instanceof Error ? error.message : String(error)}`)
-    }
-    try {
-      swarmPresets = (await loadSwarmOptions(connection, token, userId)).presets
-    } catch (error) {
-      errors.push(`Swarm presets: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  return {
-    connection: {
-      id: connection.id,
-      name: connection.name,
-      model: connection.model,
-      isDefault: connection.is_default,
-    },
-    checkpoints,
-    swarmPresets,
-    stackPresets,
-    metadataError: errors.join(" "),
   }
 }
 
@@ -1587,14 +1402,6 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           type: "bootstrap_result",
           requestId,
           data: await bootstrap(userId),
-        }, userId)
-        return
-      }
-      case "visual_editor_options": {
-        spindle.sendToFrontend({
-          type: "visual_editor_options_result",
-          requestId,
-          data: await loadVisualEditorOptions(userId),
         }, userId)
         return
       }
@@ -1804,33 +1611,6 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         } catch (error) {
           spindle.log.warn(`Could not persist Swarm Studio generation details: ${error instanceof Error ? error.message : String(error)}`)
         }
-        let outputFolders: OutputFolder[]
-        const generatedImageId = record?.imageId || asString(result.imageId)
-        const activeCharacterId = asString(activeChat?.character_id).trim()
-        if (generatedImageId && activeCharacterId) {
-          let characterName = "Character"
-          if (spindle.permissions.has("characters")) {
-            try {
-              const character = await spindle.characters.get(activeCharacterId, userId)
-              characterName = asString(character?.name).trim() || characterName
-            } catch (error) {
-              spindle.log.warn(`Could not resolve the active character name: ${error instanceof Error ? error.message : String(error)}`)
-            }
-          }
-          try {
-            outputFolders = await ensureCharacterOutputFolder(
-              [generatedImageId],
-              activeCharacterId,
-              characterName,
-              userId,
-            )
-          } catch (error) {
-            spindle.log.warn(`Could not assign the output to its character folder: ${error instanceof Error ? error.message : String(error)}`)
-            outputFolders = await loadOutputFolders(userId)
-          }
-        } else {
-          outputFolders = await loadOutputFolders(userId)
-        }
         const outputPage = await listOutputs(userId, activeChat)
         spindle.sendToFrontend({
           type: "generation_result",
@@ -1839,7 +1619,6 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           data: {
             result,
             record,
-            outputFolders,
             ...outputPage,
           },
         }, userId)
@@ -1994,48 +1773,6 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         }, userId)
         return
       }
-      case "list_character_gallery": {
-        if (!spindle.permissions.has("images")) {
-          throw new Error("Grant the Images permission to load character outputs.")
-        }
-        const characterId = asString(payload?.characterId).trim()
-        if (!characterId) throw new Error("Choose a character before loading its visual gallery.")
-        const result = await spindle.images.list({
-          onlyOwned: true,
-          characterId,
-          specificity: "sm",
-          limit: 200,
-          offset: 0,
-          userId,
-        })
-        const outputs = Array.isArray(result?.data) ? result.data : []
-        let characterName = "Character"
-        if (spindle.permissions.has("characters")) {
-          try {
-            const character = await spindle.characters.get(characterId, userId)
-            characterName = asString(character?.name).trim() || characterName
-          } catch (error) {
-            spindle.log.warn(`Could not resolve the character gallery name: ${error instanceof Error ? error.message : String(error)}`)
-          }
-        }
-        await ensureCharacterOutputFolder(
-          outputs.map((output: any) => asString(output?.id)),
-          characterId,
-          characterName,
-          userId,
-        )
-        spindle.sendToFrontend({
-          type: "character_gallery_result",
-          requestId,
-          data: {
-            characterId,
-            folderId: characterOutputFolderId(characterId),
-            outputs,
-            total: Math.max(outputs.length, Number(result?.total) || 0),
-          },
-        }, userId)
-        return
-      }
       case "append_output_to_chat": {
         if (!spindle.permissions.has("chat_mutation")) {
           throw new Error("Grant the Chat Mutation permission to append outputs to chat.")
@@ -2058,105 +1795,18 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         const label = asString(payload?.label).trim()
           || asString(image.original_filename).trim()
           || "Swarm Studio output"
-        const record = (await loadGenerationRecords(userId)).find((item) => item.imageId === imageId) || null
-        const messages = typeof spindle.chat.getMessages === "function"
-          ? await spindle.chat.getMessages(activeChat.id)
-          : []
-        const sourceTurn = Array.isArray(messages) && messages.length
-          ? messages[messages.length - 1]
-          : null
-        const metadata: Record<string, unknown> = {
-          source: "swarm_studio",
-          image_id: imageId,
-          source_turn_id: asString(sourceTurn?.id),
-        }
-        if (record) {
-          metadata.generation = {
-            prompt: record.prompt,
-            negative_prompt: record.negativePrompt,
-            model: record.model,
-            parameters: record.parameters,
-            loras: record.loras,
-            presets: record.presets,
-            workflow: record.workflow,
-            created_at: record.createdAt,
-          }
-        }
         const result = await spindle.chat.appendMessage(activeChat.id, {
           role: "assistant",
           content: markdownImageMessage(label, imageUrl),
-          metadata,
+          metadata: {
+            source: "swarm_studio",
+            image_id: imageId,
+          },
         })
         spindle.sendToFrontend({
           type: "output_appended_to_chat",
           requestId,
           data: { imageId, label, messageId: result?.id || "" },
-        }, userId)
-        return
-      }
-      case "set_output_as_character_avatar": {
-        if (!spindle.permissions.has("characters")) {
-          throw new Error("Grant the Characters permission to replace a character avatar.")
-        }
-        if (!spindle.permissions.has("chats")) {
-          throw new Error("Grant the Chats permission to resolve the active character.")
-        }
-        const activeChat = await spindle.chats.getActive(userId)
-        if (!activeChat?.character_id) throw new Error("Open a character chat before setting an avatar.")
-        const parsed = parseImageDataUrl(payload?.dataUrl)
-        const filename = asString(payload?.filename).trim().replace(/[^a-z0-9_.-]+/gi, "-").slice(0, 180)
-          || `swarm-studio-avatar-${Date.now()}.png`
-        const character = await spindle.characters.setAvatar(activeChat.character_id, {
-          data: parsed.data,
-          mime_type: parsed.mimeType,
-          filename,
-        }, userId)
-        spindle.sendToFrontend({
-          type: "character_avatar_updated",
-          requestId,
-          data: { characterId: character?.id || activeChat.character_id, characterName: character?.name || "Character" },
-        }, userId)
-        return
-      }
-      case "apply_output_palette": {
-        if (!spindle.permissions.has("app_manipulation")) {
-          throw new Error("Grant App Manipulation to apply an output palette.")
-        }
-        if (!spindle.permissions.has("images")) {
-          throw new Error("Grant Images permission to extract an output palette.")
-        }
-        const imageId = asString(payload?.imageId).trim()
-        if (!imageId) throw new Error("Choose a saved Lumiverse output first.")
-        const palette = await spindle.theme.extractColors(imageId, userId)
-        const accent = asRecord(palette?.dominantHsl)
-        if (![accent.h, accent.s, accent.l].every((value) => Number.isFinite(Number(value)))) {
-          throw new Error("Lumiverse could not derive a usable palette from that output.")
-        }
-        await spindle.theme.applyPalette({
-          accent: { h: Number(accent.h), s: Number(accent.s), l: Number(accent.l) },
-        }, userId)
-        spindle.sendToFrontend({
-          type: "output_palette_applied",
-          requestId,
-          data: { imageId },
-        }, userId)
-        return
-      }
-      case "set_output_as_chat_wallpaper": {
-        if (typeof spindle.wallpapers?.setChat !== "function") {
-          throw new Error("This Lumiverse build does not expose the public chat wallpaper helper yet.")
-        }
-        if (!spindle.permissions.has("chats") || !spindle.permissions.has("images")) {
-          throw new Error("Chats and Images permissions are required to set a wallpaper.")
-        }
-        const imageId = asString(payload?.imageId).trim()
-        const activeChat = await spindle.chats.getActive(userId)
-        if (!imageId || !activeChat?.id) throw new Error("Choose an output while a chat is open.")
-        await spindle.wallpapers.setChat(activeChat.id, imageId, userId)
-        spindle.sendToFrontend({
-          type: "chat_wallpaper_updated",
-          requestId,
-          data: { imageId, chatId: activeChat.id },
         }, userId)
         return
       }
@@ -2213,7 +1863,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         const deleted = await spindle.images.delete(imageId, userId)
         if (!deleted) throw new Error("Lumiverse could not delete that output.")
         await deleteGenerationRecord(imageId, userId)
-        const folders = await removeOutputsFromAllFolders([imageId], userId)
+        const folders = await moveOutputToFolder(imageId, "", userId)
         const activeChat = spindle.permissions.has("chats")
           ? await spindle.chats.getActive(userId)
           : null
@@ -2246,7 +1896,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         }
         if (deletedIds.length) await deleteGenerationRecords(deletedIds, userId)
         const folders = deletedIds.length
-          ? await removeOutputsFromAllFolders(deletedIds, userId)
+          ? await moveOutputsToFolder(deletedIds, "", userId)
           : await loadOutputFolders(userId)
         const activeChat = spindle.permissions.has("chats")
           ? await spindle.chats.getActive(userId)

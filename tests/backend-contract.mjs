@@ -7,16 +7,7 @@ let frontendHandler
 const sent = []
 const secrets = new Map()
 const userFiles = new Map()
-const permissions = new Set([
-  "image_gen",
-  "cors_proxy",
-  "images",
-  "chats",
-  "chat_mutation",
-  "characters",
-  "presets",
-  "app_manipulation",
-])
+const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "chat_mutation"])
 let imageDeleted = false
 let presetAdded = false
 let presetDeleted = false
@@ -26,9 +17,6 @@ let macroDefinition = null
 let macroValue = ""
 let completionToast = ""
 let downloadedSwarmUrl = ""
-let avatarUpdate = null
-let appliedPalette = null
-let connectionsAvailable = true
 
 globalThis.spindle = {
   registerMacro(definition) {
@@ -59,7 +47,6 @@ globalThis.spindle = {
   },
   imageGen: {
     async listConnections() {
-      if (!connectionsAvailable) return []
       return [
         {
           id: "swarm-1",
@@ -119,39 +106,7 @@ globalThis.spindle = {
       return { id: "chat-1", character_id: "char-1" }
     },
   },
-  characters: {
-    async get(characterId, userId) {
-      assert.equal(characterId, "char-1")
-      assert.equal(userId, "user-1")
-      return {
-        id: "char-1",
-        name: "Mira",
-        image_id: "avatar-1",
-        extensions: {
-          swarm_studio: {
-            visualBible: {
-              canonicalPrompt: "waist-length black hair, red eyes",
-              preferredCheckpoint: "base.safetensors",
-            },
-          },
-        },
-      }
-    },
-    async setAvatar(characterId, input, userId) {
-      assert.equal(characterId, "char-1")
-      assert.equal(userId, "user-1")
-      assert.equal(input.mime_type, "image/png")
-      assert.equal(input.filename, "mira-output.png")
-      assert.deepEqual([...input.data], [65, 66, 67])
-      avatarUpdate = input
-      return { id: "char-1", name: "Mira", image_id: "avatar-2" }
-    },
-  },
   chat: {
-    async getMessages(chatId) {
-      assert.equal(chatId, "chat-1")
-      return [{ id: "turn-42", role: "user", content: "Show me the scene." }]
-    },
     async appendMessage(chatId, message) {
       assert.equal(chatId, "chat-1")
       assert.equal(message.role, "assistant")
@@ -167,13 +122,6 @@ globalThis.spindle = {
       assert.equal(options.onlyOwned, true)
       assert.equal(Number.isInteger(options.offset), true)
       assert.equal(Number.isInteger(options.limit), true)
-      if (options.characterId) {
-        assert.equal(options.characterId, "char-1")
-        return {
-          data: [{ id: "image-1", url: "/api/v1/images/image-1?size=sm", original_filename: "image.png" }],
-          total: 1,
-        }
-      }
       if (options.limit !== 200) assert.equal(options.chatId, "chat-1")
       if (imageDeleted) return { data: [], total: 0 }
       return {
@@ -193,17 +141,6 @@ globalThis.spindle = {
       assert.equal(options.specificity, "sm")
       assert.equal(options.userId, "user-1")
       return { id: imageId, url: "/api/v1/images/image-1?size=sm", original_filename: "image.png" }
-    },
-  },
-  theme: {
-    async extractColors(imageId, userId) {
-      assert.equal(imageId, "image-1")
-      assert.equal(userId, "user-1")
-      return { dominantHsl: { h: 292, s: 63, l: 58 } }
-    },
-    async applyPalette(palette, userId) {
-      assert.equal(userId, "user-1")
-      appliedPalette = palette
     },
   },
   enclave: {
@@ -487,15 +424,6 @@ async function request(type, extra = {}) {
   return response.payload
 }
 
-async function requestError(type, extra = {}) {
-  const requestId = `${type}-error-${sent.length}`
-  await frontendHandler({ type, requestId, ...extra }, "user-1")
-  const response = sent.find((entry) => entry.payload.requestId === requestId)
-  assert.ok(response, `Missing error response for ${type}`)
-  assert.equal(response.payload.type, "studio_error")
-  return response.payload
-}
-
 const bootstrap = await request("bootstrap")
 assert.equal(bootstrap.data.connections.length, 1)
 assert.equal(bootstrap.data.connections[0].provider, "swarmui")
@@ -505,10 +433,6 @@ assert.equal(bootstrap.data.offset, 0)
 assert.equal(bootstrap.data.limit, 12)
 assert.deepEqual(bootstrap.data.stackPresets, [])
 assert.deepEqual(bootstrap.data.outputFolders, [])
-assert.equal(bootstrap.data.activeCharacter.id, "char-1")
-assert.equal(bootstrap.data.activeCharacter.name, "Mira")
-assert.equal(bootstrap.data.characterVisual.canonicalPrompt, "waist-length black hair, red eyes")
-assert.equal(bootstrap.data.permissions.wallpaper, false)
 
 const expandedPrompt = await request("open_text_editor", {
   editorId: "studio-positive",
@@ -533,33 +457,6 @@ assert.equal(connection.data.swarmOptions.canManagePresets, true)
 assert.equal(connection.data.swarmOptions.parameters.some((parameter) => parameter.id === "prompt"), true)
 assert.equal(connection.data.swarmOptions.workflows[0].name, "Portrait/Inpaint")
 assert.equal(connection.data.swarmOptions.workflowError, "")
-
-const visualOptions = await request("visual_editor_options")
-assert.deepEqual(visualOptions.data.connection, {
-  id: "swarm-1",
-  name: "Local Swarm",
-  model: "base.safetensors",
-  isDefault: true,
-})
-assert.equal(visualOptions.data.checkpoints[0].name, "base.safetensors")
-assert.equal(visualOptions.data.swarmPresets[0].title, "Cinematic")
-assert.deepEqual(visualOptions.data.stackPresets, [])
-assert.equal(visualOptions.data.metadataError, "")
-
-connectionsAvailable = false
-const noConnectionVisualOptions = await request("visual_editor_options")
-assert.equal(noConnectionVisualOptions.data.connection, null)
-assert.deepEqual(noConnectionVisualOptions.data.checkpoints, [])
-assert.match(noConnectionVisualOptions.data.metadataError, /Configure a SwarmUI/i)
-connectionsAvailable = true
-
-permissions.delete("cors_proxy")
-const metadataBlockedVisualOptions = await request("visual_editor_options")
-assert.equal(metadataBlockedVisualOptions.data.connection.id, "swarm-1")
-assert.deepEqual(metadataBlockedVisualOptions.data.checkpoints, [])
-assert.deepEqual(metadataBlockedVisualOptions.data.swarmPresets, [])
-assert.match(metadataBlockedVisualOptions.data.metadataError, /CORS Proxy/i)
-permissions.add("cors_proxy")
 
 const workflow = await request("load_swarm_workflow", {
   connectionId: "swarm-1",
@@ -644,11 +541,6 @@ const storedWorkflowOverride = JSON.parse(generated.data.record.parameters.rawRe
 assert.equal(storedWorkflowOverride.comfyuicustomworkflow, "Portrait/Inpaint")
 assert.equal(storedWorkflowOverride.comfyrawworkflowinputimageinitc, "[workflow image omitted from history]")
 assert.equal(generated.data.outputs[0].studioMetadata.imageId, "image-1")
-assert.equal(generated.data.outputFolders[0].id, "character:char-1")
-assert.equal(generated.data.outputFolders[0].name, "Mira")
-assert.equal(generated.data.outputFolders[0].kind, "character")
-assert.equal(generated.data.outputFolders[0].characterId, "char-1")
-assert.deepEqual(generated.data.outputFolders[0].imageIds, ["image-1"])
 const started = sent.find((entry) => entry.payload.type === "generation_started")
 assert.equal(started.payload.clientJobId, "studio-job-1")
 assert.equal(started.payload.data.connectionId, "swarm-1")
@@ -709,25 +601,10 @@ const movedFolders = await request("move_output_to_folder", {
   folderId,
 })
 assert.deepEqual(movedFolders.data[0].imageIds, ["image-1"])
-assert.deepEqual(
-  movedFolders.data.find((folder) => folder.id === "character:char-1").imageIds,
-  ["image-1"],
-)
 
 const library = await request("list_library_outputs")
 assert.equal(library.data.outputs.length, 1)
 assert.equal(library.data.folders[0].name, "Favorites")
-
-const characterGallery = await request("list_character_gallery", { characterId: "char-1" })
-assert.equal(characterGallery.data.characterId, "char-1")
-assert.equal(characterGallery.data.folderId, "character:char-1")
-assert.equal(characterGallery.data.outputs[0].id, "image-1")
-assert.equal(characterGallery.data.total, 1)
-
-const protectedCharacterFolder = await requestError("delete_output_folder", {
-  folderId: "character:char-1",
-})
-assert.match(protectedCharacterFolder.error, /managed automatically/i)
 
 const bulkMoved = await request("bulk_move_outputs", {
   imageIds: ["image-1"],
@@ -742,30 +619,11 @@ const appended = await request("append_output_to_chat", {
 assert.equal(appended.data.messageId, "message-image-1")
 assert.equal(appended.data.imageId, "image-1")
 assert.ok(appendedMessage)
-assert.equal(appendedMessage.metadata.source_turn_id, "turn-42")
-assert.equal(appendedMessage.metadata.generation.prompt, "ink style, portrait")
-assert.deepEqual(appendedMessage.metadata.generation.presets, ["Cinematic"])
-
-const avatar = await request("set_output_as_character_avatar", {
-  dataUrl: "data:image/png;base64,QUJD",
-  filename: "mira output.png",
-})
-assert.equal(avatar.data.characterId, "char-1")
-assert.equal(avatar.data.characterName, "Mira")
-assert.ok(avatarUpdate)
-
-const palette = await request("apply_output_palette", { imageId: "image-1" })
-assert.equal(palette.data.imageId, "image-1")
-assert.deepEqual(appliedPalette, { accent: { h: 292, s: 63, l: 58 } })
 
 const deleted = await request("bulk_delete_outputs", { imageIds: ["image-1"] })
 assert.deepEqual(deleted.data.deletedIds, ["image-1"])
 assert.deepEqual(deleted.data.failedIds, [])
 assert.equal(deleted.data.outputs.length, 0)
 assert.deepEqual(deleted.data.folders[0].imageIds, [])
-assert.deepEqual(
-  deleted.data.folders.find((folder) => folder.id === "character:char-1").imageIds,
-  [],
-)
 
 console.log("backend contract: ok")
