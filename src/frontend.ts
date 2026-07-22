@@ -2545,7 +2545,7 @@ const STUDIO_V3_STYLES = `
   }
   .ss-mini-context-menu {
     position: fixed;
-    z-index: 2147483300;
+    z-index: 10020;
     width: min(210px, calc(100vw - 16px));
     display: grid;
     gap: 4px;
@@ -3162,7 +3162,6 @@ class MiniPlayerController {
   private readonly ctx: FrontendContext
   private readonly widget: any
   private readonly root: HTMLElement
-  private readonly sizeTarget: HTMLElement
   private readonly openStudio: () => void
   private readonly openLibrary: () => void
   private readonly getStudioDraft: () => StudioDraft | null
@@ -3174,10 +3173,12 @@ class MiniPlayerController {
   private expectedWidth = 318
   private expectedHeight = 94
   private sizeObserver: ResizeObserver | null = null
+  private observedSizeTarget: HTMLElement | null = null
+  private contextMenu: HTMLElement | null = null
   private longPressTimer: number | null = null
   private suppressNextClick = false
   private readonly onDocumentPointerDown = (event: PointerEvent) => {
-    const menu = this.root.querySelector<HTMLElement>('[data-role="mini-context-menu"]')
+    const menu = this.contextMenu
     if (menu && !menu.hidden && !menu.contains(event.target as Node)) this.closeContextMenu()
   }
   private readonly onDocumentKeyDown = (event: KeyboardEvent) => {
@@ -3224,12 +3225,6 @@ class MiniPlayerController {
     this.ctx = ctx
     this.widget = widget
     this.root = widget.root
-    // createFloatWidget puts widget.root inside the fixed, host-owned wrapper.
-    // Size that wrapper along with the widget API so a route/drawer transition
-    // cannot leave the old 1:1 box wrapped around expanded Quick Create.
-    this.sizeTarget = this.root.classList.contains("ss-miniplayer-app-surface")
-      ? this.root
-      : (this.root.parentElement as HTMLElement | null) || this.root
     this.root.style.width = "100%"
     this.root.style.height = "100%"
     this.openStudio = openStudio
@@ -3239,23 +3234,21 @@ class MiniPlayerController {
     this.behavior = { ...behavior }
     try {
       const stored = JSON.parse(window.localStorage.getItem(MINIPLAYER_STORAGE_KEY) || "{}")
-      // Mobile Quick Create deliberately boots expanded. The stored collapsed
-      // preference applies again only after the user minimizes this session.
       this.collapsed = this.isMobileViewport()
-        ? !this.behavior.mobileQuickCreate
+        ? true
         : stored.collapsed === true
       this.expanded = !this.collapsed
     } catch {
-      this.collapsed = this.isMobileViewport() && !this.behavior.mobileQuickCreate
+      this.collapsed = this.isMobileViewport()
       this.expanded = !this.collapsed
     }
     this.root.innerHTML = `
       <div class="ss-miniplayer" data-role="miniplayer" data-state="idle" data-collapsed="false" data-expanded="true" data-indeterminate="false">
-        <button class="ss-mini-preview" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">
+        <div class="ss-mini-preview" data-action="mini-open" role="button" tabindex="0" title="Open Swarm Studio" aria-label="Open Swarm Studio">
           <span data-role="mini-placeholder">${FRAME_WALL_ICON}</span>
           <img data-role="mini-image" alt="Latest Swarm Studio preview" hidden />
           <span class="ss-mini-live-dot" aria-hidden="true"></span>
-        </button>
+        </div>
         <div class="ss-mini-copy">
           <div class="ss-mini-title"><span>Swarm Studio</span><span class="ss-mini-state" data-role="mini-state">Ready</span></div>
           <div class="ss-mini-status" data-role="mini-status">Ready when inspiration hits.</div>
@@ -3291,7 +3284,15 @@ class MiniPlayerController {
         <button class="ss-mini-context-action" data-action="mini-menu-hide" role="menuitem"><span aria-hidden="true">×</span><span>Hide widget</span></button>
       </div>
     `
-    this.root.addEventListener("click", (event) => {
+    this.contextMenu = this.root.querySelector<HTMLElement>('[data-role="mini-context-menu"]')
+    if (this.contextMenu) {
+      // Lumi's native float wrapper is intentionally only as large as the
+      // widget chrome. Portal the menu so a minimized 1:1 host cannot clip or
+      // swallow its actions.
+      this.contextMenu.remove()
+      this.root.ownerDocument.documentElement.appendChild(this.contextMenu)
+    }
+    const handleAction = (event: Event) => {
       const button = (event.target as HTMLElement).closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
@@ -3312,13 +3313,21 @@ class MiniPlayerController {
       if (action === "mini-generate") this.snapshotValue.active ? this.interrupt() : this.quickGenerate()
       if (action === "mini-edit-prompt") this.openPromptEditor(button.dataset.promptRole || "")
       if (action?.startsWith("mini-menu-")) this.closeContextMenu()
+    }
+    this.root.addEventListener("click", handleAction)
+    this.contextMenu?.addEventListener("click", handleAction)
+    this.root.addEventListener("keydown", (event) => {
+      if (!this.collapsed || (event.key !== "Enter" && event.key !== " ")) return
+      if (!(event.target as HTMLElement).closest('[data-action="mini-open"]')) return
+      event.preventDefault()
+      this.activateWidget()
     })
     this.root.addEventListener("pointerdown", (event) => {
       const target = event.target as HTMLElement
-      if (this.isMobileOrb() || target.closest("button, input, textarea, select, a, [data-action]")) {
+      if (!this.collapsed && target.closest("button, input, textarea, select, a, [data-action]")) {
         // Lumi's float widget makes its entire chrome draggable. Stop the
-        // bubbled pointerdown after the real control receives it so text
-        // fields can focus and buttons do not start a widget drag.
+        // bubbled pointerdown for expanded controls. The collapsed preview is
+        // deliberately allowed through so the only visible surface can drag.
         event.stopPropagation()
       }
       if (event.button === 0 && target.closest('[data-action="mini-open"]')) {
@@ -3335,17 +3344,20 @@ class MiniPlayerController {
     document.addEventListener("keydown", this.onDocumentKeyDown)
     window.addEventListener("resize", this.onWindowResize)
     if (typeof ResizeObserver === "function") {
-      this.sizeObserver = new ResizeObserver((entries) => {
+      this.sizeObserver = new ResizeObserver(() => {
         if (this.studioOpen || !this.behavior.widgetEnabled) return
-        for (const entry of entries) {
-          const { width, height } = entry.contentRect
-          if (width <= 0 || height <= 0) continue
-          if (Math.abs(width - this.expectedWidth) > 2 || Math.abs(height - this.expectedHeight) > 2) {
-            this.applyWidgetSize(this.expectedWidth, this.expectedHeight)
-          }
+        const targets = this.widgetSizeTargets()
+        this.observeSizeTarget(targets[targets.length - 1] || this.root)
+        const mismatched = targets.some((target) => {
+          const { width, height } = target.getBoundingClientRect()
+          return width > 0 && height > 0
+            && (Math.abs(width - this.expectedWidth) > 2 || Math.abs(height - this.expectedHeight) > 2)
+        })
+        if (mismatched) {
+          this.applyWidgetSize(this.expectedWidth, this.expectedHeight)
         }
       })
-      this.sizeObserver.observe(this.sizeTarget)
+      this.observeSizeTarget(this.root)
     }
     this.setCollapsed(this.collapsed)
     this.setBehavior(this.behavior)
@@ -3354,14 +3366,13 @@ class MiniPlayerController {
 
   setAppearance(appearance: StudioAppearance): void {
     applyAppearanceVariables(this.root, appearance)
+    if (this.contextMenu) applyAppearanceVariables(this.contextMenu, appearance)
   }
 
   setBehavior(behavior: StudioBehavior): void {
-    const enabledMobileQuickCreate = !this.behavior.mobileQuickCreate && behavior.mobileQuickCreate
     this.behavior = { ...behavior }
     if (this.isMobileViewport()) {
       if (!this.behavior.mobileQuickCreate && !this.collapsed) this.setCollapsed(true)
-      else if (enabledMobileQuickCreate && this.collapsed) this.setCollapsed(false)
     }
     this.syncVisibility()
     this.render()
@@ -3577,11 +3588,13 @@ class MiniPlayerController {
     document.removeEventListener("keydown", this.onDocumentKeyDown)
     window.removeEventListener("resize", this.onWindowResize)
     this.sizeObserver?.disconnect()
+    this.contextMenu?.remove()
     this.widget.destroy()
   }
 
   private syncVisibility(): void {
     const visible = this.behavior.widgetEnabled && !this.studioOpen
+    if (!visible) this.closeContextMenu()
     if (typeof this.widget.setVisible === "function") this.widget.setVisible(visible)
     else this.root.hidden = !visible
   }
@@ -3628,6 +3641,10 @@ class MiniPlayerController {
   }
 
   private activateWidget(): void {
+    if (this.collapsed && this.isMobileViewport() && this.behavior.mobileQuickCreate) {
+      this.setCollapsed(false)
+      return
+    }
     this.openStudio()
   }
 
@@ -3667,7 +3684,7 @@ class MiniPlayerController {
   }
 
   private showContextMenu(clientX: number, clientY: number): void {
-    const menu = this.root.querySelector<HTMLElement>('[data-role="mini-context-menu"]')
+    const menu = this.contextMenu
     if (!menu) return
     const toggle = menu.querySelector<HTMLButtonElement>('[data-action="mini-menu-toggle"]')
     if (toggle) {
@@ -3683,15 +3700,16 @@ class MiniPlayerController {
     menu.style.left = "8px"
     menu.style.top = "8px"
     const bounds = menu.getBoundingClientRect()
-    const left = clamp(clientX, 8, Math.max(8, window.innerWidth - bounds.width - 8))
-    const top = clamp(clientY, 8, Math.max(8, window.innerHeight - bounds.height - 8))
+    const viewport = this.root.ownerDocument.documentElement
+    const left = clamp(clientX, 8, Math.max(8, viewport.clientWidth - bounds.width - 8))
+    const top = clamp(clientY, 8, Math.max(8, viewport.clientHeight - bounds.height - 8))
     menu.style.left = `${Math.round(left)}px`
     menu.style.top = `${Math.round(top)}px`
     menu.querySelector<HTMLButtonElement>("button:not([hidden]):not(:disabled)")?.focus()
   }
 
   private closeContextMenu(): void {
-    const menu = this.root.querySelector<HTMLElement>('[data-role="mini-context-menu"]')
+    const menu = this.contextMenu
     if (menu) menu.hidden = true
   }
 
@@ -3846,12 +3864,31 @@ class MiniPlayerController {
 
   private applyWidgetSize(width: number, height: number): void {
     this.widget.setSize?.(width, height)
-    this.sizeTarget.style.setProperty("width", `${width}px`, "important")
-    this.sizeTarget.style.setProperty("height", `${height}px`, "important")
-    if (this.root.classList.contains("ss-miniplayer-app-surface")) {
-      this.root.style.setProperty("width", `${width}px`, "important")
-      this.root.style.setProperty("height", `${height}px`, "important")
+    const targets = this.widgetSizeTargets()
+    for (const target of targets) {
+      target.style.setProperty("width", `${width}px`, "important")
+      target.style.setProperty("height", `${height}px`, "important")
     }
+    this.observeSizeTarget(targets[targets.length - 1] || this.root)
+  }
+
+  private widgetSizeTargets(): HTMLElement[] {
+    const targets: HTMLElement[] = [this.root]
+    if (this.root.classList.contains("ss-miniplayer-app-surface")) return targets
+    let current = this.root.parentElement as HTMLElement | null
+    while (current && current !== this.root.ownerDocument.body && current !== this.root.ownerDocument.documentElement) {
+      targets.push(current)
+      if (getComputedStyle(current).position === "fixed") break
+      current = current.parentElement as HTMLElement | null
+    }
+    return targets
+  }
+
+  private observeSizeTarget(target: HTMLElement): void {
+    if (!this.sizeObserver || this.observedSizeTarget === target) return
+    this.sizeObserver.disconnect()
+    this.sizeObserver.observe(target)
+    this.observedSizeTarget = target
   }
 
   private render(): void {
@@ -3866,6 +3903,17 @@ class MiniPlayerController {
     mini.dataset.mobileOrb = String(mobileOrb)
     mini.dataset.collapsed = String(this.collapsed)
     mini.dataset.expanded = String(this.expanded)
+    if (this.collapsed) {
+      mini.dataset.action = "mini-open"
+      mini.setAttribute("role", "button")
+      mini.tabIndex = 0
+      mini.setAttribute("aria-label", "Open Swarm Studio")
+    } else {
+      delete mini.dataset.action
+      mini.removeAttribute("role")
+      mini.removeAttribute("tabindex")
+      mini.removeAttribute("aria-label")
+    }
     mini.dataset.indeterminate = String(this.state === "running" && !hasTotal)
     mini.style.setProperty("--ss-mini-progress", `${percentage}%`)
     const labels = { idle: "Ready", running: "Live", done: "Done", error: "Stopped" }

@@ -2328,7 +2328,7 @@ const STUDIO_V3_STYLES = `
   }
   .ss-mini-context-menu {
     position: fixed;
-    z-index: 2147483300;
+    z-index: 10020;
     width: min(210px, calc(100vw - 16px));
     display: grid;
     gap: 4px;
@@ -2891,7 +2891,6 @@ class MiniPlayerController {
     ctx;
     widget;
     root;
-    sizeTarget;
     openStudio;
     openLibrary;
     getStudioDraft;
@@ -2903,10 +2902,12 @@ class MiniPlayerController {
     expectedWidth = 318;
     expectedHeight = 94;
     sizeObserver = null;
+    observedSizeTarget = null;
+    contextMenu = null;
     longPressTimer = null;
     suppressNextClick = false;
     onDocumentPointerDown = (event)=>{
-        const menu = this.root.querySelector('[data-role="mini-context-menu"]');
+        const menu = this.contextMenu;
         if (menu && !menu.hidden && !menu.contains(event.target)) this.closeContextMenu();
     };
     onDocumentKeyDown = (event)=>{
@@ -2941,7 +2942,6 @@ class MiniPlayerController {
         this.ctx = ctx;
         this.widget = widget;
         this.root = widget.root;
-        this.sizeTarget = this.root.classList.contains("ss-miniplayer-app-surface") ? this.root : this.root.parentElement || this.root;
         this.root.style.width = "100%";
         this.root.style.height = "100%";
         this.openStudio = openStudio;
@@ -2953,19 +2953,19 @@ class MiniPlayerController {
         };
         try {
             const stored = JSON.parse(window.localStorage.getItem(MINIPLAYER_STORAGE_KEY) || "{}");
-            this.collapsed = this.isMobileViewport() ? !this.behavior.mobileQuickCreate : stored.collapsed === true;
+            this.collapsed = this.isMobileViewport() ? true : stored.collapsed === true;
             this.expanded = !this.collapsed;
         } catch  {
-            this.collapsed = this.isMobileViewport() && !this.behavior.mobileQuickCreate;
+            this.collapsed = this.isMobileViewport();
             this.expanded = !this.collapsed;
         }
         this.root.innerHTML = `
       <div class="ss-miniplayer" data-role="miniplayer" data-state="idle" data-collapsed="false" data-expanded="true" data-indeterminate="false">
-        <button class="ss-mini-preview" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">
+        <div class="ss-mini-preview" data-action="mini-open" role="button" tabindex="0" title="Open Swarm Studio" aria-label="Open Swarm Studio">
           <span data-role="mini-placeholder">${FRAME_WALL_ICON}</span>
           <img data-role="mini-image" alt="Latest Swarm Studio preview" hidden />
           <span class="ss-mini-live-dot" aria-hidden="true"></span>
-        </button>
+        </div>
         <div class="ss-mini-copy">
           <div class="ss-mini-title"><span>Swarm Studio</span><span class="ss-mini-state" data-role="mini-state">Ready</span></div>
           <div class="ss-mini-status" data-role="mini-status">Ready when inspiration hits.</div>
@@ -3001,7 +3001,12 @@ class MiniPlayerController {
         <button class="ss-mini-context-action" data-action="mini-menu-hide" role="menuitem"><span aria-hidden="true">×</span><span>Hide widget</span></button>
       </div>
     `;
-        this.root.addEventListener("click", (event)=>{
+        this.contextMenu = this.root.querySelector('[data-role="mini-context-menu"]');
+        if (this.contextMenu) {
+            this.contextMenu.remove();
+            this.root.ownerDocument.documentElement.appendChild(this.contextMenu);
+        }
+        const handleAction = (event)=>{
             const button = event.target.closest("[data-action]");
             if (!button) return;
             const action = button.dataset.action;
@@ -3025,10 +3030,18 @@ class MiniPlayerController {
             if (action === "mini-generate") this.snapshotValue.active ? this.interrupt() : this.quickGenerate();
             if (action === "mini-edit-prompt") this.openPromptEditor(button.dataset.promptRole || "");
             if (action?.startsWith("mini-menu-")) this.closeContextMenu();
+        };
+        this.root.addEventListener("click", handleAction);
+        this.contextMenu?.addEventListener("click", handleAction);
+        this.root.addEventListener("keydown", (event)=>{
+            if (!this.collapsed || event.key !== "Enter" && event.key !== " ") return;
+            if (!event.target.closest('[data-action="mini-open"]')) return;
+            event.preventDefault();
+            this.activateWidget();
         });
         this.root.addEventListener("pointerdown", (event)=>{
             const target = event.target;
-            if (this.isMobileOrb() || target.closest("button, input, textarea, select, a, [data-action]")) {
+            if (!this.collapsed && target.closest("button, input, textarea, select, a, [data-action]")) {
                 event.stopPropagation();
             }
             if (event.button === 0 && target.closest('[data-action="mini-open"]')) {
@@ -3045,17 +3058,19 @@ class MiniPlayerController {
         document.addEventListener("keydown", this.onDocumentKeyDown);
         window.addEventListener("resize", this.onWindowResize);
         if (typeof ResizeObserver === "function") {
-            this.sizeObserver = new ResizeObserver((entries)=>{
+            this.sizeObserver = new ResizeObserver(()=>{
                 if (this.studioOpen || !this.behavior.widgetEnabled) return;
-                for (const entry of entries){
-                    const { width, height } = entry.contentRect;
-                    if (width <= 0 || height <= 0) continue;
-                    if (Math.abs(width - this.expectedWidth) > 2 || Math.abs(height - this.expectedHeight) > 2) {
-                        this.applyWidgetSize(this.expectedWidth, this.expectedHeight);
-                    }
+                const targets = this.widgetSizeTargets();
+                this.observeSizeTarget(targets[targets.length - 1] || this.root);
+                const mismatched = targets.some((target)=>{
+                    const { width, height } = target.getBoundingClientRect();
+                    return width > 0 && height > 0 && (Math.abs(width - this.expectedWidth) > 2 || Math.abs(height - this.expectedHeight) > 2);
+                });
+                if (mismatched) {
+                    this.applyWidgetSize(this.expectedWidth, this.expectedHeight);
                 }
             });
-            this.sizeObserver.observe(this.sizeTarget);
+            this.observeSizeTarget(this.root);
         }
         this.setCollapsed(this.collapsed);
         this.setBehavior(this.behavior);
@@ -3063,15 +3078,14 @@ class MiniPlayerController {
     }
     setAppearance(appearance) {
         applyAppearanceVariables(this.root, appearance);
+        if (this.contextMenu) applyAppearanceVariables(this.contextMenu, appearance);
     }
     setBehavior(behavior) {
-        const enabledMobileQuickCreate = !this.behavior.mobileQuickCreate && behavior.mobileQuickCreate;
         this.behavior = {
             ...behavior
         };
         if (this.isMobileViewport()) {
             if (!this.behavior.mobileQuickCreate && !this.collapsed) this.setCollapsed(true);
-            else if (enabledMobileQuickCreate && this.collapsed) this.setCollapsed(false);
         }
         this.syncVisibility();
         this.render();
@@ -3257,10 +3271,12 @@ class MiniPlayerController {
         document.removeEventListener("keydown", this.onDocumentKeyDown);
         window.removeEventListener("resize", this.onWindowResize);
         this.sizeObserver?.disconnect();
+        this.contextMenu?.remove();
         this.widget.destroy();
     }
     syncVisibility() {
         const visible = this.behavior.widgetEnabled && !this.studioOpen;
+        if (!visible) this.closeContextMenu();
         if (typeof this.widget.setVisible === "function") this.widget.setVisible(visible);
         else this.root.hidden = !visible;
     }
@@ -3295,6 +3311,10 @@ class MiniPlayerController {
         return this.isMobileViewport() && this.collapsed;
     }
     activateWidget() {
+        if (this.collapsed && this.isMobileViewport() && this.behavior.mobileQuickCreate) {
+            this.setCollapsed(false);
+            return;
+        }
         this.openStudio();
     }
     cancelLongPress() {
@@ -3331,7 +3351,7 @@ class MiniPlayerController {
         }, 560);
     }
     showContextMenu(clientX, clientY) {
-        const menu = this.root.querySelector('[data-role="mini-context-menu"]');
+        const menu = this.contextMenu;
         if (!menu) return;
         const toggle = menu.querySelector('[data-action="mini-menu-toggle"]');
         if (toggle) {
@@ -3347,14 +3367,15 @@ class MiniPlayerController {
         menu.style.left = "8px";
         menu.style.top = "8px";
         const bounds = menu.getBoundingClientRect();
-        const left = clamp(clientX, 8, Math.max(8, window.innerWidth - bounds.width - 8));
-        const top = clamp(clientY, 8, Math.max(8, window.innerHeight - bounds.height - 8));
+        const viewport = this.root.ownerDocument.documentElement;
+        const left = clamp(clientX, 8, Math.max(8, viewport.clientWidth - bounds.width - 8));
+        const top = clamp(clientY, 8, Math.max(8, viewport.clientHeight - bounds.height - 8));
         menu.style.left = `${Math.round(left)}px`;
         menu.style.top = `${Math.round(top)}px`;
         menu.querySelector("button:not([hidden]):not(:disabled)")?.focus();
     }
     closeContextMenu() {
-        const menu = this.root.querySelector('[data-role="mini-context-menu"]');
+        const menu = this.contextMenu;
         if (menu) menu.hidden = true;
     }
     appendLatestToChat() {
@@ -3491,12 +3512,31 @@ class MiniPlayerController {
     }
     applyWidgetSize(width, height) {
         this.widget.setSize?.(width, height);
-        this.sizeTarget.style.setProperty("width", `${width}px`, "important");
-        this.sizeTarget.style.setProperty("height", `${height}px`, "important");
-        if (this.root.classList.contains("ss-miniplayer-app-surface")) {
-            this.root.style.setProperty("width", `${width}px`, "important");
-            this.root.style.setProperty("height", `${height}px`, "important");
+        const targets = this.widgetSizeTargets();
+        for (const target of targets){
+            target.style.setProperty("width", `${width}px`, "important");
+            target.style.setProperty("height", `${height}px`, "important");
         }
+        this.observeSizeTarget(targets[targets.length - 1] || this.root);
+    }
+    widgetSizeTargets() {
+        const targets = [
+            this.root
+        ];
+        if (this.root.classList.contains("ss-miniplayer-app-surface")) return targets;
+        let current = this.root.parentElement;
+        while(current && current !== this.root.ownerDocument.body && current !== this.root.ownerDocument.documentElement){
+            targets.push(current);
+            if (getComputedStyle(current).position === "fixed") break;
+            current = current.parentElement;
+        }
+        return targets;
+    }
+    observeSizeTarget(target) {
+        if (!this.sizeObserver || this.observedSizeTarget === target) return;
+        this.sizeObserver.disconnect();
+        this.sizeObserver.observe(target);
+        this.observedSizeTarget = target;
     }
     render() {
         const mini = this.root.querySelector('[data-role="miniplayer"]');
@@ -3508,6 +3548,17 @@ class MiniPlayerController {
         mini.dataset.mobileOrb = String(mobileOrb);
         mini.dataset.collapsed = String(this.collapsed);
         mini.dataset.expanded = String(this.expanded);
+        if (this.collapsed) {
+            mini.dataset.action = "mini-open";
+            mini.setAttribute("role", "button");
+            mini.tabIndex = 0;
+            mini.setAttribute("aria-label", "Open Swarm Studio");
+        } else {
+            delete mini.dataset.action;
+            mini.removeAttribute("role");
+            mini.removeAttribute("tabindex");
+            mini.removeAttribute("aria-label");
+        }
         mini.dataset.indeterminate = String(this.state === "running" && !hasTotal);
         mini.style.setProperty("--ss-mini-progress", `${percentage}%`);
         const labels = {
