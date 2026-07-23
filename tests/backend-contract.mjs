@@ -13,7 +13,7 @@ let frontendHandler
 const sent = []
 const secrets = new Map()
 const userFiles = new Map()
-const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "characters", "personas", "presets", "chat_mutation", "interceptor"])
+const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "characters", "personas", "chat_mutation", "interceptor"])
 let imageDeleted = false
 let presetAdded = false
 let presetDeleted = false
@@ -242,29 +242,6 @@ globalThis.spindle = {
       assert.equal(userId, "user-1")
       Object.assign(activePersona, structuredClone(input))
       return structuredClone(activePersona)
-    },
-  },
-  presets: {
-    async list(options) {
-      assert.equal(options.limit, 200)
-      return {
-        data: [{ id: "lumi-preset-1", name: "Persona preset" }],
-        total: 1,
-      }
-    },
-    async get(presetId) {
-      assert.equal(presetId, "lumi-preset-1")
-      return {
-        id: presetId,
-        name: "Persona preset",
-        prompt_order: [{
-          id: "persona-block",
-          name: "Persona",
-          marker: "persona",
-          enabled: true,
-          content: "portrait identity: {{persona}}",
-        }],
-      }
     },
   },
   chat: {
@@ -900,11 +877,6 @@ assert.equal(personaVisuals.data.personaBinding.presetId, personaVisuals.data.pe
 assert.equal(personaVisuals.data.activePersonaPreset.positivePrompt, "1girl, silver hair, blue eyes, black hoodie")
 assert.equal(macroValues.get("persona_base"), "1girl, silver hair, blue eyes, black hoodie")
 assert.equal(activePersona.metadata.swarm_studio_visuals.enabled, true)
-const importedPersonaPrompt = await request("import_lumiverse_persona_preset", {
-  presetId: "lumi-preset-1",
-})
-assert.equal(importedPersonaPrompt.data.presetName, "Persona preset")
-assert.match(importedPersonaPrompt.data.prompt, /portrait identity: 1girl, short silver hair/)
 const chatVisuals = await request("get_chat_visuals", {
   currentStack: [{
     name: "styles/ink.safetensors",
@@ -917,7 +889,9 @@ const chatVisuals = await request("get_chat_visuals", {
 assert.equal(chatVisuals.data.activeChat.characterName, "Lior")
 assert.equal(chatVisuals.data.activePersona.name, "User")
 assert.equal(chatVisuals.data.studioStack[0].name, "styles/ink.safetensors")
-assert.equal(chatVisuals.data.lumiversePresets[0].name, "Persona preset")
+assert.equal(chatVisuals.data.models[0].id, "base.safetensors")
+assert.equal(chatVisuals.data.studioConnectionId, "swarm-1")
+assert.equal(chatVisuals.data.studioModel, "base.safetensors")
 const intercepted = await interceptorHandler([
   {
     role: "assistant",
@@ -977,6 +951,7 @@ assert.equal(storedFoldersAfterTag[0].binding.positivePrompt, "1boy, black hair,
 const customCharacterVisuals = await request("save_chat_visuals", {
   positivePrompt: "1boy, black hair, red eyes",
   negativePrompt: "wrong eye color",
+  checkpoint: "base.safetensors",
   stackPresetId: "",
   stackSnapshot: [{
     name: "styles/ink.safetensors",
@@ -990,18 +965,21 @@ const customCharacterVisuals = await request("save_chat_visuals", {
 assert.equal(customCharacterVisuals.data.characterFolder.binding.stackPresetId, "")
 assert.equal(customCharacterVisuals.data.characterFolder.binding.stackSnapshot[0].weight, 0.61)
 assert.equal(customCharacterVisuals.data.characterFolder.binding.negativePrompt, "wrong eye color")
+assert.equal(customCharacterVisuals.data.characterFolder.binding.checkpoint, "base.safetensors")
 
 const visualFolders = await request("update_output_folder_profile", {
   folderId: storedFoldersAfterTag[0].id,
   profile: {
     positivePrompt: "1boy, red eyes, black hair, signature coat",
     negativePrompt: "wrong eye color",
+    checkpoint: "base.safetensors",
     stackPresetId: savedStack.data[0].id,
     enabled: false,
   },
 })
 assert.equal(visualFolders.data[0].binding.positivePrompt, "1boy, red eyes, black hair, signature coat")
 assert.equal(visualFolders.data[0].binding.negativePrompt, "wrong eye color")
+assert.equal(visualFolders.data[0].binding.checkpoint, "base.safetensors")
 assert.equal(visualFolders.data[0].binding.stackPresetId, savedStack.data[0].id)
 assert.equal(visualFolders.data[0].binding.enabled, false)
 

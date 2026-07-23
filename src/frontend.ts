@@ -174,6 +174,7 @@ interface OutputFolder {
     characterId: string
     positivePrompt: string
     negativePrompt: string
+    checkpoint: string
     stackPresetId: string
     stackSnapshot: StackPresetItem[]
     enabled: boolean
@@ -187,6 +188,13 @@ interface PersonaVisualPreset {
   positivePrompt: string
   sourcePresetId: string
   updatedAt: number
+}
+
+interface LumiversePersonaPromptPreset {
+  id: string
+  name: string
+  prompt: string
+  negativePrompt: string
 }
 
 interface ChatVisualsState {
@@ -207,9 +215,11 @@ interface ChatVisualsState {
     enabled: boolean
   }
   activePersonaPreset: PersonaVisualPreset | null
-  lumiversePresets: Array<{ id: string; name: string }>
   characterFolder: OutputFolder | null
   characterBasePrompt: string
+  models: Array<{ id: string; label: string }>
+  studioConnectionId: string
+  studioModel: string
   stackPresets: StackPreset[]
   studioStack: StackPresetItem[]
   studioStackPresetId: string
@@ -558,10 +568,24 @@ const STYLES = `
   .ss-launcher-actions .ss-button {
     min-width: 0;
     min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
     padding-inline: 10px;
     font-family: Georgia, Cambria, "Times New Roman", serif;
     font-size: 10px;
     letter-spacing: .025em;
+  }
+  .ss-launcher-actions .ss-button svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .ss-launcher-actions .ss-launcher-visuals-button {
     grid-column: 1 / -1;
@@ -651,6 +675,54 @@ const STYLES = `
   .ss-chat-visuals-section-head > div:first-child { min-width: 0; flex: 1; }
   .ss-chat-visuals-section-head strong { display: block; font-size: 11px; }
   .ss-chat-visuals-section-head span { display: block; margin-top: 2px; color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-toggle-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--lumiverse-text-muted);
+    font-size: 9px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .ss-toggle-line input {
+    appearance: none;
+    width: 30px;
+    height: 17px;
+    margin: 0;
+    position: relative;
+    flex: 0 0 auto;
+    border: 1px solid color-mix(in srgb, var(--ss-outline) 88%, #fff 12%);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--ss-canvas-bg) 84%, #fff 4%);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,.38);
+    transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+  }
+  .ss-toggle-line input::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--lumiverse-text-muted) 75%, #fff);
+    box-shadow: 0 1px 4px rgba(0,0,0,.45);
+    transition: transform .15s ease, background .15s ease;
+  }
+  .ss-toggle-line input:checked {
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 72%, #fff 8%);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 52%, var(--ss-canvas-bg));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 12%, transparent);
+  }
+  .ss-toggle-line input:checked::after {
+    transform: translateX(13px);
+    background: #fff;
+  }
+  .ss-toggle-line input:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 58%, transparent);
+    outline-offset: 2px;
+  }
+  .ss-toggle-line input:disabled { cursor: not-allowed; opacity: .42; }
   .ss-chat-visuals-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -2348,7 +2420,7 @@ const STUDIO_V3_STYLES = `
   .ss-library-visual-summary-meta { display: inline-flex; align-items: center; gap: 8px; color: var(--lumiverse-accent); font-size: 8px; }
   .ss-library-visual-caret { display: inline-block; color: var(--lumiverse-text); font-size: 13px; line-height: 1; transition: transform .16s ease; }
   .ss-library-visual-profile[open] .ss-library-visual-caret { transform: rotate(180deg); }
-  .ss-library-visual-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(150px, .6fr) auto; gap: 7px; align-items: end; padding: 0 10px 10px; }
+  .ss-library-visual-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(130px, .55fr) minmax(130px, .55fr) auto; gap: 7px; align-items: end; padding: 0 10px 10px; }
   .ss-library-visual-fields .ss-textarea { min-height: 58px; max-height: 110px; resize: vertical; }
   .ss-library-visual-fields .ss-button { min-height: 32px; }
   .ss-new-folder-card { width: min(520px, calc(100vw - 28px)); }
@@ -2394,7 +2466,33 @@ const STUDIO_V3_STYLES = `
     background: rgba(0,0,0,.72);
     box-shadow: 0 3px 10px rgba(0,0,0,.35);
   }
-  .ss-library-output-check input { width: 14px; height: 14px; accent-color: var(--lumiverse-accent, #7dd3fc); }
+  .ss-library-output-check input {
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(255,255,255,.5);
+    border-radius: 4px;
+    background: rgba(8,9,12,.82);
+  }
+  .ss-library-output-check input::after {
+    content: "✓";
+    color: #071014;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1;
+    opacity: 0;
+    transform: scale(.7);
+    transition: opacity .12s ease, transform .12s ease;
+  }
+  .ss-library-output-check input:checked {
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 75%, #fff);
+    background: var(--lumiverse-accent, #7dd3fc);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 24%, transparent);
+  }
+  .ss-library-output-check input:checked::after { opacity: 1; transform: scale(1); }
   .ss-output-library[data-selection-mode="false"] .ss-library-output-check { display: none; }
   .ss-library-output-button {
     width: 100%;
@@ -5679,10 +5777,11 @@ are removed when CSS is applied.</pre>
           </aside>
           <main class="ss-library-main">
             <details class="ss-library-visual-profile" data-role="library-visual-profile" hidden>
-              <summary><span><strong data-role="visual-profile-title">Character visuals</strong><small>Positive · negative · LoRA stack</small></span><span class="ss-library-visual-summary-meta"><span data-role="visual-profile-state">Active</span><span class="ss-library-visual-caret" aria-hidden="true">∨</span></span></summary>
+              <summary><span><strong data-role="visual-profile-title">Character visuals</strong><small>Positive · negative · checkpoint · LoRA stack</small></span><span class="ss-library-visual-summary-meta"><span data-role="visual-profile-state">Active</span><span class="ss-library-visual-caret" aria-hidden="true">∨</span></span></summary>
               <div class="ss-library-visual-fields">
                 <label class="ss-field"><span>Positive base</span><textarea class="ss-textarea" data-role="visual-positive" placeholder="Character identity and consistent visual tags…"></textarea></label>
                 <label class="ss-field"><span>Negative base</span><textarea class="ss-textarea" data-role="visual-negative" placeholder="Things to consistently avoid…"></textarea></label>
+                <label class="ss-field"><span>Checkpoint</span><select class="ss-select" data-role="visual-checkpoint"><option value="">Use current Studio checkpoint</option></select></label>
                 <label class="ss-field"><span>Base LoRA stack</span><select class="ss-select" data-role="visual-stack"><option value="">No bound stack</option></select></label>
                 <button class="ss-button ss-button-primary" data-action="save-visual-profile">Save visual binding</button>
               </div>
@@ -6540,6 +6639,7 @@ are removed when CSS is applied.</pre>
       this.pendingDraftRestore = null
       this.restoreDraft(draft)
     }
+    this.hydrateActiveVisualStack(true)
     this.updateFamilyChip()
     this.showMetadataError(data.metadataError || "")
     this.renderLoras()
@@ -8804,28 +8904,57 @@ are removed when CSS is applied.</pre>
       this.setStackPresetSelection(binding.stackPresetId)
       return false
     }
+
+    let checkpointLoaded = !binding.checkpoint
+    if (binding.checkpoint) {
+      const modelSelect = this.get<HTMLSelectElement>('[data-role="model"]')
+      const normalized = normalizeModelName(binding.checkpoint)
+      const matchingOption = [...modelSelect.options].find((option) => {
+        const candidate = normalizeModelName(option.value)
+        return candidate === normalized || candidate.endsWith(normalized) || normalized.endsWith(candidate)
+      })
+      if (matchingOption) {
+        modelSelect.value = matchingOption.value
+        checkpointLoaded = true
+        this.updateFamilyChip()
+        this.renderLoras()
+        this.renderStack()
+      }
+    }
+
     const preset = this.state.stackPresets.find((candidate) => candidate.id === binding.stackPresetId)
     const items = preset?.items?.length ? preset.items : binding.stackSnapshot || []
-    if (!items.length) return false
-    this.hydratedVisualCharacterId = binding.characterId
-    this.state.stack = items.map((item) => {
-      const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl)
-      return {
-        lora,
-        weight: clamp(Number(item.weight) || 1, -10, 10),
-        enabled: item.enabled !== false,
-        useTrigger: Boolean(item.useTrigger && lora.triggerPhrase),
+    if (items.length) {
+      this.state.stack = items.map((item) => {
+        const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl)
+        return {
+          lora,
+          weight: clamp(Number(item.weight) || 1, -10, 10),
+          enabled: item.enabled !== false,
+          useTrigger: Boolean(item.useTrigger && lora.triggerPhrase),
+        }
+      })
+      this.setStackPresetSelection(preset?.id || "")
+      this.renderStack()
+      this.renderLoras()
+    }
+
+    if (!checkpointLoaded) {
+      if (this.state.models.length) {
+        this.setRunStatus(`“${binding.checkpoint}” from ${folder.name} is not available on this SwarmUI connection.`, true)
       }
-    })
-    this.setStackPresetSelection(preset?.id || "")
-    this.renderStack()
-    this.renderLoras()
-    this.setRunStatus(
-      preset
-        ? `Loaded “${preset.name}” from ${folder.name} visuals.`
-        : `Loaded the Custom stack snapshot from ${folder.name} visuals.`,
-    )
-    return true
+      return items.length
+    }
+
+    this.hydratedVisualCharacterId = binding.characterId
+    const loadedParts = [
+      binding.checkpoint ? `checkpoint “${binding.checkpoint}”` : "",
+      preset ? `stack “${preset.name}”` : items.length ? "Custom stack" : "",
+    ].filter(Boolean)
+    if (loadedParts.length) {
+      this.setRunStatus(`Loaded ${loadedParts.join(" and ")} from ${folder.name} visuals.`)
+    }
+    return loadedParts.length > 0
   }
 
   private saveVisualProfile(): void {
@@ -8837,13 +8966,14 @@ are removed when CSS is applied.</pre>
     const profile = {
       positivePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value,
       negativePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value,
+      checkpoint: this.get<HTMLSelectElement>('[data-role="visual-checkpoint"]').value,
       stackPresetId: selectedStackId,
       stackSnapshot: selectedStack?.items || (selectedStackValue === "__custom__" ? folder.binding.stackSnapshot : []),
       enabled: folder.binding.enabled,
     }
     folder.binding = { ...folder.binding, ...profile }
     this.send("update_output_folder_profile", { folderId: folder.id, profile })
-    if (folder.binding.characterId === String(this.state.activeChat?.character_id || "") && profile.stackPresetId) {
+    if (folder.binding.characterId === String(this.state.activeChat?.character_id || "")) {
       this.hydratedVisualCharacterId = ""
       this.hydrateActiveVisualStack(true)
     }
@@ -8922,6 +9052,22 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="visual-profile-state"]').textContent = folder.binding.enabled ? "Active" : "Disabled"
     this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value = folder.binding.positivePrompt
     this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value = folder.binding.negativePrompt
+    const checkpoint = this.get<HTMLSelectElement>('[data-role="visual-checkpoint"]')
+    checkpoint.replaceChildren()
+    const current = element("option", "", "Use current Studio checkpoint")
+    current.value = ""
+    checkpoint.appendChild(current)
+    if (folder.binding.checkpoint && !this.state.models.some((model) => model.id === folder.binding?.checkpoint)) {
+      const retained = element("option", "", `${folder.binding.checkpoint} · saved`)
+      retained.value = folder.binding.checkpoint
+      checkpoint.appendChild(retained)
+    }
+    for (const model of this.state.models) {
+      const option = element("option", "", model.label || model.id)
+      option.value = model.id
+      checkpoint.appendChild(option)
+    }
+    checkpoint.value = folder.binding.checkpoint || ""
     const stack = this.get<HTMLSelectElement>('[data-role="visual-stack"]')
     stack.replaceChildren()
     const none = element("option", "", "No bound stack")
@@ -10237,6 +10383,8 @@ class ChatVisualsController {
   private selectedPersonaPresetId = ""
   private selectedStackValue = ""
   private importedSourcePresetId = ""
+  private lumiversePersonaPresets: LumiversePersonaPromptPreset[] = []
+  private lumiversePresetLoadToken = 0
 
   constructor(
     ctx: FrontendContext,
@@ -10278,10 +10426,10 @@ class ChatVisualsController {
             </div>
           </div>
           <div class="ss-chat-visuals-field">
-            <label for="ss-chat-lumi-preset">Pull from Lumiverse preset</label>
+            <label for="ss-chat-lumi-preset">Lumiverse Image Gen persona preset</label>
             <div class="ss-chat-visuals-row">
-              <select id="ss-chat-lumi-preset" class="ss-select" data-role="lumiverse-persona-preset"></select>
-              <button class="ss-button" data-action="import-persona-prompt">Pull identity</button>
+              <select id="ss-chat-lumi-preset" class="ss-select" data-role="lumiverse-persona-preset"><option value="">Loading persona presets…</option></select>
+              <button class="ss-button" data-action="import-persona-prompt">Use preset</button>
             </div>
           </div>
           <div class="ss-chat-visuals-field">
@@ -10307,6 +10455,10 @@ class ChatVisualsController {
               <label for="ss-chat-character-negative">Negative base</label>
               <textarea id="ss-chat-character-negative" class="ss-textarea" data-role="character-negative" placeholder="Things to consistently avoid…"></textarea>
             </div>
+          </div>
+          <div class="ss-chat-visuals-field">
+            <label for="ss-chat-character-checkpoint">Checkpoint</label>
+            <select id="ss-chat-character-checkpoint" class="ss-select" data-role="character-checkpoint"><option value="">Use current Studio checkpoint</option></select>
           </div>
         </section>
 
@@ -10351,6 +10503,10 @@ class ChatVisualsController {
         this.selectedPersonaPresetId = target.value
         this.renderPersonaEditor()
       }
+      if (target.dataset.role === "lumiverse-persona-preset") {
+        this.importedSourcePresetId = target.value
+        this.importPersonaPrompt()
+      }
       if (target.dataset.role === "character-stack") this.selectedStackValue = target.value
     })
   }
@@ -10380,16 +10536,7 @@ class ChatVisualsController {
       this.selectedStackValue = this.defaultStackSelection()
       this.render()
       this.setStatus("Chat visual bindings are synchronized.")
-      return
-    }
-    if (payload?.type === "lumiverse_persona_prompt_result") {
-      this.importedSourcePresetId = String(payload.data?.presetId || "")
-      this.get<HTMLTextAreaElement>("persona-positive").value = String(payload.data?.prompt || "")
-      this.setStatus(
-        payload.data?.prompt
-          ? `Pulled persona identity text from “${payload.data?.presetName || "Lumiverse preset"}”. Review it, then save and bind.`
-          : "That Lumiverse preset did not expose a persona block; enter the visual identity manually.",
-      )
+      void this.hydrateLumiversePersonaPresets()
       return
     }
     if (payload?.type === "studio_error" && [
@@ -10397,7 +10544,6 @@ class ChatVisualsController {
       "save_persona_visual_preset",
       "delete_persona_visual_preset",
       "bind_persona_visual_preset",
-      "import_lumiverse_persona_preset",
       "save_chat_visuals",
     ].includes(String(payload.operation || ""))) {
       this.setStatus(String(payload.error || "Could not update Chat Visuals."), true)
@@ -10458,22 +10604,8 @@ class ChatVisualsController {
       ? `Binding target: ${this.data.activePersona.name}`
       : "Select a Lumiverse persona to bind an image identity."
 
-    const nativeSelect = this.get<HTMLSelectElement>("lumiverse-persona-preset")
-    nativeSelect.replaceChildren()
-    const nativeBlank = element("option", "", this.data.lumiversePresets.length
-      ? "Choose Lumiverse preset…"
-      : "No readable Lumiverse presets")
-    nativeBlank.value = ""
-    nativeSelect.appendChild(nativeBlank)
-    for (const preset of this.data.lumiversePresets) {
-      const option = element("option", "", preset.name)
-      option.value = preset.id
-      nativeSelect.appendChild(option)
-    }
-    if (this.importedSourcePresetId && this.data.lumiversePresets.some((preset) => preset.id === this.importedSourcePresetId)) {
-      nativeSelect.value = this.importedSourcePresetId
-    }
     this.renderPersonaEditor()
+    this.renderLumiversePersonaPresets()
 
     const folder = this.data.characterFolder
     this.get<HTMLElement>("character-folder-caption").textContent = folder
@@ -10485,6 +10617,24 @@ class ChatVisualsController {
     this.get<HTMLTextAreaElement>("character-negative").value = folder?.binding?.negativePrompt || ""
     this.get<HTMLInputElement>("character-visual-enabled").checked = folder?.binding?.enabled !== false
     this.get<HTMLInputElement>("character-visual-enabled").disabled = !this.data.activeChat
+    const checkpoint = this.get<HTMLSelectElement>("character-checkpoint")
+    checkpoint.replaceChildren()
+    const currentModel = folder?.binding?.checkpoint || this.data.studioModel || ""
+    const models = Array.isArray(this.data.models) ? this.data.models : []
+    const current = element("option", "", currentModel ? "Use current Studio checkpoint" : "No checkpoint selected")
+    current.value = ""
+    checkpoint.appendChild(current)
+    if (currentModel && !models.some((model) => model.id === currentModel)) {
+      const retained = element("option", "", `${currentModel} · saved`)
+      retained.value = currentModel
+      checkpoint.appendChild(retained)
+    }
+    for (const model of models) {
+      const option = element("option", "", model.label || model.id)
+      option.value = model.id
+      checkpoint.appendChild(option)
+    }
+    checkpoint.value = folder?.binding?.checkpoint || ""
 
     const stack = this.get<HTMLSelectElement>("character-stack")
     stack.replaceChildren()
@@ -10531,9 +10681,85 @@ class ChatVisualsController {
     const preset = this.data.personaPresets.find((candidate) => candidate.id === this.selectedPersonaPresetId)
     this.get<HTMLTextAreaElement>("persona-positive").value = preset?.positivePrompt || ""
     this.importedSourcePresetId = preset?.sourcePresetId || ""
-    const nativeSelect = this.get<HTMLSelectElement>("lumiverse-persona-preset")
-    if (this.importedSourcePresetId && [...nativeSelect.options].some((option) => option.value === this.importedSourcePresetId)) {
-      nativeSelect.value = this.importedSourcePresetId
+    this.renderLumiversePersonaPresets()
+  }
+
+  private renderLumiversePersonaPresets(): void {
+    const select = this.get<HTMLSelectElement>("lumiverse-persona-preset")
+    select.replaceChildren()
+    const blank = element("option", "", this.lumiversePersonaPresets.length
+      ? "Choose Image Gen persona preset…"
+      : "No Image Gen persona presets")
+    blank.value = ""
+    select.appendChild(blank)
+    for (const preset of this.lumiversePersonaPresets) {
+      const option = element("option", "", preset.name)
+      option.value = preset.id
+      select.appendChild(option)
+    }
+    select.value = this.lumiversePersonaPresets.some((preset) => preset.id === this.importedSourcePresetId)
+      ? this.importedSourcePresetId
+      : ""
+  }
+
+  private async hydrateLumiversePersonaPresets(): Promise<void> {
+    const token = ++this.lumiversePresetLoadToken
+    try {
+      const exportResponse = await fetch("/api/v1/image-gen/export", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          include_settings: false,
+          include_presets: true,
+          include_connections: false,
+          include_parameters: false,
+        }),
+      })
+      const exported = await exportResponse.json().catch(() => ({}))
+      if (!exportResponse.ok) {
+        throw new Error(String(exported?.error || `Could not read Lumiverse Image Gen presets (${exportResponse.status}).`))
+      }
+      const presets = (Array.isArray(exported?.presets) ? exported.presets : [])
+        .filter((preset: any) => String(preset?.kind || "main") === "persona")
+        .map((preset: any): LumiversePersonaPromptPreset => ({
+          id: String(preset?.id || "").trim(),
+          name: String(preset?.name || "").trim(),
+          prompt: String(preset?.prompt || "").trim(),
+          negativePrompt: String(preset?.negativePrompt || "").trim(),
+        }))
+        .filter((preset: LumiversePersonaPromptPreset) => preset.id && preset.name)
+      if (token !== this.lumiversePresetLoadToken) return
+      this.lumiversePersonaPresets = presets
+
+      let nativeBindingId = ""
+      const personaId = this.data?.activePersona?.id || ""
+      if (personaId) {
+        const bindingResponse = await fetch(`/api/v1/image-gen/preset-bindings/persona/${encodeURIComponent(personaId)}`, {
+          credentials: "include",
+          headers: { "Accept": "application/json" },
+        })
+        if (bindingResponse.ok) {
+          const binding = await bindingResponse.json().catch(() => ({}))
+          nativeBindingId = String(binding?.preset_id || "")
+        }
+      }
+      if (token !== this.lumiversePresetLoadToken) return
+      this.renderLumiversePersonaPresets()
+      if (
+        !this.selectedPersonaPresetId
+        && !this.importedSourcePresetId
+        && presets.some((preset) => preset.id === nativeBindingId)
+      ) {
+        this.importedSourcePresetId = nativeBindingId
+        this.renderLumiversePersonaPresets()
+        this.importPersonaPrompt(false)
+      }
+    } catch (error) {
+      if (token !== this.lumiversePresetLoadToken) return
+      this.lumiversePersonaPresets = []
+      this.renderLumiversePersonaPresets()
+      this.setStatus(error instanceof Error ? error.message : "Could not read Lumiverse Image Gen persona presets.", true)
     }
   }
 
@@ -10599,14 +10825,25 @@ class ChatVisualsController {
     this.setStatus(`Deleting “${selected.name}”…`)
   }
 
-  private importPersonaPrompt(): void {
+  private importPersonaPrompt(announce = true): void {
     const presetId = this.get<HTMLSelectElement>("lumiverse-persona-preset").value
-    if (!presetId) {
+      || this.importedSourcePresetId
+    const preset = this.lumiversePersonaPresets.find((candidate) => candidate.id === presetId)
+    if (!preset) {
       this.setStatus("Choose a Lumiverse preset first.", true)
       return
     }
-    this.send("import_lumiverse_persona_preset", { presetId })
-    this.setStatus("Reading the persona block from Lumiverse…")
+    this.importedSourcePresetId = preset.id
+    this.get<HTMLSelectElement>("lumiverse-persona-preset").value = preset.id
+    this.get<HTMLTextAreaElement>("persona-positive").value = preset.prompt
+    if (announce) {
+      this.setStatus(
+        preset.prompt
+          ? `Loaded “${preset.name}” from Lumiverse Image Gen. Review it, then save and bind.`
+          : `“${preset.name}” has no positive prompt yet; enter the persona identity manually.`,
+        !preset.prompt,
+      )
+    }
   }
 
   private saveCharacterVisuals(): void {
@@ -10629,6 +10866,7 @@ class ChatVisualsController {
       folderName: this.data.activeChat.characterName || "Character visuals",
       positivePrompt: this.get<HTMLTextAreaElement>("character-positive").value,
       negativePrompt: this.get<HTMLTextAreaElement>("character-negative").value,
+      checkpoint: this.get<HTMLSelectElement>("character-checkpoint").value,
       stackPresetId,
       stackSnapshot,
       enabled: this.get<HTMLInputElement>("character-visual-enabled").checked,
@@ -10831,7 +11069,8 @@ export function setup(ctx: FrontendContext): () => void {
   const launcherActions = element("div", "ss-launcher-actions")
   const launchButton = element("button", "ss-button ss-button-primary", "Open Studio")
   launchButton.addEventListener("click", () => openStudio("studio"))
-  const libraryButton = element("button", "ss-button", "Open Library")
+  const libraryButton = element("button", "ss-button")
+  libraryButton.innerHTML = `${LIBRARY_ICON}<span>Open Library</span>`
   libraryButton.addEventListener("click", () => openStudio("library"))
   const visualsButton = element("button", "ss-button ss-launcher-visuals-button")
   visualsButton.innerHTML = `${CHAT_VISUALS_ICON}<span>Chat Visuals</span>`

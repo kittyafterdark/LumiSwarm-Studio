@@ -1038,18 +1038,6 @@ function activePersonaVisualPreset(persona, presets) {
     if (!binding.enabled || !binding.presetId) return null;
     return presets.find((preset)=>preset.id === binding.presetId) || null;
 }
-function extractPersonaPromptFromLumiversePreset(preset, persona) {
-    const description = asString(persona?.description).trim();
-    const blocks = Array.isArray(preset?.prompt_order) ? preset.prompt_order.map(asRecord) : [];
-    const selected = blocks.filter((block)=>{
-        if (block.enabled === false || asString(block.marker).toLowerCase() === "category") return false;
-        const label = `${asString(block.name)} ${asString(block.marker)} ${asString(block.group)}`.toLowerCase();
-        const content = asString(block.content);
-        return /persona|user identity|user description|self description/.test(label) || /\{\{\s*(?:persona|user|personaDescription|persona_description)\s*\}\}/i.test(content);
-    });
-    const source = selected.map((block)=>asString(block.content).trim()).filter(Boolean).join("\n") || description;
-    return source.replace(/\{\{\s*(?:persona|user|personaDescription|persona_description)\s*\}\}/gi, description).trim().slice(0, 12_000);
-}
 function comparableStack(items) {
     return JSON.stringify(items.map((item)=>({
             name: item.name.replace(/\\/g, "/").toLowerCase(),
@@ -1081,23 +1069,22 @@ async function chatVisualsState(userId, currentStack) {
     const personaPresets = await loadPersonaVisualPresets(userId);
     const stackPresets = await loadStackPresets(userId);
     const folders = await loadOutputFolders(userId);
-    const suppliedStack = Array.isArray(currentStack) ? cleanStackPresetItems(currentStack) : profileStack(await loadStudioGenerationProfile(userId));
+    const studioProfile = await loadStudioGenerationProfile(userId);
+    const suppliedStack = Array.isArray(currentStack) ? cleanStackPresetItems(currentStack) : profileStack(studioProfile);
     const stackSignature = comparableStack(suppliedStack);
     const matchedStack = stackPresets.find((preset)=>comparableStack(preset.items) === stackSignature);
-    let lumiversePresets = [];
-    if (spindle.permissions.has("presets")) {
+    let models = [];
+    let studioConnectionId = "";
+    if (spindle.permissions.has("image_gen")) {
         try {
-            const response = await spindle.presets.list({
-                limit: 200,
-                offset: 0,
-                userId
-            });
-            lumiversePresets = (Array.isArray(response?.data) ? response.data : []).map((preset)=>({
-                    id: asString(preset?.id),
-                    name: asString(preset?.name).trim()
-                })).filter((preset)=>preset.id && preset.name);
+            const connection = await connectionForTaggedProfile(studioProfile, userId);
+            studioConnectionId = connection.id;
+            models = (await spindle.imageGen.getModels(connection.id, userId)).map((model)=>({
+                    id: asString(model?.id).trim(),
+                    label: asString(model?.label).trim()
+                })).filter((model)=>model.id);
         } catch  {
-            lumiversePresets = [];
+            models = [];
         }
     }
     return {
@@ -1115,9 +1102,11 @@ async function chatVisualsState(userId, currentStack) {
         personaPresets,
         personaBinding: personaVisualBinding(persona),
         activePersonaPreset: activePersonaVisualPreset(persona, personaPresets),
-        lumiversePresets,
         characterFolder: folders.find((folder)=>folder.binding?.characterId === characterId) || null,
         characterBasePrompt: characterId ? asString((await characterBaseTagState(characterId, userId)).tags) : "",
+        models,
+        studioConnectionId,
+        studioModel: asString(asRecord(studioProfile?.input).model),
         stackPresets,
         studioStack: suppliedStack,
         studioStackPresetId: matchedStack?.id || "",
@@ -1139,6 +1128,7 @@ function cleanOutputFolders(value) {
             characterId,
             positivePrompt: asString(rawBinding.positivePrompt).trim().slice(0, 12_000),
             negativePrompt: asString(rawBinding.negativePrompt).trim().slice(0, 12_000),
+            checkpoint: asString(rawBinding.checkpoint).trim().slice(0, 500),
             stackPresetId: asString(rawBinding.stackPresetId).trim().slice(0, 200),
             stackSnapshot: cleanStackPresetItems(rawBinding.stackSnapshot),
             enabled: asBoolean(rawBinding.enabled, true)
@@ -1221,6 +1211,7 @@ async function createOutputFolder(name, bindingType, userId) {
             characterId,
             positivePrompt: asString(tagState.tags).trim().slice(0, 12_000),
             negativePrompt: "",
+            checkpoint: "",
             stackPresetId: "",
             stackSnapshot: [],
             enabled: true
@@ -1259,6 +1250,7 @@ async function updateOutputFolderProfile(folderId, value, userId) {
         ...folder.binding,
         positivePrompt: asString(input.positivePrompt).trim().slice(0, 12_000),
         negativePrompt: asString(input.negativePrompt).trim().slice(0, 12_000),
+        checkpoint: Object.prototype.hasOwnProperty.call(input, "checkpoint") ? asString(input.checkpoint).trim().slice(0, 500) : folder.binding.checkpoint,
         stackPresetId,
         stackSnapshot: Object.prototype.hasOwnProperty.call(input, "stackSnapshot") ? cleanStackPresetItems(input.stackSnapshot) : folder.binding.stackSnapshot,
         enabled: asBoolean(input.enabled, folder.binding.enabled)
@@ -2114,6 +2106,7 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     return {
         prompt,
         negativePrompt: includeCharacter ? visualFolder?.binding?.negativePrompt || "" : includePersona ? "" : NO_CHARACTER_NEGATIVE,
+        checkpoint: includeCharacter ? visualFolder?.binding?.checkpoint || "" : "",
         stack: includeCharacter ? visualStack : [],
         excludedLoras: includeCharacter ? [] : visualStack.map((item)=>item.name),
         characterId: includeCharacter ? characterId : "",
@@ -2138,6 +2131,7 @@ async function ensureCharacterOutputFolder(characterId, characterName, imageId, 
                 characterId,
                 positivePrompt: inheritedTags,
                 negativePrompt: "",
+                checkpoint: "",
                 stackPresetId: "",
                 stackSnapshot: [],
                 enabled: true
@@ -2152,6 +2146,7 @@ async function ensureCharacterOutputFolder(characterId, characterName, imageId, 
             characterId,
             positivePrompt: inheritedTags,
             negativePrompt: "",
+            checkpoint: "",
             stackPresetId: "",
             stackSnapshot: [],
             enabled: true
@@ -2339,6 +2334,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
             "1"
         ].includes(personaMode);
         const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, includePersona, userId);
+        if (characterLayer.checkpoint) input.model = characterLayer.checkpoint;
         input.prompt = characterLayer.prompt;
         const profileNegative = overrides.negativePrompt !== undefined ? asString(overrides.negativePrompt).trim() : asString(profileInput.negativePrompt).trim();
         const visualNegative = characterLayer.negativePrompt.trim();
@@ -2583,7 +2579,6 @@ function permissionSnapshot() {
         chats: spindle.permissions.has("chats"),
         characters: spindle.permissions.has("characters"),
         personas: spindle.permissions.has("personas"),
-        presets: spindle.permissions.has("presets"),
         chatMutation: spindle.permissions.has("chat_mutation"),
         interceptor: spindle.permissions.has("interceptor")
     };
@@ -2808,29 +2803,6 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
-            case "import_lumiverse_persona_preset":
-                {
-                    if (!spindle.permissions.has("presets")) {
-                        throw new Error("Grant Presets permission to read a Lumiverse persona prompt source.");
-                    }
-                    const presetId = asString(payload?.presetId).trim();
-                    if (!presetId) throw new Error("Choose a Lumiverse preset to import from.");
-                    const [preset, persona] = await Promise.all([
-                        spindle.presets.get(presetId, userId),
-                        spindle.permissions.has("personas") ? spindle.personas.getActive(userId) : null
-                    ]);
-                    if (!preset) throw new Error("That Lumiverse preset no longer exists.");
-                    spindle.sendToFrontend({
-                        type: "lumiverse_persona_prompt_result",
-                        requestId,
-                        data: {
-                            presetId,
-                            presetName: asString(preset.name),
-                            prompt: extractPersonaPromptFromLumiversePreset(preset, persona)
-                        }
-                    }, userId);
-                    return;
-                }
             case "save_chat_visuals":
                 {
                     const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
@@ -2848,6 +2820,7 @@ async function handleMessage(payload, userId) {
                     await updateOutputFolderProfile(folder.id, {
                         positivePrompt: asString(payload?.positivePrompt),
                         negativePrompt: asString(payload?.negativePrompt),
+                        checkpoint: asString(payload?.checkpoint),
                         stackPresetId: stackPreset?.id || "",
                         stackSnapshot: stackPreset?.items || cleanStackPresetItems(payload?.stackSnapshot),
                         enabled: asBoolean(payload?.enabled, true)
