@@ -28,6 +28,7 @@ let downloadedSwarmUrl = ""
 const relayedLoraRequests = []
 let holdLoraDownload = false
 let taggedGenerationCount = 0
+const taggedGenerationInputs = []
 const taggedMessage = {
   id: "message-tag-1",
   role: "assistant",
@@ -162,12 +163,18 @@ globalThis.spindle = {
         assert.equal(rawOverride.comfyrawworkflowinputimageinitc, "data:image/png;base64,QUJD")
       } else {
         taggedGenerationCount += 1
+        taggedGenerationInputs.push(input)
         taggedImageId = `image-tag-${taggedGenerationCount}`
-        assert.match(input.prompt, /^1boy, black hair, red eyes, <preset:Cinematic>, outside, city street/)
+        if (input.prompt.includes("train platform")) {
+          assert.match(input.prompt, /^1boy, black hair, red eyes, <preset:Cinematic>, train platform, waving/)
+        } else {
+          assert.match(input.prompt, /^1boy, black hair, red eyes, <preset:Cinematic>, outside, city street/)
+        }
         assert.match(input.prompt, /<preset:composition>/)
         assert.equal((input.prompt.match(/<preset:Cinematic>/g) || []).length, 1)
         assert.doesNotMatch(input.prompt, /\{\{swarm_preset\}\}/)
         assert.equal(input.negativePrompt, "blurry")
+        assert.equal(input.parameters.seed, -1)
         assert.deepEqual(input.parameters.loras, ["styles/ink.safetensors"])
         assert.deepEqual(input.parameters.loraWeights, [0.75])
         assert.equal(input.parameters.referenceImages, undefined)
@@ -601,12 +608,13 @@ assert.equal(typeof frontendHandler, "function")
 assert.equal(macroDefinitions.get("last_genned").handler, "")
 assert.equal(macroDefinitions.has("swarm_image_protocol"), true)
 assert.equal(macroDefinitions.has("swarm_negative"), true)
-assert.equal(macroDefinitions.has("char_tags"), true)
+assert.equal(macroDefinitions.has("char_base"), true)
+assert.equal(macroDefinitions.has("char_tags"), false)
 assert.equal(macroDefinitions.has("char_profile"), true)
 assert.equal(macroDefinitions.has("user_profile"), true)
 assert.match(macroValues.get("swarm_image_protocol"), /<swarm-image/)
 assert.equal(typeof interceptorHandler, "function")
-assert.equal(typeof eventHandlers.get("GENERATION_ENDED"), "function")
+assert.equal(eventHandlers.has("GENERATION_ENDED"), false)
 
 async function request(type, extra = {}) {
   const requestId = `${type}-${sent.length}`
@@ -649,7 +657,7 @@ const loraDownload = await request("start_lora_download", {
   connectionId: "swarm-1",
   items: [{
     url: "https://civitai.com/api/download/models/12345",
-    name: "styles/new-ink.safetensors",
+    name: "https://civitai.red/models/2795146",
     title: "New Ink",
   }, {
     url: "https://civitai.com/api/download/models/12345",
@@ -666,7 +674,7 @@ for (let attempt = 0; attempt < 50 && relayedLoraRequests.length < 2; attempt +=
 assert.equal(relayedLoraRequests.length, 2, "Backend did not relay the full batch to SwarmUI")
 assert.equal(relayedLoraRequests[0].session_id, "session-1")
 assert.equal(relayedLoraRequests[0].url, "https://civitai.com/api/download/models/12345")
-assert.equal(relayedLoraRequests[0].name, "styles/new-ink")
+assert.equal(relayedLoraRequests[0].name, "new-ink")
 assert.equal(relayedLoraRequests[0].type, "LoRA")
 assert.equal(relayedLoraRequests[1].name, "styles/new-ink-variant")
 const loraDownloadMetadata = JSON.parse(relayedLoraRequests[0].metadata)
@@ -809,7 +817,7 @@ assert.equal(progress.payload.data.preview, "data:image/jpeg;base64,UFJFVklFVw==
 assert.equal(macroValues.get("last_genned"), "/api/v1/image-gen/results/image-1")
 assert.equal(macroValues.get("swarm_negative"), "blurry")
 assert.equal(macroValues.get("swarm_preset"), "<preset:Cinematic>")
-assert.equal(macroValues.get("char_tags"), "1girl, long brown hair, pink dress")
+assert.equal(macroValues.get("char_base"), "1girl, long brown hair, pink dress")
 assert.equal(macroValues.get("char_profile"), "/api/v1/images/char-avatar?size=sm")
 assert.equal(macroValues.get("user_profile"), "/api/v1/images/user-avatar?size=sm")
 assert.match(completionToast, /Swarm Studio finished/)
@@ -826,7 +834,7 @@ assert.equal(characterBaseTags.data.characterId, "char-1")
 assert.equal(characterBaseTags.data.characterName, "Lior")
 assert.equal(characterBaseTags.data.source, "studio")
 assert.equal(characterBaseTags.data.tags, "1boy, black hair, red eyes")
-assert.equal(macroValues.get("char_tags"), "1boy, black hair, red eyes")
+assert.equal(macroValues.get("char_base"), "1boy, black hair, red eyes")
 assert.equal(userFiles.get("character-base-tags.json")[0].characterId, "char-1")
 const intercepted = await interceptorHandler([
   {
@@ -890,13 +898,18 @@ assert.equal(visualFolders.data[0].binding.negativePrompt, "wrong eye color")
 assert.equal(visualFolders.data[0].binding.stackPresetId, savedStack.data[0].id)
 assert.equal(visualFolders.data[0].binding.enabled, false)
 
-await eventHandlers.get("GENERATION_ENDED")({
-  chatId: "chat-1",
-  messageId: "message-tag-1",
-  content: originalTaggedContent,
-  generationType: "normal",
+await frontendHandler({
+  type: "retry_tagged_job",
+  requestId: "retry-tagged-edited",
+  jobId: taggedResult.payload.data.taggedJob.id,
+  retryMode: "current",
+  promptOverride: "{{swarm_preset}}, train platform, waving, <preset:composition>",
+  negativePromptOverride: "blurry",
 }, "user-1")
-assert.equal(taggedGenerationCount, 1, "streaming and GENERATION_ENDED delivery must dedupe")
+assert.equal(taggedGenerationCount, 2, "edited inline regeneration should run exactly once")
+assert.equal(taggedGenerationInputs[1].parameters.seed, -1)
+assert.match(taggedGenerationInputs[1].prompt, /train platform, waving/)
+assert.match(taggedMessage.content, /image-tag-2/)
 assert.match(source, /\(\?\:\(\?!<swarm-image\\b\)\[\\s\\S\]\)\*\?/)
 
 const multiTaggedMessage = {
@@ -917,7 +930,7 @@ await Promise.all(multiMatches.map((match, index) => frontendHandler({
   attrs: { request: "generate", slot: index === 0 ? "first" : "second", aspect: "4:3", alt: index === 0 ? "First" : "Second" },
   content: match[2],
 }, "user-1")))
-assert.equal(taggedGenerationCount, 3)
+assert.equal(taggedGenerationCount, 4)
 assert.equal((multiTaggedMessage.content.match(/data-swarm-studio-image="true"/g) || []).length, 2)
 assert.equal((multiTaggedMessage.content.match(/data-swarm-studio-inline-action="true"/g) || []).length, 2)
 assert.doesNotMatch(multiTaggedMessage.content, /<swarm-image\b/i)

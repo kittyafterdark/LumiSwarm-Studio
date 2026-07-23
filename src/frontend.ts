@@ -3424,6 +3424,7 @@ class MiniPlayerController {
   private quickConnections: any[] = []
   private quickCanAppend = false
   private quickPending: GenerationDetails | null = null
+  private quickConfirm: ((prompt: string, negativePrompt: string) => void) | null = null
   private readonly bootstrapRequestId = crypto.randomUUID()
   private state: "idle" | "running" | "done" | "error" = "idle"
   private snapshotValue: StudioActivitySnapshot = {
@@ -3535,7 +3536,11 @@ class MiniPlayerController {
       if (action === "mini-menu-toggle") this.setCollapsed(!this.collapsed)
       if (action === "mini-menu-studio") this.openStudio()
       if (action === "mini-menu-hide") this.onBehaviorChange({ ...this.behavior, widgetEnabled: false })
-      if (action === "mini-generate") this.snapshotValue.active ? this.interrupt() : this.quickGenerate()
+      if (action === "mini-generate") {
+        if (this.snapshotValue.active) this.interrupt()
+        else if (this.quickConfirm) this.confirmTaggedPromptEdit()
+        else this.quickGenerate()
+      }
       if (action === "mini-edit-prompt") this.openPromptEditor(button.dataset.promptRole || "")
       if (action?.startsWith("mini-menu-")) this.closeContextMenu()
     }
@@ -3623,6 +3628,32 @@ class MiniPlayerController {
       if (negative) negative.value = draft.details.negativePrompt || ""
     }
     this.render()
+  }
+
+  openTaggedPromptEditor(
+    promptValue: string,
+    negativePromptValue: string,
+    onConfirm: (prompt: string, negativePrompt: string) => void,
+  ): boolean {
+    if (!this.behavior.widgetEnabled) return false
+    if (this.isMobileViewport() && !this.behavior.mobileQuickCreate) return false
+    this.setCollapsed(false)
+    if (this.collapsed) return false
+    const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')
+    const negative = this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')
+    if (!prompt || !negative) return false
+    prompt.value = promptValue
+    negative.value = negativePromptValue
+    this.quickConfirm = onConfirm
+    if (!this.snapshotValue.active) this.state = "idle"
+    this.snapshotValue.status = "Review the inline prompt, then Confirm to regenerate."
+    this.syncVisibility()
+    this.render()
+    window.requestAnimationFrame(() => {
+      prompt.focus()
+      prompt.setSelectionRange(prompt.value.length, prompt.value.length)
+    })
+    return true
   }
 
   bootstrap(): void {
@@ -3959,6 +3990,24 @@ class MiniPlayerController {
     this.render()
   }
 
+  private confirmTaggedPromptEdit(): void {
+    const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')?.value.trim() || ""
+    const negativePrompt = this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')?.value.trim() || ""
+    if (!prompt) {
+      this.state = "error"
+      this.snapshotValue.status = "Give the inline illustration a prompt first."
+      this.render()
+      return
+    }
+    const confirm = this.quickConfirm
+    if (!confirm) return
+    this.quickConfirm = null
+    this.state = "idle"
+    this.snapshotValue.status = "Inline regeneration queued with a random seed…"
+    confirm(prompt, negativePrompt)
+    this.render()
+  }
+
   private quickGenerate(): void {
     if (this.snapshotValue.active) return
     const liveDraft = this.getStudioDraft()
@@ -4170,9 +4219,11 @@ class MiniPlayerController {
     if (append) append.disabled = !this.quickCanAppend || !this.snapshotValue.latestImage?.id
     const quickButton = this.root.querySelector<HTMLButtonElement>('[data-action="mini-generate"]')
     if (quickButton) {
-      quickButton.disabled = !this.snapshotValue.active && !this.quickConnection
+      quickButton.disabled = !this.quickConfirm && !this.snapshotValue.active && !this.quickConnection
       quickButton.dataset.running = String(this.snapshotValue.active)
-      quickButton.textContent = this.snapshotValue.active ? "Stop generation" : "Generate quick image"
+      quickButton.textContent = this.snapshotValue.active
+        ? "Stop generation"
+        : this.quickConfirm ? "Confirm" : "Generate quick image"
     }
     const connection = this.root.querySelector<HTMLElement>('[data-role="mini-connection"]')
     if (connection) {
@@ -4848,7 +4899,7 @@ outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
                       <code>{{swarm_image_protocol}}</code><span>Current model instructions, including the active preset state.</span>
                       <code>{{swarm_preset}}</code><span>Active preset titles as exact native directives: &lt;preset:name one&gt;, &lt;preset:name two&gt;.</span>
                       <code>{{swarm_negative}}</code><span>Current Studio negative prompt.</span>
-                      <code>{{char_tags}}</code><span>Active character base image tags. Tagged jobs apply these automatically.</span>
+                      <code>{{char_base}}</code><span>Active character base image tags. Tagged jobs apply these automatically.</span>
                       <code>{{char_profile}}</code><span>Active character avatar URL for HTML shells.</span>
                       <code>{{user_profile}}</code><span>Active persona avatar URL for HTML shells.</span>
                       <code>{{swarm_checkpoint}}</code><span>Current Studio checkpoint.</span>
@@ -9483,6 +9534,11 @@ function widgetKeyHash(value: string): string {
 class TaggedImageController {
   private readonly ctx: FrontendContext
   private readonly openStudioWithPrompt: (prompt: string, negativePrompt: string) => void
+  private readonly openQuickCreateWithPrompt: (
+    prompt: string,
+    negativePrompt: string,
+    onConfirm: (prompt: string, negativePrompt: string) => void,
+  ) => boolean
   private readonly openLibrary: () => void
   private behavior: StudioBehavior
   private readonly jobs = new Map<string, TaggedImageJobView>()
@@ -9519,11 +9575,17 @@ class TaggedImageController {
     ctx: FrontendContext,
     behavior: StudioBehavior,
     openStudioWithPrompt: (prompt: string, negativePrompt: string) => void,
+    openQuickCreateWithPrompt: (
+      prompt: string,
+      negativePrompt: string,
+      onConfirm: (prompt: string, negativePrompt: string) => void,
+    ) => boolean,
     openLibrary: () => void,
   ) {
     this.ctx = ctx
     this.behavior = { ...behavior }
     this.openStudioWithPrompt = openStudioWithPrompt
+    this.openQuickCreateWithPrompt = openQuickCreateWithPrompt
     this.openLibrary = openLibrary
     document.addEventListener("click", this.handleInlineClick, true)
     document.addEventListener("contextmenu", this.handleInlineContextMenu, true)
@@ -9752,7 +9814,7 @@ class TaggedImageController {
       items: [
         { key: "retry-current", label: job.inserted ? "Regenerate with current Studio settings" : job.status === "requested" ? "Generate with current Studio settings" : "Retry with current Studio settings" },
         { key: "retry-original", label: "Retry with original settings", disabled: !job.clientJobId },
-        { key: "edit", label: "Edit prompt in Swarm Studio", disabled: !job.prompt && !this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot)) },
+        { key: "edit", label: "Edit prompt in Quick Create", disabled: !job.prompt && !this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot)) },
         { key: "divider", label: "", type: "divider" },
         { key: "studio", label: "Open Swarm Studio" },
         { key: "library", label: "Open output library" },
@@ -9762,19 +9824,41 @@ class TaggedImageController {
     if (result.selectedKey === "retry-original") this.retry(job, "original")
     if (result.selectedKey === "edit") {
       const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot))
-      this.openStudioWithPrompt(String(tag?.content || job.prompt), job.negativePrompt)
+      const prompt = String(tag?.content || job.prompt)
+      const opened = this.openQuickCreateWithPrompt(prompt, job.negativePrompt, (editedPrompt, editedNegative) => {
+        this.retry(job, "current", {
+          prompt: editedPrompt,
+          negativePrompt: editedNegative,
+        })
+      })
+      if (!opened) this.openStudioWithPrompt(prompt, job.negativePrompt)
     }
     if (result.selectedKey === "studio") this.openStudioWithPrompt("", "")
     if (result.selectedKey === "library") this.openLibrary()
   }
 
-  private retry(job: TaggedImageJobView, retryMode: "current" | "original"): void {
+  private retry(
+    job: TaggedImageJobView,
+    retryMode: "current" | "original",
+    overrides?: { prompt: string; negativePrompt: string },
+  ): void {
     const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot))
     job.status = "queued"
     job.error = ""
     const inlineFigure = this.inlineFigureForJob(job.id)
     if (inlineFigure) inlineFigure.dataset.state = "queued"
     else this.render(job)
+    if (overrides) {
+      this.ctx.sendToBackend({
+        type: "retry_tagged_job",
+        requestId: crypto.randomUUID(),
+        jobId: job.id,
+        retryMode,
+        promptOverride: overrides.prompt,
+        negativePromptOverride: overrides.negativePrompt,
+      })
+      return
+    }
     if (tag) {
       this.ctx.sendToBackend({
         type: "tag_generate",
@@ -9907,6 +9991,8 @@ export function setup(ctx: FrontendContext): () => void {
     ctx,
     behavior,
     openStudioWithTaggedPrompt,
+    (prompt, negativePrompt, onConfirm) =>
+      miniplayer?.openTaggedPromptEditor(prompt, negativePrompt, onConfirm) === true,
     () => openStudio("library"),
   )
   ctx.sendToBackend({

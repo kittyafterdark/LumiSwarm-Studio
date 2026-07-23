@@ -597,6 +597,13 @@ function cleanLoraDownloadName(value: unknown, url: string): string {
   return cleaned
 }
 
+function isUrlShapedLoraDownloadName(value: unknown): boolean {
+  const name = asString(value).trim().replace(/\\/g, "/").toLowerCase()
+  if (!name) return false
+  if (/^https?:\/\//.test(name) || /^https?[_:/-]/.test(name)) return true
+  return /^(?:www\.)?(?:civitai\.(?:com|red)|huggingface\.co)\//.test(name)
+}
+
 async function prepareLoraDownload(payload: any, userId?: string): Promise<JsonObject> {
   if (!spindle.permissions.has("cors_proxy")) {
     throw new Error("Grant the CORS Proxy permission so Studio can establish a SwarmUI download session.")
@@ -610,7 +617,11 @@ async function prepareLoraDownload(payload: any, userId?: string): Promise<JsonO
   } catch (error) {
     spindle.log.warn(`Could not enrich LoRA download metadata: ${error instanceof Error ? error.message : String(error)}`)
   }
-  const name = cleanLoraDownloadName(payload?.name || richMetadata.fileName, url)
+  const requestedName = asString(payload?.name).trim()
+  const preferredName = isUrlShapedLoraDownloadName(requestedName)
+    ? richMetadata.fileName
+    : requestedName || richMetadata.fileName
+  const name = cleanLoraDownloadName(preferredName, url)
   const token = await getMetadataToken(connectionId, userId)
   const sessionId = await getSession(connection, token, userId)
   const baseUrl = normalizeBaseUrl(connection.api_url)
@@ -1948,7 +1959,7 @@ async function saveCharacterBaseTags(characterId: string, tags: string, userId?:
   if (cleanTags) entries.unshift({ characterId, tags: cleanTags, updatedAt: Date.now() })
   await spindle.userStorage.setJson(CHARACTER_BASE_TAGS_FILE, entries, { indent: 2, userId })
   const state = await characterBaseTagState(characterId, userId)
-  spindle.updateMacroValue("char_tags", asString(state.tags))
+  spindle.updateMacroValue("char_base", asString(state.tags))
   return state
 }
 
@@ -2169,7 +2180,7 @@ async function refreshContextMacros(userId?: string): Promise<void> {
   const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora)
   const characterId = asString(character?.id)
   const tags = await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags)
-  spindle.updateMacroValue("char_tags", tags)
+  spindle.updateMacroValue("char_base", tags)
   spindle.updateMacroValue("char_profile", await imageUrlForMacro(asString(character?.image_id), userId))
   spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId))
 }
@@ -2275,7 +2286,7 @@ async function applyCharacterLayer(
   if (!characterId || !spindle.permissions.has("characters")) {
     if (!includeCharacter) {
       return {
-        prompt: scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
+        prompt: scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
         negativePrompt: NO_CHARACTER_NEGATIVE,
         stack: [],
         excludedLoras: visualStack.map((item) => item.name),
@@ -2297,7 +2308,7 @@ async function applyCharacterLayer(
   const character = await spindle.characters.get(characterId, userId)
   if (!includeCharacter) {
     return {
-      prompt: scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
+      prompt: scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
       negativePrompt: NO_CHARACTER_NEGATIVE,
       stack: [],
       excludedLoras: visualStack.map((item) => item.name),
@@ -2311,7 +2322,7 @@ async function applyCharacterLayer(
     || await extensionCharacterBaseTags(characterId, userId)
     || asString(portable.base_tags)
   ).trim()
-  let prompt = scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, baseTags).trim()
+  let prompt = scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, baseTags).trim()
   if (baseTags && !prompt.toLowerCase().includes(baseTags.toLowerCase())) prompt = `${baseTags}, ${prompt}`
   prompt = prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim()
   return {
@@ -2498,7 +2509,24 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Pro
   })
 }
 
-async function runTaggedImageJob(job: TaggedImageJob, useOriginalProfile: boolean, userId?: string): Promise<void> {
+interface TaggedImageRetryOverrides {
+  prompt?: string
+  negativePrompt?: string
+}
+
+function replaceTaggedImagePrompt(fullMatch: string, prompt: string): string {
+  return fullMatch.replace(
+    /(<swarm-image\b[^>]*>)[\s\S]*?(<\/swarm-image\s*>)/i,
+    (_match, opening, closing) => `${opening}\n${prompt}\n${closing}`,
+  )
+}
+
+async function runTaggedImageJob(
+  job: TaggedImageJob,
+  useOriginalProfile: boolean,
+  userId?: string,
+  overrides: TaggedImageRetryOverrides = {},
+): Promise<void> {
   if (runningTaggedJobs.has(job.id)) return
   runningTaggedJobs.add(job.id)
   try {
@@ -2517,14 +2545,19 @@ async function runTaggedImageJob(job: TaggedImageJob, useOriginalProfile: boolea
     const parameters = asRecord(input.parameters)
     applyAspectToParameters(parameters, job.aspect || "4:3")
     removeTaggedPresetOverride(parameters)
+    // Every in-chat retry should produce a new candidate, even when the
+    // source Studio profile or the original job happened to store a fixed seed.
+    parameters.seed = -1
     const originalTag = parseSwarmImageTags(job.fullMatch)[0]
-    const originalScenePrompt = originalTag?.content.trim() || job.prompt
+    const originalScenePrompt = overrides.prompt?.trim() || originalTag?.content.trim() || job.prompt
     const presetPrompt = applyStudioPresetLayer(originalScenePrompt, profile)
     const characterMode = asString(originalTag?.attrs.character).trim().toLowerCase()
     const includeCharacter = !["none", "off", "false", "no", "0"].includes(characterMode)
     const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, userId)
     input.prompt = characterLayer.prompt
-    const profileNegative = asString(profileInput.negativePrompt).trim()
+    const profileNegative = overrides.negativePrompt !== undefined
+      ? asString(overrides.negativePrompt).trim()
+      : asString(profileInput.negativePrompt).trim()
     const visualNegative = characterLayer.negativePrompt.trim()
     input.negativePrompt = visualNegative && !profileNegative.toLowerCase().includes(visualNegative.toLowerCase())
       ? [visualNegative, profileNegative].filter(Boolean).join(", ")
@@ -2696,7 +2729,12 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
   return job
 }
 
-async function retryTaggedImageGeneration(jobId: string, retryMode: string, userId?: string): Promise<TaggedImageJob> {
+async function retryTaggedImageGeneration(
+  jobId: string,
+  retryMode: string,
+  overrides: TaggedImageRetryOverrides = {},
+  userId?: string,
+): Promise<TaggedImageJob> {
   const job = (await loadTaggedImageJobs(userId)).find((candidate) => candidate.id === jobId)
   if (!job) throw new Error("That inline illustration job is no longer available.")
   if (runningTaggedJobs.has(job.id) || job.status === "generating") {
@@ -2706,9 +2744,16 @@ async function retryTaggedImageGeneration(jobId: string, retryMode: string, user
   job.status = "queued"
   job.error = ""
   job.inserted = false
+  if (overrides.prompt !== undefined) {
+    const prompt = asString(overrides.prompt).trim().slice(0, 12_000)
+    if (!prompt) throw new Error("Give the inline illustration a prompt before regenerating it.")
+    job.fullMatch = replaceTaggedImagePrompt(job.fullMatch, prompt)
+    job.prompt = prompt
+    overrides.prompt = prompt
+  }
   await upsertTaggedImageJob(job, userId)
   sendTaggedJobState(job, userId)
-  await runTaggedImageJob(job, retryMode === "original", userId)
+  await runTaggedImageJob(job, retryMode === "original", userId, overrides)
   return job
 }
 
@@ -2956,9 +3001,17 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         return
       }
       case "retry_tagged_job": {
+        const overrides: TaggedImageRetryOverrides = {}
+        if (Object.prototype.hasOwnProperty.call(payload, "promptOverride")) {
+          overrides.prompt = asString(payload?.promptOverride)
+        }
+        if (Object.prototype.hasOwnProperty.call(payload, "negativePromptOverride")) {
+          overrides.negativePrompt = asString(payload?.negativePromptOverride)
+        }
         await retryTaggedImageGeneration(
           asString(payload?.jobId).trim(),
           asString(payload?.retryMode).trim(),
+          overrides,
           userId,
         )
         return
@@ -3564,7 +3617,7 @@ for (const macro of [
     description: "The closest named aspect ratio in the current Swarm Studio generation profile.",
   },
   {
-    name: "char_tags",
+    name: "char_base",
     description: "Base image tags from the active character's native Lumiverse Character LoRA binding.",
   },
   {
@@ -3587,24 +3640,6 @@ for (const macro of [
 }
 
 spindle.registerInterceptor(taggedImagePromptInterceptor, 90)
-
-spindle.on("GENERATION_ENDED", async (payload: any, userId?: string) => {
-  try {
-    if (payload?.error || !payload?.messageId || !payload?.chatId || !payload?.content) return
-    if (payload?.generationType === "impersonate" || payload?.generationType === "quiet") return
-    for (const tag of parseSwarmImageTags(asString(payload.content))) {
-      await requestTaggedImageGeneration({
-        chatId: payload.chatId,
-        messageId: payload.messageId,
-        fullMatch: tag.fullMatch,
-        attrs: tag.attrs,
-        content: tag.content,
-      }, userId)
-    }
-  } catch (error) {
-    spindle.log.warn(`Could not process Swarm image tags after generation: ${error instanceof Error ? error.message : String(error)}`)
-  }
-})
 
 for (const eventName of ["CHAT_SWITCHED", "PERSONA_CHANGED", "CHARACTER_AVATAR_CHANGED"]) {
   spindle.on(eventName, async (_payload: any, userId?: string) => {

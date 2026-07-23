@@ -3129,6 +3129,7 @@ class MiniPlayerController {
     quickConnections = [];
     quickCanAppend = false;
     quickPending = null;
+    quickConfirm = null;
     bootstrapRequestId = crypto.randomUUID();
     state = "idle";
     snapshotValue = {
@@ -3231,7 +3232,11 @@ class MiniPlayerController {
                 ...this.behavior,
                 widgetEnabled: false
             });
-            if (action === "mini-generate") this.snapshotValue.active ? this.interrupt() : this.quickGenerate();
+            if (action === "mini-generate") {
+                if (this.snapshotValue.active) this.interrupt();
+                else if (this.quickConfirm) this.confirmTaggedPromptEdit();
+                else this.quickGenerate();
+            }
             if (action === "mini-edit-prompt") this.openPromptEditor(button.dataset.promptRole || "");
             if (action?.startsWith("mini-menu-")) this.closeContextMenu();
         };
@@ -3314,6 +3319,27 @@ class MiniPlayerController {
             if (negative) negative.value = draft.details.negativePrompt || "";
         }
         this.render();
+    }
+    openTaggedPromptEditor(promptValue, negativePromptValue, onConfirm) {
+        if (!this.behavior.widgetEnabled) return false;
+        if (this.isMobileViewport() && !this.behavior.mobileQuickCreate) return false;
+        this.setCollapsed(false);
+        if (this.collapsed) return false;
+        const prompt = this.root.querySelector('[data-role="mini-prompt"]');
+        const negative = this.root.querySelector('[data-role="mini-negative"]');
+        if (!prompt || !negative) return false;
+        prompt.value = promptValue;
+        negative.value = negativePromptValue;
+        this.quickConfirm = onConfirm;
+        if (!this.snapshotValue.active) this.state = "idle";
+        this.snapshotValue.status = "Review the inline prompt, then Confirm to regenerate.";
+        this.syncVisibility();
+        this.render();
+        window.requestAnimationFrame(()=>{
+            prompt.focus();
+            prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+        });
+        return true;
     }
     bootstrap() {
         this.ctx.sendToBackend({
@@ -3602,6 +3628,23 @@ class MiniPlayerController {
         this.snapshotValue.status = "Appending output to active chat…";
         this.render();
     }
+    confirmTaggedPromptEdit() {
+        const prompt = this.root.querySelector('[data-role="mini-prompt"]')?.value.trim() || "";
+        const negativePrompt = this.root.querySelector('[data-role="mini-negative"]')?.value.trim() || "";
+        if (!prompt) {
+            this.state = "error";
+            this.snapshotValue.status = "Give the inline illustration a prompt first.";
+            this.render();
+            return;
+        }
+        const confirm = this.quickConfirm;
+        if (!confirm) return;
+        this.quickConfirm = null;
+        this.state = "idle";
+        this.snapshotValue.status = "Inline regeneration queued with a random seed…";
+        confirm(prompt, negativePrompt);
+        this.render();
+    }
     quickGenerate() {
         if (this.snapshotValue.active) return;
         const liveDraft = this.getStudioDraft();
@@ -3796,9 +3839,9 @@ class MiniPlayerController {
         if (append) append.disabled = !this.quickCanAppend || !this.snapshotValue.latestImage?.id;
         const quickButton = this.root.querySelector('[data-action="mini-generate"]');
         if (quickButton) {
-            quickButton.disabled = !this.snapshotValue.active && !this.quickConnection;
+            quickButton.disabled = !this.quickConfirm && !this.snapshotValue.active && !this.quickConnection;
             quickButton.dataset.running = String(this.snapshotValue.active);
-            quickButton.textContent = this.snapshotValue.active ? "Stop generation" : "Generate quick image";
+            quickButton.textContent = this.snapshotValue.active ? "Stop generation" : this.quickConfirm ? "Confirm" : "Generate quick image";
         }
         const connection = this.root.querySelector('[data-role="mini-connection"]');
         if (connection) {
@@ -4453,7 +4496,7 @@ outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
                       <code>{{swarm_image_protocol}}</code><span>Current model instructions, including the active preset state.</span>
                       <code>{{swarm_preset}}</code><span>Active preset titles as exact native directives: &lt;preset:name one&gt;, &lt;preset:name two&gt;.</span>
                       <code>{{swarm_negative}}</code><span>Current Studio negative prompt.</span>
-                      <code>{{char_tags}}</code><span>Active character base image tags. Tagged jobs apply these automatically.</span>
+                      <code>{{char_base}}</code><span>Active character base image tags. Tagged jobs apply these automatically.</span>
                       <code>{{char_profile}}</code><span>Active character avatar URL for HTML shells.</span>
                       <code>{{user_profile}}</code><span>Active persona avatar URL for HTML shells.</span>
                       <code>{{swarm_checkpoint}}</code><span>Current Studio checkpoint.</span>
@@ -8813,6 +8856,7 @@ function widgetKeyHash(value) {
 class TaggedImageController {
     ctx;
     openStudioWithPrompt;
+    openQuickCreateWithPrompt;
     openLibrary;
     behavior;
     jobs = new Map();
@@ -8844,12 +8888,13 @@ class TaggedImageController {
         event.preventDefault();
         void this.showJobMenu(inline.job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
     };
-    constructor(ctx, behavior, openStudioWithPrompt, openLibrary){
+    constructor(ctx, behavior, openStudioWithPrompt, openQuickCreateWithPrompt, openLibrary){
         this.ctx = ctx;
         this.behavior = {
             ...behavior
         };
         this.openStudioWithPrompt = openStudioWithPrompt;
+        this.openQuickCreateWithPrompt = openQuickCreateWithPrompt;
         this.openLibrary = openLibrary;
         document.addEventListener("click", this.handleInlineClick, true);
         document.addEventListener("contextmenu", this.handleInlineContextMenu, true);
@@ -9085,7 +9130,7 @@ class TaggedImageController {
                 },
                 {
                     key: "edit",
-                    label: "Edit prompt in Swarm Studio",
+                    label: "Edit prompt in Quick Create",
                     disabled: !job.prompt && !this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot))
                 },
                 {
@@ -9107,18 +9152,36 @@ class TaggedImageController {
         if (result.selectedKey === "retry-original") this.retry(job, "original");
         if (result.selectedKey === "edit") {
             const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot));
-            this.openStudioWithPrompt(String(tag?.content || job.prompt), job.negativePrompt);
+            const prompt = String(tag?.content || job.prompt);
+            const opened = this.openQuickCreateWithPrompt(prompt, job.negativePrompt, (editedPrompt, editedNegative)=>{
+                this.retry(job, "current", {
+                    prompt: editedPrompt,
+                    negativePrompt: editedNegative
+                });
+            });
+            if (!opened) this.openStudioWithPrompt(prompt, job.negativePrompt);
         }
         if (result.selectedKey === "studio") this.openStudioWithPrompt("", "");
         if (result.selectedKey === "library") this.openLibrary();
     }
-    retry(job, retryMode) {
+    retry(job, retryMode, overrides) {
         const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot));
         job.status = "queued";
         job.error = "";
         const inlineFigure = this.inlineFigureForJob(job.id);
         if (inlineFigure) inlineFigure.dataset.state = "queued";
         else this.render(job);
+        if (overrides) {
+            this.ctx.sendToBackend({
+                type: "retry_tagged_job",
+                requestId: crypto.randomUUID(),
+                jobId: job.id,
+                retryMode,
+                promptOverride: overrides.prompt,
+                negativePromptOverride: overrides.negativePrompt
+            });
+            return;
+        }
         if (tag) {
             this.ctx.sendToBackend({
                 type: "tag_generate",
@@ -9230,7 +9293,7 @@ export function setup(ctx) {
         openStudio("studio");
         if (prompt) activeStudio?.loadTaggedPrompt(prompt, negativePrompt);
     };
-    taggedImages = new TaggedImageController(ctx, behavior, openStudioWithTaggedPrompt, ()=>openStudio("library"));
+    taggedImages = new TaggedImageController(ctx, behavior, openStudioWithTaggedPrompt, (prompt, negativePrompt, onConfirm)=>miniplayer?.openTaggedPromptEditor(prompt, negativePrompt, onConfirm) === true, ()=>openStudio("library"));
     ctx.sendToBackend({
         type: "set_tag_automation",
         requestId: crypto.randomUUID(),

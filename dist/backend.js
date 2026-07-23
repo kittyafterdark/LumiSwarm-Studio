@@ -330,6 +330,12 @@ function cleanLoraDownloadName(value, url) {
     if (!cleaned) throw new Error("Choose a usable LoRA filename.");
     return cleaned;
 }
+function isUrlShapedLoraDownloadName(value) {
+    const name = asString(value).trim().replace(/\\/g, "/").toLowerCase();
+    if (!name) return false;
+    if (/^https?:\/\//.test(name) || /^https?[_:/-]/.test(name)) return true;
+    return /^(?:www\.)?(?:civitai\.(?:com|red)|huggingface\.co)\//.test(name);
+}
 async function prepareLoraDownload(payload, userId) {
     if (!spindle.permissions.has("cors_proxy")) {
         throw new Error("Grant the CORS Proxy permission so Studio can establish a SwarmUI download session.");
@@ -346,7 +352,9 @@ async function prepareLoraDownload(payload, userId) {
     } catch (error) {
         spindle.log.warn(`Could not enrich LoRA download metadata: ${error instanceof Error ? error.message : String(error)}`);
     }
-    const name = cleanLoraDownloadName(payload?.name || richMetadata.fileName, url);
+    const requestedName = asString(payload?.name).trim();
+    const preferredName = isUrlShapedLoraDownloadName(requestedName) ? richMetadata.fileName : requestedName || richMetadata.fileName;
+    const name = cleanLoraDownloadName(preferredName, url);
     const token = await getMetadataToken(connectionId, userId);
     const sessionId = await getSession(connection, token, userId);
     const baseUrl = normalizeBaseUrl(connection.api_url);
@@ -1463,7 +1471,7 @@ async function saveCharacterBaseTags(characterId, tags, userId) {
         userId
     });
     const state = await characterBaseTagState(characterId, userId);
-    spindle.updateMacroValue("char_tags", asString(state.tags));
+    spindle.updateMacroValue("char_base", asString(state.tags));
     return state;
 }
 function stableTextHash(value) {
@@ -1693,7 +1701,7 @@ async function refreshContextMacros(userId) {
     const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora);
     const characterId = asString(character?.id);
     const tags = await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags);
-    spindle.updateMacroValue("char_tags", tags);
+    spindle.updateMacroValue("char_base", tags);
     spindle.updateMacroValue("char_profile", await imageUrlForMacro(asString(character?.image_id), userId));
     spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId));
 }
@@ -1797,7 +1805,7 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     if (!characterId || !spindle.permissions.has("characters")) {
         if (!includeCharacter) {
             return {
-                prompt: scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
+                prompt: scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
                 negativePrompt: NO_CHARACTER_NEGATIVE,
                 stack: [],
                 excludedLoras: visualStack.map((item)=>item.name),
@@ -1822,7 +1830,7 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     const character = await spindle.characters.get(characterId, userId);
     if (!includeCharacter) {
         return {
-            prompt: scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
+            prompt: scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
             negativePrompt: NO_CHARACTER_NEGATIVE,
             stack: [],
             excludedLoras: visualStack.map((item)=>item.name),
@@ -1832,7 +1840,7 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     }
     const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora);
     const baseTags = (visualFolder?.binding?.positivePrompt || await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags)).trim();
-    let prompt = scenePrompt.replace(/\{\{\s*char_tags\s*\}\}/gi, baseTags).trim();
+    let prompt = scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, baseTags).trim();
     if (baseTags && !prompt.toLowerCase().includes(baseTags.toLowerCase())) prompt = `${baseTags}, ${prompt}`;
     prompt = prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
     return {
@@ -2015,7 +2023,10 @@ async function finalizeTaggedImageJob(job, userId) {
         return true;
     });
 }
-async function runTaggedImageJob(job, useOriginalProfile, userId) {
+function replaceTaggedImagePrompt(fullMatch, prompt) {
+    return fullMatch.replace(/(<swarm-image\b[^>]*>)[\s\S]*?(<\/swarm-image\s*>)/i, (_match, opening, closing)=>`${opening}\n${prompt}\n${closing}`);
+}
+async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}) {
     if (runningTaggedJobs.has(job.id)) return;
     runningTaggedJobs.add(job.id);
     try {
@@ -2039,8 +2050,9 @@ async function runTaggedImageJob(job, useOriginalProfile, userId) {
         const parameters = asRecord(input.parameters);
         applyAspectToParameters(parameters, job.aspect || "4:3");
         removeTaggedPresetOverride(parameters);
+        parameters.seed = -1;
         const originalTag = parseSwarmImageTags(job.fullMatch)[0];
-        const originalScenePrompt = originalTag?.content.trim() || job.prompt;
+        const originalScenePrompt = overrides.prompt?.trim() || originalTag?.content.trim() || job.prompt;
         const presetPrompt = applyStudioPresetLayer(originalScenePrompt, profile);
         const characterMode = asString(originalTag?.attrs.character).trim().toLowerCase();
         const includeCharacter = ![
@@ -2052,7 +2064,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId) {
         ].includes(characterMode);
         const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, userId);
         input.prompt = characterLayer.prompt;
-        const profileNegative = asString(profileInput.negativePrompt).trim();
+        const profileNegative = overrides.negativePrompt !== undefined ? asString(overrides.negativePrompt).trim() : asString(profileInput.negativePrompt).trim();
         const visualNegative = characterLayer.negativePrompt.trim();
         input.negativePrompt = visualNegative && !profileNegative.toLowerCase().includes(visualNegative.toLowerCase()) ? [
             visualNegative,
@@ -2227,7 +2239,7 @@ async function requestTaggedImageGeneration(payload, userId) {
     if (config.autoGenerate || force) await runTaggedImageJob(job, useOriginalProfile, userId);
     return job;
 }
-async function retryTaggedImageGeneration(jobId, retryMode, userId) {
+async function retryTaggedImageGeneration(jobId, retryMode, overrides = {}, userId) {
     const job = (await loadTaggedImageJobs(userId)).find((candidate)=>candidate.id === jobId);
     if (!job) throw new Error("That inline illustration job is no longer available.");
     if (runningTaggedJobs.has(job.id) || job.status === "generating") {
@@ -2237,9 +2249,16 @@ async function retryTaggedImageGeneration(jobId, retryMode, userId) {
     job.status = "queued";
     job.error = "";
     job.inserted = false;
+    if (overrides.prompt !== undefined) {
+        const prompt = asString(overrides.prompt).trim().slice(0, 12_000);
+        if (!prompt) throw new Error("Give the inline illustration a prompt before regenerating it.");
+        job.fullMatch = replaceTaggedImagePrompt(job.fullMatch, prompt);
+        job.prompt = prompt;
+        overrides.prompt = prompt;
+    }
     await upsertTaggedImageJob(job, userId);
     sendTaggedJobState(job, userId);
-    await runTaggedImageJob(job, retryMode === "original", userId);
+    await runTaggedImageJob(job, retryMode === "original", userId, overrides);
     return job;
 }
 function cleanGeneratedMarkupForPrompt(content) {
@@ -2477,7 +2496,14 @@ async function handleMessage(payload, userId) {
                 }
             case "retry_tagged_job":
                 {
-                    await retryTaggedImageGeneration(asString(payload?.jobId).trim(), asString(payload?.retryMode).trim(), userId);
+                    const overrides = {};
+                    if (Object.prototype.hasOwnProperty.call(payload, "promptOverride")) {
+                        overrides.prompt = asString(payload?.promptOverride);
+                    }
+                    if (Object.prototype.hasOwnProperty.call(payload, "negativePromptOverride")) {
+                        overrides.negativePrompt = asString(payload?.negativePromptOverride);
+                    }
+                    await retryTaggedImageGeneration(asString(payload?.jobId).trim(), asString(payload?.retryMode).trim(), overrides, userId);
                     return;
                 }
             case "load_connection":
@@ -3036,7 +3062,7 @@ for (const macro of [
         description: "The closest named aspect ratio in the current Swarm Studio generation profile."
     },
     {
-        name: "char_tags",
+        name: "char_base",
         description: "Base image tags from the active character's native Lumiverse Character LoRA binding."
     },
     {
@@ -3058,23 +3084,6 @@ for (const macro of [
     spindle.updateMacroValue(macro.name, macro.name === "swarm_image_protocol" ? buildSwarmImageProtocol(null) : "");
 }
 spindle.registerInterceptor(taggedImagePromptInterceptor, 90);
-spindle.on("GENERATION_ENDED", async (payload, userId)=>{
-    try {
-        if (payload?.error || !payload?.messageId || !payload?.chatId || !payload?.content) return;
-        if (payload?.generationType === "impersonate" || payload?.generationType === "quiet") return;
-        for (const tag of parseSwarmImageTags(asString(payload.content))){
-            await requestTaggedImageGeneration({
-                chatId: payload.chatId,
-                messageId: payload.messageId,
-                fullMatch: tag.fullMatch,
-                attrs: tag.attrs,
-                content: tag.content
-            }, userId);
-        }
-    } catch (error) {
-        spindle.log.warn(`Could not process Swarm image tags after generation: ${error instanceof Error ? error.message : String(error)}`);
-    }
-});
 for (const eventName of [
     "CHAT_SWITCHED",
     "PERSONA_CHANGED",

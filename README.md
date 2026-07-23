@@ -23,9 +23,9 @@ It adds:
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker and an optional `character="none"` scenery/object mode that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, serialize concurrent insertions into the same reply, and replace themselves with permanent container-filling Lumiverse images
-- Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with current/original settings, edit the prompt in Studio, or open the output library; right-clicking the finished image opens the same menu
+- Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with a fresh random seed using current/original settings, edit and immediately confirm the prompt in Quick Create, or open the output library; right-clicking the finished image opens the same menu
 - Chat visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack can follow one conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile stack controls once when that chat opens, and file that chat's Studio outputs automatically only while the pill is enabled; disabled visuals leave new outputs Unfiled
-- Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_tags}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
+- Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_base}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Append to chat / Delete menus
@@ -108,7 +108,7 @@ Each request is keyed by chat, message, slot, and tag content. Delivery from bot
 Profile macros resolve to raw values so authored HTML and display regexes remain presentation-only:
 
 - `{{char_profile}}` / `{{user_profile}}` — authenticated avatar image URLs
-- `{{char_tags}}` — the active character's legacy Studio/native base tags; chat-folder positives are applied directly by the visual-binding layer
+- `{{char_base}}` — the active character's Studio image base tags; this avoids Lumiverse's built-in `{{char_tags}}` macro, which returns categorical character-card labels
 - `{{swarm_negative}}` — current literal Studio negative prompt
 - `{{swarm_preset}}` — enabled Studio presets as comma-separated native `<preset:exact saved name>` tokens
 - `{{swarm_checkpoint}}` / `{{swarm_aspect}}` — current profile details

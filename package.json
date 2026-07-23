@@ -1,6 +1,6 @@
 {
   "name": "lumiverse-swarm-studio",
-  "version": "0.15.20",
+  "version": "0.15.21",
   "private": true,
   "type": "module",
   "description": "Metadata-aware SwarmUI studio for Lumiverse",
