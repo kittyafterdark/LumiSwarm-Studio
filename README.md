@@ -22,7 +22,7 @@ It adds:
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
-- Opt-in `<swarm-image>` message tags with a required `request="generate"` marker, a configurable 0–6 required-image range per reply (`0–0` keeps model discretion), and an optional `character="none"` scenery/object mode that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, serialize concurrent insertions into the same reply, and replace themselves with permanent container-filling Lumiverse images
+- Opt-in `<swarm-image>` message tags with a required `request="generate"` marker, a server-persisted 0–6 required-image range per reply (`0–0` keeps model discretion), selectable **Multi-character / ensemble** and **Character-only / POV** composition guidance, and an optional `character="none"` scenery/object mode; completed tags begin generating without a chat-shifting progress strip, failures leave an aspect-aware retry placeholder, and finished outputs become permanent container-filling Lumiverse images while syncing back into Studio without taking over Studio's own Generate/Interrupt state
 - Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with a fresh random seed using current/original settings, edit and immediately confirm the prompt in Quick Create, or open the output library; right-clicking the finished image opens the same menu
 - Character visual bindings stored inside Library folders: a checkpoint, base positive, base negative, and saved LoRA stack follow the character across every conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile model and stack controls when that character becomes active, and file that character's Studio outputs automatically only while the pill is enabled; disabled visuals leave new outputs Unfiled
 - A dedicated **Chat Visuals** drawer page that keeps persona identity profiles, the active character's Library-backed checkpoint/positive/negative base, and its named or custom LoRA-stack snapshot in one compact place; Lumiverse's native Image Gen persona-kind prompt presets can hydrate a visual profile without turning the main Studio into another settings maze
@@ -85,6 +85,13 @@ Studio settings contains two independent, default-off controls:
 
 - **Automatically generate completed `<swarm-image>` tags** executes image requests. When disabled, the tag becomes a lazy **Generate image** card instead of spending GPU time.
 - **Teach the model the Swarm image-tag protocol** injects a short attributed system instruction. The copyable example and `{{swarm_image_protocol}}` macro remain available when this toggle is disabled, so prompt authors can place the protocol themselves.
+
+**Prompt composition** selects one of two protocol shapes:
+
+- **Multi-character / ensemble** isolates each visible subject's expression, position, action, and current outfit on its own line, then describes the shared interaction and composition once. It allows up to five visually necessary subjects and uses short natural-language supplements only for relationships that tags cannot express cleanly.
+- **Character-only / POV** favors a single focal character. User interaction is framed as POV with only scene-required partial body parts, while explicit expression, camera direction, and current clothing changes stay in Danbooru-style tags.
+
+The required-image range, automation switches, completion-toast preference, and prompt mode are stored by Lumiverse per user. Browser storage remains only a fast local mirror, so extension updates do not silently reset the selected count.
 
 The tag body is passed to SwarmUI as scene prompt content. Native Swarm syntax is preserved. Preset names are user-defined and opaque: a saved preset literally named `Cinematic Portrait` is invoked as `<preset:Cinematic Portrait>`.
 

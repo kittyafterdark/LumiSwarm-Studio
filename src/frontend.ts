@@ -18,6 +18,7 @@ interface StudioBehavior {
   tagPromptInjection: boolean
   requiredImageMin: number
   requiredImageMax: number
+  tagPromptMode: "multi" | "pov"
 }
 
 interface LoraMetadata {
@@ -586,6 +587,24 @@ const STYLES = `
     stroke-width: 1.7;
     stroke-linecap: round;
     stroke-linejoin: round;
+  }
+  .ss-launcher-action-content {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    display: inline-flex;
+    width: max-content;
+    max-width: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    margin: 0 auto;
+  }
+  .ss-launcher-action-content > svg {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    margin: 0 !important;
   }
   .ss-launcher-actions .ss-launcher-visuals-button {
     grid-column: 1 / -1;
@@ -1209,6 +1228,20 @@ const STYLES = `
     border: 1px solid var(--ss-outline, var(--lumiverse-border));
     border-radius: var(--ss-control-radius, 8px);
     background: color-mix(in srgb, var(--ss-canvas, #090a0d) 72%, transparent);
+  }
+  .ss-config-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(150px, auto);
+    align-items: center;
+    gap: 10px;
+    color: var(--ss-text, var(--lumiverse-text));
+    font-size: 10px;
+    font-weight: 650;
+  }
+  .ss-config-field .ss-select {
+    min-width: 0;
+    height: 32px;
+    font-size: 10px;
   }
   .ss-image-count-range > span:first-child { color: var(--ss-text, var(--lumiverse-text)); font-size: 9px; font-weight: 650; }
   .ss-image-count-range .ss-input {
@@ -3283,6 +3316,7 @@ function defaultStudioBehavior(): StudioBehavior {
     tagPromptInjection: false,
     requiredImageMin: 0,
     requiredImageMax: 0,
+    tagPromptMode: "multi",
   }
 }
 
@@ -3310,6 +3344,7 @@ function storedStudioBehavior(): StudioBehavior {
       tagPromptInjection: parsed?.tagPromptInjection === true,
       requiredImageMin: imageRange.min,
       requiredImageMax: imageRange.max,
+      tagPromptMode: parsed?.tagPromptMode === "pov" ? "pov" : "multi",
     }
   } catch {
     return defaultStudioBehavior()
@@ -4053,6 +4088,29 @@ class MiniPlayerController {
     this.render()
   }
 
+  private syncTaggedOutput(data: any): void {
+    const imageSrc = String(data?.result?.imageDataUrl || data?.result?.imageUrl || "")
+    if (!imageSrc) return
+    const details = (data?.record || null) as GenerationDetails | null
+    const latestImage: CurrentImage = {
+      id: String(data?.result?.imageId || data?.record?.imageId || "") || undefined,
+      src: imageSrc,
+      url: String(data?.result?.imageUrl || imageSrc),
+      label: `${String(data?.result?.model || details?.model || "SwarmUI")} · message illustration`,
+      details,
+    }
+    this.snapshotValue = {
+      ...this.snapshotValue,
+      preview: imageSrc,
+      latestImage,
+      status: this.snapshotValue.active
+        ? this.snapshotValue.status
+        : "Message illustration complete · synced to Studio",
+    }
+    if (!this.snapshotValue.active) this.state = "done"
+    this.render()
+  }
+
   fail(jobId: string, message: string): void {
     if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return
     this.state = "error"
@@ -4089,8 +4147,10 @@ class MiniPlayerController {
       return
     }
     if (payload?.type === "generation_progress") {
+      const jobId = String(payload.clientJobId || "")
+      if (!this.snapshotValue.active || !this.snapshotValue.jobId || jobId !== this.snapshotValue.jobId) return
       this.progress(
-        String(payload.clientJobId || ""),
+        jobId,
         typeof data.preview === "string" ? data.preview : "",
         Number(data.step) || 0,
         Number(data.totalSteps) || 0,
@@ -4102,7 +4162,7 @@ class MiniPlayerController {
       return
     }
     if (payload?.type === "tagged_generation_result") {
-      this.complete(String(payload.clientJobId || ""), data)
+      this.syncTaggedOutput(data)
       return
     }
     if (payload?.type === "output_appended_to_chat") {
@@ -4142,6 +4202,7 @@ class MiniPlayerController {
   onImageGenerationEvent(type: "progress" | "complete" | "error", payload: any): void {
     if (payload?.extensionIdentifier && payload.extensionIdentifier !== "swarm_studio") return
     const jobId = String(payload?.assetId || "")
+    if (!this.snapshotValue.active || !this.snapshotValue.jobId) return
     if (this.snapshotValue.jobId && jobId && jobId !== this.snapshotValue.jobId) return
     if (type === "progress") {
       this.progress(
@@ -4800,6 +4861,8 @@ class StudioController {
     if (requiredImageMin) requiredImageMin.value = String(this.behavior.requiredImageMin)
     const requiredImageMax = this.root.querySelector<HTMLInputElement>('[data-role="required-image-max"]')
     if (requiredImageMax) requiredImageMax.value = String(this.behavior.requiredImageMax)
+    const tagPromptMode = this.root.querySelector<HTMLSelectElement>('[data-role="tag-prompt-mode"]')
+    if (tagPromptMode) tagPromptMode.value = this.behavior.tagPromptMode
   }
 
   exportDraft(): StudioDraft | null {
@@ -5205,6 +5268,13 @@ class StudioController {
                   <div class="ss-config-section-head"><strong>In-message images</strong><span>Explicitly opt in</span></div>
                   <label class="ss-config-toggle"><input type="checkbox" data-role="tag-auto-generate" ${this.behavior.tagAutoGenerate ? "checked" : ""} /><span>Automatically generate completed &lt;swarm-image&gt; tags</span></label>
                   <label class="ss-config-toggle"><input type="checkbox" data-role="tag-prompt-injection" ${this.behavior.tagPromptInjection ? "checked" : ""} /><span>Teach the model the Swarm image-tag protocol</span></label>
+                  <label class="ss-config-field">
+                    <span>Prompt composition</span>
+                    <select class="ss-select" data-role="tag-prompt-mode">
+                      <option value="multi" ${this.behavior.tagPromptMode === "multi" ? "selected" : ""}>Multi-character / ensemble</option>
+                      <option value="pov" ${this.behavior.tagPromptMode === "pov" ? "selected" : ""}>Character-only / POV</option>
+                    </select>
+                  </label>
                   <div class="ss-image-count-range">
                     <span>Required images per reply</span>
                     <input class="ss-input" type="number" min="0" max="6" step="1" inputmode="numeric" data-role="required-image-min" value="${this.behavior.requiredImageMin}" aria-label="Minimum required images" title="Minimum required images" />
@@ -5242,7 +5312,7 @@ medium shot, city street, food stall, evening lights&lt;/swarm-image&gt;</code>
                       <code>{{last_genned}}</code><span>URL of the latest completed Swarm Studio image.</span>
                     </div>
                   </details>
-                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character-folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Set <code>character="none"</code> to skip the chat character and <code>persona="active"</code> to include the bound persona. For two subjects, keep character 1, character 2, and interaction on separate compact lines. The request runs on local SwarmUI; one-line and multiline tags both work.</p>
+                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate placeholders. Multi-character mode isolates each subject and shared interaction; Character-only / POV favors the active character and uses only scene-required parts of the User. Both modes track visible expression and current outfit changes. Character-folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Set <code>character="none"</code> to skip the chat character and <code>persona="active"</code> to include the bound persona. The request runs on local SwarmUI; one-line and multiline tags both work.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -5893,6 +5963,12 @@ are removed when CSS is applied.</pre>
       this.onBehaviorChange({
         ...this.behavior,
         tagPromptInjection: (event.currentTarget as HTMLInputElement).checked,
+      })
+    })
+    this.get<HTMLSelectElement>('[data-role="tag-prompt-mode"]').addEventListener("change", (event) => {
+      this.onBehaviorChange({
+        ...this.behavior,
+        tagPromptMode: (event.currentTarget as HTMLSelectElement).value === "pov" ? "pov" : "multi",
       })
     })
     const updateRequiredImageRange = () => {
@@ -10119,7 +10195,7 @@ class TaggedImageController {
       error: "",
     }
     this.jobs.set(optimistic.id, optimistic)
-    this.render(optimistic)
+    if (this.shouldRenderPlaceholder(optimistic)) this.render(optimistic)
     this.ctx.sendToBackend({
       type: "tag_generate",
       requestId: crypto.randomUUID(),
@@ -10138,7 +10214,11 @@ class TaggedImageController {
       for (const job of jobs) {
         if (!job?.id || !job?.messageId) continue
         this.jobs.set(job.id, job)
-        if (!job.inserted && !this.inlineFigureForJob(job.id)) this.render(job)
+        if (!job.inserted && !this.inlineFigureForJob(job.id) && this.shouldRenderPlaceholder(job)) {
+          this.render(job)
+        } else {
+          this.remove(job)
+        }
       }
       return
     }
@@ -10147,6 +10227,7 @@ class TaggedImageController {
       if (!job?.id || !job?.messageId) return
       for (const [id, candidate] of this.jobs) {
         if (id.startsWith("pending-") && this.lookupKey(candidate.chatId, candidate.messageId, candidate.slot) === this.lookupKey(job.chatId, job.messageId, job.slot)) {
+          this.remove(candidate)
           this.jobs.delete(id)
         }
       }
@@ -10157,10 +10238,10 @@ class TaggedImageController {
       if (inlineFigure) {
         inlineFigure.dataset.state = next.inserted ? "ready" : next.status
         this.remove(next)
-      } else if (next.status === "ready" && next.inserted) {
-        this.remove(next)
-      } else {
+      } else if (this.shouldRenderPlaceholder(next)) {
         this.render(next)
+      } else {
+        this.remove(next)
       }
       return
     }
@@ -10226,14 +10307,29 @@ class TaggedImageController {
     this.cleanups.delete(id)
   }
 
+  private shouldRenderPlaceholder(job: TaggedImageJobView): boolean {
+    return job.status === "requested" || job.status === "failed" || job.status === "cancelled"
+  }
+
+  private requestedAspect(job: TaggedImageJobView): string {
+    const aspect = String(job.aspect || "").trim()
+    return /^(?:1:1|2:3|3:2|3:4|4:3|4:5|5:4|9:16|16:9)$/.test(aspect)
+      ? aspect.replace(":", " / ")
+      : "4 / 3"
+  }
+
   private render(job: TaggedImageJobView): void {
+    if (!this.shouldRenderPlaceholder(job)) {
+      this.remove(job)
+      return
+    }
     const widgetId = this.widgetId(job)
     this.cleanups.get(widgetId)?.()
     const labels: Record<TaggedImageJobView["status"], string> = {
       requested: "Illustration requested",
       queued: "Queued for SwarmUI",
       generating: "Rendering in SwarmUI",
-      ready: "Finishing illustration",
+      ready: "Illustration ready",
       failed: "Illustration unavailable",
       cancelled: "Illustration stopped",
     }
@@ -10242,36 +10338,31 @@ class TaggedImageController {
       : job.status === "failed" || job.status === "cancelled"
         ? `<button data-action="retry">Retry</button>`
         : ""
-    const busy = job.status === "queued" || job.status === "generating" || job.status === "ready"
-    const visual = busy
-      ? `<div class="emblem"><i class="spinner" aria-label="Generating"></i></div>`
-      : `<div class="emblem">${FRAME_WALL_ICON}</div>`
     const error = job.error ? `<p class="error">${widgetEscape(job.error)}</p>` : ""
     const html = `
       <style>
         :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
         * { box-sizing: border-box; }
         body { margin: 0; color: var(--lumiverse-text, #f5f5f7); background: transparent; }
-        .card { position: relative; display: grid; grid-template-columns: 54px minmax(0,1fr) auto; gap: 11px; align-items: center; min-height: 68px; padding: 8px 9px; border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #b994ff) 28%, var(--lumiverse-border, #35313f)); border-radius: var(--lumiverse-radius, 12px); background: linear-gradient(115deg, color-mix(in srgb, var(--lumiverse-accent, #b994ff) 9%, var(--lumiverse-fill, #111116)), var(--lumiverse-fill, #111116)); overflow: hidden; }
-        .emblem { width: 54px; height: 54px; border-radius: calc(var(--lumiverse-radius, 12px) * .72); border: 1px solid var(--lumiverse-border, #35313f); background: var(--lumiverse-fill-subtle, #191820); }
-        .emblem { display: grid; place-items: center; color: var(--lumiverse-accent, #b994ff); }
-        .emblem svg { width: 28px; height: 28px; fill: currentColor; }
-        .spinner { width: 22px; height: 22px; border: 2px solid color-mix(in srgb, currentColor 22%, transparent); border-top-color: currentColor; border-radius: 50%; animation: spin .85s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .copy { min-width: 0; }
-        strong { display: block; font: 600 12px/1.2 Georgia, ui-serif, serif; letter-spacing: .01em; }
-        p { margin: 4px 0 0; color: var(--lumiverse-text-muted, #aaa6b1); font-size: 10px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .error { color: #ff9caa; white-space: normal; }
-        .actions { display: flex; align-items: center; gap: 5px; }
+        .card { position: relative; display: grid; place-items: center; width: 100%; min-height: 150px; aspect-ratio: ${this.requestedAspect(job)}; max-height: min(70vh, 680px); padding: 22px; border: 1px dashed color-mix(in srgb, var(--lumiverse-accent, #b994ff) 34%, var(--lumiverse-border, #35313f)); border-radius: var(--lumiverse-radius, 12px); background: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 5%, var(--lumiverse-fill, #111116)); overflow: hidden; }
+        .center { display: grid; justify-items: center; gap: 10px; max-width: 430px; text-align: center; }
+        .emblem { display: grid; place-items: center; width: 48px; height: 48px; color: var(--lumiverse-accent, #b994ff); border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .72); background: var(--lumiverse-fill-subtle, #191820); }
+        .emblem svg { width: 25px; height: 25px; fill: currentColor; }
+        strong { display: block; font: 600 14px/1.2 Georgia, ui-serif, serif; letter-spacing: .01em; }
+        p { margin: 0; color: var(--lumiverse-text-muted, #aaa6b1); font-size: 11px; line-height: 1.45; }
+        .error { color: #ff9caa; }
+        .actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; }
         button { min-height: 30px; padding: 0 10px; border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .65); background: var(--lumiverse-fill-subtle, #191820); color: var(--lumiverse-text, #f5f5f7); font: 600 10px/1 system-ui, sans-serif; cursor: pointer; }
         button:hover { border-color: var(--lumiverse-accent, #b994ff); }
         .menu { width: 30px; padding: 0; font-size: 16px; }
-        @media (max-width: 480px) { .card { grid-template-columns: 46px minmax(0,1fr) auto; gap: 8px; } .emblem { width:46px;height:46px; } button:not(.menu) { padding: 0 8px; } }
+        @media (max-width: 480px) { .card { min-height: 132px; padding: 15px; } .center { gap: 8px; } .emblem { width: 42px; height: 42px; } }
       </style>
       <div class="card" id="card">
-        ${visual}
-        <div class="copy"><strong>${widgetEscape(labels[job.status])}</strong><p>${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}</div>
-        <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions">⋯</button></div>
+        <div class="center">
+          <div class="emblem">${FRAME_WALL_ICON}</div>
+          <div><strong>${widgetEscape(labels[job.status])}</strong><p>${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}</div>
+          <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions">⋯</button></div>
+        </div>
       </div>
       <script>
         const send = (type) => window.spindleSandbox.postMessage({ type })
@@ -10337,7 +10428,7 @@ class TaggedImageController {
     job.error = ""
     const inlineFigure = this.inlineFigureForJob(job.id)
     if (inlineFigure) inlineFigure.dataset.state = "queued"
-    else this.render(job)
+    this.remove(job)
     if (overrides) {
       this.ctx.sendToBackend({
         type: "retry_tagged_job",
@@ -10919,12 +11010,29 @@ export function setup(ctx: FrontendContext): () => void {
     updateAppearance(appearance)
   }
 
-  const updateBehavior = (next: StudioBehavior) => {
+  const applyBehaviorState = (next: StudioBehavior) => {
     behavior = { ...next }
     persistStudioBehavior(behavior)
     miniplayer?.setBehavior(behavior)
     activeStudio?.setBehavior(behavior)
     taggedImages?.setBehavior(behavior)
+  }
+
+  const behaviorFromServer = (value: any): StudioBehavior => {
+    const range = normalizeRequiredImageRange(value?.requiredImageMin, value?.requiredImageMax)
+    return {
+      ...behavior,
+      completionToast: value?.completionToast === true,
+      tagAutoGenerate: value?.autoGenerate === true,
+      tagPromptInjection: value?.injectProtocol === true,
+      requiredImageMin: range.min,
+      requiredImageMax: range.max,
+      tagPromptMode: value?.promptMode === "pov" ? "pov" : "multi",
+    }
+  }
+
+  const updateBehavior = (next: StudioBehavior) => {
+    applyBehaviorState(next)
     ctx.sendToBackend({
       type: "set_tag_automation",
       requestId: crypto.randomUUID(),
@@ -10934,6 +11042,7 @@ export function setup(ctx: FrontendContext): () => void {
         completionToast: behavior.completionToast,
         requiredImageMin: behavior.requiredImageMin,
         requiredImageMax: behavior.requiredImageMax,
+        promptMode: behavior.tagPromptMode,
       },
     })
   }
@@ -10993,17 +11102,6 @@ export function setup(ctx: FrontendContext): () => void {
       miniplayer?.openTaggedPromptEditor(prompt, negativePrompt, onConfirm) === true,
     () => openStudio("library"),
   )
-  ctx.sendToBackend({
-    type: "set_tag_automation",
-    requestId: crypto.randomUUID(),
-    config: {
-      autoGenerate: behavior.tagAutoGenerate,
-      injectProtocol: behavior.tagPromptInjection,
-      completionToast: behavior.completionToast,
-      requiredImageMin: behavior.requiredImageMin,
-      requiredImageMax: behavior.requiredImageMax,
-    },
-  })
   const unregisterTagInterceptor = ctx.messages.registerTagInterceptor(
     { tagName: "swarm-image", attrs: { request: "generate" }, removeFromMessage: true },
     (payload: any) => taggedImages?.handleTag(payload),
@@ -11070,7 +11168,7 @@ export function setup(ctx: FrontendContext): () => void {
   const launchButton = element("button", "ss-button ss-button-primary", "Open Studio")
   launchButton.addEventListener("click", () => openStudio("studio"))
   const libraryButton = element("button", "ss-button")
-  libraryButton.innerHTML = `${LIBRARY_ICON}<span>Open Library</span>`
+  libraryButton.innerHTML = `<span class="ss-launcher-action-content">${LIBRARY_ICON}<span>Library</span></span>`
   libraryButton.addEventListener("click", () => openStudio("library"))
   const visualsButton = element("button", "ss-button ss-launcher-visuals-button")
   visualsButton.innerHTML = `${CHAT_VISUALS_ICON}<span>Chat Visuals</span>`
@@ -11095,6 +11193,12 @@ export function setup(ctx: FrontendContext): () => void {
   })
   const removeActionClick = inputAction.onClick(() => openStudio("studio"))
   const unsubscribeMessages = ctx.onBackendMessage((payload: any) => {
+    if (payload?.type === "bootstrap_result" && payload?.data?.tagAutomation) {
+      applyBehaviorState(behaviorFromServer(payload.data.tagAutomation))
+    }
+    if (payload?.type === "tag_automation_result") {
+      applyBehaviorState(behaviorFromServer(payload.data))
+    }
     miniplayer?.onMessage(payload)
     activeStudio?.onMessage(payload)
     taggedImages?.onMessage(payload)

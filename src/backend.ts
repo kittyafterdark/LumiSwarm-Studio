@@ -185,6 +185,7 @@ interface TagAutomationConfig {
   completionToast: boolean
   requiredImageMin: number
   requiredImageMax: number
+  promptMode: "multi" | "pov"
 }
 
 interface CharacterBaseTagEntry {
@@ -319,11 +320,7 @@ The tag is executed by the user's configured local SwarmUI installation and loca
 IDENTITY AND SUBJECT RULES
 Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" injects the bound character identity; persona="active" injects the bound persona identity. Do not copy either identity block into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
 
-Write compact Danbooru-style scene tags, using short natural-language clauses only to disambiguate spatial relationships. For one subject, supply expression, pose/action, camera, setting, and light. For two subjects, use this compact structure:
-character 1: [scene-specific expression, pose, action, changed attributes]
-character 2: [scene-specific expression, pose, action, changed attributes]
-interaction: [who does what to whom and relative positioning]
-Then add shared camera, composition, environment, lighting, depth, effects, and finishing tags. Character 1 is the active chat character; character 2 is the active persona. Keep each subject's attributes on its own line so traits and poses do not bleed between them. Do not restate either display name or write a literary summary.
+Write compact Danbooru-style scene tags and follow the active composition mode below. Use short natural-language clauses only when tags cannot disambiguate an interaction, unusual viewpoint, or spatial relationship. Do not restate display names or write a literary summary.
 
 Use character="none" when the active chat character should not appear. Use persona="active" only when the active persona should appear; otherwise use persona="none". When both are none, Swarm Studio suppresses bound character LoRAs and adds a no-character negative guard. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.`
 
@@ -2174,6 +2171,7 @@ function cleanTagAutomationConfig(value: unknown): TagAutomationConfig {
     completionToast: record.completionToast === true,
     requiredImageMin,
     requiredImageMax,
+    promptMode: record.promptMode === "pov" ? "pov" : "multi",
   }
 }
 
@@ -2185,6 +2183,7 @@ async function loadTagAutomationConfig(userId?: string): Promise<TagAutomationCo
       completionToast: false,
       requiredImageMin: 0,
       requiredImageMax: 0,
+      promptMode: "multi",
     },
     userId,
   }))
@@ -2450,11 +2449,30 @@ The user explicitly requires exactly ${automation.requiredImageMin} complete <sw
 The user explicitly requires between ${automation.requiredImageMin} and ${automation.requiredImageMax} complete <swarm-image> requests in this reply. This overrides the default discretion about whether a moment needs visualization. Emit at least ${automation.requiredImageMin} and no more than ${automation.requiredImageMax}. Do not omit the requests by claiming that no scene is important enough, not specifically required, or better left unillustrated. Choose the strongest moments and make every request complete and distinct.`
     : `IMAGE COUNT
 No explicit image count is active. Decide whether an illustration materially improves the reply; do not emit a request merely to fill a quota.`
-  const animaGuidance = /anima/i.test(model)
-    ? `ANIMA CHECKPOINT GUIDANCE
-Use one safety tag (safe, sensitive, nsfw, or explicit), a person count, then the subject/interaction lines. Identity blocks already cover stable anatomy and clothing. Concentrate the tag body on expression, pose/hands/legs/action, camera/lens/focus/composition, environment/time/weather/objects, lighting/depth/effects/finish. Add changed traits or clothing only when the scene actually changes them.`
-    : `Use concise model-recognizable descriptors. Identity blocks cover stable appearance; direct scene-specific action, staging, camera, environment, and light.`
-  return `${SWARM_IMAGE_PROTOCOL_BASE}\n\n${imageCountGuidance}\n\n${identityGuidance}\n\n${animaGuidance}\n\n${presetGuidance}`
+  const modeGuidance = automation.promptMode === "pov"
+    ? `ILLUSTRATION MODE — CHARACTER-ONLY / POV
+Favor one visible focal character. Use compact Danbooru-style tags in this order: quality/rating and exactly one safety tag; person count; subject; visible facial expression; current outfit changes; action/pose/hands/legs; setting; camera/framing; lighting/style/effects; LoRA or preset triggers.
+
+For interaction with the User, use POV framing and show only scene-required partial body parts such as a hand, arm, legs, or an edge of the body. Avoid the User's face and do not invent a second complete identity. If physical contact or the crop hides the focal character's face, omit face tags instead of inventing a visible expression.
+
+The current message is authoritative for current outfit, clothing removal, damage, wetness, or disarray. Add those visible changes; otherwise rely on the injected identity's base outfit. When a face is visible, always use concrete expression tags including the relevant eyes, mouth, and brows—such as smiling, open mouth, blush, glaring, furrowed brows, or clenched teeth—rather than a vague mood.
+
+Use specific view tags such as front view, from behind, from above, from below, and pov; combine them when useful. Fit framing to the action. Do not put negative prompts in the tag body.`
+    : `ILLUSTRATION MODE — MULTI-CHARACTER / ENSEMBLE
+Use no more than five visually necessary subjects. Keep every visible subject isolated on a compact line:
+character 1: [visible expression], [position], [pose/action], [current outfit changes]
+character 2: [visible expression], [position], [pose/action], [current outfit changes]
+Then write interaction: [shared contact/action and spatial relation], followed by shared camera/framing, environment, lighting, depth, effects, and finish.
+
+Character 1 is the active chat character and character 2 is the active persona when enabled. Use left, right, foreground, background, and viewer-relative positions instead of display names. Attribute each action once so poses and traits do not bleed between subjects. Extra incidental subjects need concrete visible descriptors and must not rely on an unknown name.
+
+The current message is authoritative for expressions, clothing changes, and current outfit state; otherwise rely on injected identities. Use concrete facial tags—such as smiling, open mouth, blush, glaring, furrowed brows, or clenched teeth—not a vague mood. Use short natural-language clauses only when tags cannot clearly express an interaction, unusual viewpoint, or spatial relationship. Do not include negative prompts in the tag body.`
+  const checkpointGuidance = /anima/i.test(model)
+    ? `ANIMA PROMPT SHAPE
+Begin with quality/rating tags such as masterpiece, best quality, score_9, newest, and highres; then use exactly one of safe, sensitive, nsfw, or explicit plus a person count. Prefer atomic, independently visual tags. Keep composition separate from identity: subject lines own expression, pose, action, and outfit changes; shared lines own interaction, camera, setting, light, depth, and effects.`
+    : `CHECKPOINT GUIDANCE
+Use concise model-recognizable visual descriptors. Identity blocks cover stable appearance; focus the request on visible scene state, expression, action, staging, camera, environment, and light.`
+  return `${SWARM_IMAGE_PROTOCOL_BASE}\n\n${imageCountGuidance}\n\n${identityGuidance}\n\n${modeGuidance}\n\n${checkpointGuidance}\n\n${presetGuidance}`
 }
 
 function protocolContextKey(userId?: string): string {

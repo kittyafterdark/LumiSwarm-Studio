@@ -843,6 +843,7 @@ const tagConfig = await request("set_tag_automation", {
     completionToast: false,
     requiredImageMin: 2,
     requiredImageMax: 4,
+    promptMode: "pov",
   },
 })
 assert.deepEqual(tagConfig.data, {
@@ -851,8 +852,10 @@ assert.deepEqual(tagConfig.data, {
   completionToast: false,
   requiredImageMin: 2,
   requiredImageMax: 4,
+  promptMode: "pov",
 })
 assert.match(macroValues.get("swarm_image_protocol"), /between 2 and 4 complete <swarm-image> requests/)
+assert.match(macroValues.get("swarm_image_protocol"), /CHARACTER-ONLY \/ POV/)
 const characterBaseTags = await request("set_character_base_tags", {
   characterId: "char-1",
   tags: "1boy, black hair, red eyes",
@@ -910,7 +913,8 @@ assert.match(intercepted.messages[0].content, /Emit at least 2 and no more than 
 assert.match(intercepted.messages[0].content, /no scene is important enough/)
 assert.match(intercepted.messages[0].content, /CHARACTER 1 IDENTITY/)
 assert.match(intercepted.messages[0].content, /1boy, black hair, red eyes/)
-assert.match(intercepted.messages[0].content, /character 1: \[scene-specific expression/)
+assert.match(intercepted.messages[0].content, /ILLUSTRATION MODE — CHARACTER-ONLY \/ POV/)
+assert.match(intercepted.messages[0].content, /current outfit, clothing removal, damage, wetness, or disarray/)
 assert.match(intercepted.messages[0].content, /persona="active"/)
 assert.doesNotMatch(intercepted.messages[0].content, /Use at most two image tags/)
 assert.match(intercepted.messages[1].content, /\[Illustration requested: Street food\]/)
@@ -1046,7 +1050,9 @@ assert.match(source, /if \(excluded\.has\(name\.toLowerCase\(\)\)\) return/)
 assert.match(source, /LOCAL GENERATION/)
 assert.match(source, /configured local SwarmUI installation and local hardware/)
 assert.match(source, /Never use a chat character's or persona's display name as a diffusion token/)
-assert.match(source, /ANIMA CHECKPOINT GUIDANCE/)
+assert.match(source, /ANIMA PROMPT SHAPE/)
+assert.match(source, /MULTI-CHARACTER \/ ENSEMBLE/)
+assert.match(source, /CHARACTER-ONLY \/ POV/)
 assert.match(source, /safe, sensitive, nsfw, or explicit/)
 assert.match(source, /folder\.binding\?\.characterId === characterId/)
 assert.match(source, /type: "character"/)
