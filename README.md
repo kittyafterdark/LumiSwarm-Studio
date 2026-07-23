@@ -25,7 +25,8 @@ It adds:
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker, a configurable 0–6 required-image range per reply (`0–0` keeps model discretion), and an optional `character="none"` scenery/object mode that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, serialize concurrent insertions into the same reply, and replace themselves with permanent container-filling Lumiverse images
 - Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with a fresh random seed using current/original settings, edit and immediately confirm the prompt in Quick Create, or open the output library; right-clicking the finished image opens the same menu
 - Character visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack follow the character across every conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile stack controls when that character becomes active, and file that character's Studio outputs automatically only while the pill is enabled; disabled visuals leave new outputs Unfiled
-- Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_base}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
+- A dedicated **Chat Visuals** drawer page that keeps persona identity profiles, the active character's Library-backed positive/negative base, and its named or custom LoRA-stack snapshot in one compact place; Lumiverse persona presets can seed a visual profile without turning the main Studio into another settings maze
+- Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_base}}`, `{{persona_base}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Append to chat / Delete menus
@@ -55,7 +56,8 @@ Generation itself goes through `spindle.imageGen.generate()`. That means it cont
    - `images` — the extension-owned output gallery
    - `chats` — tags outputs to the active chat and character
    - `characters` — reads the active character's portable Character LoRA base tags and avatar
-   - `personas` — resolves the active persona avatar for `{{user_profile}}`
+   - `personas` — resolves the active persona avatar and stores its selected Chat Visuals profile
+   - `presets` — reads Lumiverse prompt presets that can seed persona visual identity profiles
    - `chat_mutation` — explicitly appends a selected output to the active chat
    - `interceptor` — optionally injects the image-tag protocol before LLM generation and cleans extension markup from prompt history
    - `ui_panels` — the persistent generation miniplayer
@@ -93,17 +95,20 @@ The tag body is passed to SwarmUI as scene prompt content. Native Swarm syntax i
   slot="instagram-photo"
   aspect="4:3"
   character="active"
+  persona="active"
   alt="A candid city-street photo"
 >
-outside, city street, food stall, smiling
+character 1: outside a city food stall, ordering, smiling
+character 2: beside the stall, holding a drink, amused
+interaction: character 1 turns toward character 2; distinct hands and silhouettes
 </swarm-image>
 ```
 
-Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; 3:4 is available for portrait framing. The protocol asks models to reserve 9:16 and 16:9 for layouts explicitly presented as phone or widescreen media. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the character visual positive and negative, removes that binding's LoRAs from the request, and adds a no-person/character negative guard while preserving unrelated Studio style LoRAs, presets, and generation controls. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request.
+Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; 3:4 is available for portrait framing. The protocol asks models to reserve 9:16 and 16:9 for layouts explicitly presented as phone or widescreen media. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the character visual positive and negative, removes that binding's LoRAs from the request, and adds a no-person/character negative guard while preserving unrelated Studio style LoRAs, presets, and generation controls. `persona="active"` opts the active persona's bound visual identity into the request; it defaults to `none`. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request.
 
 The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives; tagged jobs remove the duplicate raw preset field before submission. A literal `{{swarm_preset}}` in a tag resolves to the same directive list without adding it twice. Scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. An enabled character-folder visual binding contributes its base positive, base negative, and saved LoRA stack to both manual and tagged generation. Native Character LoRA `base_tags` remain a fallback when a binding has no positive base; the separately bound native Character LoRA is never injected.
 
-The injected protocol identifies this as generation through the user's configured local SwarmUI, so the language model emits a request instead of claiming it lacks an image tool. It includes the exact active identity block that Studio will prepend and forbids substituting chat display names for visual tags. Anima-family checkpoints receive an ordered hybrid Danbooru/natural-language guide, the `safe` / `sensitive` / `nsfw` / `explicit` safety vocabulary, concrete scene-layer ordering, and a subject-action pattern for unambiguous multi-character staging.
+The injected protocol identifies this as generation through the user's configured local SwarmUI, so the language model emits a request instead of claiming it lacks an image tool. It includes the exact active identity blocks that Studio will prepend and forbids substituting chat display names for visual tags. Two-subject requests use compact `character 1:`, `character 2:`, and `interaction:` lines so pose ownership remains clear without repeating the identity prompt. Anima-family checkpoints receive a condensed hybrid Danbooru/natural-language guide, the `safe` / `sensitive` / `nsfw` / `explicit` safety vocabulary, concrete scene-layer ordering, and a subject-action pattern for unambiguous multi-character staging.
 
 Each request is keyed by chat, message, slot, and tag content. The streaming tag interceptor delivers complete requests once. Completions targeting the same assistant message are finalized through a per-message queue and re-read the latest message before every replacement, so two or more fast parallel generations cannot overwrite one another. The in-message card stays at a fixed size with a static spinner instead of remounting for every progress step. Right-click or long-press a pending/failed card for current-profile retry, original-profile retry, prompt editing and confirmation in Quick Create, or the output library. A completed image keeps a small per-image action overlay with the same regeneration choices, including after reload. Finished tags are frozen to their specific Lumiverse image URL rather than leaving the global `{{last_genned}}` macro in old messages.
 
@@ -111,12 +116,13 @@ Profile macros resolve to raw values so authored HTML and display regexes remain
 
 - `{{char_profile}}` / `{{user_profile}}` — authenticated avatar image URLs
 - `{{char_base}}` — the active character's Studio image base tags; this avoids Lumiverse's built-in `{{char_tags}}` macro, which returns categorical character-card labels
+- `{{persona_base}}` — the visual identity prompt selected for the active persona in Chat Visuals
 - `{{swarm_negative}}` — current literal Studio negative prompt
 - `{{swarm_preset}}` — enabled Studio presets as comma-separated native `<preset:exact saved name>` tokens
 - `{{swarm_checkpoint}}` / `{{swarm_aspect}}` — current profile details
 - `{{last_genned}}` — latest successful Studio output URL
 
-The macro reference remains behind **Studio settings → In-message images**. Character visuals live in Output Library so the settings popover stays compact.
+The macro reference remains behind **Studio settings → In-message images**. Character and persona visuals live on the drawer's **Chat Visuals** page (with character output organization still backed by Output Library), so the settings popover stays compact.
 
 ## Metadata behavior
 

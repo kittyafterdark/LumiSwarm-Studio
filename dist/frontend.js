@@ -47,6 +47,15 @@ const NEW_FOLDER_ICON = `
 const TRASH_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 3h6l1 4H8zM7 7l1 14h8l1-14M10 11v6M14 11v6"/></svg>
 `;
+const CHAT_VISUALS_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14v11H8l-3 2.5z"/><path d="M9 9h6m-6 3h4"/><path d="M18.5 2.5c.25 1.55.95 2.25 2.5 2.5-1.55.25-2.25.95-2.5 2.5-.25-1.55-.95-2.25-2.5-2.5 1.55-.25 2.25-.95 2.5-2.5Z"/></svg>
+`;
+const PLUS_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+`;
+const BACK_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>
+`;
 const EXPAND_ICON = `
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"/>
@@ -73,9 +82,13 @@ Example output:
   slot="instagram-photo"
   aspect="4:3"
   character="active"
-  alt="A candid city-street photo"
+  persona="active"
+  alt="Two people sharing food at a city stall"
 >
-outside, city street, food stall, smiling</swarm-image>`;
+character 1: smiling, holding a paper tray
+character 2: amused expression, leaning closer
+interaction: character 1 offers character 2 a bite, standing side by side
+medium shot, city street, food stall, evening lights</swarm-image>`;
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1";
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1";
 const MINIPLAYER_STORAGE_KEY = "swarm-studio-miniplayer-v1";
@@ -267,6 +280,133 @@ const STYLES = `
     font-family: Georgia, Cambria, "Times New Roman", serif;
     font-size: 10px;
     letter-spacing: .025em;
+  }
+  .ss-launcher-actions .ss-launcher-visuals-button {
+    grid-column: 1 / -1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 35%, var(--ss-outline));
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 8%, var(--ss-button-bg));
+  }
+  .ss-launcher-actions .ss-launcher-visuals-button svg,
+  .ss-chat-visuals-page svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .ss-launcher[data-page="visuals"] .ss-launcher-center { display: none; }
+  .ss-chat-visuals-page {
+    position: relative;
+    z-index: 2;
+    min-height: 0;
+    height: 100%;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+  }
+  .ss-chat-visuals-page[hidden] { display: none; }
+  .ss-chat-visuals-head,
+  .ss-chat-visuals-section-head,
+  .ss-chat-visuals-actions,
+  .ss-chat-visuals-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ss-chat-visuals-head {
+    min-height: 44px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--ss-outline);
+  }
+  .ss-chat-visuals-head-copy { min-width: 0; flex: 1; }
+  .ss-chat-visuals-head-copy strong {
+    display: block;
+    font-family: Georgia, Cambria, "Times New Roman", serif;
+    font-size: 18px;
+    font-weight: 500;
+  }
+  .ss-chat-visuals-scroll {
+    min-height: 0;
+    display: grid;
+    gap: 10px;
+    overflow-y: auto;
+    padding: 1px 3px 8px 1px;
+  }
+  .ss-chat-visuals-context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .ss-chat-visuals-chip {
+    max-width: 100%;
+    overflow: hidden;
+    padding: 4px 8px;
+    border: 1px solid color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 24%, var(--ss-outline));
+    border-radius: 999px;
+    color: var(--lumiverse-text-muted);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 7%, transparent);
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ss-chat-visuals-section {
+    display: grid;
+    gap: 9px;
+    padding: 12px;
+    border: 1px solid var(--ss-outline);
+    border-radius: var(--ss-panel-radius, 10px);
+    background: color-mix(in srgb, var(--ss-panel-bg) var(--ss-surface-opacity), transparent);
+  }
+  .ss-chat-visuals-section-head { align-items: flex-start; }
+  .ss-chat-visuals-section-head > div:first-child { min-width: 0; flex: 1; }
+  .ss-chat-visuals-section-head strong { display: block; font-size: 11px; }
+  .ss-chat-visuals-section-head span { display: block; margin-top: 2px; color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-chat-visuals-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 9px;
+  }
+  .ss-chat-visuals-field { min-width: 0; display: grid; gap: 5px; }
+  .ss-chat-visuals-field > label {
+    color: var(--lumiverse-text-muted);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .ss-chat-visuals-field .ss-textarea { min-height: 88px; resize: vertical; }
+  .ss-chat-visuals-row > :is(.ss-select, .ss-input) { min-width: 0; flex: 1; }
+  .ss-chat-visuals-row .ss-icon-button { flex: 0 0 auto; }
+  .ss-chat-visuals-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .ss-chat-visuals-status {
+    min-height: 18px;
+    color: var(--lumiverse-text-muted);
+    font-size: 9px;
+  }
+  .ss-chat-visuals-status[data-error="true"] { color: #fb7185; }
+  .ss-chat-visuals-footer {
+    display: flex;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--ss-outline);
+  }
+  .ss-chat-visuals-footer .ss-button { flex: 1; }
+  @media (max-width: 720px) {
+    .ss-chat-visuals-grid { grid-template-columns: 1fr; }
+    .ss-chat-visuals-row { align-items: stretch; }
+    .ss-chat-visuals-actions { justify-content: stretch; }
+    .ss-chat-visuals-actions .ss-button { flex: 1; }
   }
   :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="lumiverse"],
   :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="custom"] {
@@ -3758,6 +3898,7 @@ class MiniPlayerController {
                 workflow: draft?.details.workflow || "",
                 initImageId: draft?.details.initImageId || "",
                 initImageLabel: draft?.details.initImageLabel || "",
+                stack: draft?.stack || [],
                 source: "miniplayer"
             },
             showCompletionToast: this.behavior.completionToast
@@ -4046,7 +4187,8 @@ class StudioController {
                 characterName: "",
                 tags: "",
                 source: "none"
-            }
+            },
+            chatVisuals: null
         };
         this.buildV3();
         this.restoreWorkspaceState();
@@ -4238,7 +4380,8 @@ class StudioController {
                 resolvedPrompt: draft.details.resolvedPrompt,
                 resolvedNegativePrompt: draft.details.resolvedNegativePrompt,
                 presets: draft.details.presets,
-                workflow: draft.details.workflow
+                workflow: draft.details.workflow,
+                stack: draft.stack
             }
         });
     }
@@ -4536,9 +4679,13 @@ class StudioController {
   slot="instagram-photo"
   aspect="4:3"
   character="active"
-  alt="A candid city-street photo"
+  persona="active"
+  alt="Two people sharing food at a city stall"
 &gt;
-outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
+character 1: smiling, holding a paper tray
+character 2: amused expression, leaning closer
+interaction: character 1 offers character 2 a bite, standing side by side
+medium shot, city street, food stall, evening lights&lt;/swarm-image&gt;</code>
                   <button class="ss-button" data-action="copy-tag-protocol">Copy protocol example</button>
                   <details class="ss-css-guide ss-macro-guide">
                     <summary>Macro and preset guide</summary>
@@ -4547,6 +4694,7 @@ outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
                       <code>{{swarm_preset}}</code><span>Active preset titles as exact native directives: &lt;preset:name one&gt;, &lt;preset:name two&gt;.</span>
                       <code>{{swarm_negative}}</code><span>Current Studio negative prompt.</span>
                       <code>{{char_base}}</code><span>Active character base image tags. Tagged jobs apply these automatically.</span>
+                      <code>{{persona_base}}</code><span>Visual identity bound to the active persona in Chat Visuals.</span>
                       <code>{{char_profile}}</code><span>Active character avatar URL for HTML shells.</span>
                       <code>{{user_profile}}</code><span>Active persona avatar URL for HTML shells.</span>
                       <code>{{swarm_checkpoint}}</code><span>Current Studio checkpoint.</span>
@@ -4554,7 +4702,7 @@ outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
                       <code>{{last_genned}}</code><span>URL of the latest completed Swarm Studio image.</span>
                     </div>
                   </details>
-                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character-folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Identity tags are prepended automatically, so the tag body should describe the scene—not repeat a display name. Set <code>character="none"</code> for scenery or object shots that must skip the character layer. The request runs on local SwarmUI; one-line and multiline tags both work.</p>
+                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character-folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Set <code>character="none"</code> to skip the chat character and <code>persona="active"</code> to include the bound persona. For two subjects, keep character 1, character 2, and interaction on separate compact lines. The request runs on local SwarmUI; one-line and multiline tags both work.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -4835,7 +4983,7 @@ are removed when CSS is applied.</pre>
               <div class="ss-prompt-grid">
                 <div class="ss-field">
                   <div class="ss-prompt-field-head">
-                    <div class="ss-positive-label"><label for="ss-positive-v3">Positive</label><button class="ss-active-visual-pill" data-role="active-visual-pill" data-action="toggle-active-visual" type="button" hidden></button><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span></div>
+                    <div class="ss-positive-label"><label for="ss-positive-v3">Positive</label><button class="ss-active-visual-pill" data-role="active-visual-pill" data-action="toggle-active-visual" type="button" hidden></button><button class="ss-active-visual-pill" data-role="active-persona-visual-pill" data-action="toggle-active-persona-visual" type="button" hidden></button><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span></div>
                     <button class="ss-prompt-editor-button" data-action="edit-prompt" data-prompt-role="positive" title="Open positive prompt in Lumiverse editor" aria-label="Expand positive prompt">${EXPAND_ICON}</button>
                   </div>
                   <textarea id="ss-positive-v3" class="ss-textarea" data-role="positive" placeholder="Describe the image…"></textarea>
@@ -5411,6 +5559,7 @@ are removed when CSS is applied.</pre>
             if (action === "toggle-library-selection") this.toggleLibrarySelectionMode();
             if (action === "save-visual-profile") this.saveVisualProfile();
             if (action === "toggle-active-visual") this.toggleActiveVisualBinding();
+            if (action === "toggle-active-persona-visual") this.toggleActivePersonaVisual();
             if (action === "library-prev") this.changeLibraryPage(-1);
             if (action === "library-next") this.changeLibraryPage(1);
             if (action === "select-library-page") this.toggleLibraryPageSelection();
@@ -5468,6 +5617,7 @@ are removed when CSS is applied.</pre>
                 this.state.outputFolders = Array.isArray(data.outputFolders) ? data.outputFolders : [];
                 this.state.activeChat = data.activeChat || null;
                 this.state.permissions = data.permissions || {};
+                this.state.chatVisuals = data.chatVisuals || null;
                 this.acceptCharacterBaseTags(data.characterBaseTags);
                 this.renderPermissions();
                 this.populateConnections();
@@ -5475,6 +5625,21 @@ are removed when CSS is applied.</pre>
                 this.renderStackPresets();
                 this.hydrateActiveVisualStack();
                 this.updateActiveVisualPill();
+                this.updateActivePersonaVisualPill();
+                break;
+            case "chat_visuals_result":
+                this.state.chatVisuals = data;
+                this.state.outputFolders = data.characterFolder ? [
+                    ...this.state.outputFolders.filter((folder)=>folder.id !== data.characterFolder.id),
+                    data.characterFolder
+                ] : this.state.outputFolders;
+                this.state.stackPresets = Array.isArray(data.stackPresets) ? data.stackPresets : this.state.stackPresets;
+                this.renderStackPresets();
+                this.hydratedVisualCharacterId = "";
+                this.hydrateActiveVisualStack(true);
+                this.updateActiveVisualPill();
+                this.updateActivePersonaVisualPill();
+                this.updateTriggerSummary();
                 break;
             case "character_base_tags_result":
                 this.acceptCharacterBaseTags(data);
@@ -8035,25 +8200,41 @@ are removed when CSS is applied.</pre>
     hydrateActiveVisualStack(force = false) {
         const folder = this.activeVisualFolder();
         const binding = folder?.binding;
-        if (!folder || !binding?.enabled || !binding.stackPresetId || this.pendingDraftRestore) return false;
+        if (!folder || !binding?.enabled || this.pendingDraftRestore) return false;
         if (!force && this.hydratedVisualCharacterId === binding.characterId) {
             this.setStackPresetSelection(binding.stackPresetId);
             return false;
         }
         const preset = this.state.stackPresets.find((candidate)=>candidate.id === binding.stackPresetId);
-        if (!preset) return false;
+        const items = preset?.items?.length ? preset.items : binding.stackSnapshot || [];
+        if (!items.length) return false;
         this.hydratedVisualCharacterId = binding.characterId;
-        this.loadStackPreset(preset.id, false);
-        this.setRunStatus(`Loaded “${preset.name}” from ${folder.name} visuals.`);
+        this.state.stack = items.map((item)=>{
+            const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl);
+            return {
+                lora,
+                weight: clamp(Number(item.weight) || 1, -10, 10),
+                enabled: item.enabled !== false,
+                useTrigger: Boolean(item.useTrigger && lora.triggerPhrase)
+            };
+        });
+        this.setStackPresetSelection(preset?.id || "");
+        this.renderStack();
+        this.renderLoras();
+        this.setRunStatus(preset ? `Loaded “${preset.name}” from ${folder.name} visuals.` : `Loaded the Custom stack snapshot from ${folder.name} visuals.`);
         return true;
     }
     saveVisualProfile() {
         const folder = this.state.outputFolders.find((candidate)=>candidate.id === this.libraryFolderId);
         if (!folder?.binding) return;
+        const selectedStackValue = this.get('[data-role="visual-stack"]').value;
+        const selectedStackId = selectedStackValue === "__custom__" ? "" : selectedStackValue;
+        const selectedStack = this.state.stackPresets.find((preset)=>preset.id === selectedStackId);
         const profile = {
             positivePrompt: this.get('[data-role="visual-positive"]').value,
             negativePrompt: this.get('[data-role="visual-negative"]').value,
-            stackPresetId: this.get('[data-role="visual-stack"]').value,
+            stackPresetId: selectedStackId,
+            stackSnapshot: selectedStack?.items || (selectedStackValue === "__custom__" ? folder.binding.stackSnapshot : []),
             enabled: folder.binding.enabled
         };
         folder.binding = {
@@ -8104,6 +8285,34 @@ are removed when CSS is applied.</pre>
         pill.dataset.enabled = String(folder.binding.enabled);
         pill.title = folder.binding.enabled ? `Using “${folder.name}” character visuals. Click to disable them for this character.` : `“${folder.name}” character visuals are disabled. Click to enable.`;
     }
+    toggleActivePersonaVisual() {
+        const visuals = this.state.chatVisuals;
+        const presetId = visuals?.personaBinding?.presetId || "";
+        if (!visuals?.activePersona || !presetId) return;
+        const enabled = visuals.personaBinding.enabled === false;
+        visuals.personaBinding = {
+            presetId,
+            enabled
+        };
+        this.send("bind_persona_visual_preset", {
+            binding: visuals.personaBinding,
+            currentStack: this.stackExportItems()
+        });
+        this.updateActivePersonaVisualPill();
+        this.scheduleStudioProfileSync();
+        this.setRunStatus(`${visuals.activePersona.name} persona visuals ${enabled ? "enabled" : "disabled"}.`);
+    }
+    updateActivePersonaVisualPill() {
+        const pill = this.root.querySelector('[data-role="active-persona-visual-pill"]');
+        if (!pill) return;
+        const visuals = this.state.chatVisuals;
+        const preset = visuals?.personaPresets?.find((candidate)=>candidate.id === visuals.personaBinding?.presetId) || null;
+        pill.hidden = !visuals?.activePersona || !preset;
+        if (!visuals?.activePersona || !preset) return;
+        pill.textContent = `Persona: ${visuals.activePersona.name}`;
+        pill.dataset.enabled = String(visuals.personaBinding.enabled !== false);
+        pill.title = visuals.personaBinding.enabled !== false ? `Using persona visual profile “${preset.name}”. Click to disable it.` : `Persona visual profile “${preset.name}” is disabled. Click to enable.`;
+    }
     renderVisualProfile() {
         const panel = this.get('[data-role="library-visual-profile"]');
         const folder = this.state.outputFolders.find((candidate)=>candidate.id === this.libraryFolderId);
@@ -8123,7 +8332,12 @@ are removed when CSS is applied.</pre>
             option.value = preset.id;
             stack.appendChild(option);
         }
-        stack.value = this.state.stackPresets.some((preset)=>preset.id === folder.binding?.stackPresetId) ? folder.binding.stackPresetId : "";
+        if (folder.binding.stackSnapshot?.length && !folder.binding.stackPresetId) {
+            const custom = element("option", "", `Custom snapshot · ${folder.binding.stackSnapshot.length}`);
+            custom.value = "__custom__";
+            stack.appendChild(custom);
+        }
+        stack.value = this.state.stackPresets.some((preset)=>preset.id === folder.binding?.stackPresetId) ? folder.binding.stackPresetId : folder.binding.stackSnapshot?.length ? "__custom__" : "";
     }
     deleteSelectedOutputFolder() {
         const folder = this.state.outputFolders.find((item)=>item.id === this.libraryFolderId);
@@ -8401,7 +8615,8 @@ are removed when CSS is applied.</pre>
         const folder = this.activeVisualFolder();
         const preset = folder?.binding?.enabled && folder.binding.stackPresetId ? this.state.stackPresets.find((candidate)=>candidate.id === folder.binding?.stackPresetId) : null;
         const merged = new Map();
-        for (const item of preset?.items || []){
+        const boundItems = preset?.items?.length ? preset.items : folder?.binding?.enabled ? folder.binding.stackSnapshot || [] : [];
+        for (const item of boundItems){
             const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl);
             merged.set(normalizeModelName(item.name), {
                 lora,
@@ -8423,10 +8638,21 @@ are removed when CSS is applied.</pre>
         const prompt = this.get('[data-role="positive"]').value.trim();
         const folder = this.activeVisualFolder();
         const visual = folder?.binding?.enabled ? folder.binding.positivePrompt.trim() : "";
-        const layeredPrompt = visual && !prompt.toLowerCase().includes(visual.toLowerCase()) ? [
+        const chatVisuals = this.state.chatVisuals;
+        const personaPreset = chatVisuals?.personaBinding?.enabled !== false ? chatVisuals?.personaPresets?.find((candidate)=>candidate.id === chatVisuals.personaBinding.presetId) : null;
+        const personaVisual = personaPreset?.positivePrompt.trim() || "";
+        let layeredPrompt = prompt;
+        for (const layer of [
             visual,
-            prompt
-        ].filter(Boolean).join(", ") : prompt;
+            personaVisual
+        ]){
+            if (layer && !layeredPrompt.toLowerCase().includes(layer.toLowerCase())) {
+                layeredPrompt = [
+                    layer,
+                    layeredPrompt
+                ].filter(Boolean).join(", ");
+            }
+        }
         const triggers = this.inheritedTriggers().filter((trigger)=>!layeredPrompt.toLowerCase().includes(trigger.toLowerCase()));
         return [
             triggers.join(", "),
@@ -8571,7 +8797,8 @@ are removed when CSS is applied.</pre>
                 presets: resolved.presets,
                 workflow: this.state.selectedWorkflow?.name || "",
                 initImageId: this.state.initImage?.imageId || "",
-                initImageLabel: this.state.initImage?.label || ""
+                initImageLabel: this.state.initImage?.label || "",
+                stack: this.stackExportItems()
             },
             showCompletionToast: this.behavior.completionToast
         });
@@ -9265,6 +9492,361 @@ class TaggedImageController {
         });
     }
 }
+class ChatVisualsController {
+    ctx;
+    launcher;
+    getCurrentStack;
+    openStudio;
+    openLibrary;
+    page;
+    data = null;
+    selectedPersonaPresetId = "";
+    selectedStackValue = "";
+    importedSourcePresetId = "";
+    constructor(ctx, launcher, getCurrentStack, openStudio, openLibrary){
+        this.ctx = ctx;
+        this.launcher = launcher;
+        this.getCurrentStack = getCurrentStack;
+        this.openStudio = openStudio;
+        this.openLibrary = openLibrary;
+        this.page = element("section", "ss-chat-visuals-page");
+        this.page.hidden = true;
+        this.page.innerHTML = `
+      <div class="ss-chat-visuals-head">
+        <button class="ss-icon-button" data-action="visuals-back" title="Back to Swarm Studio" aria-label="Back">${BACK_ICON}</button>
+        <div class="ss-chat-visuals-head-copy">
+          <strong>Chat Visuals</strong>
+          <span class="ss-muted ss-tiny">Bind image identity without crowding the generation modal.</span>
+        </div>
+        <button class="ss-icon-button" data-action="visuals-refresh" title="Refresh active chat context" aria-label="Refresh">↻</button>
+      </div>
+      <div class="ss-chat-visuals-scroll">
+        <div class="ss-chat-visuals-context" data-role="visuals-context"></div>
+
+        <section class="ss-chat-visuals-section">
+          <div class="ss-chat-visuals-section-head">
+            <div><strong>Persona</strong><span data-role="persona-caption">The active Lumiverse persona can own a reusable image identity.</span></div>
+            <label class="ss-toggle-line"><input type="checkbox" data-role="persona-visual-enabled" checked> Active</label>
+          </div>
+          <div class="ss-chat-visuals-field">
+            <label for="ss-chat-persona-profile">Visual profile</label>
+            <div class="ss-chat-visuals-row">
+              <select id="ss-chat-persona-profile" class="ss-select" data-role="persona-visual-preset"></select>
+              <button class="ss-icon-button" data-action="new-persona-visual" title="Create a persona visual profile" aria-label="Create persona visual profile">${PLUS_ICON}</button>
+              <button class="ss-icon-button ss-button-danger" data-action="delete-persona-visual" title="Delete selected persona visual profile" aria-label="Delete persona visual profile">${TRASH_ICON}</button>
+            </div>
+          </div>
+          <div class="ss-chat-visuals-field">
+            <label for="ss-chat-lumi-preset">Pull from Lumiverse preset</label>
+            <div class="ss-chat-visuals-row">
+              <select id="ss-chat-lumi-preset" class="ss-select" data-role="lumiverse-persona-preset"></select>
+              <button class="ss-button" data-action="import-persona-prompt">Pull identity</button>
+            </div>
+          </div>
+          <div class="ss-chat-visuals-field">
+            <label for="ss-chat-persona-positive">Positive identity prompt</label>
+            <textarea id="ss-chat-persona-positive" class="ss-textarea" data-role="persona-positive" placeholder="Visual traits for the active persona…"></textarea>
+          </div>
+          <div class="ss-chat-visuals-actions">
+            <button class="ss-button ss-button-primary" data-action="save-persona-visual">Save &amp; bind to active persona</button>
+          </div>
+        </section>
+
+        <section class="ss-chat-visuals-section">
+          <div class="ss-chat-visuals-section-head">
+            <div><strong>Character folder</strong><span data-role="character-folder-caption">Creates the Library folder and keeps these prompts synchronized with it.</span></div>
+            <label class="ss-toggle-line"><input type="checkbox" data-role="character-visual-enabled" checked> Active</label>
+          </div>
+          <div class="ss-chat-visuals-grid">
+            <div class="ss-chat-visuals-field">
+              <label for="ss-chat-character-positive">Positive base</label>
+              <textarea id="ss-chat-character-positive" class="ss-textarea" data-role="character-positive" placeholder="Stable visual identity for the active character…"></textarea>
+            </div>
+            <div class="ss-chat-visuals-field">
+              <label for="ss-chat-character-negative">Negative base</label>
+              <textarea id="ss-chat-character-negative" class="ss-textarea" data-role="character-negative" placeholder="Things to consistently avoid…"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <section class="ss-chat-visuals-section">
+          <div class="ss-chat-visuals-section-head">
+            <div><strong>Character LoRA stack</strong><span>Saved presets remain named; edited Studio state is stored as a real Custom snapshot.</span></div>
+          </div>
+          <div class="ss-chat-visuals-field">
+            <label for="ss-chat-stack">Stack source</label>
+            <select id="ss-chat-stack" class="ss-select" data-role="character-stack"></select>
+          </div>
+          <div class="ss-muted ss-tiny" data-role="character-stack-caption"></div>
+          <div class="ss-chat-visuals-actions">
+            <button class="ss-button ss-button-primary" data-action="save-character-visuals">Save character visuals</button>
+          </div>
+        </section>
+
+        <div class="ss-chat-visuals-status" data-role="chat-visuals-status">Open a chat to configure its active character.</div>
+      </div>
+      <div class="ss-chat-visuals-footer">
+        <button class="ss-button ss-button-primary" data-action="visuals-open-studio">Open Studio</button>
+        <button class="ss-button" data-action="visuals-open-library">${LIBRARY_ICON} Library</button>
+      </div>
+    `;
+        launcher.appendChild(this.page);
+        this.page.addEventListener("click", (event)=>{
+            const button = event.target.closest("[data-action]");
+            const action = button?.dataset.action || "";
+            if (action === "visuals-back") this.hide();
+            if (action === "visuals-refresh") this.refresh();
+            if (action === "new-persona-visual") this.createPersonaVisual();
+            if (action === "delete-persona-visual") this.deletePersonaVisual();
+            if (action === "import-persona-prompt") this.importPersonaPrompt();
+            if (action === "save-persona-visual") this.savePersonaVisual();
+            if (action === "save-character-visuals") this.saveCharacterVisuals();
+            if (action === "visuals-open-studio") this.openStudio();
+            if (action === "visuals-open-library") this.openLibrary();
+        });
+        this.page.addEventListener("change", (event)=>{
+            const target = event.target;
+            if (target.dataset.role === "persona-visual-preset") {
+                this.selectedPersonaPresetId = target.value;
+                this.renderPersonaEditor();
+            }
+            if (target.dataset.role === "character-stack") this.selectedStackValue = target.value;
+        });
+    }
+    show() {
+        this.launcher.dataset.page = "visuals";
+        this.page.hidden = false;
+        this.refresh();
+    }
+    hide() {
+        this.launcher.dataset.page = "home";
+        this.page.hidden = true;
+    }
+    refresh() {
+        this.setStatus("Reading the active chat, persona, Library folder, and Studio stack…");
+        this.send("get_chat_visuals", {
+            currentStack: this.getCurrentStack()
+        });
+    }
+    onMessage(payload) {
+        if (payload?.type === "chat_visuals_result") {
+            this.data = payload.data;
+            this.selectedPersonaPresetId = this.data.personaBinding?.presetId || this.data.personaPresets?.[0]?.id || "";
+            this.selectedStackValue = this.defaultStackSelection();
+            this.render();
+            this.setStatus("Chat visual bindings are synchronized.");
+            return;
+        }
+        if (payload?.type === "lumiverse_persona_prompt_result") {
+            this.importedSourcePresetId = String(payload.data?.presetId || "");
+            this.get("persona-positive").value = String(payload.data?.prompt || "");
+            this.setStatus(payload.data?.prompt ? `Pulled persona identity text from “${payload.data?.presetName || "Lumiverse preset"}”. Review it, then save and bind.` : "That Lumiverse preset did not expose a persona block; enter the visual identity manually.");
+            return;
+        }
+        if (payload?.type === "studio_error" && [
+            "get_chat_visuals",
+            "save_persona_visual_preset",
+            "delete_persona_visual_preset",
+            "bind_persona_visual_preset",
+            "import_lumiverse_persona_preset",
+            "save_chat_visuals"
+        ].includes(String(payload.operation || ""))) {
+            this.setStatus(String(payload.error || "Could not update Chat Visuals."), true);
+        }
+    }
+    destroy() {
+        this.page.remove();
+    }
+    get(role) {
+        const node = this.page.querySelector(`[data-role="${role}"]`);
+        if (!node) throw new Error(`Chat Visuals element missing: ${role}`);
+        return node;
+    }
+    send(type, data = {}) {
+        this.ctx.sendToBackend({
+            type,
+            requestId: crypto.randomUUID(),
+            ...data
+        });
+    }
+    setStatus(message, error = false) {
+        const status = this.get("chat-visuals-status");
+        status.textContent = message;
+        status.dataset.error = String(error);
+    }
+    render() {
+        if (!this.data) return;
+        const context = this.get("visuals-context");
+        context.replaceChildren();
+        context.append(element("span", "ss-chat-visuals-chip", this.data.activeChat ? `Character · ${this.data.activeChat.characterName || this.data.activeChat.name || "active chat"}` : "No active character chat"), element("span", "ss-chat-visuals-chip", this.data.activePersona ? `Persona · ${this.data.activePersona.name}` : "No active persona"));
+        const personaSelect = this.get("persona-visual-preset");
+        personaSelect.replaceChildren();
+        const noPersonaProfile = element("option", "", this.data.personaPresets.length ? "Choose a visual profile…" : "No persona visual profiles yet");
+        noPersonaProfile.value = "";
+        personaSelect.appendChild(noPersonaProfile);
+        for (const preset of this.data.personaPresets){
+            const option = element("option", "", preset.name);
+            option.value = preset.id;
+            personaSelect.appendChild(option);
+        }
+        personaSelect.value = this.data.personaPresets.some((preset)=>preset.id === this.selectedPersonaPresetId) ? this.selectedPersonaPresetId : "";
+        this.get("persona-visual-enabled").checked = this.data.personaBinding?.enabled !== false;
+        this.get("persona-visual-enabled").disabled = !this.data.activePersona;
+        this.get("persona-caption").textContent = this.data.activePersona ? `Binding target: ${this.data.activePersona.name}` : "Select a Lumiverse persona to bind an image identity.";
+        const nativeSelect = this.get("lumiverse-persona-preset");
+        nativeSelect.replaceChildren();
+        const nativeBlank = element("option", "", this.data.lumiversePresets.length ? "Choose Lumiverse preset…" : "No readable Lumiverse presets");
+        nativeBlank.value = "";
+        nativeSelect.appendChild(nativeBlank);
+        for (const preset of this.data.lumiversePresets){
+            const option = element("option", "", preset.name);
+            option.value = preset.id;
+            nativeSelect.appendChild(option);
+        }
+        if (this.importedSourcePresetId && this.data.lumiversePresets.some((preset)=>preset.id === this.importedSourcePresetId)) {
+            nativeSelect.value = this.importedSourcePresetId;
+        }
+        this.renderPersonaEditor();
+        const folder = this.data.characterFolder;
+        this.get("character-folder-caption").textContent = folder ? `${folder.name} · synchronized with Output Library` : this.data.activeChat ? `No folder yet · saving creates “${this.data.activeChat.characterName || "Character"}”` : "Open a character chat to create a visual folder.";
+        this.get("character-positive").value = folder?.binding?.positivePrompt || this.data.characterBasePrompt || "";
+        this.get("character-negative").value = folder?.binding?.negativePrompt || "";
+        this.get("character-visual-enabled").checked = folder?.binding?.enabled !== false;
+        this.get("character-visual-enabled").disabled = !this.data.activeChat;
+        const stack = this.get("character-stack");
+        stack.replaceChildren();
+        const none = element("option", "", "No bound stack");
+        none.value = "";
+        stack.appendChild(none);
+        if (this.data.studioStack.length) {
+            const current = element("option", "", this.data.studioStackCustom ? `Current Studio · Custom · ${this.data.studioStack.length}` : `${this.data.stackPresets.find((preset)=>preset.id === this.data?.studioStackPresetId)?.name || "Current Studio"} · ${this.data.studioStack.length}`);
+            current.value = "__studio__";
+            stack.appendChild(current);
+        }
+        if (folder?.binding?.stackSnapshot?.length && !folder.binding.stackPresetId) {
+            const bound = element("option", "", `Bound Custom snapshot · ${folder.binding.stackSnapshot.length}`);
+            bound.value = "__bound_custom__";
+            stack.appendChild(bound);
+        }
+        for (const preset of this.data.stackPresets){
+            const option = element("option", "", `${preset.name} · ${preset.items.length}`);
+            option.value = `preset:${preset.id}`;
+            stack.appendChild(option);
+        }
+        stack.value = [
+            ...stack.options
+        ].some((option)=>option.value === this.selectedStackValue) ? this.selectedStackValue : "";
+        this.get("character-stack-caption").textContent = stack.value === "__studio__" ? this.data.studioStackCustom ? "Saving will capture this edited Studio stack as Custom." : "Saving will bind the matching named stack." : stack.value === "__bound_custom__" ? "Keeping the custom snapshot already bound to this character." : stack.value.startsWith("preset:") ? "This named saved stack will load with the character." : "No character-specific LoRAs will be inherited.";
+    }
+    renderPersonaEditor() {
+        if (!this.data) return;
+        const preset = this.data.personaPresets.find((candidate)=>candidate.id === this.selectedPersonaPresetId);
+        this.get("persona-positive").value = preset?.positivePrompt || "";
+        this.importedSourcePresetId = preset?.sourcePresetId || "";
+        const nativeSelect = this.get("lumiverse-persona-preset");
+        if (this.importedSourcePresetId && [
+            ...nativeSelect.options
+        ].some((option)=>option.value === this.importedSourcePresetId)) {
+            nativeSelect.value = this.importedSourcePresetId;
+        }
+    }
+    defaultStackSelection() {
+        if (!this.data) return "";
+        if (this.data.studioStack.length) return "__studio__";
+        const binding = this.data.characterFolder?.binding;
+        if (binding?.stackPresetId) return `preset:${binding.stackPresetId}`;
+        if (binding?.stackSnapshot?.length) return "__bound_custom__";
+        return "";
+    }
+    createPersonaVisual() {
+        if (!this.data?.activePersona) {
+            this.setStatus("Select a Lumiverse persona first.", true);
+            return;
+        }
+        const name = window.prompt("New persona visual profile", `${this.data.activePersona.name} visuals`);
+        if (!name?.trim()) return;
+        this.send("save_persona_visual_preset", {
+            preset: {
+                name: name.trim(),
+                positivePrompt: this.get("persona-positive").value,
+                sourcePresetId: this.importedSourcePresetId
+            },
+            bind: true,
+            bindingEnabled: this.get("persona-visual-enabled").checked,
+            currentStack: this.getCurrentStack()
+        });
+        this.setStatus(`Creating and binding “${name.trim()}”…`);
+    }
+    savePersonaVisual() {
+        if (!this.data?.activePersona) {
+            this.setStatus("Select a Lumiverse persona first.", true);
+            return;
+        }
+        const selected = this.data.personaPresets.find((preset)=>preset.id === this.selectedPersonaPresetId);
+        if (!selected) {
+            this.createPersonaVisual();
+            return;
+        }
+        this.send("save_persona_visual_preset", {
+            preset: {
+                ...selected,
+                positivePrompt: this.get("persona-positive").value,
+                sourcePresetId: this.importedSourcePresetId || selected.sourcePresetId
+            },
+            bind: true,
+            bindingEnabled: this.get("persona-visual-enabled").checked,
+            currentStack: this.getCurrentStack()
+        });
+        this.setStatus(`Saving and binding “${selected.name}”…`);
+    }
+    deletePersonaVisual() {
+        const selected = this.data?.personaPresets.find((preset)=>preset.id === this.selectedPersonaPresetId);
+        if (!selected || !window.confirm(`Delete persona visual profile “${selected.name}”?`)) return;
+        this.send("delete_persona_visual_preset", {
+            presetId: selected.id,
+            currentStack: this.getCurrentStack()
+        });
+        this.setStatus(`Deleting “${selected.name}”…`);
+    }
+    importPersonaPrompt() {
+        const presetId = this.get("lumiverse-persona-preset").value;
+        if (!presetId) {
+            this.setStatus("Choose a Lumiverse preset first.", true);
+            return;
+        }
+        this.send("import_lumiverse_persona_preset", {
+            presetId
+        });
+        this.setStatus("Reading the persona block from Lumiverse…");
+    }
+    saveCharacterVisuals() {
+        if (!this.data?.activeChat) {
+            this.setStatus("Open a character chat first.", true);
+            return;
+        }
+        const value = this.get("character-stack").value;
+        let stackPresetId = "";
+        let stackSnapshot = [];
+        if (value === "__studio__") {
+            stackPresetId = this.data.studioStackCustom ? "" : this.data.studioStackPresetId;
+            stackSnapshot = this.data.studioStack;
+        } else if (value === "__bound_custom__") {
+            stackSnapshot = this.data.characterFolder?.binding?.stackSnapshot || [];
+        } else if (value.startsWith("preset:")) {
+            stackPresetId = value.slice("preset:".length);
+        }
+        this.send("save_chat_visuals", {
+            folderName: this.data.activeChat.characterName || "Character visuals",
+            positivePrompt: this.get("character-positive").value,
+            negativePrompt: this.get("character-negative").value,
+            stackPresetId,
+            stackSnapshot,
+            enabled: this.get("character-visual-enabled").checked,
+            currentStack: this.getCurrentStack()
+        });
+        this.setStatus(this.data.characterFolder ? "Saving character visuals…" : "Creating and binding the character folder…");
+    }
+}
 let activeStudio = null;
 let activeModal = null;
 export function setup(ctx) {
@@ -9277,6 +9859,7 @@ export function setup(ctx) {
     let launcher = null;
     let miniplayer = null;
     let taggedImages = null;
+    let chatVisuals = null;
     let removeCustomStyle = appearance.customCss ? ctx.dom.addStyle(appearance.customCss) : null;
     const setThemeState = (theme)=>{
         currentTheme = theme;
@@ -9350,6 +9933,7 @@ export function setup(ctx) {
             activeStudio = null;
             activeModal = null;
             miniplayer?.setStudioOpen(false);
+            chatVisuals?.refresh();
         });
     };
     const openStudioWithTaggedPrompt = (prompt, negativePrompt)=>{
@@ -9409,6 +9993,7 @@ export function setup(ctx) {
         iconSvg: FRAME_WALL_ICON
     });
     launcher = element("div", "ss-launcher");
+    launcher.dataset.page = "home";
     launcher.dataset.theme = currentTheme;
     applyAppearanceVariables(launcher, appearance);
     for (const corner of [
@@ -9434,9 +10019,13 @@ export function setup(ctx) {
     launchButton.addEventListener("click", ()=>openStudio("studio"));
     const libraryButton = element("button", "ss-button", "Open Library");
     libraryButton.addEventListener("click", ()=>openStudio("library"));
-    launcherActions.append(launchButton, libraryButton);
+    const visualsButton = element("button", "ss-button ss-launcher-visuals-button");
+    visualsButton.innerHTML = `${CHAT_VISUALS_ICON}<span>Chat Visuals</span>`;
+    visualsButton.addEventListener("click", ()=>chatVisuals?.show());
+    launcherActions.append(launchButton, libraryButton, visualsButton);
     launcherCenter.append(emblem, wordmark, launcherActions);
     launcher.appendChild(launcherCenter);
+    chatVisuals = new ChatVisualsController(ctx, launcher, ()=>activeStudio?.exportDraft()?.stack || miniplayer?.snapshot()?.draft?.stack || null, ()=>openStudio("studio"), ()=>openStudio("library"));
     drawer.root.appendChild(launcher);
     const inputAction = ctx.ui.registerInputBarAction({
         id: "open-swarm-studio",
@@ -9449,6 +10038,7 @@ export function setup(ctx) {
         miniplayer?.onMessage(payload);
         activeStudio?.onMessage(payload);
         taggedImages?.onMessage(payload);
+        chatVisuals?.onMessage(payload);
     });
     ctx.sendToBackend({
         type: "list_tagged_jobs",
@@ -9482,6 +10072,8 @@ export function setup(ctx) {
         unregisterTagInterceptor();
         taggedImages?.destroy();
         taggedImages = null;
+        chatVisuals?.destroy();
+        chatVisuals = null;
         miniplayer?.destroy();
         miniplayer = null;
         removeCustomStyle?.();

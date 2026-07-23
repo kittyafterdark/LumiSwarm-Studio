@@ -9,7 +9,9 @@ const TAG_AUTOMATION_CONFIG_FILE = "tag-automation-config.json";
 const TAGGED_IMAGE_JOBS_FILE = "tagged-image-jobs.json";
 const STUDIO_GENERATION_PROFILE_FILE = "studio-generation-profile.json";
 const CHARACTER_BASE_TAGS_FILE = "character-base-tags.json";
+const PERSONA_VISUAL_PRESETS_FILE = "persona-visual-presets.json";
 const STACK_PRESET_LIMIT = 40;
+const PERSONA_VISUAL_PRESET_LIMIT = 80;
 const GENERATION_RECORD_LIMIT = 100;
 const OUTPUT_FOLDER_LIMIT = 80;
 const TAGGED_IMAGE_JOB_LIMIT = 160;
@@ -30,6 +32,7 @@ Place this exact XML-like request wherever an illustration selected under the im
   slot="short-stable-name"
   aspect="4:3"
   character="active"
+  persona="none"
   alt="brief accessible description"
 >
 scene-specific SwarmUI prompt</swarm-image>
@@ -38,20 +41,16 @@ The request="generate" marker is required. Emit the tag only as an actual image 
 LOCAL GENERATION
 The tag is executed by the user's configured local SwarmUI installation and local hardware. You are not claiming to render the image yourself, calling a remote image service, or embedding a pre-existing web image. Follow the conversation's actually applicable instructions, but do not invent or quote a remote image provider's policy, capability restriction, quota, moderation rule, or refusal: no remote image provider is being invoked by this tag. When an illustration is appropriate, emit the request tag and continue the reply naturally; do not apologize that you cannot generate images, ask the user to open another tool, warn that an external image model may refuse, or replace the request with image-search instructions.
 
-IDENTITY RULES
-Never use a chat character's or persona's display name as a diffusion token. Names such as an original character's conversational name do not teach the checkpoint what that person looks like. For character="active", Swarm Studio automatically prepends the active character identity block shown below; do not repeat, summarize, or replace that identity with a name. Add only scene-specific changes or traits not already covered. If another person or the user's persona appears, translate visual traits already present in context into concrete model-recognizable descriptors; never send their display name alone. A canonical character-name or series tag is allowed only when it is explicitly supplied as a trained tag in the identity/context, never merely because it is the speaker's name.
+IDENTITY AND SUBJECT RULES
+Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" injects the bound character identity; persona="active" injects the bound persona identity. Do not copy either identity block into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
 
-PROMPTING STYLE
-Prefer Danbooru-style comma tags for concrete visual content, with short natural-language clauses where spatial relationships or multi-character interactions would be ambiguous. For multiple subjects, begin with one clear subject-action relationship, for example: "The red angel girl and the blue demon girl float in the night sky, holding each other's hands." Then add distinct visible traits and scene tags so the subjects cannot be confused. Do not write a literary summary.
+Write compact Danbooru-style scene tags, using short natural-language clauses only to disambiguate spatial relationships. For one subject, supply expression, pose/action, camera, setting, and light. For two subjects, use this compact structure:
+character 1: [scene-specific expression, pose, action, changed attributes]
+character 2: [scene-specific expression, pose, action, changed attributes]
+interaction: [who does what to whom and relative positioning]
+Then add shared camera, composition, environment, lighting, depth, effects, and finishing tags. Character 1 is the active chat character; character 2 is the active persona. Keep each subject's attributes on its own line so traits and poses do not bleed between them. Do not restate either display name or write a literary summary.
 
-Focus the tag body on this scene layer, in this order:
-[expression], [pose], [hand position], [leg position], [action],
-[camera distance], [camera angle], [lens], [focus], [composition],
-[background], [time], [weather], [scene objects],
-[lighting], [depth], [effects], [finishing details].
-Include changed clothing, accessories, or body traits only when the scene requires a variation from the supplied identity block.
-
-Omit character or use character="active" when the active character should appear. Use character="none" for scenery, objects, establishing shots, interfaces, or any illustration that should contain no people or characters; this suppresses the character identity tags and bound visual LoRAs and adds a no-character negative guard. The user's current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve every such directive exactly. Supported aspect values are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Use 4:3 for ordinary illustrations placed between prose and 3:4 when portrait framing materially helps. Reserve 9:16 or 16:9 for content explicitly presented as phone or widescreen media; use a different ratio only when the surrounding layout clearly calls for it. Do not put Markdown fences around the tag.`;
+Use character="none" when the active chat character should not appear. Use persona="active" only when the active persona should appear; otherwise use persona="none". When both are none, Swarm Studio suppresses bound character LoRAs and adds a no-character negative guard. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.`;
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -885,13 +884,10 @@ async function loadStackPresets(userId) {
     });
     return Array.isArray(value) ? value.slice(0, STACK_PRESET_LIMIT) : [];
 }
-function cleanStackPreset(value, existingId = "") {
-    const input = asRecord(value);
-    const name = asString(input.name).trim().slice(0, 80);
-    if (!name) throw new Error("Give this LoRA stack a name.");
-    const rawItems = Array.isArray(input.items) ? input.items : [];
-    if (!rawItems.length) throw new Error("Add at least one LoRA before saving a stack.");
-    const items = rawItems.slice(0, 64).map((raw)=>{
+function cleanStackPresetItems(value, allowEmpty = true) {
+    const rawItems = Array.isArray(value) ? value : [];
+    if (!allowEmpty && !rawItems.length) throw new Error("Add at least one LoRA before saving a stack.");
+    return rawItems.slice(0, 64).map((raw)=>{
         const item = asRecord(raw);
         const modelName = asString(item.name).trim().slice(0, 500);
         if (!modelName) throw new Error("A saved stack item is missing its LoRA filename.");
@@ -905,6 +901,12 @@ function cleanStackPreset(value, existingId = "") {
             sourceUrl: metadataSourceUrl(item.sourceUrl)
         };
     });
+}
+function cleanStackPreset(value, existingId = "") {
+    const input = asRecord(value);
+    const name = asString(input.name).trim().slice(0, 80);
+    if (!name) throw new Error("Give this LoRA stack a name.");
+    const items = cleanStackPresetItems(input.items, false);
     return {
         id: existingId || crypto.randomUUID(),
         name,
@@ -934,6 +936,194 @@ async function deleteStackPreset(presetId, userId) {
     });
     return presets;
 }
+function cleanPersonaVisualPresets(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    return value.slice(0, PERSONA_VISUAL_PRESET_LIMIT).flatMap((raw)=>{
+        const item = asRecord(raw);
+        const id = asString(item.id).trim();
+        const name = asString(item.name).trim().slice(0, 80);
+        if (!id || !name || seen.has(id)) return [];
+        seen.add(id);
+        return [
+            {
+                id,
+                name,
+                positivePrompt: asString(item.positivePrompt).trim().slice(0, 12_000),
+                sourcePresetId: asString(item.sourcePresetId).trim().slice(0, 200),
+                updatedAt: Number(item.updatedAt) || Date.now()
+            }
+        ];
+    });
+}
+async function loadPersonaVisualPresets(userId) {
+    return cleanPersonaVisualPresets(await spindle.userStorage.getJson(PERSONA_VISUAL_PRESETS_FILE, {
+        fallback: [],
+        userId
+    }));
+}
+async function savePersonaVisualPreset(value, userId) {
+    const input = asRecord(value);
+    const requestedId = asString(input.id).trim();
+    const name = asString(input.name).trim().slice(0, 80);
+    if (!name) throw new Error("Give this persona visual profile a name.");
+    const presets = await loadPersonaVisualPresets(userId);
+    const existingIndex = requestedId ? presets.findIndex((preset)=>preset.id === requestedId) : presets.findIndex((preset)=>preset.name.toLowerCase() === name.toLowerCase());
+    const preset = {
+        id: existingIndex >= 0 ? presets[existingIndex].id : requestedId || crypto.randomUUID(),
+        name,
+        positivePrompt: asString(input.positivePrompt).trim().slice(0, 12_000),
+        sourcePresetId: asString(input.sourcePresetId).trim().slice(0, 200),
+        updatedAt: Date.now()
+    };
+    if (existingIndex >= 0) presets.splice(existingIndex, 1);
+    presets.unshift(preset);
+    const saved = presets.slice(0, PERSONA_VISUAL_PRESET_LIMIT);
+    await spindle.userStorage.setJson(PERSONA_VISUAL_PRESETS_FILE, saved, {
+        indent: 2,
+        userId
+    });
+    return saved;
+}
+async function deletePersonaVisualPreset(presetId, userId) {
+    const cleanId = presetId.trim();
+    const presets = (await loadPersonaVisualPresets(userId)).filter((preset)=>preset.id !== cleanId);
+    await spindle.userStorage.setJson(PERSONA_VISUAL_PRESETS_FILE, presets, {
+        indent: 2,
+        userId
+    });
+    if (spindle.permissions.has("personas")) {
+        const activePersona = await spindle.personas.getActive(userId);
+        const binding = personaVisualBinding(activePersona);
+        if (activePersona?.id && binding.presetId === cleanId) {
+            await updatePersonaVisualBinding(activePersona, {
+                presetId: "",
+                enabled: false
+            }, userId);
+        }
+    }
+    await refreshContextMacros(userId);
+    return presets;
+}
+function personaVisualBinding(persona) {
+    const metadata = asRecord(persona?.metadata);
+    const binding = asRecord(metadata.swarm_studio_visuals);
+    return {
+        presetId: asString(binding.presetId).trim().slice(0, 200),
+        enabled: asBoolean(binding.enabled, true)
+    };
+}
+async function updatePersonaVisualBinding(persona, value, userId) {
+    if (!spindle.permissions.has("personas")) throw new Error("Grant Personas permission to bind persona visuals.");
+    if (!persona?.id) throw new Error("Select a Lumiverse persona before binding a visual profile.");
+    const input = asRecord(value);
+    const binding = {
+        presetId: asString(input.presetId).trim().slice(0, 200),
+        enabled: asBoolean(input.enabled, true)
+    };
+    if (binding.presetId && !(await loadPersonaVisualPresets(userId)).some((preset)=>preset.id === binding.presetId)) {
+        throw new Error("That persona visual profile no longer exists.");
+    }
+    await spindle.personas.update(persona.id, {
+        metadata: {
+            ...asRecord(persona.metadata),
+            swarm_studio_visuals: binding
+        }
+    }, userId);
+    await refreshContextMacros(userId);
+    return binding;
+}
+function activePersonaVisualPreset(persona, presets) {
+    const binding = personaVisualBinding(persona);
+    if (!binding.enabled || !binding.presetId) return null;
+    return presets.find((preset)=>preset.id === binding.presetId) || null;
+}
+function extractPersonaPromptFromLumiversePreset(preset, persona) {
+    const description = asString(persona?.description).trim();
+    const blocks = Array.isArray(preset?.prompt_order) ? preset.prompt_order.map(asRecord) : [];
+    const selected = blocks.filter((block)=>{
+        if (block.enabled === false || asString(block.marker).toLowerCase() === "category") return false;
+        const label = `${asString(block.name)} ${asString(block.marker)} ${asString(block.group)}`.toLowerCase();
+        const content = asString(block.content);
+        return /persona|user identity|user description|self description/.test(label) || /\{\{\s*(?:persona|user|personaDescription|persona_description)\s*\}\}/i.test(content);
+    });
+    const source = selected.map((block)=>asString(block.content).trim()).filter(Boolean).join("\n") || description;
+    return source.replace(/\{\{\s*(?:persona|user|personaDescription|persona_description)\s*\}\}/gi, description).trim().slice(0, 12_000);
+}
+function comparableStack(items) {
+    return JSON.stringify(items.map((item)=>({
+            name: item.name.replace(/\\/g, "/").toLowerCase(),
+            weight: Math.round(item.weight * 1000) / 1000,
+            enabled: item.enabled !== false,
+            useTrigger: Boolean(item.useTrigger)
+        })));
+}
+function profileStack(profile) {
+    const hints = asRecord(profile?.recordHints);
+    if (Array.isArray(hints.stack)) return cleanStackPresetItems(hints.stack);
+    const parameters = asRecord(asRecord(profile?.input).parameters);
+    const names = stringList(parameters.loras, 128);
+    const weights = Array.isArray(parameters.loraWeights) ? parameters.loraWeights.map(Number) : [];
+    return names.map((name, index)=>({
+            name,
+            title: "",
+            weight: Number.isFinite(weights[index]) ? weights[index] : 1,
+            enabled: true,
+            useTrigger: false,
+            sourceUrl: ""
+        }));
+}
+async function chatVisualsState(userId, currentStack) {
+    const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
+    const characterId = asString(activeChat?.character_id);
+    const character = characterId && spindle.permissions.has("characters") ? await spindle.characters.get(characterId, userId) : null;
+    const persona = spindle.permissions.has("personas") ? await spindle.personas.getActive(userId) : null;
+    const personaPresets = await loadPersonaVisualPresets(userId);
+    const stackPresets = await loadStackPresets(userId);
+    const folders = await loadOutputFolders(userId);
+    const suppliedStack = Array.isArray(currentStack) ? cleanStackPresetItems(currentStack) : profileStack(await loadStudioGenerationProfile(userId));
+    const stackSignature = comparableStack(suppliedStack);
+    const matchedStack = stackPresets.find((preset)=>comparableStack(preset.items) === stackSignature);
+    let lumiversePresets = [];
+    if (spindle.permissions.has("presets")) {
+        try {
+            const response = await spindle.presets.list({
+                limit: 200,
+                offset: 0,
+                userId
+            });
+            lumiversePresets = (Array.isArray(response?.data) ? response.data : []).map((preset)=>({
+                    id: asString(preset?.id),
+                    name: asString(preset?.name).trim()
+                })).filter((preset)=>preset.id && preset.name);
+        } catch  {
+            lumiversePresets = [];
+        }
+    }
+    return {
+        activeChat: activeChat ? {
+            id: asString(activeChat.id),
+            name: asString(activeChat.name),
+            characterId,
+            characterName: asString(character?.name)
+        } : null,
+        activePersona: persona ? {
+            id: asString(persona.id),
+            name: asString(persona.name),
+            description: asString(persona.description)
+        } : null,
+        personaPresets,
+        personaBinding: personaVisualBinding(persona),
+        activePersonaPreset: activePersonaVisualPreset(persona, personaPresets),
+        lumiversePresets,
+        characterFolder: folders.find((folder)=>folder.binding?.characterId === characterId) || null,
+        characterBasePrompt: characterId ? asString((await characterBaseTagState(characterId, userId)).tags) : "",
+        stackPresets,
+        studioStack: suppliedStack,
+        studioStackPresetId: matchedStack?.id || "",
+        studioStackCustom: suppliedStack.length > 0 && !matchedStack
+    };
+}
 function cleanOutputFolders(value) {
     if (!Array.isArray(value)) return [];
     const seen = new Set();
@@ -950,6 +1140,7 @@ function cleanOutputFolders(value) {
             positivePrompt: asString(rawBinding.positivePrompt).trim().slice(0, 12_000),
             negativePrompt: asString(rawBinding.negativePrompt).trim().slice(0, 12_000),
             stackPresetId: asString(rawBinding.stackPresetId).trim().slice(0, 200),
+            stackSnapshot: cleanStackPresetItems(rawBinding.stackSnapshot),
             enabled: asBoolean(rawBinding.enabled, true)
         } : null;
         seen.add(id);
@@ -1031,6 +1222,7 @@ async function createOutputFolder(name, bindingType, userId) {
             positivePrompt: asString(tagState.tags).trim().slice(0, 12_000),
             negativePrompt: "",
             stackPresetId: "",
+            stackSnapshot: [],
             enabled: true
         };
         const legacy = characterId ? folders.find((folder)=>folder.id === `character:${characterId}` && !folder.binding) : null;
@@ -1068,6 +1260,7 @@ async function updateOutputFolderProfile(folderId, value, userId) {
         positivePrompt: asString(input.positivePrompt).trim().slice(0, 12_000),
         negativePrompt: asString(input.negativePrompt).trim().slice(0, 12_000),
         stackPresetId,
+        stackSnapshot: Object.prototype.hasOwnProperty.call(input, "stackSnapshot") ? cleanStackPresetItems(input.stackSnapshot) : folder.binding.stackSnapshot,
         enabled: asBoolean(input.enabled, folder.binding.enabled)
     };
     folder.updatedAt = Date.now();
@@ -1703,25 +1896,19 @@ function studioPresetTokens(profile) {
 function buildSwarmImageProtocol(profile, context = null, automation = cleanTagAutomationConfig(null)) {
     const presetTokens = studioPresetTokens(profile);
     const presetGuidance = presetTokens.length ? `The active Studio preset stack is force-applied once as ${presetTokens.join(", ")}. Do not repeat those directives in the tag. The {{swarm_preset}} macro expands to that exact directive list for authored prompts and templates. You may add another <preset:exact saved preset name> only when the scene specifically needs a different saved preset.` : `No Studio presets are currently active. The {{swarm_preset}} macro is therefore empty. You may use <preset:exact saved preset name> only when you know the exact saved SwarmUI preset needed by the scene; do not invent placeholder preset names.`;
-    const baseTags = asString(context?.baseTags).trim().slice(0, 8_000);
-    const identityGuidance = baseTags ? `ACTIVE CHARACTER IDENTITY BLOCK — automatically prepended for character="active"; do not copy it into the tag body:\n${baseTags}` : `No active character identity block is configured. If a person must appear, derive concrete visual descriptors from the available character/persona context; never substitute a display name for appearance tags.`;
+    const characterTags = asString(context?.characterTags).trim().slice(0, 8_000);
+    const personaTags = asString(context?.personaTags).trim().slice(0, 8_000);
+    const identityGuidance = [
+        characterTags ? `CHARACTER 1 IDENTITY — injected for character="active"; do not repeat it:\n${characterTags}` : `CHARACTER 1 IDENTITY — no active character visual block is configured. Use concrete appearance descriptors from context, never the display name alone.`,
+        personaTags ? `CHARACTER 2 / PERSONA IDENTITY — injected only for persona="active"; do not repeat it:\n${personaTags}` : `CHARACTER 2 / PERSONA IDENTITY — no active persona visual profile is bound. Leave persona="none" unless concrete appearance descriptors are available in context.`
+    ].join("\n\n");
     const model = asString(asRecord(profile?.input).model);
     const imageCountGuidance = automation.requiredImageMin > 0 ? automation.requiredImageMin === automation.requiredImageMax ? `IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY
 The user explicitly requires exactly ${automation.requiredImageMin} complete <swarm-image> request${automation.requiredImageMin === 1 ? "" : "s"} in this reply. This overrides the default discretion about whether a moment needs visualization. Do not omit the requests by claiming that no scene is important enough, not specifically required, or better left unillustrated. Choose the strongest ${automation.requiredImageMin === 1 ? "moment" : "moments"}, emit exactly the required count, and make every request complete and distinct.` : `IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY
 The user explicitly requires between ${automation.requiredImageMin} and ${automation.requiredImageMax} complete <swarm-image> requests in this reply. This overrides the default discretion about whether a moment needs visualization. Emit at least ${automation.requiredImageMin} and no more than ${automation.requiredImageMax}. Do not omit the requests by claiming that no scene is important enough, not specifically required, or better left unillustrated. Choose the strongest moments and make every request complete and distinct.` : `IMAGE COUNT
 No explicit image count is active. Decide whether an illustration materially improves the reply; do not emit a request merely to fill a quota.`;
     const animaGuidance = /anima/i.test(model) ? `ANIMA CHECKPOINT GUIDANCE
-Build the resolved prompt in this conceptual order:
-masterpiece, best quality, score_7, [one safety tag], newest, highres,
-[person count], [interaction],
-[trained character tag and series only when explicitly supplied],
-[skin / ears / horns / halo / wings], [hair color / length / style],
-[eye color / shape / pupils], [expression], [body features],
-[headwear / eyewear], [neckwear], [upper clothes], [lower clothes],
-[legwear], [shoes], [accessories / tail / wings],
-[pose / hands / legs / action], [camera / lens / focus / composition],
-[background / time / weather / objects], [lighting / depth / effects / finishing details].
-Use exactly one context-appropriate Anima safety tag: safe, sensitive, nsfw, or explicit. The automatic identity block already occupies the active character's identity/anatomy/clothing slots, so the tag body should primarily supply the interaction and scene layers instead of reconstructing the character.` : `Use concise, model-recognizable visual descriptors. The automatic identity block supplies the active character; the tag body should primarily direct action, staging, camera, environment, and light.`;
+Use one safety tag (safe, sensitive, nsfw, or explicit), a person count, then the subject/interaction lines. Identity blocks already cover stable anatomy and clothing. Concentrate the tag body on expression, pose/hands/legs/action, camera/lens/focus/composition, environment/time/weather/objects, lighting/depth/effects/finish. Add changed traits or clothing only when the scene actually changes them.` : `Use concise model-recognizable descriptors. Identity blocks cover stable appearance; direct scene-specific action, staging, camera, environment, and light.`;
     return `${SWARM_IMAGE_PROTOCOL_BASE}\n\n${imageCountGuidance}\n\n${identityGuidance}\n\n${animaGuidance}\n\n${presetGuidance}`;
 }
 function protocolContextKey(userId) {
@@ -1785,12 +1972,20 @@ async function refreshContextMacros(userId) {
     const characterId = asString(character?.id);
     const tags = await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags);
     const visualFolder = characterId ? (await loadOutputFolders(userId)).find((folder)=>folder.binding?.characterId === characterId && folder.binding.enabled) : null;
+    const personaPresets = await loadPersonaVisualPresets(userId);
+    const personaPreset = activePersonaVisualPreset(persona, personaPresets);
+    const characterTags = visualFolder?.binding?.positivePrompt || tags;
+    const personaTags = personaPreset?.positivePrompt || "";
     const protocolContext = {
         characterId,
-        baseTags: visualFolder?.binding?.positivePrompt || tags
+        characterTags,
+        personaId: asString(persona?.id),
+        personaName: asString(persona?.name),
+        personaTags
     };
     swarmProtocolContexts.set(protocolContextKey(userId), protocolContext);
-    spindle.updateMacroValue("char_base", tags);
+    spindle.updateMacroValue("char_base", characterTags);
+    spindle.updateMacroValue("persona_base", personaTags);
     spindle.updateMacroValue("char_profile", await imageUrlForMacro(asString(character?.image_id), userId));
     spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId));
     spindle.updateMacroValue("swarm_image_protocol", buildSwarmImageProtocol(await loadStudioGenerationProfile(userId), protocolContext, await loadTagAutomationConfig(userId)));
@@ -1879,67 +2074,50 @@ function applyStudioPresetLayer(scenePrompt, profile) {
     if (missing.length) prompt = `${missing.join(", ")}, ${prompt}`;
     return prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
 }
-async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, userId) {
-    if (!spindle.permissions.has("chats")) return {
-        prompt: scenePrompt,
-        negativePrompt: includeCharacter ? "" : NO_CHARACTER_NEGATIVE,
-        stack: [],
-        excludedLoras: [],
-        characterId: "",
-        characterName: ""
-    };
-    const chat = await spindle.chats.get(chatId, userId);
+async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, includePersona = false, userId) {
+    const chat = spindle.permissions.has("chats") ? await spindle.chats.get(chatId, userId) : null;
     const characterId = asString(chat?.character_id);
     const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.type === "character" && folder.binding.characterId === characterId && folder.binding.enabled);
-    const visualStack = visualFolder?.binding?.stackPresetId ? (await loadStackPresets(userId)).find((preset)=>preset.id === visualFolder.binding?.stackPresetId)?.items || [] : [];
-    if (!characterId || !spindle.permissions.has("characters")) {
-        if (!includeCharacter) {
-            return {
-                prompt: scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
-                negativePrompt: NO_CHARACTER_NEGATIVE,
-                stack: [],
-                excludedLoras: visualStack.map((item)=>item.name),
-                characterId,
-                characterName: visualFolder?.name || ""
-            };
-        }
-        const visualTags = visualFolder?.binding?.positivePrompt.trim() || "";
-        const prompt = [
-            visualTags,
-            scenePrompt
-        ].filter(Boolean).join(", ");
-        return {
-            prompt,
-            negativePrompt: visualFolder?.binding?.negativePrompt || "",
-            stack: visualStack,
-            excludedLoras: [],
-            characterId,
-            characterName: ""
-        };
-    }
-    const character = await spindle.characters.get(characterId, userId);
-    if (!includeCharacter) {
-        return {
-            prompt: scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, "").replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim(),
-            negativePrompt: NO_CHARACTER_NEGATIVE,
-            stack: [],
-            excludedLoras: visualStack.map((item)=>item.name),
-            characterId,
-            characterName: asString(character?.name).trim()
-        };
-    }
+    const stackPresets = await loadStackPresets(userId);
+    const savedStack = visualFolder?.binding?.stackPresetId ? stackPresets.find((preset)=>preset.id === visualFolder.binding?.stackPresetId)?.items || [] : [];
+    const visualStack = savedStack.length ? savedStack : visualFolder?.binding?.stackSnapshot || [];
+    const character = characterId && spindle.permissions.has("characters") ? await spindle.characters.get(characterId, userId) : null;
     const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora);
-    const baseTags = (visualFolder?.binding?.positivePrompt || await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags)).trim();
-    let prompt = scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, baseTags).trim();
-    if (baseTags && !prompt.toLowerCase().includes(baseTags.toLowerCase())) prompt = `${baseTags}, ${prompt}`;
+    const characterBase = includeCharacter ? (visualFolder?.binding?.positivePrompt || await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags)).trim() : "";
+    const persona = includePersona && spindle.permissions.has("personas") ? await spindle.personas.getActive(userId) : null;
+    const personaPresets = persona ? await loadPersonaVisualPresets(userId) : [];
+    const personaPreset = activePersonaVisualPreset(persona, personaPresets);
+    const personaBase = includePersona ? (personaPreset?.positivePrompt || asString(persona?.description)).trim() : "";
+    let prompt = scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, characterBase).replace(/\{\{\s*persona_base\s*\}\}/gi, personaBase).trim();
+    const contains = (value)=>Boolean(value && prompt.toLowerCase().includes(value.toLowerCase()));
+    if (characterBase && personaBase) {
+        const identityLines = [
+            !contains(characterBase) ? `character 1 identity: ${characterBase}` : "",
+            !contains(personaBase) ? `character 2 identity: ${personaBase}` : ""
+        ].filter(Boolean);
+        prompt = [
+            ...identityLines,
+            prompt
+        ].filter(Boolean).join("\n");
+    } else if (characterBase && !contains(characterBase)) {
+        prompt = [
+            characterBase,
+            prompt
+        ].filter(Boolean).join(", ");
+    } else if (personaBase && !contains(personaBase)) {
+        prompt = [
+            personaBase,
+            prompt
+        ].filter(Boolean).join(", ");
+    }
     prompt = prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
     return {
         prompt,
-        negativePrompt: visualFolder?.binding?.negativePrompt || "",
-        stack: visualStack,
-        excludedLoras: [],
-        characterId,
-        characterName: asString(character?.name).trim()
+        negativePrompt: includeCharacter ? visualFolder?.binding?.negativePrompt || "" : includePersona ? "" : NO_CHARACTER_NEGATIVE,
+        stack: includeCharacter ? visualStack : [],
+        excludedLoras: includeCharacter ? [] : visualStack.map((item)=>item.name),
+        characterId: includeCharacter ? characterId : "",
+        characterName: includeCharacter ? asString(character?.name).trim() || visualFolder?.name || "" : ""
     };
 }
 async function ensureCharacterOutputFolder(characterId, characterName, imageId, userId) {
@@ -1961,6 +2139,7 @@ async function ensureCharacterOutputFolder(characterId, characterName, imageId, 
                 positivePrompt: inheritedTags,
                 negativePrompt: "",
                 stackPresetId: "",
+                stackSnapshot: [],
                 enabled: true
             },
             updatedAt: Date.now()
@@ -1974,6 +2153,7 @@ async function ensureCharacterOutputFolder(characterId, characterName, imageId, 
             positivePrompt: inheritedTags,
             negativePrompt: "",
             stackPresetId: "",
+            stackSnapshot: [],
             enabled: true
         };
     }
@@ -2150,7 +2330,15 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
             "no",
             "0"
         ].includes(characterMode);
-        const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, userId);
+        const personaMode = asString(originalTag?.attrs.persona).trim().toLowerCase();
+        const includePersona = [
+            "active",
+            "on",
+            "true",
+            "yes",
+            "1"
+        ].includes(personaMode);
+        const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, includePersona, userId);
         input.prompt = characterLayer.prompt;
         const profileNegative = overrides.negativePrompt !== undefined ? asString(overrides.negativePrompt).trim() : asString(profileInput.negativePrompt).trim();
         const visualNegative = characterLayer.negativePrompt.trim();
@@ -2395,6 +2583,7 @@ function permissionSnapshot() {
         chats: spindle.permissions.has("chats"),
         characters: spindle.permissions.has("characters"),
         personas: spindle.permissions.has("personas"),
+        presets: spindle.permissions.has("presets"),
         chatMutation: spindle.permissions.has("chat_mutation"),
         interceptor: spindle.permissions.has("interceptor")
     };
@@ -2474,7 +2663,8 @@ async function bootstrap(userId) {
         stackPresets: await loadStackPresets(userId),
         outputFolders: await loadOutputFolders(userId),
         tagAutomation: await loadTagAutomationConfig(userId),
-        characterBaseTags: await characterBaseTagState(asString(activeChat?.character_id), userId)
+        characterBaseTags: await characterBaseTagState(asString(activeChat?.character_id), userId),
+        chatVisuals: await chatVisualsState(userId)
     };
 }
 async function loadConnection(connectionId, userId) {
@@ -2566,6 +2756,106 @@ async function handleMessage(payload, userId) {
                         data: {
                             updatedAt: profile?.updatedAt || 0
                         }
+                    }, userId);
+                    return;
+                }
+            case "get_chat_visuals":
+                {
+                    spindle.sendToFrontend({
+                        type: "chat_visuals_result",
+                        requestId,
+                        data: await chatVisualsState(userId, payload?.currentStack)
+                    }, userId);
+                    return;
+                }
+            case "save_persona_visual_preset":
+                {
+                    const presets = await savePersonaVisualPreset(payload?.preset, userId);
+                    const requested = asRecord(payload?.preset);
+                    const selected = presets.find((preset)=>preset.id === asString(requested.id).trim() || preset.name.toLowerCase() === asString(requested.name).trim().toLowerCase());
+                    if (payload?.bind === true && selected) {
+                        const persona = spindle.permissions.has("personas") ? await spindle.personas.getActive(userId) : null;
+                        await updatePersonaVisualBinding(persona, {
+                            presetId: selected.id,
+                            enabled: asBoolean(payload?.bindingEnabled, true)
+                        }, userId);
+                    }
+                    spindle.sendToFrontend({
+                        type: "chat_visuals_result",
+                        requestId,
+                        data: await chatVisualsState(userId, payload?.currentStack)
+                    }, userId);
+                    return;
+                }
+            case "delete_persona_visual_preset":
+                {
+                    await deletePersonaVisualPreset(asString(payload?.presetId), userId);
+                    spindle.sendToFrontend({
+                        type: "chat_visuals_result",
+                        requestId,
+                        data: await chatVisualsState(userId, payload?.currentStack)
+                    }, userId);
+                    return;
+                }
+            case "bind_persona_visual_preset":
+                {
+                    const persona = spindle.permissions.has("personas") ? await spindle.personas.getActive(userId) : null;
+                    await updatePersonaVisualBinding(persona, payload?.binding, userId);
+                    spindle.sendToFrontend({
+                        type: "chat_visuals_result",
+                        requestId,
+                        data: await chatVisualsState(userId, payload?.currentStack)
+                    }, userId);
+                    return;
+                }
+            case "import_lumiverse_persona_preset":
+                {
+                    if (!spindle.permissions.has("presets")) {
+                        throw new Error("Grant Presets permission to read a Lumiverse persona prompt source.");
+                    }
+                    const presetId = asString(payload?.presetId).trim();
+                    if (!presetId) throw new Error("Choose a Lumiverse preset to import from.");
+                    const [preset, persona] = await Promise.all([
+                        spindle.presets.get(presetId, userId),
+                        spindle.permissions.has("personas") ? spindle.personas.getActive(userId) : null
+                    ]);
+                    if (!preset) throw new Error("That Lumiverse preset no longer exists.");
+                    spindle.sendToFrontend({
+                        type: "lumiverse_persona_prompt_result",
+                        requestId,
+                        data: {
+                            presetId,
+                            presetName: asString(preset.name),
+                            prompt: extractPersonaPromptFromLumiversePreset(preset, persona)
+                        }
+                    }, userId);
+                    return;
+                }
+            case "save_chat_visuals":
+                {
+                    const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
+                    const characterId = asString(activeChat?.character_id);
+                    if (!characterId) throw new Error("Open a character chat before saving character visuals.");
+                    let folders = await loadOutputFolders(userId);
+                    let folder = folders.find((candidate)=>candidate.binding?.characterId === characterId);
+                    if (!folder) {
+                        folders = await createOutputFolder(asString(payload?.folderName), "character", userId);
+                        folder = folders.find((candidate)=>candidate.binding?.characterId === characterId);
+                    }
+                    if (!folder?.binding) throw new Error("Lumiverse could not create this character's visual folder.");
+                    const requestedStackId = asString(payload?.stackPresetId).trim();
+                    const stackPreset = requestedStackId ? (await loadStackPresets(userId)).find((preset)=>preset.id === requestedStackId) : null;
+                    await updateOutputFolderProfile(folder.id, {
+                        positivePrompt: asString(payload?.positivePrompt),
+                        negativePrompt: asString(payload?.negativePrompt),
+                        stackPresetId: stackPreset?.id || "",
+                        stackSnapshot: stackPreset?.items || cleanStackPresetItems(payload?.stackSnapshot),
+                        enabled: asBoolean(payload?.enabled, true)
+                    }, userId);
+                    spindle.sendToFrontend({
+                        type: "chat_visuals_result",
+                        requestId,
+                        data: await chatVisualsState(userId, payload?.currentStack)
                     }, userId);
                     return;
                 }
@@ -3153,7 +3443,11 @@ for (const macro of [
     },
     {
         name: "char_base",
-        description: "Base image tags from the active character's native Lumiverse Character LoRA binding."
+        description: "Effective base image tags from the active character's Swarm Studio visual folder."
+    },
+    {
+        name: "persona_base",
+        description: "Effective base image tags from the visual profile bound to the active Lumiverse persona."
     },
     {
         name: "char_profile",

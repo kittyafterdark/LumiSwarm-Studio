@@ -13,7 +13,7 @@ let frontendHandler
 const sent = []
 const secrets = new Map()
 const userFiles = new Map()
-const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "characters", "personas", "chat_mutation", "interceptor"])
+const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "characters", "personas", "presets", "chat_mutation", "interceptor"])
 let imageDeleted = false
 let presetAdded = false
 let presetDeleted = false
@@ -41,6 +41,13 @@ const taggedMessage = {
   metadata: {},
 }
 const taggedMessages = [taggedMessage]
+const activePersona = {
+  id: "persona-1",
+  name: "User",
+  description: "1girl, short silver hair, blue eyes, black hoodie",
+  image_id: "user-avatar",
+  metadata: {},
+}
 
 class MockSwarmDownloadSocket extends EventTarget {
   static CONNECTING = 0
@@ -228,7 +235,36 @@ globalThis.spindle = {
   },
   personas: {
     async getActive() {
-      return { id: "persona-1", name: "User", image_id: "user-avatar" }
+      return structuredClone(activePersona)
+    },
+    async update(personaId, input, userId) {
+      assert.equal(personaId, "persona-1")
+      assert.equal(userId, "user-1")
+      Object.assign(activePersona, structuredClone(input))
+      return structuredClone(activePersona)
+    },
+  },
+  presets: {
+    async list(options) {
+      assert.equal(options.limit, 200)
+      return {
+        data: [{ id: "lumi-preset-1", name: "Persona preset" }],
+        total: 1,
+      }
+    },
+    async get(presetId) {
+      assert.equal(presetId, "lumi-preset-1")
+      return {
+        id: presetId,
+        name: "Persona preset",
+        prompt_order: [{
+          id: "persona-block",
+          name: "Persona",
+          marker: "persona",
+          enabled: true,
+          content: "portrait identity: {{persona}}",
+        }],
+      }
     },
   },
   chat: {
@@ -609,6 +645,7 @@ assert.equal(macroDefinitions.get("last_genned").handler, "")
 assert.equal(macroDefinitions.has("swarm_image_protocol"), true)
 assert.equal(macroDefinitions.has("swarm_negative"), true)
 assert.equal(macroDefinitions.has("char_base"), true)
+assert.equal(macroDefinitions.has("persona_base"), true)
 assert.equal(macroDefinitions.has("char_tags"), false)
 assert.equal(macroDefinitions.has("char_profile"), true)
 assert.equal(macroDefinitions.has("user_profile"), true)
@@ -849,6 +886,38 @@ assert.equal(characterBaseTags.data.source, "studio")
 assert.equal(characterBaseTags.data.tags, "1boy, black hair, red eyes")
 assert.equal(macroValues.get("char_base"), "1boy, black hair, red eyes")
 assert.equal(userFiles.get("character-base-tags.json")[0].characterId, "char-1")
+const personaVisuals = await request("save_persona_visual_preset", {
+  preset: {
+    name: "User visuals",
+    positivePrompt: "1girl, silver hair, blue eyes, black hoodie",
+    sourcePresetId: "lumi-preset-1",
+  },
+  bind: true,
+  bindingEnabled: true,
+})
+assert.equal(personaVisuals.data.personaPresets[0].name, "User visuals")
+assert.equal(personaVisuals.data.personaBinding.presetId, personaVisuals.data.personaPresets[0].id)
+assert.equal(personaVisuals.data.activePersonaPreset.positivePrompt, "1girl, silver hair, blue eyes, black hoodie")
+assert.equal(macroValues.get("persona_base"), "1girl, silver hair, blue eyes, black hoodie")
+assert.equal(activePersona.metadata.swarm_studio_visuals.enabled, true)
+const importedPersonaPrompt = await request("import_lumiverse_persona_preset", {
+  presetId: "lumi-preset-1",
+})
+assert.equal(importedPersonaPrompt.data.presetName, "Persona preset")
+assert.match(importedPersonaPrompt.data.prompt, /portrait identity: 1girl, short silver hair/)
+const chatVisuals = await request("get_chat_visuals", {
+  currentStack: [{
+    name: "styles/ink.safetensors",
+    title: "Ink",
+    weight: 0.75,
+    enabled: true,
+    useTrigger: false,
+  }],
+})
+assert.equal(chatVisuals.data.activeChat.characterName, "Lior")
+assert.equal(chatVisuals.data.activePersona.name, "User")
+assert.equal(chatVisuals.data.studioStack[0].name, "styles/ink.safetensors")
+assert.equal(chatVisuals.data.lumiversePresets[0].name, "Persona preset")
 const intercepted = await interceptorHandler([
   {
     role: "assistant",
@@ -865,8 +934,10 @@ assert.match(intercepted.messages[0].content, /configured local SwarmUI installa
 assert.match(intercepted.messages[0].content, /IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY/)
 assert.match(intercepted.messages[0].content, /Emit at least 2 and no more than 4/)
 assert.match(intercepted.messages[0].content, /no scene is important enough/)
-assert.match(intercepted.messages[0].content, /ACTIVE CHARACTER IDENTITY BLOCK/)
+assert.match(intercepted.messages[0].content, /CHARACTER 1 IDENTITY/)
 assert.match(intercepted.messages[0].content, /1boy, black hair, red eyes/)
+assert.match(intercepted.messages[0].content, /character 1: \[scene-specific expression/)
+assert.match(intercepted.messages[0].content, /persona="active"/)
 assert.doesNotMatch(intercepted.messages[0].content, /Use at most two image tags/)
 assert.match(intercepted.messages[1].content, /\[Illustration requested: Street food\]/)
 
@@ -902,6 +973,23 @@ assert.equal(storedFoldersAfterTag[0].binding.type, "character")
 assert.equal(storedFoldersAfterTag[0].binding.chatId, undefined)
 assert.equal(storedFoldersAfterTag[0].binding.characterId, "char-1")
 assert.equal(storedFoldersAfterTag[0].binding.positivePrompt, "1boy, black hair, red eyes")
+
+const customCharacterVisuals = await request("save_chat_visuals", {
+  positivePrompt: "1boy, black hair, red eyes",
+  negativePrompt: "wrong eye color",
+  stackPresetId: "",
+  stackSnapshot: [{
+    name: "styles/ink.safetensors",
+    title: "Ink",
+    weight: 0.61,
+    enabled: true,
+    useTrigger: false,
+  }],
+  enabled: true,
+})
+assert.equal(customCharacterVisuals.data.characterFolder.binding.stackPresetId, "")
+assert.equal(customCharacterVisuals.data.characterFolder.binding.stackSnapshot[0].weight, 0.61)
+assert.equal(customCharacterVisuals.data.characterFolder.binding.negativePrompt, "wrong eye color")
 
 const visualFolders = await request("update_output_folder_profile", {
   folderId: storedFoldersAfterTag[0].id,
@@ -968,14 +1056,14 @@ const originalOutput = await request("download_swarm_output", {
 assert.equal(originalOutput.data.dataUrl, "data:image/png;base64,QUJD")
 assert.equal(originalOutput.data.filename, "image-1.png")
 assert.equal(downloadedSwarmUrl, "http://localhost:7801/Output/2026-07-19/image-1.png")
-assert.match(source, /Supported aspect values are 1:1, 2:3, 3:2, 3:4, 4:3/)
-assert.match(source, /Use 4:3 for ordinary illustrations placed between prose/)
+assert.match(source, /Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3/)
+assert.match(source, /Default inline prose illustrations to 4:3/)
 assert.match(source, /aspect: cleanAspect\(attrs\.aspect\) \|\| "4:3"/)
 assert.match(source, /character="active"/)
-assert.match(source, /Use character="none" for scenery, objects, establishing shots/)
+assert.match(source, /Use character="none" when the active chat character should not appear/)
 assert.match(source, /const NO_CHARACTER_NEGATIVE = "people, person, character/)
 assert.match(source, /const includeCharacter = !\["none", "off", "false", "no", "0"\]\.includes\(characterMode\)/)
-assert.match(source, /excludedLoras: visualStack\.map\(\(item\) => item\.name\)/)
+assert.match(source, /excludedLoras: includeCharacter \? \[\] : visualStack\.map\(\(item\) => item\.name\)/)
 assert.match(source, /if \(excluded\.has\(name\.toLowerCase\(\)\)\) return/)
 assert.match(source, /LOCAL GENERATION/)
 assert.match(source, /configured local SwarmUI installation and local hardware/)
