@@ -919,6 +919,35 @@ assert.match(intercepted.messages[0].content, /persona="active"/)
 assert.doesNotMatch(intercepted.messages[0].content, /Use at most two image tags/)
 assert.match(intercepted.messages[1].content, /\[Illustration requested: Street food\]/)
 
+const completedFigure = `<figure data-swarm-studio-image="true" data-swarm-studio-job-id="17b19357-bfbb-42e1-bbc8-1b6df1a01c1a" data-swarm-studio-slot="tea-gambit" tabindex="0" style="position:relative;display:block;width:100%;height:100%;margin:0;"><img src="http://localhost:2004/api/v1/images/284217fc-73bf-4e8c-ac06-ae144bd4cab9" alt="A silver-haired android maid serves tea beside a triple-monitor desk" data-swarm-studio-slot="tea-gambit" data-swarm-studio-fit="cover" loading="lazy"><span data-swarm-studio-inline-action="true">↻</span></figure>`
+const cleanedCompleted = await interceptorHandler([
+  {
+    role: "assistant",
+    content: `Scene text.\n${completedFigure}\nAfter the image.`,
+  },
+  {
+    role: "assistant",
+    content: `![Swarm output](<http://localhost:2004/api/v1/images/284217fc-73bf-4e8c-ac06-ae144bd4cab9>)`,
+  },
+], { chatId: "chat-1" })
+assert.match(cleanedCompleted.messages[1].content, /Scene text\.\n\[Generated illustration: A silver-haired android maid serves tea beside a triple-monitor desk\]\nAfter the image\./)
+assert.doesNotMatch(cleanedCompleted.messages[1].content, /<figure|<img|data-swarm-studio/)
+assert.equal(cleanedCompleted.messages[2].content, "[Generated illustration: Swarm output]")
+
+const boundedVisualMemory = await interceptorHandler(
+  Array.from({ length: 8 }, (_, index) => ({
+    role: "assistant",
+    content: completedFigure.replace("serves tea", `serves tea ${index + 1}`),
+  })),
+  { chatId: "chat-1" },
+)
+const retainedVisualMarkers = boundedVisualMemory.messages
+  .slice(1)
+  .reduce((count, message) => count + (message.content.match(/\[Generated illustration:/g) || []).length, 0)
+assert.equal(retainedVisualMarkers, 6)
+assert.equal(boundedVisualMemory.messages.length, 7)
+assert.match(boundedVisualMemory.messages[1].content, /serves tea 3/)
+
 const originalTaggedContent = taggedMessage.content
 const tagMatch = originalTaggedContent.match(/<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image>/i)
 assert.ok(tagMatch)

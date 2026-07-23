@@ -16,6 +16,7 @@ const GENERATION_RECORD_LIMIT = 100;
 const OUTPUT_FOLDER_LIMIT = 80;
 const TAGGED_IMAGE_JOB_LIMIT = 160;
 const HISTORY_PAGE_SIZE = 12;
+const CONTEXT_IMAGE_MEMORY_LIMIT = 6;
 const DEFAULT_SWARMUI_URL = "http://localhost:7801";
 const NO_CHARACTER_NEGATIVE = "people, person, character, human, humanoid, crowd, girl, boy, woman, man";
 const sessions = new Map();
@@ -2548,21 +2549,64 @@ async function retryTaggedImageGeneration(jobId, retryMode, overrides = {}, user
     await runTaggedImageJob(job, retryMode === "original", userId, overrides);
     return job;
 }
+function compactPromptImageLabel(value, fallback = "generated image") {
+    const label = asString(value).replace(/&(?:quot|apos|#39|lt|gt|amp);/gi, " ").replace(/<[^>]*>/g, " ").replace(/[\[\]\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 240);
+    return label || fallback;
+}
+function imageAltFromMarkup(markup, fallback = "generated image") {
+    const match = markup.match(/<img\b[^>]*\balt\s*=\s*(["'])([\s\S]*?)\1/i);
+    return compactPromptImageLabel(match?.[2], fallback);
+}
+function isStoredLumiverseImageUrl(value) {
+    const url = value.trim().replace(/^<|>$/g, "");
+    return /^data:image\//i.test(url) || /\/api\/v1\/images\/[a-z0-9-]+(?:[?#].*)?$/i.test(url) || /\/api\/v1\/image-gen\/results\/[a-z0-9-]+(?:[?#].*)?$/i.test(url);
+}
 function cleanGeneratedMarkupForPrompt(content) {
     return content.replace(/<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image\s*>/gi, (_match, rawAttrs, prompt)=>{
         const attrs = parseTagAttributes(rawAttrs);
-        return `[Illustration requested${attrs.alt ? `: ${attrs.alt}` : ""}]`;
-    }).replace(/<figure\b[^>]*data-swarm-studio-image="true"[^>]*>[\s\S]*?<img\b[^>]*alt="([^"]*)"[^>]*>[\s\S]*?<\/figure>/gi, (_match, alt)=>`[Generated illustration: ${alt}]`).replace(/<img\b[^>]*data-swarm-studio-slot="[^"]*"[^>]*alt="([^"]*)"[^>]*>/gi, (_match, alt)=>`[Generated illustration: ${alt}]`).replace(/<img\b[^>]*alt="([^"]*)"[^>]*data-swarm-studio-slot="[^"]*"[^>]*>/gi, (_match, alt)=>`[Generated illustration: ${alt}]`);
+        return `[Illustration requested${attrs.alt ? `: ${compactPromptImageLabel(attrs.alt)}` : ""}]`;
+    }).replace(/<figure\b(?=[^>]*\bdata-swarm-studio-image\s*=\s*(["'])true\1)[^>]*>[\s\S]*?<\/figure\s*>/gi, (markup)=>`[Generated illustration: ${imageAltFromMarkup(markup)}]`).replace(/<img\b(?=[^>]*\bdata-swarm-studio-slot\s*=\s*(["'])[^"']+\1)[^>]*>/gi, (markup)=>`[Generated illustration: ${imageAltFromMarkup(markup)}]`).replace(/!\[([^\]\r\n]*)\]\(\s*(?:<([^>\r\n]+)>|([^\s)\r\n]+))(?:\s+["'][^"'\r\n]*["'])?\s*\)/gi, (markup, alt, bracketedUrl, plainUrl)=>isStoredLumiverseImageUrl(asString(bracketedUrl || plainUrl)) ? `[Generated illustration: ${compactPromptImageLabel(alt)}]` : markup).replace(/<img\b[^>]*\bsrc\s*=\s*(["'])([\s\S]*?)\1[^>]*>/gi, (markup, _quote, url)=>isStoredLumiverseImageUrl(asString(url)) ? `[Generated illustration: ${imageAltFromMarkup(markup)}]` : markup).replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, "[Embedded generated image omitted]");
+}
+function compactGeneratedIllustrationHistory(messages) {
+    let remaining = CONTEXT_IMAGE_MEMORY_LIMIT;
+    const marker = /\[(?:Generated illustration|Illustration requested)(?:: [^\]\r\n]{0,240})?\]/gi;
+    return [
+        ...messages
+    ].reverse().map((message)=>{
+        if (typeof message?.content !== "string") return message;
+        const matches = [
+            ...message.content.matchAll(marker)
+        ];
+        if (!matches.length) return message;
+        let content = message.content;
+        for (const match of matches.reverse()){
+            const index = match.index ?? -1;
+            if (index < 0) continue;
+            if (remaining > 0) {
+                remaining -= 1;
+                continue;
+            }
+            content = `${content.slice(0, index)}${content.slice(index + match[0].length)}`;
+        }
+        return {
+            ...message,
+            content: content.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+        };
+    }).reverse().filter((message)=>{
+        if (asString(message?.role).toLowerCase() !== "assistant") return true;
+        return typeof message?.content !== "string" || Boolean(message.content.trim());
+    });
 }
 async function taggedImagePromptInterceptor(messages, context) {
     const userId = asString(context?.userId) || undefined;
-    const cleaned = messages.map((message)=>{
-        if (!message?.__isChatHistory || typeof message.content !== "string") return message;
+    const cleaned = compactGeneratedIllustrationHistory(messages.map((message)=>{
+        const role = asString(message?.role).toLowerCase();
+        if (typeof message?.content !== "string" || !message?.__isChatHistory && role !== "assistant") return message;
         return {
             ...message,
             content: cleanGeneratedMarkupForPrompt(message.content)
         };
-    });
+    }));
     const config = await loadTagAutomationConfig(userId);
     if (!config.injectProtocol) return cleaned;
     if (cleaned.some((message)=>typeof message?.content === "string" && message.content.includes("SWARM STUDIO IMAGE REQUEST PROTOCOL"))) {
