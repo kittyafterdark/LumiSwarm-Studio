@@ -2049,16 +2049,26 @@ const STUDIO_V3_STYLES = `
   .ss-output-library {
     position: fixed;
     inset: 0;
+    box-sizing: border-box;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    min-width: 0;
+    min-height: 0;
     z-index: 2147483008;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 52px 50px minmax(0, 1fr);
+    overflow: hidden;
+    overscroll-behavior: contain;
     background: color-mix(in srgb, var(--ss-canvas-bg, var(--lumiverse-bg, #050608)) 98%, transparent);
     backdrop-filter: blur(12px);
   }
   .ss-output-library[hidden] { display: none; }
   .ss-library-head {
     grid-column: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -2066,8 +2076,25 @@ const STUDIO_V3_STYLES = `
     border-bottom: 1px solid var(--ss-outline, var(--lumiverse-border));
     background: var(--ss-header-bg, var(--lumiverse-fill-subtle));
   }
-  .ss-library-head strong { font-size: 14px; }
-  .ss-library-head .ss-muted { flex: 1; }
+  .ss-library-head strong { flex: 0 0 auto; font-size: 14px; }
+  .ss-library-head .ss-muted {
+    min-width: 0;
+    flex: 1 1 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ss-library-close {
+    position: relative;
+    z-index: 2;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    flex: 0 0 44px;
+    margin-left: auto;
+    touch-action: manipulation;
+  }
+  .ss-library-mobile-close { display: none; }
   .ss-library-folders {
     grid-row: 2;
     min-width: 0;
@@ -2177,6 +2204,8 @@ const STUDIO_V3_STYLES = `
     align-content: start;
     gap: 9px;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
     padding: 10px;
   }
   .ss-library-output {
@@ -2434,8 +2463,36 @@ const STUDIO_V3_STYLES = `
     .ss-output-library {
       grid-template-columns: 1fr;
       grid-template-rows: 50px 52px minmax(0, 1fr);
+      padding:
+        var(--app-interactive-safe-top, env(safe-area-inset-top, 0px))
+        env(safe-area-inset-right, 0px)
+        max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--app-keyboard-inset-bottom, 0px)))
+        env(safe-area-inset-left, 0px);
     }
-    .ss-library-head { grid-column: 1; }
+    html[data-ios-pwa] .ss-output-library {
+      position: absolute;
+      height: 100%;
+      max-height: 100%;
+    }
+    .ss-library-head { grid-column: 1; padding-block: 3px; }
+    .ss-library-head .ss-muted { font-size: 8px; }
+    .ss-library-mobile-close {
+      display: inline-flex;
+      min-width: 66px;
+      min-height: 36px;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      margin-left: auto;
+      touch-action: manipulation;
+    }
+    .ss-library-mobile-close svg {
+      width: 13px;
+      height: 13px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+    }
     .ss-library-folders { padding-inline: 2.2vw; }
     .ss-library-toolbar { flex-wrap: wrap; }
     .ss-library-search { order: 5; min-width: 100%; max-width: none; flex-basis: 100%; margin-left: 0; }
@@ -5384,7 +5441,7 @@ are removed when CSS is applied.</pre>
           <header class="ss-library-head">
             <strong>Output library</strong>
             <span class="ss-muted ss-tiny">Lumiverse-owned Swarm Studio images and virtual folders</span>
-            <button class="ss-icon-button" data-action="close-output-library" aria-label="Close output library">×</button>
+            <button class="ss-icon-button ss-library-close" data-action="close-output-library" data-role="library-close" aria-label="Close output library" title="Close output library">×</button>
           </header>
           <aside class="ss-library-folders" data-role="library-folders">
             <div class="ss-empty">Loading folders…</div>
@@ -5422,6 +5479,7 @@ are removed when CSS is applied.</pre>
               <span class="ss-history-page-label" data-role="library-page">1 / 1</span>
               <button class="ss-button" data-action="library-next" disabled>›</button>
               <button class="ss-icon-button ss-library-tool-icon" data-action="toggle-library-search" title="Search this folder" aria-label="Search this folder">${SEARCH_ICON}</button>
+              <button class="ss-button ss-library-mobile-close" data-action="close-output-library" aria-label="Close output library">${BACK_ICON}<span>Close</span></button>
             </div>
           </main>
         </div>
@@ -8292,6 +8350,11 @@ are removed when CSS is applied.</pre>
         const activeFolder = this.activeVisualFolder();
         if (!this.libraryFolderId && activeFolder) this.libraryFolderId = activeFolder.id;
         this.get('[data-role="output-library"]').hidden = false;
+        window.requestAnimationFrame(()=>{
+            this.root.querySelector('[data-role="library-close"]')?.focus({
+                preventScroll: true
+            });
+        });
         this.get('[data-role="library-grid"]').replaceChildren(element("div", "ss-empty", "Loading Lumiverse outputs…"));
         this.send("list_library_outputs");
     }
