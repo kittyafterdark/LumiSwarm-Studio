@@ -177,6 +177,38 @@ interface CharacterBaseTagEntry {
   updatedAt: number
 }
 
+type LoraDownloadJobStatus =
+  | "preparing"
+  | "connecting"
+  | "downloading"
+  | "complete"
+  | "failed"
+  | "cancelled"
+
+interface LoraDownloadQueueItem {
+  url: string
+  name: string
+  title: string
+}
+
+interface LoraDownloadJob {
+  id: string
+  requestId: string
+  userId?: string
+  connectionId: string
+  items: LoraDownloadQueueItem[]
+  index: number
+  status: LoraDownloadJobStatus
+  currentProgress: number
+  overallProgress: number
+  message: string
+  error: string
+  startedAt: number
+  updatedAt: number
+  cancelled: boolean
+  socket: WebSocket | null
+}
+
 type TaggedImageJobStatus = "requested" | "queued" | "generating" | "ready" | "failed" | "cancelled"
 
 interface TaggedImageJob {
@@ -233,6 +265,7 @@ const DEFAULT_SWARMUI_URL = "http://localhost:7801"
 const NO_CHARACTER_NEGATIVE = "people, person, character, human, humanoid, crowd, girl, boy, woman, man"
 const sessions = new Map<string, SessionCacheEntry>()
 const previewCache = new Map<string, string>()
+const loraDownloadJobs = new Map<string, LoraDownloadJob>()
 const generationControllers = new Map<string, {
   controller: AbortController
   nativeStream: boolean
@@ -589,6 +622,246 @@ async function prepareLoraDownload(payload: any, userId?: string): Promise<JsonO
     type: "LoRA",
     metadata: richMetadata.metadata,
   }
+}
+
+function loraDownloadJobKey(userId?: string): string {
+  return userId || "__default__"
+}
+
+function loraDownloadJobView(job: LoraDownloadJob): JsonObject {
+  const current = job.items[job.index] || job.items[job.items.length - 1]
+  return {
+    id: job.id,
+    connectionId: job.connectionId,
+    status: job.status,
+    active: !["complete", "failed", "cancelled"].includes(job.status),
+    currentIndex: Math.min(job.index + 1, job.items.length),
+    total: job.items.length,
+    currentName: current?.name || "",
+    currentTitle: current?.title || current?.name || "",
+    currentProgress: job.currentProgress,
+    overallProgress: job.overallProgress,
+    message: job.message,
+    error: job.error,
+    startedAt: job.startedAt,
+    updatedAt: job.updatedAt,
+  }
+}
+
+function emitLoraDownloadJob(job: LoraDownloadJob, requestId = job.requestId): void {
+  if (loraDownloadJobs.get(loraDownloadJobKey(job.userId)) !== job) return
+  spindle.sendToFrontend({
+    type: "lora_download_status",
+    requestId,
+    data: loraDownloadJobView(job),
+  }, job.userId)
+}
+
+function updateLoraDownloadJob(
+  job: LoraDownloadJob,
+  patch: Partial<Pick<
+    LoraDownloadJob,
+    "status" | "currentProgress" | "overallProgress" | "message" | "error"
+  >>,
+): void {
+  Object.assign(job, patch)
+  job.updatedAt = Date.now()
+  emitLoraDownloadJob(job)
+}
+
+function normalizeLoraDownloadQueue(payload: any): LoraDownloadQueueItem[] {
+  const source = Array.isArray(payload?.items)
+    ? payload.items
+    : [{ url: payload?.url, name: payload?.name, title: payload?.title }]
+  const items = source.slice(0, 48).map((raw) => {
+    const item = asRecord(raw)
+    return {
+      url: asString(item.url).trim(),
+      name: asString(item.name).trim().slice(0, 500),
+      title: asString(item.title).trim().slice(0, 500),
+    }
+  }).filter((item) => item.url)
+  if (!items.length) throw new Error("Choose at least one LoRA download.")
+  return items
+}
+
+function currentLoraDownloadLabel(job: LoraDownloadJob): string {
+  const item = job.items[job.index]
+  return item?.title || item?.name || `LoRA ${job.index + 1}`
+}
+
+function relayPreparedLoraDownload(job: LoraDownloadJob, prepared: JsonObject): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const wsUrl = asString(prepared.wsUrl)
+    if (!/^wss?:\/\//i.test(wsUrl)) {
+      reject(new Error("SwarmUI returned an invalid downloader WebSocket address."))
+      return
+    }
+
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(wsUrl)
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)))
+      return
+    }
+
+    job.socket = socket
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(connectionTimer)
+      socket.removeEventListener("open", handleOpen)
+      socket.removeEventListener("message", handleMessage)
+      socket.removeEventListener("error", handleError)
+      socket.removeEventListener("close", handleClose)
+      if (job.socket === socket) job.socket = null
+      try { socket.close() } catch {}
+      if (error) reject(error)
+      else resolve()
+    }
+    const handleOpen = () => {
+      if (job.cancelled) {
+        finish(new Error("Download cancelled."))
+        return
+      }
+      socket.send(JSON.stringify({
+        session_id: asString(prepared.sessionId),
+        url: asString(prepared.url),
+        type: "LoRA",
+        name: asString(prepared.name),
+        metadata: asString(prepared.metadata),
+      }))
+      updateLoraDownloadJob(job, {
+        status: "downloading",
+        message: `Downloading ${currentLoraDownloadLabel(job)} · ${job.index + 1}/${job.items.length}…`,
+      })
+    }
+    const handleMessage = (event: MessageEvent) => {
+      let message: any
+      try { message = JSON.parse(String(event.data || "{}")) } catch { return }
+      if (Number.isFinite(Number(message.current_percent))) {
+        const currentProgress = Math.max(0, Math.min(1, Number(message.current_percent)))
+        const overallProgress = (job.index + currentProgress) / Math.max(1, job.items.length)
+        updateLoraDownloadJob(job, {
+          status: "downloading",
+          currentProgress,
+          overallProgress,
+          message: `Downloading ${currentLoraDownloadLabel(job)} · ${job.index + 1}/${job.items.length} · ${Math.round(currentProgress * 100)}%`,
+        })
+      }
+      if (message.error) finish(new Error(asString(message.error) || "SwarmUI rejected the LoRA download."))
+      else if (message.success === true) finish()
+    }
+    const handleError = () => finish(new Error("The Lumiverse backend could not reach SwarmUI's downloader."))
+    const handleClose = () => {
+      if (job.cancelled) finish(new Error("Download cancelled."))
+      else finish(new Error("The SwarmUI downloader connection closed early."))
+    }
+    const connectionTimer = setTimeout(() => {
+      finish(new Error(`Timed out connecting to SwarmUI at ${new URL(wsUrl).host}.`))
+    }, 12_000)
+
+    socket.addEventListener("open", handleOpen)
+    socket.addEventListener("message", handleMessage)
+    socket.addEventListener("error", handleError)
+    socket.addEventListener("close", handleClose)
+  })
+}
+
+async function runLoraDownloadJob(job: LoraDownloadJob): Promise<void> {
+  try {
+    while (job.index < job.items.length) {
+      if (job.cancelled) throw new Error("Download cancelled.")
+      const item = job.items[job.index]
+      updateLoraDownloadJob(job, {
+        status: "preparing",
+        currentProgress: 0,
+        overallProgress: job.index / job.items.length,
+        message: `Preparing ${currentLoraDownloadLabel(job)} · ${job.index + 1}/${job.items.length}…`,
+        error: "",
+      })
+      const prepared = await prepareLoraDownload({
+        connectionId: job.connectionId,
+        url: item.url,
+        name: item.name,
+      }, job.userId)
+      if (job.cancelled) throw new Error("Download cancelled.")
+      updateLoraDownloadJob(job, {
+        status: "connecting",
+        message: `Connecting Lumiverse to SwarmUI for ${currentLoraDownloadLabel(job)}…`,
+      })
+      await relayPreparedLoraDownload(job, prepared)
+      job.index += 1
+      job.currentProgress = 1
+      job.overallProgress = job.index / job.items.length
+    }
+    updateLoraDownloadJob(job, {
+      status: "complete",
+      currentProgress: 1,
+      overallProgress: 1,
+      message: `${job.items.length === 1 ? "Download" : `${job.items.length} downloads`} complete · refreshing Swarm metadata…`,
+      error: "",
+    })
+  } catch (error) {
+    const cancelled = job.cancelled
+    updateLoraDownloadJob(job, {
+      status: cancelled ? "cancelled" : "failed",
+      message: cancelled ? "LoRA download cancelled." : "LoRA download failed.",
+      error: cancelled ? "" : error instanceof Error ? error.message : String(error),
+    })
+  } finally {
+    job.socket = null
+  }
+}
+
+function startLoraDownloadJob(payload: any, requestId: string, userId?: string): LoraDownloadJob {
+  const key = loraDownloadJobKey(userId)
+  const existing = loraDownloadJobs.get(key)
+  if (existing && !["complete", "failed", "cancelled"].includes(existing.status)) {
+    throw new Error("A LoRA download is already running. Cancel it before starting another.")
+  }
+  const connectionId = asString(payload?.connectionId).trim()
+  if (!connectionId) throw new Error("Choose a SwarmUI connection first.")
+  const job: LoraDownloadJob = {
+    id: crypto.randomUUID(),
+    requestId,
+    userId,
+    connectionId,
+    items: normalizeLoraDownloadQueue(payload),
+    index: 0,
+    status: "preparing",
+    currentProgress: 0,
+    overallProgress: 0,
+    message: "Preparing LoRA download…",
+    error: "",
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+    cancelled: false,
+    socket: null,
+  }
+  loraDownloadJobs.set(key, job)
+  emitLoraDownloadJob(job)
+  void runLoraDownloadJob(job)
+  return job
+}
+
+function cancelLoraDownloadJob(userId?: string): LoraDownloadJob | null {
+  const job = loraDownloadJobs.get(loraDownloadJobKey(userId))
+  if (!job || ["complete", "failed", "cancelled"].includes(job.status)) return job || null
+  job.cancelled = true
+  updateLoraDownloadJob(job, {
+    status: "cancelled",
+    message: "LoRA download cancelled.",
+    error: "",
+  })
+  const socket = job.socket
+  if (socket) {
+    try { socket.send(JSON.stringify({ signal: "cancel" })) } catch {}
+    try { socket.close() } catch {}
+  }
+  return job
 }
 
 function parseTags(value: unknown): string[] {
@@ -2720,11 +2993,25 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         }, userId)
         return
       }
-      case "prepare_lora_download": {
+      case "start_lora_download": {
+        startLoraDownloadJob(payload, requestId, userId)
+        return
+      }
+      case "get_lora_download_status": {
+        const job = loraDownloadJobs.get(loraDownloadJobKey(userId))
         spindle.sendToFrontend({
-          type: "lora_download_ready",
+          type: "lora_download_status",
           requestId,
-          data: await prepareLoraDownload(payload, userId),
+          data: job ? loraDownloadJobView(job) : null,
+        }, userId)
+        return
+      }
+      case "cancel_lora_download": {
+        const job = cancelLoraDownloadJob(userId)
+        spindle.sendToFrontend({
+          type: "lora_download_status",
+          requestId,
+          data: job ? loraDownloadJobView(job) : null,
         }, userId)
         return
       }

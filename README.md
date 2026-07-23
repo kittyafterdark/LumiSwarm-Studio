@@ -142,25 +142,29 @@ format or a config exported by Lumiverse. If the current Swarm
 library lacks a referenced filename, Studio keeps it in the stack and shows
 the metadata source link when available. **Download selected** explicitly
 hands checked Civitai/Hugging Face URLs to SwarmUI's permission-checked
-`DoModelDownloadWS` endpoint, shows live progress, downloads sequentially, and
-refreshes Studio metadata afterward. Civitai model-page links are resolved to
+`DoModelDownloadWS` endpoint through the Lumiverse backend, shows live progress,
+downloads sequentially, and refreshes Studio metadata afterward. The backend
+owns the active batch, so closing and reopening Studio recovers its current
+status instead of abandoning the queue. Civitai model-page links are resolved to
 the matching filename's version when possible. Before the model transfer,
 Studio maps Civitai's title/version, creator, descriptions, date, trained
 words, tags, base-model hint, source link, and first preview into Swarm's
-ModelSpec sidecar payload; the preview is reduced to a compact JPEG in the
-browser before the WebSocket request. Metadata enrichment is best-effort, so
+ModelSpec sidecar payload; the preview is fetched once by the backend with a
+strict payload-size cap and never round-trips through the remote device.
+Metadata enrichment is best-effort, so
 an unavailable Civitai API or preview never prevents the model itself from
 downloading. Downloads never start merely
 because a stack was imported.
 
-The final model transfer is SwarmUI's WebSocket, so a remote phone must be able
-to reach SwarmUI directly. When the saved connection uses `localhost` but
-Lumiverse is open through a LAN or Tailscale address, Studio automatically
-substitutes that visible host while preserving Swarm's port. A 12-second
-handshake timeout replaces indefinite **Preparing…** states with the exact
-address and reachability guidance. If Lumiverse is served over HTTPS, SwarmUI
-must likewise be exposed through WSS/HTTPS; browsers forbid an insecure
-`ws://` downloader inside an HTTPS page.
+The final model transfer runs inside Lumiverse's normal Bun backend process:
+the browser or remote phone talks only to Lumiverse, while the extension backend
+connects to the configured SwarmUI address (including the usual
+`http://localhost:7801` default). This avoids exposing Swarm's port to mobile,
+works when Lumiverse itself uses HTTPS, and keeps progress/cancellation flowing
+through the ordinary extension message channel. Lumiverse's optional macOS
+`sandbox` runtime mode denies backend networking; use the normal/default
+`process` runtime there. Windows and Linux normal installs use the compatible
+process runtime (Windows `sandbox` currently falls back to it).
 
 The inspector treats the exact prompt text sent by Studio as the authoritative
 prompt record and lists the ordered Swarm presets separately as provenance.

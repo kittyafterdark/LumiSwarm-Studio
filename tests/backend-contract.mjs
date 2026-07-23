@@ -2,8 +2,11 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 
 const source = await readFile(new URL("../src/backend.ts", import.meta.url), "utf8")
-assert.match(source, /case "prepare_lora_download"/)
+assert.match(source, /case "start_lora_download"/)
+assert.match(source, /case "get_lora_download_status"/)
+assert.match(source, /case "cancel_lora_download"/)
 assert.match(source, /DoModelDownloadWS/)
+assert.match(source, /new WebSocket\(wsUrl\)/)
 assert.match(source, /Only Civitai and Hugging Face LoRA downloads/)
 
 let frontendHandler
@@ -22,6 +25,8 @@ const eventHandlers = new Map()
 let interceptorHandler = null
 let completionToast = ""
 let downloadedSwarmUrl = ""
+const relayedLoraRequests = []
+let holdLoraDownload = false
 let taggedGenerationCount = 0
 const taggedMessage = {
   id: "message-tag-1",
@@ -35,6 +40,50 @@ const taggedMessage = {
   metadata: {},
 }
 const taggedMessages = [taggedMessage]
+
+class MockSwarmDownloadSocket extends EventTarget {
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSED = 3
+
+  constructor(url) {
+    super()
+    assert.equal(url, "ws://localhost:7801/API/DoModelDownloadWS")
+    this.readyState = MockSwarmDownloadSocket.CONNECTING
+    queueMicrotask(() => {
+      if (this.readyState !== MockSwarmDownloadSocket.CONNECTING) return
+      this.readyState = MockSwarmDownloadSocket.OPEN
+      this.dispatchEvent(new Event("open"))
+    })
+  }
+
+  send(payload) {
+    const message = JSON.parse(String(payload))
+    if (message.signal === "cancel") {
+      this.close()
+      return
+    }
+    relayedLoraRequests.push(message)
+    if (holdLoraDownload) return
+    queueMicrotask(() => {
+      if (this.readyState !== MockSwarmDownloadSocket.OPEN) return
+      this.dispatchEvent(new MessageEvent("message", {
+        data: JSON.stringify({ current_percent: 0.5 }),
+      }))
+      this.dispatchEvent(new MessageEvent("message", {
+        data: JSON.stringify({ success: true }),
+      }))
+    })
+  }
+
+  close() {
+    if (this.readyState === MockSwarmDownloadSocket.CLOSED) return
+    this.readyState = MockSwarmDownloadSocket.CLOSED
+    queueMicrotask(() => this.dispatchEvent(new Event("close")))
+  }
+}
+
+globalThis.WebSocket = MockSwarmDownloadSocket
 
 globalThis.spindle = {
   registerMacro(definition) {
@@ -596,23 +645,64 @@ const connection = await request("load_connection", { connectionId: "swarm-1" })
 assert.equal(connection.data.loras.length, 1)
 assert.equal(connection.data.loras[0].triggerPhrase, "ink style")
 
-const loraDownload = await request("prepare_lora_download", {
+const loraDownload = await request("start_lora_download", {
   connectionId: "swarm-1",
-  url: "https://civitai.com/api/download/models/12345",
-  name: "styles/new-ink.safetensors",
+  items: [{
+    url: "https://civitai.com/api/download/models/12345",
+    name: "styles/new-ink.safetensors",
+    title: "New Ink",
+  }, {
+    url: "https://civitai.com/api/download/models/12345",
+    name: "styles/new-ink-variant.safetensors",
+    title: "New Ink Variant",
+  }],
 })
-assert.equal(loraDownload.data.wsUrl, "ws://localhost:7801/API/DoModelDownloadWS")
-assert.equal(loraDownload.data.sessionId, "session-1")
-assert.equal(loraDownload.data.url, "https://civitai.com/api/download/models/12345")
-assert.equal(loraDownload.data.name, "styles/new-ink")
-assert.equal(loraDownload.data.type, "LoRA")
-const loraDownloadMetadata = JSON.parse(loraDownload.data.metadata)
+assert.equal(loraDownload.data.status, "preparing")
+assert.equal(loraDownload.data.active, true)
+assert.equal(loraDownload.data.total, 2)
+for (let attempt = 0; attempt < 50 && relayedLoraRequests.length < 2; attempt += 1) {
+  await new Promise((resolve) => setTimeout(resolve, 1))
+}
+assert.equal(relayedLoraRequests.length, 2, "Backend did not relay the full batch to SwarmUI")
+assert.equal(relayedLoraRequests[0].session_id, "session-1")
+assert.equal(relayedLoraRequests[0].url, "https://civitai.com/api/download/models/12345")
+assert.equal(relayedLoraRequests[0].name, "styles/new-ink")
+assert.equal(relayedLoraRequests[0].type, "LoRA")
+assert.equal(relayedLoraRequests[1].name, "styles/new-ink-variant")
+const loraDownloadMetadata = JSON.parse(relayedLoraRequests[0].metadata)
 assert.equal(loraDownloadMetadata["modelspec.title"], "New Ink - v1.0")
 assert.equal(loraDownloadMetadata["modelspec.author"], "Artist")
 assert.equal(loraDownloadMetadata["modelspec.trigger_phrase"], "ink style; dramatic linework")
 assert.equal(loraDownloadMetadata["modelspec.tags"], "style, ink")
 assert.equal(loraDownloadMetadata["modelspec.usage_hint"], "Illustrious")
 assert.equal(loraDownloadMetadata["modelspec.thumbnail"], "data:image/jpeg;base64,VEhVTUJOQUlM")
+let loraDownloadStatus
+for (let attempt = 0; attempt < 50; attempt += 1) {
+  loraDownloadStatus = await request("get_lora_download_status")
+  if (loraDownloadStatus.data.status === "complete") break
+  await new Promise((resolve) => setTimeout(resolve, 1))
+}
+assert.equal(loraDownloadStatus.data.status, "complete")
+assert.equal(loraDownloadStatus.data.active, false)
+assert.equal(loraDownloadStatus.data.overallProgress, 1)
+holdLoraDownload = true
+const heldLoraDownload = await request("start_lora_download", {
+  connectionId: "swarm-1",
+  items: [{
+    url: "https://huggingface.co/example/repo/resolve/main/held.safetensors",
+    name: "styles/held.safetensors",
+    title: "Held download",
+  }],
+})
+assert.equal(heldLoraDownload.data.active, true)
+for (let attempt = 0; attempt < 50 && relayedLoraRequests.length < 3; attempt += 1) {
+  await new Promise((resolve) => setTimeout(resolve, 1))
+}
+assert.equal(relayedLoraRequests.length, 3)
+const cancelledLoraDownload = await request("cancel_lora_download")
+assert.equal(cancelledLoraDownload.data.status, "cancelled")
+assert.equal(cancelledLoraDownload.data.active, false)
+holdLoraDownload = false
 assert.equal(connection.data.loras[0].defaultWeight, 0.75)
 assert.equal(connection.data.checkpoints[0].compatClass, "stable-diffusion-xl-v1")
 assert.deepEqual(connection.data.swarmOptions.samplers, ["euler", "dpmpp_2m_sde_gpu"])

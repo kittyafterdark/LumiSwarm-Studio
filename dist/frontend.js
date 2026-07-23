@@ -2847,26 +2847,6 @@ function safeHttpUrl(value) {
         return "";
     }
 }
-export function browserReachableWebSocketUrl(value, pageHref) {
-    const target = new URL(String(value || ""));
-    if (target.protocol !== "ws:" && target.protocol !== "wss:") {
-        throw new Error("SwarmUI returned an invalid downloader WebSocket protocol.");
-    }
-    const page = new URL(pageHref);
-    const loopback = new Set([
-        "localhost",
-        "127.0.0.1",
-        "::1",
-        "[::1]"
-    ]);
-    if (loopback.has(target.hostname.toLowerCase()) && !loopback.has(page.hostname.toLowerCase())) {
-        target.hostname = page.hostname;
-    }
-    if (page.protocol === "https:" && target.protocol === "ws:") {
-        throw new Error("This remote Lumiverse page uses HTTPS, but SwarmUI only exposed an insecure ws:// downloader. " + "Configure the SwarmUI connection with an HTTPS/WSS-reachable address or reverse proxy.");
-    }
-    return target.href;
-}
 function downloadJson(value, filename) {
     const url = URL.createObjectURL(new Blob([
         `${JSON.stringify(value, null, 2)}\n`
@@ -3867,9 +3847,10 @@ class StudioController {
     hydratedVisualChatId = "";
     pendingCreatedFolder = null;
     missingLoras = [];
-    loraDownloadQueue = [];
     loraDownloadRequestId = "";
-    loraDownloadSocket = null;
+    loraDownloadJobId = "";
+    loraDownloadActive = false;
+    handledLoraDownloadJobId = "";
     pendingPresetParamMap = {};
     pendingMoveImageIds = [];
     outputResizeObserver = null;
@@ -4011,6 +3992,7 @@ class StudioController {
             }
         }
         this.send("bootstrap");
+        this.send("get_lora_download_status");
     }
     dispose() {
         this.persistWorkspaceState();
@@ -4026,15 +4008,6 @@ class StudioController {
         this.inspectorResizeObserver = null;
         this.stopActiveResize?.();
         this.stopActiveResize = null;
-        if (this.loraDownloadSocket) {
-            try {
-                this.loraDownloadSocket.send(JSON.stringify({
-                    signal: "cancel"
-                }));
-            } catch  {}
-            this.loraDownloadSocket.close();
-            this.loraDownloadSocket = null;
-        }
         document.removeEventListener("keydown", this.handleKeyDown, true);
     }
     setTheme(theme) {
@@ -5407,6 +5380,7 @@ are removed when CSS is applied.</pre>
             case "connection_result":
                 if (payload.requestId !== this.connectionRequestId) return;
                 this.acceptConnectionData(data);
+                this.send("get_lora_download_status");
                 this.applyPendingTaggedPrompt();
                 this.setRunStatus(data.metadataError ? "Ready — LoRA metadata needs attention." : "Ready.");
                 this.scheduleStudioProfileSync();
@@ -5431,9 +5405,34 @@ are removed when CSS is applied.</pre>
                 this.setRunStatus(`Metadata refreshed: ${this.state.loras.length} LoRAs.`);
                 this.setConnectionStatus("ready");
                 break;
-            case "lora_download_ready":
-                if (payload.requestId !== this.loraDownloadRequestId) break;
-                void this.openLoraDownloadSocket(data);
+            case "lora_download_status":
+                {
+                    const jobId = String(data.id || "");
+                    if (!jobId) break;
+                    const status = String(data.status || "");
+                    const active = data.active === true;
+                    const progress = Number.isFinite(Number(data.overallProgress)) ? Number(data.overallProgress) : 0;
+                    const error = String(data.error || "");
+                    const message = [
+                        String(data.message || ""),
+                        error
+                    ].filter(Boolean).join(" ");
+                    this.loraDownloadJobId = jobId;
+                    this.loraDownloadActive = active;
+                    if (active) this.toggleLoraDownloader(true, false);
+                    this.setLoraDownloadStatus(message, status === "failed", progress);
+                    if (status === "complete" && this.handledLoraDownloadJobId !== jobId) {
+                        this.get('[data-role="lora-download-url"]').value = "";
+                        this.get('[data-role="lora-download-name"]').value = "";
+                        if (this.state.connection?.id === String(data.connectionId || "")) {
+                            this.handledLoraDownloadJobId = jobId;
+                            this.send("refresh_metadata", {
+                                connectionId: this.state.connection.id
+                            });
+                        }
+                    }
+                    break;
+                }
                 break;
             case "preview_result":
                 if (payload?.name && payload?.dataUrl) {
@@ -5657,9 +5656,9 @@ are removed when CSS is applied.</pre>
                 this.setRunStatus("Saved LoRA stacks updated.");
                 break;
             case "studio_error":
-                if (payload.operation === "prepare_lora_download") {
-                    this.loraDownloadQueue = [];
+                if (payload.operation === "start_lora_download") {
                     this.loraDownloadRequestId = "";
+                    this.loraDownloadActive = false;
                     this.setLoraDownloadStatus(payload.error || "SwarmUI could not start that download.", true);
                 }
                 if (payload.operation === "create_output_folder") this.pendingCreatedFolder = null;
@@ -6884,11 +6883,11 @@ are removed when CSS is applied.</pre>
         this.renderStack();
         this.renderLoras();
     }
-    toggleLoraDownloader(force) {
+    toggleLoraDownloader(force, focus = true) {
         const search = this.get('[data-role="lora-search"]');
         const entry = this.get('[data-role="lora-download-entry"]');
         const shouldOpen = force ?? entry.hidden;
-        if (!shouldOpen && this.loraDownloadSocket) {
+        if (!shouldOpen && this.loraDownloadActive) {
             this.cancelLoraDownload();
             return;
         }
@@ -6898,7 +6897,7 @@ are removed when CSS is applied.</pre>
         const toggle = this.get('[data-action="toggle-lora-download"]');
         toggle.dataset.active = String(shouldOpen);
         toggle.querySelector("span").textContent = shouldOpen ? "Searching" : "Download";
-        if (shouldOpen) this.get('[data-role="lora-download-url"]').focus();
+        if (shouldOpen && focus) this.get('[data-role="lora-download-url"]').focus();
     }
     startManualLoraDownload() {
         const url = this.get('[data-role="lora-download-url"]').value.trim();
@@ -6907,7 +6906,7 @@ are removed when CSS is applied.</pre>
             this.setLoraDownloadStatus(url ? "Choose a SwarmUI connection first." : "Paste a download URL first.", true);
             return;
         }
-        this.loraDownloadQueue = [
+        this.startLoraDownloadBatch([
             {
                 name,
                 title: name,
@@ -6916,8 +6915,7 @@ are removed when CSS is applied.</pre>
                 enabled: true,
                 useTrigger: false
             }
-        ];
-        this.requestNextLoraDownload();
+        ]);
     }
     downloadSelectedMissingLoras() {
         const selected = [
@@ -6927,169 +6925,31 @@ are removed when CSS is applied.</pre>
             this.setLoraDownloadStatus("Select at least one LoRA with a source URL.", true);
             return;
         }
-        this.loraDownloadQueue = selected;
-        this.requestNextLoraDownload();
+        this.startLoraDownloadBatch(selected);
     }
-    requestNextLoraDownload() {
-        const item = this.loraDownloadQueue[0];
-        if (!item || !this.state.connection) return;
-        this.setLoraDownloadStatus(`Preparing ${item.title || labelFromName(item.name)}…`, false, 0);
-        this.loraDownloadRequestId = this.send("prepare_lora_download", {
+    startLoraDownloadBatch(items) {
+        if (!items.length || !this.state.connection) return;
+        if (this.loraDownloadActive) {
+            this.setLoraDownloadStatus("A LoRA download is already running. Cancel it before starting another.", true);
+            return;
+        }
+        this.loraDownloadActive = true;
+        this.setLoraDownloadStatus(`Preparing ${items.length === 1 ? items[0].title || labelFromName(items[0].name) : `${items.length} LoRA downloads`}…`, false, 0);
+        this.loraDownloadRequestId = this.send("start_lora_download", {
             connectionId: this.state.connection.id,
-            url: item.sourceUrl,
-            name: item.name
-        });
-    }
-    async compactLoraDownloadMetadata(value) {
-        const raw = String(value || "");
-        if (!raw) return "";
-        let metadata;
-        try {
-            metadata = JSON.parse(raw);
-        } catch  {
-            return "";
-        }
-        const thumbnail = String(metadata["modelspec.thumbnail"] || "");
-        if (!thumbnail.startsWith("data:image/")) return JSON.stringify(metadata);
-        try {
-            const image = new Image();
-            await new Promise((resolve, reject)=>{
-                const timer = window.setTimeout(()=>reject(new Error("Preview image decode timed out.")), 8_000);
-                image.onload = ()=>{
-                    window.clearTimeout(timer);
-                    resolve();
-                };
-                image.onerror = ()=>{
-                    window.clearTimeout(timer);
-                    reject(new Error("Preview image could not be decoded."));
-                };
-                image.src = thumbnail;
-            });
-            const targetPixels = 256 * 256;
-            const ratio = Math.min(1, Math.sqrt(targetPixels / Math.max(1, image.naturalWidth * image.naturalHeight)));
-            const canvas = document.createElement("canvas");
-            canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
-            canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
-            const context = canvas.getContext("2d");
-            if (!context) throw new Error("Preview canvas is unavailable.");
-            context.drawImage(image, 0, 0, canvas.width, canvas.height);
-            metadata["modelspec.thumbnail"] = canvas.toDataURL("image/jpeg", 0.84);
-        } catch  {
-            delete metadata["modelspec.thumbnail"];
-        }
-        return JSON.stringify(metadata);
-    }
-    async openLoraDownloadSocket(data) {
-        let wsUrl = "";
-        try {
-            wsUrl = browserReachableWebSocketUrl(data.wsUrl, window.location.href);
-        } catch (error) {
-            this.loraDownloadQueue = [];
-            this.setLoraDownloadStatus(error instanceof Error ? error.message : "SwarmUI returned an invalid downloader address.", true);
-            return;
-        }
-        const item = this.loraDownloadQueue[0];
-        if (!item) return;
-        const metadata = await this.compactLoraDownloadMetadata(data.metadata);
-        if (this.loraDownloadQueue[0] !== item) return;
-        let finished = false;
-        let socket;
-        try {
-            socket = new WebSocket(wsUrl);
-        } catch (error) {
-            this.loraDownloadQueue = [];
-            this.setLoraDownloadStatus(error instanceof Error ? error.message : "The browser refused SwarmUI's downloader address.", true);
-            return;
-        }
-        this.loraDownloadSocket = socket;
-        this.setLoraDownloadStatus(`Connecting to SwarmUI at ${new URL(wsUrl).host}…`, false, 0);
-        const connectionTimer = window.setTimeout(()=>{
-            if (finished || socket.readyState === WebSocket.OPEN) return;
-            finished = true;
-            this.loraDownloadQueue = [];
-            this.loraDownloadSocket = null;
-            try {
-                socket.close();
-            } catch  {}
-            this.setLoraDownloadStatus(`Could not reach SwarmUI at ${new URL(wsUrl).host}. On a remote phone, SwarmUI must listen on the LAN/Tailscale interface and that port must be reachable.`, true);
-        }, 12_000);
-        socket.addEventListener("open", ()=>{
-            window.clearTimeout(connectionTimer);
-            socket.send(JSON.stringify({
-                session_id: String(data.sessionId || ""),
-                url: String(data.url || ""),
-                type: "LoRA",
-                name: String(data.name || item.name || "downloaded-lora"),
-                metadata
-            }));
-            this.setLoraDownloadStatus(`Downloading ${item.title || labelFromName(item.name)}…`, false, 0);
-        });
-        socket.addEventListener("message", (event)=>{
-            let message;
-            try {
-                message = JSON.parse(String(event.data || "{}"));
-            } catch  {
-                return;
-            }
-            if (Number.isFinite(Number(message.current_percent))) {
-                const progress = clamp(Number(message.current_percent), 0, 1);
-                this.setLoraDownloadStatus(`Downloading ${item.title || labelFromName(item.name)} · ${Math.round(progress * 100)}%`, false, progress);
-            }
-            if (message.error) {
-                window.clearTimeout(connectionTimer);
-                finished = true;
-                this.loraDownloadQueue = [];
-                this.loraDownloadSocket = null;
-                this.setLoraDownloadStatus(String(message.error), true);
-                socket.close();
-            }
-            if (message.success === true) {
-                window.clearTimeout(connectionTimer);
-                finished = true;
-                this.loraDownloadQueue.shift();
-                this.loraDownloadSocket = null;
-                socket.close();
-                if (this.loraDownloadQueue.length) {
-                    this.requestNextLoraDownload();
-                } else {
-                    this.setLoraDownloadStatus("Download complete · refreshing Swarm metadata…", false, 1);
-                    this.get('[data-role="lora-download-url"]').value = "";
-                    this.get('[data-role="lora-download-name"]').value = "";
-                    if (this.state.connection) this.send("refresh_metadata", {
-                        connectionId: this.state.connection.id
-                    });
-                }
-            }
-        });
-        socket.addEventListener("error", ()=>{
-            if (finished) return;
-            window.clearTimeout(connectionTimer);
-            finished = true;
-            this.loraDownloadQueue = [];
-            this.loraDownloadSocket = null;
-            this.setLoraDownloadStatus(`The browser could not reach SwarmUI at ${new URL(wsUrl).host}. On mobile, make sure SwarmUI is exposed beyond localhost.`, true);
-        });
-        socket.addEventListener("close", ()=>{
-            window.clearTimeout(connectionTimer);
-            if (finished || this.loraDownloadSocket !== socket) return;
-            this.loraDownloadSocket = null;
-            this.loraDownloadQueue = [];
-            this.setLoraDownloadStatus("The SwarmUI downloader connection closed early.", true);
+            items: items.map((item)=>({
+                    url: item.sourceUrl,
+                    name: item.name,
+                    title: item.title || labelFromName(item.name)
+                }))
         });
     }
     cancelLoraDownload() {
-        this.loraDownloadQueue = [];
         this.loraDownloadRequestId = "";
-        const socket = this.loraDownloadSocket;
-        this.loraDownloadSocket = null;
-        if (socket) {
-            try {
-                socket.send(JSON.stringify({
-                    signal: "cancel"
-                }));
-            } catch  {}
-            socket.close();
-        }
+        if (this.loraDownloadActive) this.send("cancel_lora_download", {
+            jobId: this.loraDownloadJobId
+        });
+        this.loraDownloadActive = false;
         this.setLoraDownloadStatus("", false);
         this.toggleLoraDownloader(false);
     }
