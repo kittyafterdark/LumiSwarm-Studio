@@ -7,8 +7,6 @@ It adds:
 - A desktop workspace with collapsible and draggable generation, history, prompt, LoRA-library, LoRA-stack, and bottom-dock boundaries, plus an optional fullscreen mode; fullscreen, collapse states, mobile tab, and custom pane sizes survive closing Studio
 - A phone-first fullscreen interface with combined Create + Prompt, Tune, LoRAs, Stack, and History tabs
 - One-tap mobile **Use as init**, context-aware **Random/Current seed**, and **Append to chat** actions below the Create prompts, with **Library** beside Settings in the header
-- A Lumiverse-native profile plus an automatic Custom state for component colors, panel geometry, opacity, blur, and CSS overrides
-- A full appearance editor with native component color pickers, border-radius, surface-opacity and backdrop-blur sliders, plus persisted custom CSS
 - A compact opaque settings panel containing appearance controls, metadata refresh, and the encrypted metadata token
 - Positive and negative prompting, checkpoint selection, chain-linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, in-app Swarm preset management, model-component overrides, and raw request JSON
 - Saved SwarmUI/ComfyUI workflows presented through a focused setup modal: choose a workflow, edit the grouped parameters its author exposed, upload workflow image inputs, and generate without touching the node graph
@@ -18,8 +16,6 @@ It adds:
 - Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, reusable saved stack presets, and one-click materialization of a Swarm preset into editable Studio controls
 - Shareable Studio stack JSON, direct in-app application to Lumiverse Image Gen LoRA presets, and an in-Studio, progress-aware SwarmUI downloader for selected missing LoRAs or pasted/dropped Civitai and Hugging Face links
 - A prompt-header generation action on desktop and a persistent mobile generation action
-- Native Lumiverse expanded text editors for Studio and Quick Create positive/negative prompts, including the host's macro-aware editing tools
-- An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker, a server-persisted 0–6 required-image range per reply (`0–0` keeps model discretion), selectable **Multi-character / ensemble** and **Character-only / POV** composition guidance, and an optional `character="none"` scenery/object mode; completed tags begin generating without a chat-shifting progress strip, failures leave an aspect-aware retry placeholder, and finished outputs become permanent container-filling Lumiverse images while syncing back into Studio without taking over Studio's own Generate/Interrupt state
@@ -32,12 +28,10 @@ It adds:
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Append to chat / Delete menus
 - A fullscreen searchable Lumiverse output library with an anchored `+ folder` control, horizontally scrolling folder strip, contextual Select/Clear page, Shift-range selection, conditional batch actions, collapsible chat-visual profiles, and a sticky current-folder/search/pagination rail; pages hold 30 images on desktop and 15 on mobile, and selection updates in place without snapping the mobile gallery back to the top
-- A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
 - A draggable two-state Lumiverse float player: a square image orb and a full **Quick create** panel. Its single visible surface mounts above Lumiverse's zero-height mobile body without leaving a ghost host widget, keeps its box exactly synchronized with the 64px orb across responsive transitions, stays beneath Lumi drawers/modals, and hides while Studio is open; it survives closing Studio, generates from editable lightweight prompts, follows live previews and step progress, can append the latest output to chat, and turns its stable Generate action into Stop while rendering
 - Shared float-player/Studio output and draft state, so Quick create inherits the last model, dimensions, sampler, scheduler, presets, LoRAs, workflow, init image, and overrides—and the full Studio restores them when it reopens
-- The drawer’s picture-frame wall emblem reused consistently in the float player, Studio header, drawer registration, and chat input action
 
 Generation itself goes through `spindle.imageGen.generate()`. That means it continues to use the SwarmUI connection, encrypted secret, persistence, and ownership behavior already managed by Lumiverse.
 
