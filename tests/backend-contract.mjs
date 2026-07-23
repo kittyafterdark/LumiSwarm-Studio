@@ -823,9 +823,22 @@ assert.equal(macroValues.get("user_profile"), "/api/v1/images/user-avatar?size=s
 assert.match(completionToast, /Swarm Studio finished/)
 
 const tagConfig = await request("set_tag_automation", {
-  config: { autoGenerate: true, injectProtocol: true, completionToast: false },
+  config: {
+    autoGenerate: true,
+    injectProtocol: true,
+    completionToast: false,
+    requiredImageMin: 2,
+    requiredImageMax: 4,
+  },
 })
-assert.deepEqual(tagConfig.data, { autoGenerate: true, injectProtocol: true, completionToast: false })
+assert.deepEqual(tagConfig.data, {
+  autoGenerate: true,
+  injectProtocol: true,
+  completionToast: false,
+  requiredImageMin: 2,
+  requiredImageMax: 4,
+})
+assert.match(macroValues.get("swarm_image_protocol"), /between 2 and 4 complete <swarm-image> requests/)
 const characterBaseTags = await request("set_character_base_tags", {
   characterId: "char-1",
   tags: "1boy, black hair, red eyes",
@@ -849,6 +862,9 @@ assert.match(intercepted.messages[0].content, /request="generate"/)
 assert.match(intercepted.messages[0].content, /Attributes may be written on one line or separate lines/)
 assert.match(intercepted.messages[0].content, /<preset:Cinematic>/)
 assert.match(intercepted.messages[0].content, /configured local SwarmUI installation and local hardware/)
+assert.match(intercepted.messages[0].content, /IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY/)
+assert.match(intercepted.messages[0].content, /Emit at least 2 and no more than 4/)
+assert.match(intercepted.messages[0].content, /no scene is important enough/)
 assert.match(intercepted.messages[0].content, /ACTIVE CHARACTER IDENTITY BLOCK/)
 assert.match(intercepted.messages[0].content, /1boy, black hair, red eyes/)
 assert.doesNotMatch(intercepted.messages[0].content, /Use at most two image tags/)

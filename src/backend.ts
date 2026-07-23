@@ -168,6 +168,8 @@ interface TagAutomationConfig {
   autoGenerate: boolean
   injectProtocol: boolean
   completionToast: boolean
+  requiredImageMin: number
+  requiredImageMax: number
 }
 
 interface CharacterBaseTagEntry {
@@ -279,7 +281,7 @@ const taggedMessageFinalizeLocks = new Map<string, Promise<void>>()
 const swarmProtocolContexts = new Map<string, SwarmProtocolContext>()
 
 const SWARM_IMAGE_PROTOCOL_BASE = `SWARM STUDIO IMAGE REQUEST PROTOCOL
-When a newly generated illustration materially improves your reply, place this exact XML-like request where the finished image should appear. Attributes may be written on one line or separate lines:
+Place this exact XML-like request wherever an illustration selected under the image-count instructions should appear. Attributes may be written on one line or separate lines:
 <swarm-image
   request="generate"
   slot="short-stable-name"
@@ -1937,16 +1939,31 @@ async function fetchSwarmOutput(
 
 function cleanTagAutomationConfig(value: unknown): TagAutomationConfig {
   const record = asRecord(value)
+  let requiredImageMin = Math.max(0, Math.min(6, Math.trunc(Number(record.requiredImageMin) || 0)))
+  let requiredImageMax = Math.max(0, Math.min(6, Math.trunc(Number(record.requiredImageMax) || 0)))
+  if (requiredImageMin === 0 && requiredImageMax > 0) requiredImageMin = 1
+  if (requiredImageMin > 0 && requiredImageMax === 0) requiredImageMax = requiredImageMin
+  if (requiredImageMax > 0 && requiredImageMax < requiredImageMin) {
+    ;[requiredImageMin, requiredImageMax] = [requiredImageMax, requiredImageMin]
+  }
   return {
     autoGenerate: record.autoGenerate === true,
     injectProtocol: record.injectProtocol === true,
     completionToast: record.completionToast === true,
+    requiredImageMin,
+    requiredImageMax,
   }
 }
 
 async function loadTagAutomationConfig(userId?: string): Promise<TagAutomationConfig> {
   return cleanTagAutomationConfig(await spindle.userStorage.getJson(TAG_AUTOMATION_CONFIG_FILE, {
-    fallback: { autoGenerate: false, injectProtocol: false, completionToast: false },
+    fallback: {
+      autoGenerate: false,
+      injectProtocol: false,
+      completionToast: false,
+      requiredImageMin: 0,
+      requiredImageMax: 0,
+    },
     userId,
   }))
 }
@@ -1954,6 +1971,14 @@ async function loadTagAutomationConfig(userId?: string): Promise<TagAutomationCo
 async function saveTagAutomationConfig(value: unknown, userId?: string): Promise<TagAutomationConfig> {
   const config = cleanTagAutomationConfig(value)
   await spindle.userStorage.setJson(TAG_AUTOMATION_CONFIG_FILE, config, { indent: 2, userId })
+  spindle.updateMacroValue(
+    "swarm_image_protocol",
+    buildSwarmImageProtocol(
+      await loadStudioGenerationProfile(userId),
+      swarmProtocolContexts.get(protocolContextKey(userId)) || null,
+      config,
+    ),
+  )
   return config
 }
 
@@ -2178,6 +2203,7 @@ function studioPresetTokens(profile: StudioGenerationProfile | null): string[] {
 function buildSwarmImageProtocol(
   profile: StudioGenerationProfile | null,
   context: SwarmProtocolContext | null = null,
+  automation: TagAutomationConfig = cleanTagAutomationConfig(null),
 ): string {
   const presetTokens = studioPresetTokens(profile)
   const presetGuidance = presetTokens.length
@@ -2188,6 +2214,14 @@ function buildSwarmImageProtocol(
     ? `ACTIVE CHARACTER IDENTITY BLOCK — automatically prepended for character="active"; do not copy it into the tag body:\n${baseTags}`
     : `No active character identity block is configured. If a person must appear, derive concrete visual descriptors from the available character/persona context; never substitute a display name for appearance tags.`
   const model = asString(asRecord(profile?.input).model)
+  const imageCountGuidance = automation.requiredImageMin > 0
+    ? automation.requiredImageMin === automation.requiredImageMax
+      ? `IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY
+The user explicitly requires exactly ${automation.requiredImageMin} complete <swarm-image> request${automation.requiredImageMin === 1 ? "" : "s"} in this reply. This overrides the default discretion about whether a moment needs visualization. Do not omit the requests by claiming that no scene is important enough, not specifically required, or better left unillustrated. Choose the strongest ${automation.requiredImageMin === 1 ? "moment" : "moments"}, emit exactly the required count, and make every request complete and distinct.`
+      : `IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY
+The user explicitly requires between ${automation.requiredImageMin} and ${automation.requiredImageMax} complete <swarm-image> requests in this reply. This overrides the default discretion about whether a moment needs visualization. Emit at least ${automation.requiredImageMin} and no more than ${automation.requiredImageMax}. Do not omit the requests by claiming that no scene is important enough, not specifically required, or better left unillustrated. Choose the strongest moments and make every request complete and distinct.`
+    : `IMAGE COUNT
+No explicit image count is active. Decide whether an illustration materially improves the reply; do not emit a request merely to fill a quota.`
   const animaGuidance = /anima/i.test(model)
     ? `ANIMA CHECKPOINT GUIDANCE
 Build the resolved prompt in this conceptual order:
@@ -2202,14 +2236,14 @@ masterpiece, best quality, score_7, [one safety tag], newest, highres,
 [background / time / weather / objects], [lighting / depth / effects / finishing details].
 Use exactly one context-appropriate Anima safety tag: safe, sensitive, nsfw, or explicit. The automatic identity block already occupies the active character's identity/anatomy/clothing slots, so the tag body should primarily supply the interaction and scene layers instead of reconstructing the character.`
     : `Use concise, model-recognizable visual descriptors. The automatic identity block supplies the active character; the tag body should primarily direct action, staging, camera, environment, and light.`
-  return `${SWARM_IMAGE_PROTOCOL_BASE}\n\n${identityGuidance}\n\n${animaGuidance}\n\n${presetGuidance}`
+  return `${SWARM_IMAGE_PROTOCOL_BASE}\n\n${imageCountGuidance}\n\n${identityGuidance}\n\n${animaGuidance}\n\n${presetGuidance}`
 }
 
 function protocolContextKey(userId?: string): string {
   return userId || "__default__"
 }
 
-function pushStudioProfileMacros(profile: StudioGenerationProfile | null, userId?: string): void {
+async function pushStudioProfileMacros(profile: StudioGenerationProfile | null, userId?: string): Promise<void> {
   const input = asRecord(profile?.input)
   const parameters = asRecord(input.parameters)
   const presetTokens = studioPresetTokens(profile).join(", ")
@@ -2219,7 +2253,11 @@ function pushStudioProfileMacros(profile: StudioGenerationProfile | null, userId
   spindle.updateMacroValue("swarm_aspect", aspectFromParameters(parameters))
   spindle.updateMacroValue(
     "swarm_image_protocol",
-    buildSwarmImageProtocol(profile, swarmProtocolContexts.get(protocolContextKey(userId)) || null),
+    buildSwarmImageProtocol(
+      profile,
+      swarmProtocolContexts.get(protocolContextKey(userId)) || null,
+      await loadTagAutomationConfig(userId),
+    ),
   )
 }
 
@@ -2231,7 +2269,7 @@ async function saveStudioGenerationProfile(
   const profile = sanitizeStudioProfile({ input, recordHints, updatedAt: Date.now() })
   if (!profile) return null
   await spindle.userStorage.setJson(STUDIO_GENERATION_PROFILE_FILE, profile, { indent: 2, userId })
-  pushStudioProfileMacros(profile, userId)
+  await pushStudioProfileMacros(profile, userId)
   return profile
 }
 
@@ -2281,7 +2319,11 @@ async function refreshContextMacros(userId?: string): Promise<void> {
   spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId))
   spindle.updateMacroValue(
     "swarm_image_protocol",
-    buildSwarmImageProtocol(await loadStudioGenerationProfile(userId), protocolContext),
+    buildSwarmImageProtocol(
+      await loadStudioGenerationProfile(userId),
+      protocolContext,
+      await loadTagAutomationConfig(userId),
+    ),
   )
 }
 
@@ -2882,6 +2924,7 @@ async function taggedImagePromptInterceptor(messages: any[], context: any): Prom
     content: buildSwarmImageProtocol(
       await loadStudioGenerationProfile(userId),
       swarmProtocolContexts.get(protocolContextKey(userId)) || null,
+      config,
     ),
   }
   return {
@@ -2974,7 +3017,7 @@ async function listLibraryOutputs(userId?: string): Promise<{
 async function bootstrap(userId?: string): Promise<JsonObject> {
   const permissions = permissionSnapshot()
   const profile = await loadStudioGenerationProfile(userId)
-  pushStudioProfileMacros(profile, userId)
+  await pushStudioProfileMacros(profile, userId)
   await refreshContextMacros(userId)
   const allConnections = permissions.imageGen
     ? await spindle.imageGen.listConnections(userId)

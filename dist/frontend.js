@@ -705,6 +705,26 @@ const STYLES = `
   .ss-config-section-head span { color: var(--lumiverse-text-muted); font-size: 8.5px; }
   .ss-config-toggle { display: flex; align-items: center; gap: 7px; color: var(--lumiverse-text-muted); font-size: 9px; }
   .ss-config-toggle input { accent-color: var(--lumiverse-accent, #7dd3fc); }
+  .ss-image-count-range {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 58px auto 58px;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 6px 8px;
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--ss-canvas, #090a0d) 72%, transparent);
+  }
+  .ss-image-count-range > span:first-child { color: var(--ss-text, var(--lumiverse-text)); font-size: 9px; font-weight: 650; }
+  .ss-image-count-range .ss-input {
+    width: 58px;
+    min-width: 0;
+    height: 27px;
+    padding: 3px 5px;
+    text-align: center;
+  }
+  .ss-image-count-range .ss-range-separator { color: var(--lumiverse-text-muted); font-size: 10px; }
   .ss-character-tags-editor { display: grid; gap: 6px; }
   .ss-character-tags-editor .ss-textarea {
     min-height: 72px;
@@ -2723,18 +2743,37 @@ function defaultStudioBehavior() {
         widgetEnabled: true,
         mobileQuickCreate: false,
         tagAutoGenerate: false,
-        tagPromptInjection: false
+        tagPromptInjection: false,
+        requiredImageMin: 0,
+        requiredImageMax: 0
+    };
+}
+export function normalizeRequiredImageRange(minValue, maxValue) {
+    let min = Math.max(0, Math.min(6, Math.trunc(Number(minValue) || 0)));
+    let max = Math.max(0, Math.min(6, Math.trunc(Number(maxValue) || 0)));
+    if (min === 0 && max > 0) min = 1;
+    if (min > 0 && max === 0) max = min;
+    if (max > 0 && max < min) [min, max] = [
+        max,
+        min
+    ];
+    return {
+        min,
+        max
     };
 }
 function storedStudioBehavior() {
     try {
         const parsed = JSON.parse(window.localStorage.getItem(BEHAVIOR_STORAGE_KEY) || "{}");
+        const imageRange = normalizeRequiredImageRange(parsed?.requiredImageMin, parsed?.requiredImageMax);
         return {
             completionToast: parsed?.completionToast === true,
             widgetEnabled: parsed?.widgetEnabled !== false,
             mobileQuickCreate: parsed?.mobileQuickCreate === true,
             tagAutoGenerate: parsed?.tagAutoGenerate === true,
-            tagPromptInjection: parsed?.tagPromptInjection === true
+            tagPromptInjection: parsed?.tagPromptInjection === true,
+            requiredImageMin: imageRange.min,
+            requiredImageMax: imageRange.max
         };
     } catch  {
         return defaultStudioBehavior();
@@ -4084,6 +4123,10 @@ class StudioController {
         if (tagAutoGenerate) tagAutoGenerate.checked = this.behavior.tagAutoGenerate;
         const tagPromptInjection = this.root.querySelector('[data-role="tag-prompt-injection"]');
         if (tagPromptInjection) tagPromptInjection.checked = this.behavior.tagPromptInjection;
+        const requiredImageMin = this.root.querySelector('[data-role="required-image-min"]');
+        if (requiredImageMin) requiredImageMin.value = String(this.behavior.requiredImageMin);
+        const requiredImageMax = this.root.querySelector('[data-role="required-image-max"]');
+        if (requiredImageMax) requiredImageMax.value = String(this.behavior.requiredImageMax);
     }
     exportDraft() {
         if (!this.state.connection) return this.pendingDraftRestore;
@@ -4479,6 +4522,13 @@ class StudioController {
                   <div class="ss-config-section-head"><strong>In-message images</strong><span>Explicitly opt in</span></div>
                   <label class="ss-config-toggle"><input type="checkbox" data-role="tag-auto-generate" ${this.behavior.tagAutoGenerate ? "checked" : ""} /><span>Automatically generate completed &lt;swarm-image&gt; tags</span></label>
                   <label class="ss-config-toggle"><input type="checkbox" data-role="tag-prompt-injection" ${this.behavior.tagPromptInjection ? "checked" : ""} /><span>Teach the model the Swarm image-tag protocol</span></label>
+                  <div class="ss-image-count-range">
+                    <span>Required images per reply</span>
+                    <input class="ss-input" type="number" min="0" max="6" step="1" inputmode="numeric" data-role="required-image-min" value="${this.behavior.requiredImageMin}" aria-label="Minimum required images" title="Minimum required images" />
+                    <span class="ss-range-separator">to</span>
+                    <input class="ss-input" type="number" min="0" max="6" step="1" inputmode="numeric" data-role="required-image-max" value="${this.behavior.requiredImageMax}" aria-label="Maximum required images" title="Maximum required images" />
+                  </div>
+                  <p class="ss-muted ss-tiny">0–0 lets the model decide. Any other range explicitly requires that many complete image requests in the reply.</p>
                   <code class="ss-tag-protocol-example">{{swarm_image_protocol}}
 
 &lt;swarm-image
@@ -5155,6 +5205,16 @@ are removed when CSS is applied.</pre>
                 tagPromptInjection: event.currentTarget.checked
             });
         });
+        const updateRequiredImageRange = ()=>{
+            const range = normalizeRequiredImageRange(this.get('[data-role="required-image-min"]').value, this.get('[data-role="required-image-max"]').value);
+            this.onBehaviorChange({
+                ...this.behavior,
+                requiredImageMin: range.min,
+                requiredImageMax: range.max
+            });
+        };
+        this.get('[data-role="required-image-min"]').addEventListener("change", updateRequiredImageRange);
+        this.get('[data-role="required-image-max"]').addEventListener("change", updateRequiredImageRange);
         this.get('[data-role="lora-sort"]').addEventListener("change", ()=>this.renderLoras());
         this.get('[data-role="lora-filter"]').addEventListener("change", ()=>this.renderLoras());
         this.get('[data-role="model"]').addEventListener("change", ()=>{
@@ -9254,7 +9314,9 @@ export function setup(ctx) {
             config: {
                 autoGenerate: behavior.tagAutoGenerate,
                 injectProtocol: behavior.tagPromptInjection,
-                completionToast: behavior.completionToast
+                completionToast: behavior.completionToast,
+                requiredImageMin: behavior.requiredImageMin,
+                requiredImageMax: behavior.requiredImageMax
             }
         });
     };
@@ -9301,7 +9363,9 @@ export function setup(ctx) {
         config: {
             autoGenerate: behavior.tagAutoGenerate,
             injectProtocol: behavior.tagPromptInjection,
-            completionToast: behavior.completionToast
+            completionToast: behavior.completionToast,
+            requiredImageMin: behavior.requiredImageMin,
+            requiredImageMax: behavior.requiredImageMax
         }
     });
     const unregisterTagInterceptor = ctx.messages.registerTagInterceptor({

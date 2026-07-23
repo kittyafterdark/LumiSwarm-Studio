@@ -12,6 +12,7 @@ const {
   lorasFromSwarmPreset,
   matchesKeywordQuery,
   modelSignalsCompatible,
+  normalizeRequiredImageRange,
   outputLibraryPageSize,
   quickGenerationParameters,
   sanitizeCustomCss,
@@ -43,6 +44,10 @@ assert.equal(matchesKeywordQuery("illustrious portrait", ["Anima model", "soft p
 assert.equal(outputLibraryPageSize(390), 15)
 assert.equal(outputLibraryPageSize(720), 15)
 assert.equal(outputLibraryPageSize(721), 30)
+assert.deepEqual(normalizeRequiredImageRange(0, 0), { min: 0, max: 0 })
+assert.deepEqual(normalizeRequiredImageRange(0, 3), { min: 1, max: 3 })
+assert.deepEqual(normalizeRequiredImageRange(4, 2), { min: 2, max: 4 })
+assert.deepEqual(normalizeRequiredImageRange(99, 99), { min: 6, max: 6 })
 assert.deepEqual(
   quickGenerationParameters({ width: 576, height: 384, steps: 26, cfg_scale: 4, sampler: "euler", scheduler: "beta57" }),
   {
@@ -294,8 +299,13 @@ assert.match(source, /activeModal = null[\s\S]*?miniplayer\?\.setStudioOpen\(fal
 assert.match(source, /completionToast: false/)
 assert.match(source, /tagAutoGenerate: false/)
 assert.match(source, /tagPromptInjection: false/)
+assert.match(source, /requiredImageMin: 0/)
+assert.match(source, /requiredImageMax: 0/)
 assert.match(source, /data-role="tag-auto-generate"/)
 assert.match(source, /data-role="tag-prompt-injection"/)
+assert.match(source, /data-role="required-image-min"/)
+assert.match(source, /data-role="required-image-max"/)
+assert.match(source, /0–0 lets the model decide/)
 assert.match(source, /data-action="copy-tag-protocol"/)
 assert.match(source, /data-role="character-base-tags"/)
 assert.match(source, /data-action="save-character-base-tags"/)
