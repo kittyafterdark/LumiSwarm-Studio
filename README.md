@@ -24,7 +24,7 @@ It adds:
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker and an optional `character="none"` scenery/object mode that accept one-line or multiline attributes, begin generating as soon as a complete tag streams, reject stray/nested prose examples, show stable lazy/spinner/failure cards without shifting chat layout, sync completed output back into Studio, serialize concurrent insertions into the same reply, and replace themselves with permanent container-filling Lumiverse images
 - Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with a fresh random seed using current/original settings, edit and immediately confirm the prompt in Quick Create, or open the output library; right-clicking the finished image opens the same menu
-- Chat visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack can follow one conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile stack controls once when that chat opens, and file that chat's Studio outputs automatically only while the pill is enabled; disabled visuals leave new outputs Unfiled
+- Character visual bindings stored inside Library folders: a base positive, base negative, and saved LoRA stack follow the character across every conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile stack controls when that character becomes active, and file that character's Studio outputs automatically only while the pill is enabled; disabled visuals leave new outputs Unfiled
 - Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_base}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
@@ -99,11 +99,13 @@ outside, city street, food stall, smiling
 </swarm-image>
 ```
 
-Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; 3:4 is available for portrait framing. The protocol asks models to reserve 9:16 and 16:9 for layouts explicitly presented as phone or widescreen media. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the chat visual positive and negative, removes that binding's LoRAs from the request, and adds a no-person/character negative guard while preserving unrelated Studio style LoRAs, presets, and generation controls. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request. The final-message handler retains compatibility with older tags that include a slot plus aspect or alt metadata.
+Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; 3:4 is available for portrait framing. The protocol asks models to reserve 9:16 and 16:9 for layouts explicitly presented as phone or widescreen media. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the character visual positive and negative, removes that binding's LoRAs from the request, and adds a no-person/character negative guard while preserving unrelated Studio style LoRAs, presets, and generation controls. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request.
 
-The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives; tagged jobs remove the duplicate raw preset field before submission. A literal `{{swarm_preset}}` in a tag resolves to the same directive list without adding it twice. Scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. An enabled chat-folder visual binding contributes its base positive, base negative, and saved LoRA stack to both manual and tagged generation. Native Character LoRA `base_tags` remain a fallback when a binding has no positive base; the separately bound native Character LoRA is never injected.
+The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives; tagged jobs remove the duplicate raw preset field before submission. A literal `{{swarm_preset}}` in a tag resolves to the same directive list without adding it twice. Scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. An enabled character-folder visual binding contributes its base positive, base negative, and saved LoRA stack to both manual and tagged generation. Native Character LoRA `base_tags` remain a fallback when a binding has no positive base; the separately bound native Character LoRA is never injected.
 
-Each request is keyed by chat, message, slot, and tag content. Delivery from both streaming tag interception and Lumiverse's final generation event is therefore safe. Completions targeting the same assistant message are finalized through a per-message queue and re-read the latest message before every replacement, so two or more fast parallel generations cannot overwrite one another. The in-message card stays at a fixed size with a static spinner instead of remounting for every progress step. Right-click or long-press a pending/failed card for current-profile retry, original-profile retry, prompt editing in Studio, or the output library. A completed image keeps a small per-image action overlay with the same regeneration choices, including after reload. Finished tags are frozen to their specific Lumiverse image URL rather than leaving the global `{{last_genned}}` macro in old messages.
+The injected protocol identifies this as generation through the user's configured local SwarmUI, so the language model emits a request instead of claiming it lacks an image tool. It includes the exact active identity block that Studio will prepend and forbids substituting chat display names for visual tags. Anima-family checkpoints receive an ordered hybrid Danbooru/natural-language guide, the `safe` / `sensitive` / `nsfw` / `explicit` safety vocabulary, concrete scene-layer ordering, and a subject-action pattern for unambiguous multi-character staging.
+
+Each request is keyed by chat, message, slot, and tag content. The streaming tag interceptor delivers complete requests once. Completions targeting the same assistant message are finalized through a per-message queue and re-read the latest message before every replacement, so two or more fast parallel generations cannot overwrite one another. The in-message card stays at a fixed size with a static spinner instead of remounting for every progress step. Right-click or long-press a pending/failed card for current-profile retry, original-profile retry, prompt editing and confirmation in Quick Create, or the output library. A completed image keeps a small per-image action overlay with the same regeneration choices, including after reload. Finished tags are frozen to their specific Lumiverse image URL rather than leaving the global `{{last_genned}}` macro in old messages.
 
 Profile macros resolve to raw values so authored HTML and display regexes remain presentation-only:
 
@@ -114,7 +116,7 @@ Profile macros resolve to raw values so authored HTML and display regexes remain
 - `{{swarm_checkpoint}}` / `{{swarm_aspect}}` — current profile details
 - `{{last_genned}}` — latest successful Studio output URL
 
-The macro reference remains behind **Studio settings → In-message images**. Chat visuals live in Output Library so the settings popover stays compact.
+The macro reference remains behind **Studio settings → In-message images**. Character visuals live in Output Library so the settings popover stays compact.
 
 ## Metadata behavior
 
@@ -253,12 +255,13 @@ parameters, filename, and Swarm path; quoted phrases stay together. The
 checkmark enters selection mode, and **Move** / **Delete** appear only after an
 image is selected.
 
-New folders can be unbound collections or bound to the active chat. A chat
-folder exposes a collapsible visual strip with base positive, base negative,
-and a saved LoRA-stack selector. Its pill above Studio's positive prompt can be
-tapped to disable or re-enable all three layers without deleting their settings
-or the gallery. Manual and tagged generations from that chat are filed into the
-folder automatically. Duplicate LoRA filenames are normalized; the ordinary
+New folders can be unbound collections or bound to the active character. A
+character folder exposes a collapsible visual strip with base positive, base
+negative, and a saved LoRA-stack selector. Its pill above Studio's positive
+prompt can be tapped to disable or re-enable all three layers without deleting
+their settings or the gallery. Manual and tagged generations for that character
+are filed into the same folder across conversations. Older chat-bound folders
+are migrated by character ID and duplicate galleries are merged. Duplicate LoRA filenames are normalized; the ordinary
 Studio stack wins when it intentionally overrides a bound-stack item.
 
 Folders remain lightweight per-user collections stored by the extension;

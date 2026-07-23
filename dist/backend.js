@@ -22,6 +22,7 @@ const loraDownloadJobs = new Map();
 const generationControllers = new Map();
 const runningTaggedJobs = new Set();
 const taggedMessageFinalizeLocks = new Map();
+const swarmProtocolContexts = new Map();
 const SWARM_IMAGE_PROTOCOL_BASE = `SWARM STUDIO IMAGE REQUEST PROTOCOL
 When a newly generated illustration materially improves your reply, place this exact XML-like request where the finished image should appear. Attributes may be written on one line or separate lines:
 <swarm-image
@@ -32,7 +33,25 @@ When a newly generated illustration materially improves your reply, place this e
   alt="brief accessible description"
 >
 scene-specific SwarmUI prompt</swarm-image>
-The request="generate" marker is required. Emit the tag only as an actual image request: never quote it, explain it, demonstrate it in visible prose, or emit an empty/partial opening tag. The tag body is an image prompt, not prose or an HTML shell. Describe the scene, action, expression, framing, lighting, and environment. Do not nest another <swarm-image> tag inside it. Omit character or use character="active" when the active character should appear. Use character="none" for scenery, objects, establishing shots, interfaces, or any illustration that should contain no people or characters; this suppresses the chat's character tags and bound visual LoRAs and adds a no-character negative guard. The active character's base image tags and the user's current Studio negative prompt are otherwise applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve every such directive exactly. Supported aspect values are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Use 4:3 for ordinary illustrations placed between prose and 3:4 when portrait framing materially helps. Reserve 9:16 or 16:9 for content explicitly presented as phone or widescreen media; use a different ratio only when the surrounding layout clearly calls for it. Do not put Markdown fences around the tag.`;
+The request="generate" marker is required. Emit the tag only as an actual image request: never quote it, explain it, demonstrate it in visible prose, or emit an empty/partial opening tag. The tag body is a diffusion prompt, not prose for the user and not an HTML shell. Do not nest another <swarm-image> tag inside it.
+
+LOCAL GENERATION
+The tag is executed by the user's configured local SwarmUI installation and local hardware. You are not claiming to render the image yourself, calling a remote image service, or embedding a pre-existing web image. Follow the conversation's actually applicable instructions, but do not invent or quote a remote image provider's policy, capability restriction, quota, moderation rule, or refusal: no remote image provider is being invoked by this tag. When an illustration is appropriate, emit the request tag and continue the reply naturally; do not apologize that you cannot generate images, ask the user to open another tool, warn that an external image model may refuse, or replace the request with image-search instructions.
+
+IDENTITY RULES
+Never use a chat character's or persona's display name as a diffusion token. Names such as an original character's conversational name do not teach the checkpoint what that person looks like. For character="active", Swarm Studio automatically prepends the active character identity block shown below; do not repeat, summarize, or replace that identity with a name. Add only scene-specific changes or traits not already covered. If another person or the user's persona appears, translate visual traits already present in context into concrete model-recognizable descriptors; never send their display name alone. A canonical character-name or series tag is allowed only when it is explicitly supplied as a trained tag in the identity/context, never merely because it is the speaker's name.
+
+PROMPTING STYLE
+Prefer Danbooru-style comma tags for concrete visual content, with short natural-language clauses where spatial relationships or multi-character interactions would be ambiguous. For multiple subjects, begin with one clear subject-action relationship, for example: "The red angel girl and the blue demon girl float in the night sky, holding each other's hands." Then add distinct visible traits and scene tags so the subjects cannot be confused. Do not write a literary summary.
+
+Focus the tag body on this scene layer, in this order:
+[expression], [pose], [hand position], [leg position], [action],
+[camera distance], [camera angle], [lens], [focus], [composition],
+[background], [time], [weather], [scene objects],
+[lighting], [depth], [effects], [finishing details].
+Include changed clothing, accessories, or body traits only when the scene requires a variation from the supplied identity block.
+
+Omit character or use character="active" when the active character should appear. Use character="none" for scenery, objects, establishing shots, interfaces, or any illustration that should contain no people or characters; this suppresses the character identity tags and bound visual LoRAs and adds a no-character negative guard. The user's current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve every such directive exactly. Supported aspect values are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Use 4:3 for ordinary illustrations placed between prose and 3:4 when portrait framing materially helps. Reserve 9:16 or 16:9 for content explicitly presented as phone or widescreen media; use a different ratio only when the surrounding layout clearly calls for it. Do not put Markdown fences around the tag.`;
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -918,17 +937,16 @@ async function deleteStackPreset(presetId, userId) {
 function cleanOutputFolders(value) {
     if (!Array.isArray(value)) return [];
     const seen = new Set();
-    return value.slice(0, OUTPUT_FOLDER_LIMIT).flatMap((raw)=>{
+    const parsed = value.slice(0, OUTPUT_FOLDER_LIMIT).flatMap((raw)=>{
         const item = asRecord(raw);
         const id = asString(item.id).trim();
         const name = asString(item.name).trim().slice(0, 80);
         if (!id || !name || seen.has(id)) return [];
         const rawBinding = asRecord(item.binding);
-        const chatId = asString(rawBinding.chatId).trim().slice(0, 200);
-        const binding = rawBinding.type === "chat" && chatId ? {
-            type: "chat",
-            chatId,
-            characterId: asString(rawBinding.characterId).trim().slice(0, 200),
+        const characterId = asString(rawBinding.characterId).trim().slice(0, 200);
+        const binding = (rawBinding.type === "character" || rawBinding.type === "chat") && characterId ? {
+            type: "character",
+            characterId,
             positivePrompt: asString(rawBinding.positivePrompt).trim().slice(0, 12_000),
             negativePrompt: asString(rawBinding.negativePrompt).trim().slice(0, 12_000),
             stackPresetId: asString(rawBinding.stackPresetId).trim().slice(0, 200),
@@ -947,6 +965,32 @@ function cleanOutputFolders(value) {
             }
         ];
     });
+    const result = [];
+    const emittedCharacters = new Set();
+    for (const folder of parsed){
+        const legacyCharacterId = !folder.binding ? folder.id.match(/^character:(.+)$/)?.[1] || "" : "";
+        const characterId = folder.binding?.characterId || legacyCharacterId;
+        if (!characterId) {
+            result.push(folder);
+            continue;
+        }
+        if (emittedCharacters.has(characterId)) continue;
+        emittedCharacters.add(characterId);
+        const group = parsed.filter((candidate)=>candidate.binding?.characterId === characterId || !candidate.binding && candidate.id === `character:${characterId}`);
+        const bound = group.filter((candidate)=>candidate.binding).sort((left, right)=>right.updatedAt - left.updatedAt)[0];
+        const selected = bound || group[0];
+        result.push({
+            ...selected,
+            id: `character:${characterId}`,
+            name: bound?.name || selected.name,
+            imageIds: [
+                ...new Set(group.flatMap((candidate)=>candidate.imageIds))
+            ].slice(0, 500),
+            binding: bound?.binding || null,
+            updatedAt: Math.max(...group.map((candidate)=>candidate.updatedAt))
+        });
+    }
+    return result.slice(0, OUTPUT_FOLDER_LIMIT);
 }
 async function loadOutputFolders(userId) {
     return cleanOutputFolders(await spindle.userStorage.getJson(OUTPUT_FOLDERS_FILE, {
@@ -966,24 +1010,23 @@ async function createOutputFolder(name, bindingType, userId) {
     const folders = await loadOutputFolders(userId);
     let cleanName = name.trim().slice(0, 80);
     let binding = null;
-    if (bindingType === "chat") {
+    if (bindingType === "character" || bindingType === "chat") {
         if (!spindle.permissions.has("chats")) throw new Error("Grant Chats permission to bind a visual folder.");
         const chat = await spindle.chats.getActive(userId);
         const chatId = asString(chat?.id).trim();
         const characterId = asString(chat?.character_id).trim();
-        if (!chatId) throw new Error("Open a chat before creating a chat-bound folder.");
-        if (folders.some((folder)=>folder.binding?.chatId === chatId)) {
-            throw new Error("This chat already has a visual folder.");
+        if (!chatId || !characterId) throw new Error("Open a character chat before creating a character visual folder.");
+        if (folders.some((folder)=>folder.binding?.characterId === characterId)) {
+            throw new Error("This character already has a visual folder.");
         }
         let characterName = "";
         if (characterId && spindle.permissions.has("characters")) {
             characterName = asString((await spindle.characters.get(characterId, userId))?.name).trim();
         }
-        if (!cleanName) cleanName = characterName.slice(0, 80) || "Chat visuals";
+        if (!cleanName) cleanName = characterName.slice(0, 80) || "Character visuals";
         const tagState = await characterBaseTagState(characterId, userId);
         binding = {
-            type: "chat",
-            chatId,
+            type: "character",
             characterId,
             positivePrompt: asString(tagState.tags).trim().slice(0, 12_000),
             negativePrompt: "",
@@ -1003,7 +1046,7 @@ async function createOutputFolder(name, bindingType, userId) {
         throw new Error(`An output folder named “${cleanName}” already exists.`);
     }
     folders.unshift({
-        id: crypto.randomUUID(),
+        id: binding ? `character:${binding.characterId}` : crypto.randomUUID(),
         name: cleanName,
         imageIds: [],
         binding,
@@ -1014,7 +1057,7 @@ async function createOutputFolder(name, bindingType, userId) {
 async function updateOutputFolderProfile(folderId, value, userId) {
     const folders = await loadOutputFolders(userId);
     const folder = folders.find((candidate)=>candidate.id === folderId);
-    if (!folder?.binding) throw new Error("Choose a chat-bound visual folder first.");
+    if (!folder?.binding) throw new Error("Choose a character visual folder first.");
     const input = asRecord(value);
     const stackPresetId = asString(input.stackPresetId).trim().slice(0, 200);
     if (stackPresetId && !(await loadStackPresets(userId)).some((preset)=>preset.id === stackPresetId)) {
@@ -1028,7 +1071,9 @@ async function updateOutputFolderProfile(folderId, value, userId) {
         enabled: asBoolean(input.enabled, folder.binding.enabled)
     };
     folder.updatedAt = Date.now();
-    return persistOutputFolders(folders, userId);
+    const saved = await persistOutputFolders(folders, userId);
+    await refreshContextMacros(userId);
+    return saved;
 }
 async function deleteOutputFolder(folderId, userId) {
     return persistOutputFolders((await loadOutputFolders(userId)).filter((folder)=>folder.id !== folderId), userId);
@@ -1471,7 +1516,7 @@ async function saveCharacterBaseTags(characterId, tags, userId) {
         userId
     });
     const state = await characterBaseTagState(characterId, userId);
-    spindle.updateMacroValue("char_base", asString(state.tags));
+    await refreshContextMacros(userId);
     return state;
 }
 function stableTextHash(value) {
@@ -1639,12 +1684,30 @@ function studioPresetTokens(profile) {
     const hints = asRecord(profile?.recordHints);
     return stringList(hints.presets, 20).map((name)=>name.replace(/[<>\r\n]+/g, "").trim()).filter(Boolean).map((name)=>`<preset:${name}>`);
 }
-function buildSwarmImageProtocol(profile) {
+function buildSwarmImageProtocol(profile, context = null) {
     const presetTokens = studioPresetTokens(profile);
     const presetGuidance = presetTokens.length ? `The active Studio preset stack is force-applied once as ${presetTokens.join(", ")}. Do not repeat those directives in the tag. The {{swarm_preset}} macro expands to that exact directive list for authored prompts and templates. You may add another <preset:exact saved preset name> only when the scene specifically needs a different saved preset.` : `No Studio presets are currently active. The {{swarm_preset}} macro is therefore empty. You may use <preset:exact saved preset name> only when you know the exact saved SwarmUI preset needed by the scene; do not invent placeholder preset names.`;
-    return `${SWARM_IMAGE_PROTOCOL_BASE}\n${presetGuidance}`;
+    const baseTags = asString(context?.baseTags).trim().slice(0, 8_000);
+    const identityGuidance = baseTags ? `ACTIVE CHARACTER IDENTITY BLOCK — automatically prepended for character="active"; do not copy it into the tag body:\n${baseTags}` : `No active character identity block is configured. If a person must appear, derive concrete visual descriptors from the available character/persona context; never substitute a display name for appearance tags.`;
+    const model = asString(asRecord(profile?.input).model);
+    const animaGuidance = /anima/i.test(model) ? `ANIMA CHECKPOINT GUIDANCE
+Build the resolved prompt in this conceptual order:
+masterpiece, best quality, score_7, [one safety tag], newest, highres,
+[person count], [interaction],
+[trained character tag and series only when explicitly supplied],
+[skin / ears / horns / halo / wings], [hair color / length / style],
+[eye color / shape / pupils], [expression], [body features],
+[headwear / eyewear], [neckwear], [upper clothes], [lower clothes],
+[legwear], [shoes], [accessories / tail / wings],
+[pose / hands / legs / action], [camera / lens / focus / composition],
+[background / time / weather / objects], [lighting / depth / effects / finishing details].
+Use exactly one context-appropriate Anima safety tag: safe, sensitive, nsfw, or explicit. The automatic identity block already occupies the active character's identity/anatomy/clothing slots, so the tag body should primarily supply the interaction and scene layers instead of reconstructing the character.` : `Use concise, model-recognizable visual descriptors. The automatic identity block supplies the active character; the tag body should primarily direct action, staging, camera, environment, and light.`;
+    return `${SWARM_IMAGE_PROTOCOL_BASE}\n\n${identityGuidance}\n\n${animaGuidance}\n\n${presetGuidance}`;
 }
-function pushStudioProfileMacros(profile) {
+function protocolContextKey(userId) {
+    return userId || "__default__";
+}
+function pushStudioProfileMacros(profile, userId) {
     const input = asRecord(profile?.input);
     const parameters = asRecord(input.parameters);
     const presetTokens = studioPresetTokens(profile).join(", ");
@@ -1652,7 +1715,7 @@ function pushStudioProfileMacros(profile) {
     spindle.updateMacroValue("swarm_preset", presetTokens);
     spindle.updateMacroValue("swarm_checkpoint", asString(input.model));
     spindle.updateMacroValue("swarm_aspect", aspectFromParameters(parameters));
-    spindle.updateMacroValue("swarm_image_protocol", buildSwarmImageProtocol(profile));
+    spindle.updateMacroValue("swarm_image_protocol", buildSwarmImageProtocol(profile, swarmProtocolContexts.get(protocolContextKey(userId)) || null));
 }
 async function saveStudioGenerationProfile(input, recordHints, userId) {
     const profile = sanitizeStudioProfile({
@@ -1665,7 +1728,7 @@ async function saveStudioGenerationProfile(input, recordHints, userId) {
         indent: 2,
         userId
     });
-    pushStudioProfileMacros(profile);
+    pushStudioProfileMacros(profile, userId);
     return profile;
 }
 async function imageUrlForMacro(imageId, userId) {
@@ -1701,9 +1764,16 @@ async function refreshContextMacros(userId) {
     const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora);
     const characterId = asString(character?.id);
     const tags = await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags);
+    const visualFolder = characterId ? (await loadOutputFolders(userId)).find((folder)=>folder.binding?.characterId === characterId && folder.binding.enabled) : null;
+    const protocolContext = {
+        characterId,
+        baseTags: visualFolder?.binding?.positivePrompt || tags
+    };
+    swarmProtocolContexts.set(protocolContextKey(userId), protocolContext);
     spindle.updateMacroValue("char_base", tags);
     spindle.updateMacroValue("char_profile", await imageUrlForMacro(asString(character?.image_id), userId));
     spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId));
+    spindle.updateMacroValue("swarm_image_protocol", buildSwarmImageProtocol(await loadStudioGenerationProfile(userId), protocolContext));
 }
 function parseTagAttributes(raw) {
     const attrs = {};
@@ -1800,7 +1870,7 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     };
     const chat = await spindle.chats.get(chatId, userId);
     const characterId = asString(chat?.character_id);
-    const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.type === "chat" && folder.binding.chatId === chatId && folder.binding.enabled);
+    const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.type === "character" && folder.binding.characterId === characterId && folder.binding.enabled);
     const visualStack = visualFolder?.binding?.stackPresetId ? (await loadStackPresets(userId)).find((preset)=>preset.id === visualFolder.binding?.stackPresetId)?.items || [] : [];
     if (!characterId || !spindle.permissions.has("characters")) {
         if (!includeCharacter) {
@@ -1852,22 +1922,21 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
         characterName: asString(character?.name).trim()
     };
 }
-async function ensureCharacterOutputFolder(chatId, characterId, characterName, imageId, userId) {
+async function ensureCharacterOutputFolder(characterId, characterName, imageId, userId) {
     if (!characterId || !characterName || !imageId) return;
     const folders = await loadOutputFolders(userId);
-    const chatFolder = folders.find((candidate)=>candidate.binding?.chatId === chatId);
-    if (chatFolder?.binding && !chatFolder.binding.enabled) return;
+    const characterFolder = folders.find((candidate)=>candidate.binding?.characterId === characterId);
+    if (characterFolder?.binding && !characterFolder.binding.enabled) return;
     const inheritedTags = asString((await characterBaseTagState(characterId, userId)).tags).trim();
     const folderId = `character:${characterId}`;
-    let folder = chatFolder || folders.find((candidate)=>candidate.id === folderId && !candidate.binding);
+    let folder = characterFolder || folders.find((candidate)=>candidate.id === folderId && !candidate.binding);
     if (!folder) {
         folder = {
-            id: folders.some((candidate)=>candidate.id === folderId) ? `chat:${chatId}` : folderId,
+            id: folderId,
             name: characterName.slice(0, 80),
             imageIds: [],
             binding: {
-                type: "chat",
-                chatId,
+                type: "character",
                 characterId,
                 positivePrompt: inheritedTags,
                 negativePrompt: "",
@@ -1880,8 +1949,7 @@ async function ensureCharacterOutputFolder(chatId, characterId, characterName, i
     }
     if (!folder.binding) {
         folder.binding = {
-            type: "chat",
-            chatId,
+            type: "character",
             characterId,
             positivePrompt: inheritedTags,
             negativePrompt: "",
@@ -2145,7 +2213,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         job.error = "";
         await upsertTaggedImageJob(job, userId);
         spindle.updateMacroValue("last_genned", job.imageUrl);
-        await ensureCharacterOutputFolder(job.chatId, characterLayer.characterId, characterLayer.characterName, job.imageId, userId);
+        await ensureCharacterOutputFolder(characterLayer.characterId, characterLayer.characterName, job.imageId, userId);
         const taggedChat = spindle.permissions.has("chats") ? await spindle.chats.get(job.chatId, userId) : {
             id: job.chatId
         };
@@ -2281,9 +2349,10 @@ async function taggedImagePromptInterceptor(messages, context) {
     if (cleaned.some((message)=>typeof message?.content === "string" && message.content.includes("SWARM STUDIO IMAGE REQUEST PROTOCOL"))) {
         return cleaned;
     }
+    await refreshContextMacros(userId);
     const injected = {
         role: "system",
-        content: buildSwarmImageProtocol(await loadStudioGenerationProfile(userId))
+        content: buildSwarmImageProtocol(await loadStudioGenerationProfile(userId), swarmProtocolContexts.get(protocolContextKey(userId)) || null)
     };
     return {
         messages: [
@@ -2371,7 +2440,7 @@ async function listLibraryOutputs(userId) {
 async function bootstrap(userId) {
     const permissions = permissionSnapshot();
     const profile = await loadStudioGenerationProfile(userId);
-    pushStudioProfileMacros(profile);
+    pushStudioProfileMacros(profile, userId);
     await refreshContextMacros(userId);
     const allConnections = permissions.imageGen ? await spindle.imageGen.listConnections(userId) : [];
     const connections = (Array.isArray(allConnections) ? allConnections : []).filter((connection)=>connection?.provider === "swarmui");
@@ -2718,8 +2787,9 @@ async function handleMessage(payload, userId) {
                     } catch (error) {
                         spindle.log.warn(`Could not persist Swarm Studio generation details: ${error instanceof Error ? error.message : String(error)}`);
                     }
-                    if (record?.imageId && activeChat?.id) {
-                        const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.chatId === activeChat.id && folder.binding.enabled);
+                    if (record?.imageId && activeChat?.character_id) {
+                        const characterId = asString(activeChat.character_id);
+                        const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.characterId === characterId && folder.binding.enabled);
                         if (visualFolder) await moveOutputToFolder(record.imageId, visualFolder.id, userId);
                     }
                     const outputPage = await listOutputs(userId, activeChat);

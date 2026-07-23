@@ -848,6 +848,9 @@ assert.match(intercepted.messages[0].content, /SWARM STUDIO IMAGE REQUEST PROTOC
 assert.match(intercepted.messages[0].content, /request="generate"/)
 assert.match(intercepted.messages[0].content, /Attributes may be written on one line or separate lines/)
 assert.match(intercepted.messages[0].content, /<preset:Cinematic>/)
+assert.match(intercepted.messages[0].content, /configured local SwarmUI installation and local hardware/)
+assert.match(intercepted.messages[0].content, /ACTIVE CHARACTER IDENTITY BLOCK/)
+assert.match(intercepted.messages[0].content, /1boy, black hair, red eyes/)
 assert.doesNotMatch(intercepted.messages[0].content, /Use at most two image tags/)
 assert.match(intercepted.messages[1].content, /\[Illustration requested: Street food\]/)
 
@@ -879,8 +882,8 @@ const storedFoldersAfterTag = userFiles.get("output-folders.json")
 assert.equal(storedFoldersAfterTag[0].id, "character:char-1")
 assert.equal(storedFoldersAfterTag[0].name, "Lior")
 assert.deepEqual(storedFoldersAfterTag[0].imageIds, ["image-tag-1"])
-assert.equal(storedFoldersAfterTag[0].binding.type, "chat")
-assert.equal(storedFoldersAfterTag[0].binding.chatId, "chat-1")
+assert.equal(storedFoldersAfterTag[0].binding.type, "character")
+assert.equal(storedFoldersAfterTag[0].binding.chatId, undefined)
 assert.equal(storedFoldersAfterTag[0].binding.characterId, "char-1")
 assert.equal(storedFoldersAfterTag[0].binding.positivePrompt, "1boy, black hair, red eyes")
 
@@ -939,7 +942,7 @@ const foldersAfterDisabledVisualGenerations = userFiles.get("output-folders.json
 assert.deepEqual(
   foldersAfterDisabledVisualGenerations[0].imageIds,
   ["image-tag-1"],
-  "disabled chat visuals must leave newly generated images Unfiled",
+  "disabled character visuals must leave newly generated images Unfiled",
 )
 
 const originalOutput = await request("download_swarm_output", {
@@ -958,6 +961,14 @@ assert.match(source, /const NO_CHARACTER_NEGATIVE = "people, person, character/)
 assert.match(source, /const includeCharacter = !\["none", "off", "false", "no", "0"\]\.includes\(characterMode\)/)
 assert.match(source, /excludedLoras: visualStack\.map\(\(item\) => item\.name\)/)
 assert.match(source, /if \(excluded\.has\(name\.toLowerCase\(\)\)\) return/)
+assert.match(source, /LOCAL GENERATION/)
+assert.match(source, /configured local SwarmUI installation and local hardware/)
+assert.match(source, /Never use a chat character's or persona's display name as a diffusion token/)
+assert.match(source, /ANIMA CHECKPOINT GUIDANCE/)
+assert.match(source, /safe, sensitive, nsfw, or explicit/)
+assert.match(source, /folder\.binding\?\.characterId === characterId/)
+assert.match(source, /type: "character"/)
+assert.match(source, /rawBinding\.type === "character" \|\| rawBinding\.type === "chat"/)
 assert.match(source, /const taggedMessageFinalizeLocks = new Map<string, Promise<void>>\(\)/)
 assert.match(source, /withTaggedMessageFinalizeLock\(lockKey/)
 assert.match(source, /replaceTaggedImagePlaceholder\(content, job, markup\)/)
@@ -965,8 +976,8 @@ assert.match(source, /data-swarm-studio-image="true"/)
 assert.match(source, /data-swarm-studio-inline-action="true"/)
 assert.match(source, /case "list_tagged_jobs"/)
 assert.match(source, /case "retry_tagged_job"/)
-assert.match(source, /if \(chatFolder\?\.binding && !chatFolder\.binding\.enabled\) return/)
-assert.match(source, /folder\.binding\?\.chatId === activeChat\.id && folder\.binding\.enabled/)
+assert.match(source, /if \(characterFolder\?\.binding && !characterFolder\.binding\.enabled\) return/)
+assert.match(source, /folder\.binding\?\.characterId === characterId && folder\.binding\.enabled/)
 
 const createdPreset = await request("add_swarm_preset", {
   connectionId: "swarm-1",
@@ -999,6 +1010,31 @@ assert.equal(interruptRequested, true)
 const page = await request("refresh_outputs", { offset: 12, limit: 12 })
 assert.equal(page.data.offset, 12)
 assert.equal(page.data.limit, 12)
+
+const currentCharacterFolder = userFiles.get("output-folders.json")[0]
+userFiles.set("output-folders.json", [
+  currentCharacterFolder,
+  {
+    id: "legacy-chat-folder",
+    name: "Lior old chat",
+    imageIds: ["legacy-chat-image"],
+    binding: {
+      type: "chat",
+      chatId: "chat-older",
+      characterId: "char-1",
+      positivePrompt: "outdated visual tags",
+      negativePrompt: "",
+      stackPresetId: "",
+      enabled: true,
+    },
+    updatedAt: 1,
+  },
+])
+const migratedLibrary = await request("list_library_outputs")
+const migratedCharacterFolder = migratedLibrary.data.folders.find((folder) => folder.id === "character:char-1")
+assert.equal(migratedCharacterFolder.binding.type, "character")
+assert.equal(migratedCharacterFolder.binding.chatId, undefined)
+assert.deepEqual(migratedCharacterFolder.imageIds, ["image-tag-1", "legacy-chat-image"])
 
 const createdFolders = await request("create_output_folder", { name: "Favorites" })
 assert.equal(createdFolders.data[0].name, "Favorites")

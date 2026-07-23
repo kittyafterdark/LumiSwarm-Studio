@@ -168,8 +168,7 @@ interface OutputFolder {
   name: string
   imageIds: string[]
   binding: {
-    type: "chat"
-    chatId: string
+    type: "character"
     characterId: string
     positivePrompt: string
     negativePrompt: string
@@ -4272,8 +4271,8 @@ class StudioController {
   private librarySelectionAnchorId = ""
   private librarySearchOpen = false
   private librarySelectionMode = false
-  private hydratedVisualChatId = ""
-  private pendingCreatedFolder: { name: string; bindingType: "unbound" | "chat" } | null = null
+  private hydratedVisualCharacterId = ""
+  private pendingCreatedFolder: { name: string; bindingType: "unbound" | "character" } | null = null
   private missingLoras: StackPresetItem[] = []
   private loraDownloadRequestId = ""
   private loraDownloadJobId = ""
@@ -4896,7 +4895,7 @@ outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
                   <details class="ss-css-guide ss-macro-guide">
                     <summary>Macro and preset guide</summary>
                     <div class="ss-macro-guide-grid">
-                      <code>{{swarm_image_protocol}}</code><span>Current model instructions, including the active preset state.</span>
+                      <code>{{swarm_image_protocol}}</code><span>Local-generation instructions, active identity tags, checkpoint-aware prompting guidance, and preset state.</span>
                       <code>{{swarm_preset}}</code><span>Active preset titles as exact native directives: &lt;preset:name one&gt;, &lt;preset:name two&gt;.</span>
                       <code>{{swarm_negative}}</code><span>Current Studio negative prompt.</span>
                       <code>{{char_base}}</code><span>Active character base image tags. Tagged jobs apply these automatically.</span>
@@ -4907,7 +4906,7 @@ outside, city street, food stall, smiling&lt;/swarm-image&gt;</code>
                       <code>{{last_genned}}</code><span>URL of the latest completed Swarm Studio image.</span>
                     </div>
                   </details>
-                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Chat-bound folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Set <code>character="none"</code> for scenery or object shots that must skip the chat character layer. Create or edit a visual binding inside Output Library. The required request marker protects visible prose; one-line and multiline tags both work.</p>
+                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate cards. Character-folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Identity tags are prepended automatically, so the tag body should describe the scene—not repeat a display name. Set <code>character="none"</code> for scenery or object shots that must skip the character layer. The request runs on local SwarmUI; one-line and multiline tags both work.</p>
                 </section>
                 <section class="ss-config-section">
                   <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
@@ -5386,9 +5385,9 @@ are removed when CSS is applied.</pre>
             <label class="ss-field"><span>Name</span><input class="ss-input" data-role="new-folder-name" maxlength="80" placeholder="Folder name" /></label>
             <div class="ss-new-folder-types">
               <label><input type="radio" name="ss-new-folder-type" data-role="new-folder-type" value="unbound" checked /><span><strong>Unbound</strong><small>A simple library folder.</small></span></label>
-              <label><input type="radio" name="ss-new-folder-type" data-role="new-folder-type" value="chat" /><span><strong>Chat folder</strong><small>Bind prompts and a LoRA stack to the active chat.</small></span></label>
+              <label><input type="radio" name="ss-new-folder-type" data-role="new-folder-type" value="character" /><span><strong>Character folder</strong><small>Reuse prompts and a LoRA stack anywhere this character is active.</small></span></label>
             </div>
-            <p class="ss-muted ss-tiny" data-role="new-folder-chat-hint">Chat folders use the active conversation and character.</p>
+            <p class="ss-muted ss-tiny" data-role="new-folder-chat-hint">Character folders follow the active character across conversations.</p>
             <footer class="ss-workflow-modal-actions"><button class="ss-button" data-action="close-new-folder">Cancel</button><button class="ss-button ss-button-primary" data-action="confirm-new-folder">Create folder</button></footer>
           </section>
         </div>
@@ -5442,7 +5441,7 @@ are removed when CSS is applied.</pre>
           </aside>
           <main class="ss-library-main">
             <details class="ss-library-visual-profile" data-role="library-visual-profile" hidden>
-              <summary><span><strong data-role="visual-profile-title">Chat visuals</strong><small>Positive · negative · LoRA stack</small></span><span class="ss-library-visual-summary-meta"><span data-role="visual-profile-state">Active</span><span class="ss-library-visual-caret" aria-hidden="true">∨</span></span></summary>
+              <summary><span><strong data-role="visual-profile-title">Character visuals</strong><small>Positive · negative · LoRA stack</small></span><span class="ss-library-visual-summary-meta"><span data-role="visual-profile-state">Active</span><span class="ss-library-visual-caret" aria-hidden="true">∨</span></span></summary>
               <div class="ss-library-visual-fields">
                 <label class="ss-field"><span>Positive base</span><textarea class="ss-textarea" data-role="visual-positive" placeholder="Character identity and consistent visual tags…"></textarea></label>
                 <label class="ss-field"><span>Negative base</span><textarea class="ss-textarea" data-role="visual-negative" placeholder="Things to consistently avoid…"></textarea></label>
@@ -6063,7 +6062,7 @@ are removed when CSS is applied.</pre>
         this.state.outputFolders = Array.isArray(data) ? data : []
         if (this.pendingCreatedFolder) {
           const pending = this.pendingCreatedFolder
-          const created = pending.bindingType === "chat"
+          const created = pending.bindingType === "character"
             ? this.activeVisualFolder()
             : this.state.outputFolders.find((folder) => folder.name.toLowerCase() === pending.name.toLowerCase())
           if (created) this.libraryFolderId = created.id
@@ -8469,11 +8468,12 @@ are removed when CSS is applied.</pre>
     const unbound = this.root.querySelector<HTMLInputElement>('[data-role="new-folder-type"][value="unbound"]')
     if (unbound) unbound.checked = true
     const chat = this.state.activeChat
+    const characterId = String(chat?.character_id || "")
     this.get<HTMLElement>('[data-role="new-folder-chat-hint"]').textContent = chat?.id
-      ? "Chat folder will bind to the active conversation and inherit the character's current base tags."
-      : "Open a chat before choosing Chat folder."
-    const chatOption = this.root.querySelector<HTMLInputElement>('[data-role="new-folder-type"][value="chat"]')
-    if (chatOption) chatOption.disabled = !chat?.id
+      ? "Character folder will follow the active character across every conversation and inherit their current base tags."
+      : "Open a character chat before choosing Character folder."
+    const characterOption = this.root.querySelector<HTMLInputElement>('[data-role="new-folder-type"][value="character"]')
+    if (characterOption) characterOption.disabled = !chat?.id || !characterId
     this.get<HTMLElement>('[data-role="new-folder-modal"]').hidden = false
     window.setTimeout(() => name.focus(), 0)
   }
@@ -8485,8 +8485,8 @@ are removed when CSS is applied.</pre>
 
   private createOutputFolder(): void {
     const name = this.get<HTMLInputElement>('[data-role="new-folder-name"]').value.trim()
-    const bindingType = this.root.querySelector<HTMLInputElement>('[data-role="new-folder-type"]:checked')?.value === "chat"
-      ? "chat"
+    const bindingType = this.root.querySelector<HTMLInputElement>('[data-role="new-folder-type"]:checked')?.value === "character"
+      ? "character"
       : "unbound"
     if (!name && bindingType === "unbound") {
       this.setRunStatus("Give the unbound folder a name.", true)
@@ -8495,7 +8495,7 @@ are removed when CSS is applied.</pre>
     this.pendingCreatedFolder = { name, bindingType }
     this.send("create_output_folder", { name, bindingType })
     this.closeNewFolderModal()
-    this.setRunStatus(bindingType === "chat" ? "Creating chat visual folder…" : `Creating folder “${name}”…`)
+    this.setRunStatus(bindingType === "character" ? "Creating character visual folder…" : `Creating folder “${name}”…`)
   }
 
   private toggleLibrarySearch(): void {
@@ -8519,22 +8519,24 @@ are removed when CSS is applied.</pre>
   }
 
   private activeVisualFolder(): OutputFolder | null {
-    const chatId = String(this.state.activeChat?.id || "")
-    if (!chatId) return null
-    return this.state.outputFolders.find((folder) => folder.binding?.type === "chat" && folder.binding.chatId === chatId) || null
+    const characterId = String(this.state.activeChat?.character_id || "")
+    if (!characterId) return null
+    return this.state.outputFolders.find((folder) =>
+      folder.binding?.type === "character" && folder.binding.characterId === characterId,
+    ) || null
   }
 
   private hydrateActiveVisualStack(force = false): boolean {
     const folder = this.activeVisualFolder()
     const binding = folder?.binding
     if (!folder || !binding?.enabled || !binding.stackPresetId || this.pendingDraftRestore) return false
-    if (!force && this.hydratedVisualChatId === binding.chatId) {
+    if (!force && this.hydratedVisualCharacterId === binding.characterId) {
       this.setStackPresetSelection(binding.stackPresetId)
       return false
     }
     const preset = this.state.stackPresets.find((candidate) => candidate.id === binding.stackPresetId)
     if (!preset) return false
-    this.hydratedVisualChatId = binding.chatId
+    this.hydratedVisualCharacterId = binding.characterId
     this.loadStackPreset(preset.id, false)
     this.setRunStatus(`Loaded “${preset.name}” from ${folder.name} visuals.`)
     return true
@@ -8551,8 +8553,8 @@ are removed when CSS is applied.</pre>
     }
     folder.binding = { ...folder.binding, ...profile }
     this.send("update_output_folder_profile", { folderId: folder.id, profile })
-    if (folder.binding.chatId === String(this.state.activeChat?.id || "") && profile.stackPresetId) {
-      this.hydratedVisualChatId = ""
+    if (folder.binding.characterId === String(this.state.activeChat?.character_id || "") && profile.stackPresetId) {
+      this.hydratedVisualCharacterId = ""
       this.hydrateActiveVisualStack(true)
     }
     this.updateActiveVisualPill()
@@ -8586,8 +8588,8 @@ are removed when CSS is applied.</pre>
     pill.textContent = `Visuals: ${folder.name}`
     pill.dataset.enabled = String(folder.binding.enabled)
     pill.title = folder.binding.enabled
-      ? `Using “${folder.name}” chat visuals. Click to disable for this chat.`
-      : `“${folder.name}” chat visuals are disabled. Click to enable.`
+      ? `Using “${folder.name}” character visuals. Click to disable them for this character.`
+      : `“${folder.name}” character visuals are disabled. Click to enable.`
   }
 
   private renderVisualProfile(): void {
