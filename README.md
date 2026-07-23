@@ -44,13 +44,13 @@ Generation itself goes through `spindle.imageGen.generate()`. That means it cont
 
 ## Install
 
-1. Build the extension if you are installing from source (Node.js 23.6+):
+1. Copy:
 
-   ```sh
-   npm run build
+   ```
+   https://github.com/kittyafterdark/LumiSwarm-Studio
    ```
 
-2. In Lumiverse, open **Extensions / Spindle**, install the extension folder or packaged archive, and enable it.
+2. In Lumiverse, open **Extensions**, install the extension, and enable it.
 3. Grant these permissions:
 
    - `image_gen` — connections, checkpoints, and generation
