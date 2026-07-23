@@ -153,6 +153,15 @@ an unavailable Civitai API or preview never prevents the model itself from
 downloading. Downloads never start merely
 because a stack was imported.
 
+The final model transfer is SwarmUI's WebSocket, so a remote phone must be able
+to reach SwarmUI directly. When the saved connection uses `localhost` but
+Lumiverse is open through a LAN or Tailscale address, Studio automatically
+substitutes that visible host while preserving Swarm's port. A 12-second
+handshake timeout replaces indefinite **Preparing…** states with the exact
+address and reachability guidance. If Lumiverse is served over HTTPS, SwarmUI
+must likewise be exposed through WSS/HTTPS; browsers forbid an insecure
+`ws://` downloader inside an HTTPS page.
+
 The inspector treats the exact prompt text sent by Studio as the authoritative
 prompt record and lists the ordered Swarm presets separately as provenance.
 This avoids claiming that a local reconstruction is SwarmUI's final

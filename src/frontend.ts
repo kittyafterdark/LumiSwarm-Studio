@@ -3121,6 +3121,25 @@ function safeHttpUrl(value: unknown): string {
   }
 }
 
+export function browserReachableWebSocketUrl(value: unknown, pageHref: string): string {
+  const target = new URL(String(value || ""))
+  if (target.protocol !== "ws:" && target.protocol !== "wss:") {
+    throw new Error("SwarmUI returned an invalid downloader WebSocket protocol.")
+  }
+  const page = new URL(pageHref)
+  const loopback = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
+  if (loopback.has(target.hostname.toLowerCase()) && !loopback.has(page.hostname.toLowerCase())) {
+    target.hostname = page.hostname
+  }
+  if (page.protocol === "https:" && target.protocol === "ws:") {
+    throw new Error(
+      "This remote Lumiverse page uses HTTPS, but SwarmUI only exposed an insecure ws:// downloader. "
+      + "Configure the SwarmUI connection with an HTTPS/WSS-reachable address or reverse proxy.",
+    )
+  }
+  return target.href
+}
+
 function downloadJson(value: unknown, filename: string): void {
   const url = URL.createObjectURL(new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: "application/json" }))
   const anchor = document.createElement("a")
@@ -7432,8 +7451,9 @@ are removed when CSS is applied.</pre>
     try {
       const image = new Image()
       await new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve()
-        image.onerror = () => reject(new Error("Preview image could not be decoded."))
+        const timer = window.setTimeout(() => reject(new Error("Preview image decode timed out.")), 8_000)
+        image.onload = () => { window.clearTimeout(timer); resolve() }
+        image.onerror = () => { window.clearTimeout(timer); reject(new Error("Preview image could not be decoded.")) }
         image.src = thumbnail
       })
       const targetPixels = 256 * 256
@@ -7452,10 +7472,12 @@ are removed when CSS is applied.</pre>
   }
 
   private async openLoraDownloadSocket(data: any): Promise<void> {
-    const wsUrl = String(data.wsUrl || "")
-    if (!/^wss?:\/\//i.test(wsUrl)) {
+    let wsUrl = ""
+    try {
+      wsUrl = browserReachableWebSocketUrl(data.wsUrl, window.location.href)
+    } catch (error) {
       this.loraDownloadQueue = []
-      this.setLoraDownloadStatus("SwarmUI returned an invalid downloader address.", true)
+      this.setLoraDownloadStatus(error instanceof Error ? error.message : "SwarmUI returned an invalid downloader address.", true)
       return
     }
     const item = this.loraDownloadQueue[0]
@@ -7463,9 +7485,32 @@ are removed when CSS is applied.</pre>
     const metadata = await this.compactLoraDownloadMetadata(data.metadata)
     if (this.loraDownloadQueue[0] !== item) return
     let finished = false
-    const socket = new WebSocket(wsUrl)
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(wsUrl)
+    } catch (error) {
+      this.loraDownloadQueue = []
+      this.setLoraDownloadStatus(
+        error instanceof Error ? error.message : "The browser refused SwarmUI's downloader address.",
+        true,
+      )
+      return
+    }
     this.loraDownloadSocket = socket
+    this.setLoraDownloadStatus(`Connecting to SwarmUI at ${new URL(wsUrl).host}…`, false, 0)
+    const connectionTimer = window.setTimeout(() => {
+      if (finished || socket.readyState === WebSocket.OPEN) return
+      finished = true
+      this.loraDownloadQueue = []
+      this.loraDownloadSocket = null
+      try { socket.close() } catch {}
+      this.setLoraDownloadStatus(
+        `Could not reach SwarmUI at ${new URL(wsUrl).host}. On a remote phone, SwarmUI must listen on the LAN/Tailscale interface and that port must be reachable.`,
+        true,
+      )
+    }, 12_000)
     socket.addEventListener("open", () => {
+      window.clearTimeout(connectionTimer)
       socket.send(JSON.stringify({
         session_id: String(data.sessionId || ""),
         url: String(data.url || ""),
@@ -7483,6 +7528,7 @@ are removed when CSS is applied.</pre>
         this.setLoraDownloadStatus(`Downloading ${item.title || labelFromName(item.name)} · ${Math.round(progress * 100)}%`, false, progress)
       }
       if (message.error) {
+        window.clearTimeout(connectionTimer)
         finished = true
         this.loraDownloadQueue = []
         this.loraDownloadSocket = null
@@ -7490,6 +7536,7 @@ are removed when CSS is applied.</pre>
         socket.close()
       }
       if (message.success === true) {
+        window.clearTimeout(connectionTimer)
         finished = true
         this.loraDownloadQueue.shift()
         this.loraDownloadSocket = null
@@ -7506,12 +7553,17 @@ are removed when CSS is applied.</pre>
     })
     socket.addEventListener("error", () => {
       if (finished) return
+      window.clearTimeout(connectionTimer)
       finished = true
       this.loraDownloadQueue = []
       this.loraDownloadSocket = null
-      this.setLoraDownloadStatus("The browser could not reach SwarmUI's downloader WebSocket.", true)
+      this.setLoraDownloadStatus(
+        `The browser could not reach SwarmUI at ${new URL(wsUrl).host}. On mobile, make sure SwarmUI is exposed beyond localhost.`,
+        true,
+      )
     })
     socket.addEventListener("close", () => {
+      window.clearTimeout(connectionTimer)
       if (finished || this.loraDownloadSocket !== socket) return
       this.loraDownloadSocket = null
       this.loraDownloadQueue = []

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises"
 const {
   applyPresetPrompt,
   applyPresetStackPrompts,
+  browserReachableWebSocketUrl,
   dimensionsForAspect,
   fitAspectWithin,
   inferModelFamily,
@@ -16,6 +17,35 @@ const {
   quickGenerationParameters,
   sanitizeCustomCss,
 } = await import("../dist/frontend.js")
+
+assert.equal(
+  browserReachableWebSocketUrl(
+    "ws://localhost:7801/API/DoModelDownloadWS",
+    "http://192.168.1.42:2004/chat/example",
+  ),
+  "ws://192.168.1.42:7801/API/DoModelDownloadWS",
+)
+assert.equal(
+  browserReachableWebSocketUrl(
+    "ws://localhost:7801/API/DoModelDownloadWS",
+    "http://localhost:2004/chat/example",
+  ),
+  "ws://localhost:7801/API/DoModelDownloadWS",
+)
+assert.equal(
+  browserReachableWebSocketUrl(
+    "ws://10.0.0.25:7801/API/DoModelDownloadWS",
+    "http://192.168.1.42:2004/chat/example",
+  ),
+  "ws://10.0.0.25:7801/API/DoModelDownloadWS",
+)
+assert.throws(
+  () => browserReachableWebSocketUrl(
+    "ws://localhost:7801/API/DoModelDownloadWS",
+    "https://lumi.example.com/chat/example",
+  ),
+  /HTTPS.*insecure ws/,
+)
 
 assert.deepEqual(dimensionsForAspect("1:1", 1024), { width: 1024, height: 1024 })
 assert.deepEqual(dimensionsForAspect("4:3", 1024), { width: 1152, height: 896 })
