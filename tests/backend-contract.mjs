@@ -8,7 +8,6 @@ assert.match(source, /case "cancel_lora_download"/)
 assert.match(source, /DoModelDownloadWS/)
 assert.match(source, /new WebSocket\(wsUrl\)/)
 assert.match(source, /Only Civitai and Hugging Face LoRA downloads/)
-assert.match(source, /console\.error\(`\[Swarm Studio\] Backend request/)
 
 let frontendHandler
 const sent = []
