@@ -291,6 +291,27 @@ interface StudioState {
   chatVisuals: ChatVisualsState | null
 }
 
+let fallbackRequestIdCounter = 0
+
+export function createRequestId(cryptoApi: Crypto | null | undefined = globalThis.crypto): string {
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID()
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+
+  fallbackRequestIdCounter += 1
+  return `swarm-studio-${Date.now().toString(36)}-${fallbackRequestIdCounter.toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`
+}
+
 type ModelFamily =
   | "anima"
   | "illustrious"
@@ -4039,7 +4060,7 @@ class MiniPlayerController {
   private quickCanAppend = false
   private quickPending: GenerationDetails | null = null
   private quickConfirm: ((prompt: string, negativePrompt: string) => void) | null = null
-  private readonly bootstrapRequestId = crypto.randomUUID()
+  private readonly bootstrapRequestId = createRequestId()
   private state: "idle" | "running" | "done" | "error" = "idle"
   private snapshotValue: StudioActivitySnapshot = {
     active: false,
@@ -4503,7 +4524,7 @@ class MiniPlayerController {
     if (!this.snapshotValue.active || !this.snapshotValue.jobId) return
     this.ctx.sendToBackend({
       type: "interrupt_generation",
-      requestId: crypto.randomUUID(),
+      requestId: createRequestId(),
       clientJobId: this.snapshotValue.jobId,
       connectionId: this.snapshotValue.connectionId,
     })
@@ -4521,7 +4542,7 @@ class MiniPlayerController {
     if (!input) return
     this.ctx.sendToBackend({
       type: "open_text_editor",
-      requestId: crypto.randomUUID(),
+      requestId: createRequestId(),
       editorId: `mini-${role}`,
       title: positive ? "Swarm Studio · Positive prompt" : "Swarm Studio · Negative prompt",
       value: input.value,
@@ -4622,7 +4643,7 @@ class MiniPlayerController {
     if (!image?.id || !this.quickCanAppend) return
     this.ctx.sendToBackend({
       type: "append_output_to_chat",
-      requestId: crypto.randomUUID(),
+      requestId: createRequestId(),
       imageId: image.id,
       label: image.label,
     })
@@ -4683,7 +4704,7 @@ class MiniPlayerController {
       : (draft?.details.loras || []).map((lora) => lora.weight)
     parameters.loras = loras
     parameters.loraWeights = loraWeights
-    const clientJobId = crypto.randomUUID()
+    const clientJobId = createRequestId()
     this.quickPending = {
       prompt,
       negativePrompt,
@@ -4712,7 +4733,7 @@ class MiniPlayerController {
     this.begin(clientJobId, String(connection.id || ""), `Preparing quick image · ${model || "SwarmUI"}`)
     this.ctx.sendToBackend({
       type: "generate",
-      requestId: crypto.randomUUID(),
+      requestId: createRequestId(),
       input: {
         prompt,
         negativePrompt: negativePrompt || undefined,
@@ -6524,7 +6545,7 @@ are removed when CSS is applied.</pre>
   }
 
   private send(type: string, data: Record<string, unknown> = {}): string {
-    const requestId = crypto.randomUUID()
+    const requestId = createRequestId()
     this.ctx.sendToBackend({ type, requestId, ...data })
     return requestId
   }
@@ -8643,7 +8664,7 @@ are removed when CSS is applied.</pre>
       if (!exportResponse.ok) throw new Error(String(exported?.error || `Could not read Lumiverse Image Gen settings (${exportResponse.status}).`))
       const existing = Array.isArray(exported?.settings?.loraPresets) ? exported.settings.loraPresets : []
       const sameName = existing.find((preset: any) => String(preset?.name || "").trim().toLowerCase() === name.trim().toLowerCase())
-      const id = String(sameName?.id || `swarm-studio-${crypto.randomUUID()}`)
+      const id = String(sameName?.id || `swarm-studio-${createRequestId()}`)
       const nextPreset = {
         id,
         name,
@@ -10054,7 +10075,7 @@ are removed when CSS is applied.</pre>
     const parameters = this.collectGenerationParameters(rawRequestOverride, enabled)
 
     const model = this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
-    const clientJobId = crypto.randomUUID()
+    const clientJobId = createRequestId()
     const negativePrompt = this.finalNegativePrompt()
     const profileInput = {
       prompt: this.get<HTMLTextAreaElement>('[data-role="positive"]').value.trim(),
@@ -10730,7 +10751,7 @@ class TaggedImageController {
     if (this.shouldRenderPlaceholder(optimistic)) this.render(optimistic)
     this.ctx.sendToBackend({
       type: "tag_generate",
-      requestId: crypto.randomUUID(),
+      requestId: createRequestId(),
       chatId: payload.chatId,
       messageId: payload.messageId,
       fullMatch: payload.fullMatch,
@@ -10814,7 +10835,7 @@ class TaggedImageController {
     this.settledAttachmentRequests.add(job.id)
     this.ctx.sendToBackend({
       type: "retry_tagged_attachment",
-      requestId: crypto.randomUUID(),
+      requestId: createRequestId(),
       jobId: job.id,
       messageId,
     })
@@ -10995,7 +11016,7 @@ class TaggedImageController {
       this.render(job)
       this.ctx.sendToBackend({
         type: "retry_tagged_attachment",
-        requestId: crypto.randomUUID(),
+        requestId: createRequestId(),
         jobId: job.id,
       })
       return
@@ -11047,7 +11068,7 @@ class TaggedImageController {
     if (overrides) {
       this.ctx.sendToBackend({
         type: "retry_tagged_job",
-        requestId: crypto.randomUUID(),
+        requestId: createRequestId(),
         jobId: job.id,
         retryMode,
         promptOverride: overrides.prompt,
@@ -11058,7 +11079,7 @@ class TaggedImageController {
     if (tag) {
       this.ctx.sendToBackend({
         type: "tag_generate",
-        requestId: crypto.randomUUID(),
+        requestId: createRequestId(),
         chatId: tag.chatId,
         messageId: tag.messageId,
         fullMatch: tag.fullMatch,
@@ -11071,7 +11092,7 @@ class TaggedImageController {
     }
     this.ctx.sendToBackend({
       type: "retry_tagged_job",
-      requestId: crypto.randomUUID(),
+      requestId: createRequestId(),
       jobId: job.id,
       retryMode,
     })
@@ -11288,7 +11309,7 @@ class ChatVisualsController {
   }
 
   private send(type: string, data: Record<string, unknown> = {}): void {
-    this.ctx.sendToBackend({ type, requestId: crypto.randomUUID(), ...data })
+    this.ctx.sendToBackend({ type, requestId: createRequestId(), ...data })
   }
 
   private setStatus(message: string, error = false): void {
@@ -11869,7 +11890,7 @@ export function setup(ctx: FrontendContext): () => void {
     applyBehaviorState(next)
     ctx.sendToBackend({
       type: "set_tag_automation",
-      requestId: crypto.randomUUID(),
+      requestId: createRequestId(),
       config: {
         autoGenerate: behavior.tagAutoGenerate,
         injectProtocol: behavior.tagPromptInjection,
@@ -11928,6 +11949,19 @@ export function setup(ctx: FrontendContext): () => void {
     if (prompt) activeStudio?.loadTaggedPrompt(prompt, negativePrompt)
   }
 
+  // Register the core surface before optional host integrations. Older
+  // Lumiverse builds may not expose message tag interception yet, but users
+  // should still be able to open the Studio and use its generation tools.
+  const drawer = ctx.ui.registerDrawerTab({
+    id: "swarm-studio",
+    title: "Swarm Studio",
+    shortName: "Swarm",
+    headerTitle: "Swarm Studio",
+    description: "Open the metadata-aware SwarmUI prompt and LoRA studio",
+    keywords: ["image", "generation", "lora", "swarmui", "prompt", "studio"],
+    iconSvg: FRAME_WALL_ICON,
+  })
+
   taggedImages = new TaggedImageController(
     ctx,
     behavior,
@@ -11936,10 +11970,21 @@ export function setup(ctx: FrontendContext): () => void {
       miniplayer?.openTaggedPromptEditor(prompt, negativePrompt, onConfirm) === true,
     () => openStudio("library"),
   )
-  const unregisterTagInterceptor = ctx.messages.registerTagInterceptor(
-    { tagName: "swarm-image", attrs: { request: "generate" }, removeFromMessage: true },
-    (payload: any) => taggedImages?.handleTag(payload),
-  )
+  let unregisterTagInterceptor = () => {}
+  const registerTagInterceptor = ctx.messages?.registerTagInterceptor
+  if (typeof registerTagInterceptor === "function") {
+    try {
+      unregisterTagInterceptor = registerTagInterceptor.call(
+        ctx.messages,
+        { tagName: "swarm-image", attrs: { request: "generate" }, removeFromMessage: true },
+        (payload: any) => taggedImages?.handleTag(payload),
+      )
+    } catch (error) {
+      console.warn("[Swarm Studio] Inline image tag interception is unavailable in this Lumiverse build.", error)
+    }
+  } else {
+    console.warn("[Swarm Studio] Inline image tags require a newer Lumiverse build; Studio UI remains available.")
+  }
 
   if (typeof document !== "undefined") {
     try {
@@ -11972,15 +12017,6 @@ export function setup(ctx: FrontendContext): () => void {
     }
   }
 
-  const drawer = ctx.ui.registerDrawerTab({
-    id: "swarm-studio",
-    title: "Swarm Studio",
-    shortName: "Swarm",
-    headerTitle: "Swarm Studio",
-    description: "Open the metadata-aware SwarmUI prompt and LoRA studio",
-    keywords: ["image", "generation", "lora", "swarmui", "prompt", "studio"],
-    iconSvg: FRAME_WALL_ICON,
-  })
   launcher = element("div", "ss-launcher")
   launcher.dataset.page = "home"
   launcher.dataset.theme = currentTheme
@@ -12019,13 +12055,17 @@ export function setup(ctx: FrontendContext): () => void {
   )
   drawer.root.appendChild(launcher)
 
-  const inputAction = ctx.ui.registerInputBarAction({
-    id: "open-swarm-studio",
-    label: "Open Swarm Studio",
-    iconSvg: FRAME_WALL_ICON,
-    enabled: true,
-  })
-  const removeActionClick = inputAction.onClick(() => openStudio("studio"))
+  const inputAction =
+    typeof ctx.ui.registerInputBarAction === "function"
+      ? ctx.ui.registerInputBarAction({
+          id: "open-swarm-studio",
+          label: "Open Swarm Studio",
+          iconSvg: FRAME_WALL_ICON,
+          enabled: true,
+        })
+      : null
+  const removeActionClick =
+    typeof inputAction?.onClick === "function" ? inputAction.onClick(() => openStudio("studio")) : () => {}
   const unsubscribeMessages = ctx.onBackendMessage((payload: any) => {
     if (payload?.type === "bootstrap_result" && payload?.data?.tagAutomation) {
       applyBehaviorState(behaviorFromServer(payload.data.tagAutomation))
@@ -12040,17 +12080,27 @@ export function setup(ctx: FrontendContext): () => void {
   })
   ctx.sendToBackend({
     type: "list_tagged_jobs",
-    requestId: crypto.randomUUID(),
+    requestId: createRequestId(),
   })
-  const unsubscribeProgress = ctx.events.on("IMAGE_GEN_PROGRESS", (payload: any) => {
+  const subscribeToImageEvent = (eventName: string, handler: (payload: any) => void): (() => void) => {
+    if (typeof ctx.events?.on !== "function") return () => {}
+    try {
+      const unsubscribe = ctx.events.on(eventName, handler)
+      return typeof unsubscribe === "function" ? unsubscribe : () => {}
+    } catch (error) {
+      console.warn(`[Swarm Studio] Host event ${eventName} is unavailable.`, error)
+      return () => {}
+    }
+  }
+  const unsubscribeProgress = subscribeToImageEvent("IMAGE_GEN_PROGRESS", (payload: any) => {
     miniplayer?.onImageGenerationEvent("progress", payload)
     activeStudio?.onImageGenerationEvent("progress", payload)
   })
-  const unsubscribeComplete = ctx.events.on("IMAGE_GEN_COMPLETE", (payload: any) => {
+  const unsubscribeComplete = subscribeToImageEvent("IMAGE_GEN_COMPLETE", (payload: any) => {
     miniplayer?.onImageGenerationEvent("complete", payload)
     activeStudio?.onImageGenerationEvent("complete", payload)
   })
-  const unsubscribeError = ctx.events.on("IMAGE_GEN_ERROR", (payload: any) => {
+  const unsubscribeError = subscribeToImageEvent("IMAGE_GEN_ERROR", (payload: any) => {
     miniplayer?.onImageGenerationEvent("error", payload)
     activeStudio?.onImageGenerationEvent("error", payload)
   })
@@ -12066,7 +12116,7 @@ export function setup(ctx: FrontendContext): () => void {
     unsubscribeComplete()
     unsubscribeError()
     removeActionClick()
-    inputAction.destroy()
+    inputAction?.destroy()
     drawer.destroy()
     unregisterTagInterceptor()
     taggedImages?.destroy()

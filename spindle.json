@@ -1,5 +1,5 @@
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "name": "Swarm Studio",
   "identifier": "swarm_studio",
   "author": "kittyafterdark",
@@ -20,5 +20,5 @@
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js",
-  "minimum_lumiverse_version": "0.1.0"
+  "minimum_lumiverse_version": "0.15.8"
 }

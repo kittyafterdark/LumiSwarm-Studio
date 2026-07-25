@@ -46,6 +46,20 @@ fallback for older runtimes. Both paths continue to use the SwarmUI connection,
 encrypted secret, persistence, and ownership behavior already managed by
 Lumiverse.
 
+## Compatibility
+
+Swarm Studio 1.0.5 requires Lumiverse 0.15.8 or newer. The core drawer,
+generation modal, and library register before optional host integrations so an
+unavailable newer API cannot remove the entire extension UI.
+
+Lumiverse builds without `messages.registerTagInterceptor()` can still use
+Studio normally; only automatic in-message `<swarm-image>` interception is
+disabled, with a compatibility warning written to the browser console. Remote
+phones may access Lumiverse over plain HTTP without losing the drawer: request
+correlation IDs fall back to `crypto.getRandomValues()` when the secure-context
+only `crypto.randomUUID()` API is unavailable. HTTPS remains recommended for
+the host application and any authenticated remote access.
+
 ## Install
 
 1. Build the extension if you are installing from source (Node.js 23.6+):

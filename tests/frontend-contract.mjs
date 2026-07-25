@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises"
 const {
   applyPresetPrompt,
   applyPresetStackPrompts,
+  createRequestId,
   dimensionsForAspect,
   fitAspectWithin,
   inferModelFamily,
@@ -19,6 +20,17 @@ const {
   sanitizeCustomCss,
 } = await import("../dist/frontend.js")
 
+assert.equal(createRequestId({ randomUUID: () => "native-request-id" }), "native-request-id")
+assert.equal(
+  createRequestId({
+    getRandomValues(bytes) {
+      bytes.fill(0)
+      return bytes
+    },
+  }),
+  "00000000-0000-4000-8000-000000000000",
+)
+assert.match(createRequestId(null), /^swarm-studio-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+$/)
 assert.deepEqual(dimensionsForAspect("1:1", 1024), { width: 1024, height: 1024 })
 assert.deepEqual(dimensionsForAspect("4:3", 1024), { width: 1152, height: 896 })
 assert.deepEqual(dimensionsForAspect("3:4", 1024), { width: 896, height: 1152 })
@@ -394,8 +406,18 @@ assert.match(source, /reconciliationQueues/)
 assert.match(source, /this\.ctx\.chats\.updateMessage\(chatId, messageId, \{ content \}\)/)
 assert.match(source, /job\.status === "ready" && !job\.inserted/)
 assert.match(source, /data-action="attach">Attach image/)
-assert.match(source, /registerTagInterceptor\(/)
+assert.match(source, /registerTagInterceptor\.call\(/)
+assert.match(source, /const registerTagInterceptor = ctx\.messages\?\.registerTagInterceptor/)
+assert.match(source, /typeof registerTagInterceptor === "function"/)
+assert.match(source, /Inline image tags require a newer Lumiverse build; Studio UI remains available/)
+assert.doesNotMatch(source, /ctx\.messages\.registerTagInterceptor\(/)
+assert.ok(
+  source.indexOf("ctx.ui.registerDrawerTab") < source.indexOf("ctx.messages?.registerTagInterceptor"),
+  "the core drawer must register before optional tag interception",
+)
 assert.match(source, /tagName: "swarm-image", attrs: \{ request: "generate" \}, removeFromMessage: true/)
+assert.match(source, /function createRequestId\(/)
+assert.doesNotMatch(source, /crypto\.randomUUID\(\)/)
 assert.match(source, /img\[data-swarm-studio-slot\][\s\S]*?object-fit: cover !important/)
 assert.match(source, /messages\.renderWidget\(/)
 assert.match(source, /type: "tag_generate"/)
