@@ -3531,6 +3531,7 @@ async function handleMessage(payload, userId) {
                 throw new Error(`Unknown Swarm Studio request: ${type || "(missing type)"}`);
         }
     } catch (error) {
+        console.error(`[Swarm Studio] Backend request “${type || "(missing type)"}” failed.`, error);
         spindle.sendToFrontend({
             type: "studio_error",
             requestId,

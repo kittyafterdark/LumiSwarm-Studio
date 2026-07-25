@@ -17,8 +17,24 @@ const {
   normalizeRequiredImageRange,
   outputLibraryPageSize,
   quickGenerationParameters,
+  reportStudioError,
   sanitizeCustomCss,
+  serializeSwarmPresetList,
 } = await import("../dist/frontend.js")
+
+const capturedConsoleErrors = []
+const originalConsoleError = console.error
+console.error = (...args) => capturedConsoleErrors.push(args)
+try {
+  reportStudioError("Generation", new Error("complete SwarmUI parameter failure"), { operation: "generate" })
+} finally {
+  console.error = originalConsoleError
+}
+assert.equal(capturedConsoleErrors.length, 1)
+assert.match(capturedConsoleErrors[0][0], /\[Swarm Studio\] Generation/)
+assert.equal(capturedConsoleErrors[0][1], "complete SwarmUI parameter failure")
+assert.equal(capturedConsoleErrors[0][2] instanceof Error, true)
+assert.deepEqual(capturedConsoleErrors[0][3], { operation: "generate" })
 
 assert.equal(createRequestId({ randomUUID: () => "native-request-id" }), "native-request-id")
 assert.equal(
@@ -108,6 +124,21 @@ assert.deepEqual(
     { name: "characters/hero.safetensors", weight: 1.2 },
   ],
 )
+assert.deepEqual(
+  lorasFromSwarmPreset({
+    loras: '[\"styles/legacy ink.safetensors\",\"characters/legacy hero.safetensors\"]',
+    loraweights: "[0.5,1.1]",
+  }),
+  [
+    { name: "styles/legacy ink.safetensors", weight: 0.5 },
+    { name: "characters/legacy hero.safetensors", weight: 1.1 },
+  ],
+)
+assert.equal(
+  serializeSwarmPresetList(["styles/ink.safetensors", "characters/hero.safetensors"]),
+  "styles/ink.safetensors,characters/hero.safetensors",
+)
+assert.equal(serializeSwarmPresetList([0.75, 1.2]), "0.75,1.2")
 assert.doesNotMatch(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /@import\s+"/)
 assert.match(sanitizeCustomCss('@import "https://example.com/x.css"; .ss-shell { color: red; }'), /\.ss-shell/)
 
@@ -418,6 +449,12 @@ assert.ok(
 assert.match(source, /tagName: "swarm-image", attrs: \{ request: "generate" \}, removeFromMessage: true/)
 assert.match(source, /function createRequestId\(/)
 assert.doesNotMatch(source, /crypto\.randomUUID\(\)/)
+assert.match(source, /function reportStudioError\(/)
+assert.match(source, /reportStudioError\(`Backend \$\{String\(payload\?\.type \|\| "message"\)\}`/)
+assert.match(source, /reportStudioError\(\s*"Image generation event"/)
+assert.match(source, /add\("loras", serializeSwarmPresetList\(/)
+assert.match(source, /add\(\s*"loraweights",\s*serializeSwarmPresetList\(/)
+assert.doesNotMatch(source, /add\("loras", JSON\.stringify\(/)
 assert.match(source, /img\[data-swarm-studio-slot\][\s\S]*?object-fit: cover !important/)
 assert.match(source, /messages\.renderWidget\(/)
 assert.match(source, /type: "tag_generate"/)

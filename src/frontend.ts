@@ -312,6 +312,16 @@ export function createRequestId(cryptoApi: Crypto | null | undefined = globalThi
     .slice(2, 10)}`
 }
 
+export function reportStudioError(scope: string, error: unknown, details?: unknown): void {
+  const label = `[Swarm Studio] ${String(scope || "Error").trim() || "Error"}`
+  if (error instanceof Error) {
+    console.error(label, error.message, error, details ?? "")
+    return
+  }
+  const message = String(error || "Unknown error")
+  console.error(label, message, details ?? error)
+}
+
 type ModelFamily =
   | "anima"
   | "illustrious"
@@ -3896,6 +3906,13 @@ export function lorasFromSwarmPreset(paramMap: Record<string, string>): Array<{ 
   }))
 }
 
+export function serializeSwarmPresetList(values: unknown[]): string {
+  return values
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(",")
+}
+
 function labelFromName(name: string): string {
   const leaf = name.replace(/\\/g, "/").split("/").pop() || name
   return leaf.replace(/\.(safetensors|ckpt|pt)$/i, "")
@@ -4397,6 +4414,7 @@ class MiniPlayerController {
 
   fail(jobId: string, message: string): void {
     if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return
+    reportStudioError("Quick Create generation", message || "Generation stopped.")
     this.state = "error"
     this.snapshotValue = {
       ...this.snapshotValue,
@@ -7428,8 +7446,11 @@ are removed when CSS is applied.</pre>
     add("refinermodel", this.get<HTMLInputElement>('[data-role="unet"]').value)
     const enabledLoras = this.state.stack.filter((item) => item.enabled)
     if (enabledLoras.length) {
-      add("loras", JSON.stringify(enabledLoras.map((item) => item.lora.name)))
-      add("loraweights", JSON.stringify(enabledLoras.map((item) => clamp(Number(item.weight) || 1, -10, 10))))
+      add("loras", serializeSwarmPresetList(enabledLoras.map((item) => item.lora.name)))
+      add(
+        "loraweights",
+        serializeSwarmPresetList(enabledLoras.map((item) => clamp(Number(item.weight) || 1, -10, 10))),
+      )
     }
     if (this.state.selectedWorkflow) add("comfyuicustomworkflow", this.state.selectedWorkflow.name)
     return paramMap
@@ -10523,6 +10544,7 @@ are removed when CSS is applied.</pre>
   }
 
   private setRunStatus(message: string, error = false): void {
+    if (error && message) reportStudioError("Studio", message)
     for (const status of this.root.querySelectorAll<HTMLElement>(
       '[data-role="run-status"], [data-role="prompt-run-status"]',
     )) {
@@ -11313,6 +11335,7 @@ class ChatVisualsController {
   }
 
   private setStatus(message: string, error = false): void {
+    if (error && message) reportStudioError("Chat Visuals", message)
     const status = this.get<HTMLElement>("chat-visuals-status")
     status.textContent = message
     status.dataset.error = String(error)
@@ -12067,6 +12090,15 @@ export function setup(ctx: FrontendContext): () => void {
   const removeActionClick =
     typeof inputAction?.onClick === "function" ? inputAction.onClick(() => openStudio("studio")) : () => {}
   const unsubscribeMessages = ctx.onBackendMessage((payload: any) => {
+    const backendError =
+      payload?.error
+      || payload?.data?.error
+      || payload?.data?.metadataError
+      || payload?.data?.workflowError
+      || ((/error|failed/i.test(String(payload?.type || ""))) ? payload?.message : "")
+    if (backendError) {
+      reportStudioError(`Backend ${String(payload?.type || "message")}`, backendError, payload)
+    }
     if (payload?.type === "bootstrap_result" && payload?.data?.tagAutomation) {
       applyBehaviorState(behaviorFromServer(payload.data.tagAutomation))
     }
@@ -12101,6 +12133,11 @@ export function setup(ctx: FrontendContext): () => void {
     activeStudio?.onImageGenerationEvent("complete", payload)
   })
   const unsubscribeError = subscribeToImageEvent("IMAGE_GEN_ERROR", (payload: any) => {
+    reportStudioError(
+      "Image generation event",
+      payload?.error || payload?.message || "Image generation failed.",
+      payload,
+    )
     miniplayer?.onImageGenerationEvent("error", payload)
     activeStudio?.onImageGenerationEvent("error", payload)
   })

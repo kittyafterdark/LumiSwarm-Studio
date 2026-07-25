@@ -232,7 +232,11 @@ a checklist built from the current schema so prompt, model, sizing, sampling,
 LoRAs, workflow, overrides, and seed can be included or omitted individually
 before Studio calls SwarmUI's `AddNewPreset` API. The adjacent settings button
 opens a manager where existing presets can be deleted directly through
-SwarmUI's `DeletePreset` API.
+SwarmUI's `DeletePreset` API. LoRA filenames and weights are saved using
+SwarmUI's native comma-separated preset fields. Studio still understands the
+JSON-array fields written by versions 1.0.4 and 1.0.5 when **Apply** is used,
+but those malformed server-side presets should be deleted and saved again
+before they are invoked natively during generation.
 
 Each selected Swarm preset has an **Apply** action. It copies the preset's known
 values into the editable Studio controls, moves any LoRA filename/weight pairs
@@ -255,6 +259,12 @@ LoRA workspace and selected in both stack selectors. Subsequent manual edits
 are left alone rather than being overwritten on every folder refresh.
 
 Preview images are fetched lazily from the configured SwarmUI origin. Cross-origin preview URLs are refused.
+
+Compact UI status messages are mirrored without truncation to the browser
+console. Backend request failures additionally retain the original `Error`
+object and stack in Lumiverse's server console. Search for `[Swarm Studio]`
+when reporting a generation, preset, metadata, downloader, Quick Create, or
+Chat Visuals failure.
 
 ## Saved Swarm workflows
 
