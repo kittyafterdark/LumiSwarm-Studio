@@ -23,7 +23,7 @@ It adds:
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker, a server-persisted 0–6 required-image range per reply (`0–0` keeps model discretion), selectable **Multi-character / ensemble** and **Character-only / POV** composition guidance, and an optional `character="none"` scenery/object mode; completed tags begin generating without a chat-shifting progress strip, failures leave an aspect-aware retry placeholder, and finished outputs become permanent container-filling Lumiverse images while syncing back into Studio without taking over Studio's own Generate/Interrupt state
-- Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with a fresh random seed using current/original settings, edit and immediately confirm the prompt in Quick Create, or open the output library; right-clicking the finished image opens the same menu
+- Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with a fresh random seed using current/original settings, edit and immediately confirm the prompt in Quick Create, or open the output library; right-clicking the finished image opens the same menu, including inside nested or regex-rendered HTML through composed-path event delegation
 - Automatic prompt-context cleanup that leaves stored chat and visible images untouched while replacing completed Studio figures, appended Lumiverse image Markdown, and embedded image data with short semantic breadcrumbs; only the six newest illustration descriptions remain in outbound history
 - Character visual bindings stored inside Library folders: a checkpoint, base positive, base negative, and saved LoRA stack follow the character across every conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile model and stack controls when that character becomes active, and file that character's Studio outputs automatically only while the pill is enabled; disabled visuals leave new outputs Unfiled
 - A dedicated **Chat Visuals** drawer page that keeps persona identity profiles, the active character's Library-backed checkpoint/positive/negative base, and its named or custom LoRA-stack snapshot in one compact place; Lumiverse's native Image Gen persona-kind prompt presets can hydrate a visual profile without turning the main Studio into another settings maze
@@ -44,13 +44,13 @@ Generation itself goes through `spindle.imageGen.generate()`. That means it cont
 
 ## Install
 
-1. Copy:
+1. Build the extension if you are installing from source (Node.js 23.6+):
 
-   ```
-   https://github.com/kittyafterdark/LumiSwarm-Studio
+   ```sh
+   npm run build
    ```
 
-2. In Lumiverse, open **Extensions**, install the extension, and enable it.
+2. In Lumiverse, open **Extensions / Spindle**, install the extension folder or packaged archive, and enable it.
 3. Grant these permissions:
 
    - `image_gen` — connections, checkpoints, and generation

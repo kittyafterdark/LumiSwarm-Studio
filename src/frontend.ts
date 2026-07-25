@@ -10172,30 +10172,88 @@ class TaggedImageController {
   private readonly tagPayloads = new Map<string, any>()
   private readonly tagFingerprints = new Map<string, string>()
   private readonly cleanups = new Map<string, () => void>()
+
+  private eventClosest<T extends HTMLElement>(
+    event: Event,
+    selector: string,
+  ): T | null {
+    for (const node of event.composedPath()) {
+      if (!(node instanceof HTMLElement)) continue
+
+      if (node.matches(selector)) {
+        return node as T
+      }
+
+      const closest = node.closest<T>(selector)
+      if (closest) return closest
+    }
+
+    const target = event.target
+    return target instanceof HTMLElement
+      ? target.closest<T>(selector)
+      : null
+  }
+
   private readonly handleInlineClick = (event: MouseEvent) => {
-    const action = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-swarm-studio-inline-action]')
+    const action = this.eventClosest<HTMLElement>(
+      event,
+      '[data-swarm-studio-inline-action]',
+    )
     if (!action) return
+
     const inline = this.inlineJobFromTarget(action)
     if (!inline) return
+
     event.preventDefault()
-    event.stopPropagation()
-    void this.showJobMenu(inline.job, event.clientX, event.clientY)
+    event.stopImmediatePropagation()
+
+    void this.showJobMenu(
+      inline.job,
+      event.clientX,
+      event.clientY,
+    )
   }
+
   private readonly handleInlineContextMenu = (event: MouseEvent) => {
-    const inline = this.inlineJobFromTarget(event.target as HTMLElement | null)
+    const figure = this.eventClosest<HTMLElement>(
+      event,
+      'figure[data-swarm-studio-image="true"][data-swarm-studio-job-id]',
+    )
+    if (!figure) return
+
+    const inline = this.inlineJobFromTarget(figure)
     if (!inline) return
+
     event.preventDefault()
-    event.stopPropagation()
-    void this.showJobMenu(inline.job, event.clientX, event.clientY)
+    event.stopImmediatePropagation()
+
+    void this.showJobMenu(
+      inline.job,
+      event.clientX,
+      event.clientY,
+    )
   }
+
   private readonly handleInlineKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Enter" && event.key !== " ") return
-    const action = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-swarm-studio-inline-action]')
+
+    const action = this.eventClosest<HTMLElement>(
+      event,
+      '[data-swarm-studio-inline-action]',
+    )
     if (!action) return
+
     const inline = this.inlineJobFromTarget(action)
     if (!inline) return
+
     event.preventDefault()
-    void this.showJobMenu(inline.job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2))
+    event.stopImmediatePropagation()
+
+    void this.showJobMenu(
+      inline.job,
+      Math.round(window.innerWidth / 2),
+      Math.round(window.innerHeight / 2),
+    )
   }
 
   constructor(
@@ -10214,9 +10272,9 @@ class TaggedImageController {
     this.openStudioWithPrompt = openStudioWithPrompt
     this.openQuickCreateWithPrompt = openQuickCreateWithPrompt
     this.openLibrary = openLibrary
-    document.addEventListener("click", this.handleInlineClick, true)
-    document.addEventListener("contextmenu", this.handleInlineContextMenu, true)
-    document.addEventListener("keydown", this.handleInlineKeyDown, true)
+    window.addEventListener("click", this.handleInlineClick, true)
+    window.addEventListener("contextmenu", this.handleInlineContextMenu, true)
+    window.addEventListener("keydown", this.handleInlineKeyDown, true)
   }
 
   setBehavior(behavior: StudioBehavior): void {
@@ -10309,9 +10367,9 @@ class TaggedImageController {
   }
 
   destroy(): void {
-    document.removeEventListener("click", this.handleInlineClick, true)
-    document.removeEventListener("contextmenu", this.handleInlineContextMenu, true)
-    document.removeEventListener("keydown", this.handleInlineKeyDown, true)
+    window.removeEventListener("click", this.handleInlineClick, true)
+    window.removeEventListener("contextmenu", this.handleInlineContextMenu, true)
+    window.removeEventListener("keydown", this.handleInlineKeyDown, true)
     for (const cleanup of this.cleanups.values()) cleanup()
     this.cleanups.clear()
     this.jobs.clear()
