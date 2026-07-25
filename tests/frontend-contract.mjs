@@ -9,6 +9,7 @@ const {
   inferModelFamily,
   inheritQuickGenerationParameters,
   isWorkflowCoreParameter,
+  loraFolderPath,
   lorasFromSwarmPreset,
   matchesKeywordQuery,
   modelSignalsCompatible,
@@ -44,6 +45,9 @@ assert.equal(matchesKeywordQuery("illustrious portrait", ["Anima model", "soft p
 assert.equal(outputLibraryPageSize(390), 15)
 assert.equal(outputLibraryPageSize(720), 15)
 assert.equal(outputLibraryPageSize(721), 30)
+assert.equal(loraFolderPath("Anima/Characters/hero.safetensors"), "Anima/Characters")
+assert.equal(loraFolderPath("Illustrious\\Styles\\ink.safetensors"), "Illustrious/Styles")
+assert.equal(loraFolderPath("root-model.safetensors"), "")
 assert.deepEqual(normalizeRequiredImageRange(0, 0), { min: 0, max: 0 })
 assert.deepEqual(normalizeRequiredImageRange(0, 3), { min: 1, max: 3 })
 assert.deepEqual(normalizeRequiredImageRange(4, 2), { min: 2, max: 4 })
@@ -197,6 +201,13 @@ assert.match(source, /data-action="apply-lumi-stack"/)
 assert.match(source, /data-action="toggle-lora-download"/)
 assert.match(source, /data-action="start-lora-download"/)
 assert.match(source, /data-action="download-missing-loras"/)
+assert.match(source, /data-action="toggle-lora-folders"/)
+assert.match(source, /data-role="lora-folder-tree"/)
+assert.match(source, /button\.dataset\.action = "select-lora-folder"/)
+assert.match(source, /data-action="toggle-lora-sort-menu"/)
+assert.match(source, /data-action="select-lora-sort"/)
+assert.match(source, /private renderLoraFolders\(\)/)
+assert.match(source, /folder\.startsWith\(`\$\{this\.selectedLoraFolder\}\/`\)/)
 assert.match(source, /this\.send\("start_lora_download"/)
 assert.match(source, /this\.send\("get_lora_download_status"\)/)
 assert.match(source, /this\.send\("cancel_lora_download"/)
@@ -391,6 +402,12 @@ assert.match(source, /type: "tag_generate"/)
 assert.match(source, /Retry with current Studio settings/)
 assert.doesNotMatch(source, /class="spinner" aria-label="Generating"/)
 assert.match(source, /shouldRenderPlaceholder/)
+assert.match(source, /settledTagLookups/)
+assert.match(source, /settledMessageTargets/)
+assert.match(source, /payload\.isStreaming !== true/)
+assert.match(source, /retrySettledAttachment/)
+assert.match(source, /messageId: this\.settledMessageTargets\.get\(job\.id\)|const messageId = this\.settledMessageTargets\.get\(job\.id\)/)
+assert.match(source, /type: "retry_tagged_attachment"/)
 assert.match(source, /Message illustration complete · synced to Studio/)
 assert.match(source, /if \(!this\.snapshotValue\.active \|\| !this\.snapshotValue\.jobId\) return/)
 assert.match(source, /payload\?\.data\?\.tagAutomation/)

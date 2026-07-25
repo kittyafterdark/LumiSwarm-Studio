@@ -29,6 +29,7 @@ const relayedLoraRequests = []
 let holdLoraDownload = false
 let taggedGenerationCount = 0
 const taggedGenerationInputs = []
+const legacyGenerationInputs = []
 const taggedMessage = {
   id: "message-tag-1",
   role: "assistant",
@@ -156,6 +157,19 @@ globalThis.spindle = {
     },
     async getModels() {
       return [{ id: "base.safetensors", label: "Base" }]
+    },
+    async generate(input) {
+      legacyGenerationInputs.push(input)
+      assert.equal(Object.prototype.hasOwnProperty.call(input, "signal"), false)
+      assert.equal(input.owner_chat_id, "chat-1")
+      assert.equal(input.owner_character_id, "char-1")
+      return {
+        imageDataUrl: "data:image/png;base64,TEVHQUNZ",
+        imageUrl: "/api/v1/image-gen/results/image-legacy",
+        imageId: "image-legacy",
+        model: input.model,
+        provider: "swarmui",
+      }
     },
     async *generateStream(input) {
       assert.equal(input.owner_chat_id, "chat-1")
@@ -842,6 +856,40 @@ assert.equal(macroValues.get("char_profile"), "/api/v1/images/char-avatar?size=s
 assert.equal(macroValues.get("user_profile"), "/api/v1/images/user-avatar?size=sm")
 assert.match(completionToast, /Swarm Studio finished/)
 
+const nativeGenerateStream = globalThis.spindle.imageGen.generateStream
+delete globalThis.spindle.imageGen.generateStream
+let legacyGenerated
+try {
+  legacyGenerated = await request("generate", {
+    input: {
+      prompt: "legacy compatibility portrait",
+      negativePrompt: "blurry",
+      connection_id: "swarm-1",
+      model: "base.safetensors",
+      clientJobId: "legacy-job-1",
+      parameters: {
+        loras: ["styles/ink.safetensors"],
+        loraWeights: [0.75],
+        seed: -1,
+        rawRequestOverride: JSON.stringify({
+          presets: ["Cinematic"],
+          comfyuicustomworkflow: "Portrait/Inpaint",
+        }),
+      },
+    },
+    recordHints: {
+      presets: ["Cinematic"],
+      workflow: "Portrait/Inpaint",
+    },
+  })
+} finally {
+  globalThis.spindle.imageGen.generateStream = nativeGenerateStream
+}
+assert.equal(legacyGenerationInputs.length, 1)
+assert.equal(legacyGenerated.data.result.imageId, "image-legacy")
+assert.match(source, /typeof streamFactory !== "function"[\s\S]*?imageGen\.generate\(input\)[\s\S]*?const generationInput = \{/)
+assert.doesNotMatch(source, /imageGen\.generate\(generationInput\)/)
+
 const tagConfig = await request("set_tag_automation", {
   config: {
     autoGenerate: true,
@@ -969,7 +1017,18 @@ await frontendHandler({
 const tagError = sent.find((entry) => entry.payload.requestId === "tag-generate-1" && entry.payload.type === "studio_error")
 assert.equal(tagError, undefined, tagError?.payload?.error)
 assert.equal(taggedGenerationCount, 1)
+for (
+  let attempt = 0;
+  attempt < 100 && !sent.some((entry) => entry.payload.type === "tagged_generation_result");
+  attempt += 1
+) {
+  await new Promise((resolve) => setTimeout(resolve, 1))
+}
 const taggedResult = sent.find((entry) => entry.payload.type === "tagged_generation_result")
+assert.ok(
+  taggedResult,
+  `Tagged generation did not finish in time: ${JSON.stringify(sent.slice(-12).map((entry) => entry.payload))}`,
+)
 assert.equal(taggedResult.payload.data.record.imageId, "image-tag-1")
 assert.equal(taggedResult.payload.data.taggedJob.status, "ready")
 const taggedReconciliation = sent.find((entry) =>
@@ -1238,5 +1297,10 @@ assert.deepEqual(deleted.data.deletedIds, ["image-1"])
 assert.deepEqual(deleted.data.failedIds, [])
 assert.equal(deleted.data.outputs.length, 0)
 assert.deepEqual(deleted.data.folders[0].imageIds, [])
+
+assert.match(source, /TAGGED_FINALIZE_RETRY_DELAYS_MS[\s\S]*?25_000/)
+assert.match(source, /taggedFinalizeMessageTargets/)
+assert.match(source, /finalMessageId = asString\(payload\?\.messageId\)\.trim\(\)/)
+assert.match(source, /job\.messageId = finalMessageId/)
 
 console.log("backend contract: ok")

@@ -21,7 +21,11 @@ const TAGGED_FINALIZE_RETRY_DELAYS_MS = [
     750,
     1_500,
     3_000,
-    5_000
+    5_000,
+    8_000,
+    12_000,
+    18_000,
+    25_000
 ];
 const HISTORY_PAGE_SIZE = 12;
 const CONTEXT_IMAGE_MEMORY_LIMIT = 6;
@@ -31,9 +35,11 @@ const sessions = new Map();
 const previewCache = new Map();
 const loraDownloadJobs = new Map();
 const generationControllers = new Map();
+let legacyGenerationFallbackLogged = false;
 const runningTaggedJobs = new Set();
 const taggedMessageFinalizeLocks = new Map();
 const taggedFinalizeRetries = new Map();
+const taggedFinalizeMessageTargets = new Map();
 const swarmProtocolContexts = new Map();
 const SWARM_IMAGE_PROTOCOL_BASE = `SWARM STUDIO IMAGE REQUEST PROTOCOL
 Place this exact XML-like request wherever an illustration selected under the image-count instructions should appear. Attributes may be written on one line or separate lines:
@@ -1474,14 +1480,18 @@ function isAbortError(error) {
     return error instanceof Error && (error.name === "AbortError" || /abort|interrupt|cancel/i.test(error.message));
 }
 async function generateWithProgress(input, controller, clientJobId, userId) {
+    const streamFactory = spindle.imageGen?.generateStream;
+    if (typeof streamFactory !== "function") {
+        if (!legacyGenerationFallbackLogged) {
+            legacyGenerationFallbackLogged = true;
+            spindle.log.warn("[Swarm Studio] Lumiverse imageGen.generateStream is unavailable; using legacy generation without AbortSignal.");
+        }
+        return asRecord(await spindle.imageGen.generate(input));
+    }
     const generationInput = {
         ...input,
         signal: controller.signal
     };
-    const streamFactory = spindle.imageGen?.generateStream;
-    if (typeof streamFactory !== "function") {
-        return asRecord(await spindle.imageGen.generate(generationInput));
-    }
     const iterator = await streamFactory.call(spindle.imageGen, generationInput);
     if (!iterator || typeof iterator.next !== "function") {
         throw new Error("Lumiverse returned an invalid image generation stream.");
@@ -2343,7 +2353,15 @@ async function finalizeTaggedImageJobWithRetry(job, userId) {
             }
             if (job.status !== "ready" || !job.imageUrl) return false;
             try {
-                if (await finalizeTaggedImageJob(job, userId)) return true;
+                const targetMessageId = taggedFinalizeMessageTargets.get(job.id);
+                if (targetMessageId && targetMessageId !== job.messageId) {
+                    job.messageId = targetMessageId;
+                    job.key = `${job.chatId}:${job.messageId}:${job.slot}`;
+                }
+                if (await finalizeTaggedImageJob(job, userId)) {
+                    taggedFinalizeMessageTargets.delete(job.id);
+                    return true;
+                }
             } catch (error) {
                 lastError = error instanceof Error ? error.message : String(error);
             }
@@ -2982,6 +3000,13 @@ async function handleMessage(payload, userId) {
                     if (!job) throw new Error("That inline image job no longer exists.");
                     if (job.status !== "ready" || !job.imageUrl) {
                         throw new Error("The image must finish generating before it can be attached.");
+                    }
+                    const finalMessageId = asString(payload?.messageId).trim();
+                    if (finalMessageId && finalMessageId !== job.messageId) {
+                        taggedFinalizeMessageTargets.set(job.id, finalMessageId);
+                        job.messageId = finalMessageId;
+                        job.key = `${job.chatId}:${job.messageId}:${job.slot}`;
+                        await upsertTaggedImageJob(job, userId);
                     }
                     await finalizeTaggedImageJobWithRetry(job, userId);
                     return;

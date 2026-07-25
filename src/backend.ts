@@ -288,7 +288,11 @@ const PERSONA_VISUAL_PRESET_LIMIT = 80
 const GENERATION_RECORD_LIMIT = 100
 const OUTPUT_FOLDER_LIMIT = 80
 const TAGGED_IMAGE_JOB_LIMIT = 160
-const TAGGED_FINALIZE_RETRY_DELAYS_MS = [0, 250, 750, 1_500, 3_000, 5_000] as const
+// Assistant messages may remain transient for a surprisingly long time after
+// generation ends, especially when several image tags finish together.
+const TAGGED_FINALIZE_RETRY_DELAYS_MS = [
+  0, 250, 750, 1_500, 3_000, 5_000, 8_000, 12_000, 18_000, 25_000,
+] as const
 const HISTORY_PAGE_SIZE = 12
 const CONTEXT_IMAGE_MEMORY_LIMIT = 6
 const DEFAULT_SWARMUI_URL = "http://localhost:7801"
@@ -300,9 +304,11 @@ const generationControllers = new Map<string, {
   controller: AbortController
   nativeStream: boolean
 }>()
+let legacyGenerationFallbackLogged = false
 const runningTaggedJobs = new Set<string>()
 const taggedMessageFinalizeLocks = new Map<string, Promise<void>>()
 const taggedFinalizeRetries = new Map<string, Promise<boolean>>()
+const taggedFinalizeMessageTargets = new Map<string, string>()
 const swarmProtocolContexts = new Map<string, SwarmProtocolContext>()
 
 const SWARM_IMAGE_PROTOCOL_BASE = `SWARM STUDIO IMAGE REQUEST PROTOCOL
@@ -1981,15 +1987,23 @@ async function generateWithProgress(
   clientJobId: string,
   userId?: string,
 ): Promise<JsonObject> {
+  const streamFactory = spindle.imageGen?.generateStream
+  if (typeof streamFactory !== "function") {
+    if (!legacyGenerationFallbackLogged) {
+      legacyGenerationFallbackLogged = true
+      spindle.log.warn(
+        "[Swarm Studio] Lumiverse imageGen.generateStream is unavailable; using legacy generation without AbortSignal.",
+      )
+    }
+    // AbortSignal cannot cross the Bun/Spindle structured-clone boundary used
+    // by the legacy generate API. Only the streaming API accepts it.
+    return asRecord(await spindle.imageGen.generate(input))
+  }
+
   const generationInput = {
     ...input,
     signal: controller.signal,
   }
-  const streamFactory = spindle.imageGen?.generateStream
-  if (typeof streamFactory !== "function") {
-    return asRecord(await spindle.imageGen.generate(generationInput))
-  }
-
   const iterator = await streamFactory.call(spindle.imageGen, generationInput)
   if (!iterator || typeof iterator.next !== "function") {
     throw new Error("Lumiverse returned an invalid image generation stream.")
@@ -2940,7 +2954,15 @@ async function finalizeTaggedImageJobWithRetry(job: TaggedImageJob, userId?: str
       }
       if (job.status !== "ready" || !job.imageUrl) return false
       try {
-        if (await finalizeTaggedImageJob(job, userId)) return true
+        const targetMessageId = taggedFinalizeMessageTargets.get(job.id)
+        if (targetMessageId && targetMessageId !== job.messageId) {
+          job.messageId = targetMessageId
+          job.key = `${job.chatId}:${job.messageId}:${job.slot}`
+        }
+        if (await finalizeTaggedImageJob(job, userId)) {
+          taggedFinalizeMessageTargets.delete(job.id)
+          return true
+        }
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error)
       }
@@ -3646,6 +3668,13 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         if (!job) throw new Error("That inline image job no longer exists.")
         if (job.status !== "ready" || !job.imageUrl) {
           throw new Error("The image must finish generating before it can be attached.")
+        }
+        const finalMessageId = asString(payload?.messageId).trim()
+        if (finalMessageId && finalMessageId !== job.messageId) {
+          taggedFinalizeMessageTargets.set(job.id, finalMessageId)
+          job.messageId = finalMessageId
+          job.key = `${job.chatId}:${job.messageId}:${job.slot}`
+          await upsertTaggedImageJob(job, userId)
         }
         await finalizeTaggedImageJobWithRetry(job, userId)
         return

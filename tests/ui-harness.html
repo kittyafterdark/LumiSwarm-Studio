@@ -106,6 +106,9 @@
 
     const drawerRoot = document.querySelector("#drawer")
     const ctx = {
+      messages: {
+        registerTagInterceptor() { return () => {} },
+      },
       dom: {
         addStyle(css) {
           const style = document.createElement("style")

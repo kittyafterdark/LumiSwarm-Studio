@@ -35,6 +35,15 @@ const IMPORT_ICON = `
 const DOWNLOAD_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4"/><path d="M4 18h16"/></svg>
 `;
+const SORT_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M4 12h6M4 18h3"/><path d="M17 4v16m-3-3 3 3 3-3"/></svg>
+`;
+const FOLDER_TREE_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6l2 3h8v12H4z"/><path d="M8 10v6m0-3h4m0 0v3m0-3h4v3"/></svg>
+`;
+const FOLDER_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v10h-17z"/></svg>
+`;
 const SETTINGS_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.82 2.82-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.36a1.7 1.7 0 0 0-1.88.34l-.06.06-2.82-2.82.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3v-4h.04A1.7 1.7 0 0 0 4.6 8.92a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.82-2.82.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3V3h4v.08a1.7 1.7 0 0 0 1.04 1.48 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.82 2.82-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z"/></svg>
 `;
@@ -1778,10 +1787,64 @@ const STUDIO_V3_STYLES = `
   .ss-lora-titlebar .ss-family-chip { margin-left: auto; }
   .ss-lora-dock .ss-section-head { min-height: 27px; margin-bottom: 0; }
   .ss-library-tools {
-    grid-template-columns: minmax(180px, 1fr) auto 135px 100px;
+    grid-template-columns: minmax(180px, 1fr) auto 135px auto auto;
   }
   .ss-lora-query { min-width: 0; }
   .ss-lora-query > .ss-input { width: 100%; }
+  .ss-lora-tool-icon {
+    width: 31px;
+    height: 31px;
+    min-width: 31px;
+    padding: 6px;
+  }
+  .ss-lora-tool-icon svg,
+  .ss-lora-folder-row svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .ss-lora-tool-icon[data-active="true"] {
+    color: var(--lumiverse-accent, #7dd3fc);
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 60%, var(--ss-outline));
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 13%, var(--ss-button-bg));
+  }
+  .ss-lora-sort-wrap { position: relative; }
+  .ss-lora-sort-menu {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    z-index: 24;
+    width: 132px;
+    padding: 5px;
+    display: grid;
+    gap: 3px;
+    border: 1px solid var(--ss-outline);
+    border-radius: var(--ss-radius);
+    background: color-mix(in srgb, var(--ss-panel-bg) 97%, black);
+    box-shadow: 0 12px 30px rgba(0,0,0,.42);
+  }
+  .ss-lora-sort-menu[hidden] { display: none; }
+  .ss-lora-sort-choice {
+    min-height: 28px;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: max(4px, calc(var(--ss-radius) - 3px));
+    background: transparent;
+    color: var(--ss-text);
+    text-align: left;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+  }
+  .ss-lora-sort-choice:hover,
+  .ss-lora-sort-choice[data-selected="true"] {
+    color: var(--lumiverse-accent, #7dd3fc);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 12%, transparent);
+  }
   .ss-library-tools.ss-download-open { grid-template-columns: minmax(0, 1fr); }
   .ss-library-tools.ss-download-open > :not(.ss-lora-query) { display: none; }
   .ss-lora-download-entry {
@@ -1837,10 +1900,93 @@ const STUDIO_V3_STYLES = `
     color: var(--lumiverse-accent, #7dd3fc);
     background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 10%, transparent);
   }
+  .ss-lora-browser {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(140px, clamp(150px, 24%, 220px)) minmax(0, 1fr);
+    gap: 6px;
+    overflow: hidden;
+  }
+  .ss-lora-browser[data-folders-open="false"] { grid-template-columns: minmax(0, 1fr); }
+  .ss-lora-folder-sidebar {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid color-mix(in srgb, var(--ss-outline) 82%, transparent);
+    border-radius: var(--ss-radius);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 7%, transparent), transparent 32%),
+      color-mix(in srgb, var(--ss-panel-bg) 95%, black);
+  }
+  .ss-lora-folder-sidebar[hidden] { display: none; }
+  .ss-lora-folder-head {
+    min-height: 31px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 6px 7px;
+    border-bottom: 1px solid color-mix(in srgb, var(--ss-outline) 65%, transparent);
+  }
+  .ss-lora-folder-head strong { font-size: 10px; letter-spacing: .03em; }
+  .ss-lora-folder-tree {
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 5px;
+  }
+  .ss-lora-folder-row {
+    --ss-folder-depth: 0;
+    width: 100%;
+    min-width: 0;
+    min-height: 28px;
+    display: grid;
+    grid-template-columns: 15px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px 4px calc(6px + (var(--ss-folder-depth) * 12px));
+    border: 1px solid transparent;
+    border-radius: max(4px, calc(var(--ss-radius) - 3px));
+    background: transparent;
+    color: var(--ss-muted);
+    font: inherit;
+    font-size: 9.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ss-lora-folder-row span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ss-lora-folder-row small {
+    color: var(--ss-dim);
+    font-size: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ss-lora-folder-row:hover {
+    color: var(--ss-text);
+    background: color-mix(in srgb, var(--ss-outline) 24%, transparent);
+  }
+  .ss-lora-folder-row[data-selected="true"] {
+    color: var(--lumiverse-accent, #7dd3fc);
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 38%, transparent);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 11%, transparent);
+  }
+  .ss-lora-folder-row[data-kind="all"] svg { opacity: .72; }
   .ss-lora-grid {
     flex: 1;
     min-height: 0;
     max-height: none;
+    height: 100%;
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   }
   .ss-lora-card {
@@ -2318,8 +2464,7 @@ const STUDIO_V3_STYLES = `
       --ss-history-width: 205px;
       --ss-library-width: 58%;
     }
-    .ss-library-tools { grid-template-columns: minmax(120px, 1fr) 125px auto; }
-    .ss-library-tools [data-role="lora-sort"] { display: none; }
+    .ss-library-tools { grid-template-columns: minmax(120px, 1fr) auto 125px auto auto; }
   }
 
   @media (max-height: 800px) and (min-width: 721px) {
@@ -2479,8 +2624,16 @@ const STUDIO_V3_STYLES = `
     .ss-shell[data-mobile-tab="loras"] .ss-stack-pane { display: none; }
     .ss-shell[data-mobile-tab="stack"] .ss-lora-library { display: none; }
     .ss-shell[data-mobile-tab="stack"] .ss-stack-pane { display: flex; height: 100%; }
-    .ss-library-tools { grid-template-columns: minmax(0, 1fr) 120px auto; }
-    .ss-library-tools [data-role="lora-sort"] { display: none; }
+    .ss-library-tools { grid-template-columns: minmax(0, 1fr) auto 120px auto auto; }
+    .ss-lora-browser,
+    .ss-lora-browser[data-folders-open="false"] { grid-template-columns: minmax(0, 1fr); }
+    .ss-lora-folder-sidebar {
+      position: absolute;
+      inset: 0 auto 0 0;
+      z-index: 22;
+      width: min(78vw, 290px);
+      box-shadow: 16px 0 38px rgba(0,0,0,.52);
+    }
     .ss-lora-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ss-lora-card { grid-template-columns: 78px minmax(0, 1fr); min-height: 120px; }
     .ss-lora-card .ss-lora-footer { left: 85px; }
@@ -2963,6 +3116,8 @@ const STUDIO_V3_STYLES = `
     .ss-brand span { display: none; }
     .ss-mobile-tab { padding-inline: 11px; }
     .ss-lora-grid { grid-template-columns: 1fr; }
+    .ss-library-tools { grid-template-columns: minmax(0, 1fr) auto minmax(104px, 34vw) auto auto; }
+    .ss-lora-download-toggle span { display: none; }
     .ss-lora-card { grid-template-columns: 96px minmax(0, 1fr); }
     .ss-lora-card .ss-lora-footer { left: 103px; }
     .ss-history-pane .ss-history-grid { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -3404,8 +3559,13 @@ export function lorasFromSwarmPreset(paramMap) {
         }));
 }
 function labelFromName(name) {
-    const leaf = name.split("/").pop() || name;
+    const leaf = name.replace(/\\/g, "/").split("/").pop() || name;
     return leaf.replace(/\.(safetensors|ckpt|pt)$/i, "");
+}
+export function loraFolderPath(name) {
+    const parts = String(name || "").replace(/\\/g, "/").split("/").map((part)=>part.trim()).filter((part)=>part && part !== ".");
+    parts.pop();
+    return parts.join("/");
 }
 function normalizeModelName(value) {
     return String(value || "").replace(/\\/g, "/").split("/").pop().replace(/\.(safetensors|ckpt|pt)$/i, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -4312,6 +4472,8 @@ class StudioController {
     loraDownloadJobId = "";
     loraDownloadActive = false;
     handledLoraDownloadJobId = "";
+    selectedLoraFolder = null;
+    loraFoldersOpen = false;
     pendingPresetParamMap = {};
     pendingMoveImageIds = [];
     outputResizeObserver = null;
@@ -4321,6 +4483,18 @@ class StudioController {
     disposed = false;
     handleKeyDown = (event)=>{
         if (event.key !== "Escape") return;
+        const loraSortMenu = this.root.querySelector('[data-role="lora-sort-menu"]');
+        if (loraSortMenu && !loraSortMenu.hidden) {
+            this.closeLoraSortMenu();
+            event.stopPropagation();
+            return;
+        }
+        const loraFolderSidebar = this.root.querySelector('[data-role="lora-folder-sidebar"]');
+        if (loraFolderSidebar && !loraFolderSidebar.hidden && window.matchMedia("(max-width: 720px)").matches) {
+            this.toggleLoraFolders(false);
+            event.stopPropagation();
+            return;
+        }
         const config = this.root.querySelector('[data-role="config-popover"]');
         if (config && !config.hidden) {
             this.closeConfigPopover();
@@ -5297,20 +5471,38 @@ are removed when CSS is applied.</pre>
                   </div>
                   <div class="ss-lora-download-status" data-role="lora-download-progress" hidden><i></i></div>
                 </div>
-                <button class="ss-button ss-lora-download-toggle" data-action="toggle-lora-download">${DOWNLOAD_ICON}<span>Download</span></button>
+                <button class="ss-button ss-lora-download-toggle" data-action="toggle-lora-download" title="Download a LoRA" aria-label="Download a LoRA">${DOWNLOAD_ICON}<span>Download</span></button>
                 <select class="ss-select ss-lora-filter" data-role="lora-filter" aria-label="LoRA compatibility filter">
                   <option value="compatible">Compatible only</option>
                   <option value="all">All model families</option>
                 </select>
-                <select class="ss-select" data-role="lora-sort" aria-label="Sort LoRAs">
-                  <option value="title">Title</option>
-                  <option value="name">Filename</option>
-                  <option value="newest">Newest</option>
-                </select>
+                <div class="ss-lora-sort-wrap">
+                  <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-sort-menu" data-role="lora-sort-button" title="Sort LoRAs: Title" aria-label="Sort LoRAs: Title" aria-expanded="false">${SORT_ICON}</button>
+                  <div class="ss-lora-sort-menu" data-role="lora-sort-menu" role="menu" hidden>
+                    <button class="ss-lora-sort-choice" data-action="select-lora-sort" data-sort-value="title" data-selected="true" role="menuitem">Title</button>
+                    <button class="ss-lora-sort-choice" data-action="select-lora-sort" data-sort-value="name" data-selected="false" role="menuitem">Filename</button>
+                    <button class="ss-lora-sort-choice" data-action="select-lora-sort" data-sort-value="newest" data-selected="false" role="menuitem">Newest</button>
+                  </div>
+                  <select data-role="lora-sort" aria-label="Sort LoRAs" hidden>
+                    <option value="title">Title</option>
+                    <option value="name">Filename</option>
+                    <option value="newest">Newest</option>
+                  </select>
+                </div>
+                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}</button>
               </div>
               <div class="ss-library-status" data-role="metadata-error" hidden></div>
-              <div class="ss-lora-grid" data-role="lora-grid">
-                <div class="ss-empty">Choose a SwarmUI connection to load its LoRA library.</div>
+              <div class="ss-lora-browser" data-role="lora-browser" data-folders-open="false">
+                <aside class="ss-lora-folder-sidebar" data-role="lora-folder-sidebar" aria-label="LoRA folders" hidden>
+                  <div class="ss-lora-folder-head">
+                    <strong>LoRA folders</strong>
+                    <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" title="Close folder browser" aria-label="Close folder browser">${FOLDER_TREE_ICON}</button>
+                  </div>
+                  <div class="ss-lora-folder-tree" data-role="lora-folder-tree" role="tree"></div>
+                </aside>
+                <div class="ss-lora-grid" data-role="lora-grid">
+                  <div class="ss-empty">Choose a SwarmUI connection to load its LoRA library.</div>
+                </div>
               </div>
             </section>
 
@@ -5712,6 +5904,7 @@ are removed when CSS is applied.</pre>
             }
             if (!target.closest(".ss-config-wrap")) this.closeConfigPopover();
             if (!target.closest(".ss-history-card")) this.closeHistoryMenus();
+            if (!target.closest(".ss-lora-sort-wrap")) this.closeLoraSortMenu();
             const button = target.closest("[data-action]");
             if (!button) return;
             const action = button.dataset.action;
@@ -5765,6 +5958,10 @@ are removed when CSS is applied.</pre>
             if (action === "toggle-lora-download") this.toggleLoraDownloader();
             if (action === "start-lora-download") this.startManualLoraDownload();
             if (action === "cancel-lora-download") this.cancelLoraDownload();
+            if (action === "toggle-lora-sort-menu") this.toggleLoraSortMenu();
+            if (action === "select-lora-sort") this.selectLoraSort(button.dataset.sortValue || "title");
+            if (action === "toggle-lora-folders") this.toggleLoraFolders();
+            if (action === "select-lora-folder") this.selectLoraFolder(button.dataset.folderPath || "__all__");
             if (action === "toggle-generation") this.togglePane("generation");
             if (action === "toggle-history") this.togglePane("history");
             if (action === "toggle-loras") this.togglePane("loras");
@@ -7265,11 +7462,108 @@ are removed when CSS is applied.</pre>
         const exact = checkpoint?.compatClass || checkpoint?.architecture || "";
         this.get('[data-role="family-chip"]').textContent = exact ? `${familyLabel(family)} · ${exact}` : `${familyLabel(family)} · inferred`;
     }
+    closeLoraSortMenu() {
+        const menu = this.root.querySelector('[data-role="lora-sort-menu"]');
+        const button = this.root.querySelector('[data-role="lora-sort-button"]');
+        if (menu) menu.hidden = true;
+        if (button) button.setAttribute("aria-expanded", "false");
+    }
+    toggleLoraSortMenu() {
+        const menu = this.get('[data-role="lora-sort-menu"]');
+        const button = this.get('[data-role="lora-sort-button"]');
+        menu.hidden = !menu.hidden;
+        button.setAttribute("aria-expanded", String(!menu.hidden));
+    }
+    selectLoraSort(value) {
+        const sort = value === "name" || value === "newest" ? value : "title";
+        const select = this.get('[data-role="lora-sort"]');
+        select.value = sort;
+        const label = sort === "name" ? "Filename" : sort === "newest" ? "Newest" : "Title";
+        const button = this.get('[data-role="lora-sort-button"]');
+        button.title = `Sort LoRAs: ${label}`;
+        button.setAttribute("aria-label", `Sort LoRAs: ${label}`);
+        for (const choice of this.root.querySelectorAll('[data-action="select-lora-sort"]')){
+            choice.dataset.selected = String(choice.dataset.sortValue === sort);
+        }
+        this.closeLoraSortMenu();
+        this.renderLoras();
+        this.persistWorkspaceState();
+    }
+    toggleLoraFolders(force) {
+        this.loraFoldersOpen = force ?? !this.loraFoldersOpen;
+        const browser = this.get('[data-role="lora-browser"]');
+        const sidebar = this.get('[data-role="lora-folder-sidebar"]');
+        const toggle = this.get('[data-role="lora-folder-toggle"]');
+        browser.dataset.foldersOpen = String(this.loraFoldersOpen);
+        sidebar.hidden = !this.loraFoldersOpen;
+        toggle.dataset.active = String(this.loraFoldersOpen);
+        toggle.setAttribute("aria-expanded", String(this.loraFoldersOpen));
+        if (this.loraFoldersOpen) this.renderLoraFolders();
+        this.persistWorkspaceState();
+    }
+    selectLoraFolder(value) {
+        this.selectedLoraFolder = value === "__all__" ? null : value === "__root__" ? "" : value;
+        if (window.matchMedia("(max-width: 720px)").matches) this.toggleLoraFolders(false);
+        this.renderLoras();
+        this.persistWorkspaceState();
+    }
+    renderLoraFolders() {
+        const tree = this.get('[data-role="lora-folder-tree"]');
+        const counts = new Map();
+        let rootCount = 0;
+        for (const lora of this.state.loras){
+            const folder = loraFolderPath(lora.name);
+            if (!folder) {
+                rootCount += 1;
+                continue;
+            }
+            const parts = folder.split("/");
+            for(let index = 1; index <= parts.length; index += 1){
+                const path = parts.slice(0, index).join("/");
+                counts.set(path, (counts.get(path) || 0) + 1);
+            }
+        }
+        if (this.selectedLoraFolder !== null && this.selectedLoraFolder !== "" && !counts.has(this.selectedLoraFolder)) this.selectedLoraFolder = null;
+        tree.replaceChildren();
+        const addRow = (label, path, count, depth, kind)=>{
+            const button = element("button", "ss-lora-folder-row");
+            button.type = "button";
+            button.dataset.action = "select-lora-folder";
+            button.dataset.folderPath = path === null ? "__all__" : path || "__root__";
+            button.dataset.selected = String(this.selectedLoraFolder === path);
+            button.dataset.kind = kind;
+            button.setAttribute("role", "treeitem");
+            button.setAttribute("aria-selected", String(this.selectedLoraFolder === path));
+            button.style.setProperty("--ss-folder-depth", String(depth));
+            button.title = path === null ? "Show every LoRA" : path || "LoRAs stored at the model root";
+            const icon = element("span");
+            icon.innerHTML = kind === "all" ? FOLDER_TREE_ICON : FOLDER_ICON;
+            button.append(icon, element("span", "", label), element("small", "", String(count)));
+            tree.appendChild(button);
+        };
+        addRow("All LoRAs", null, this.state.loras.length, 0, "all");
+        if (rootCount || this.selectedLoraFolder === "") addRow("Root", "", rootCount, 0, "root");
+        for (const [path, count] of [
+            ...counts
+        ].sort(([left], [right])=>left.localeCompare(right, undefined, {
+                sensitivity: "base",
+                numeric: true
+            }))){
+            const parts = path.split("/");
+            addRow(parts.at(-1) || path, path, count, Math.max(0, parts.length - 1), "folder");
+        }
+    }
     filteredLoras() {
         const query = this.get('[data-role="lora-search"]').value.trim().toLowerCase();
         const sort = this.get('[data-role="lora-sort"]').value;
         const compatibility = this.get('[data-role="lora-filter"]').value;
         const items = this.state.loras.filter((lora)=>{
+            if (this.selectedLoraFolder !== null) {
+                const folder = loraFolderPath(lora.name);
+                if (this.selectedLoraFolder === "") {
+                    if (folder) return false;
+                } else if (folder !== this.selectedLoraFolder && !folder.startsWith(`${this.selectedLoraFolder}/`)) return false;
+            }
             if (compatibility === "compatible" && !this.isLoraCompatible(lora)) return false;
             return matchesKeywordQuery(query, [
                 lora.name,
@@ -7304,6 +7598,7 @@ are removed when CSS is applied.</pre>
         const grid = this.get('[data-role="lora-grid"]');
         this.previewObserver?.disconnect();
         grid.replaceChildren();
+        this.renderLoraFolders();
         const items = this.filteredLoras();
         this.get('[data-role="lora-count"]').textContent = `${items.length}${items.length !== this.state.loras.length ? ` of ${this.state.loras.length}` : ""} model${items.length === 1 ? "" : "s"}`;
         this.updateDockSummary();
@@ -7949,6 +8244,30 @@ are removed when CSS is applied.</pre>
         if (advanced) advanced.open = state?.details?.advanced === true;
         const visual = this.root.querySelector('details[data-role="library-visual-profile"]');
         if (visual) visual.open = state?.details?.visual === true;
+        const savedLoraFolder = state?.loraBrowser?.folder;
+        this.selectedLoraFolder = savedLoraFolder === null || typeof savedLoraFolder === "string" ? savedLoraFolder : null;
+        this.loraFoldersOpen = state?.loraBrowser?.open === true && !window.matchMedia("(max-width: 720px)").matches;
+        const loraBrowser = this.get('[data-role="lora-browser"]');
+        const loraFolderSidebar = this.get('[data-role="lora-folder-sidebar"]');
+        const loraFolderToggle = this.get('[data-role="lora-folder-toggle"]');
+        loraBrowser.dataset.foldersOpen = String(this.loraFoldersOpen);
+        loraFolderSidebar.hidden = !this.loraFoldersOpen;
+        loraFolderToggle.dataset.active = String(this.loraFoldersOpen);
+        loraFolderToggle.setAttribute("aria-expanded", String(this.loraFoldersOpen));
+        const savedLoraSort = [
+            "title",
+            "name",
+            "newest"
+        ].includes(state?.loraBrowser?.sort) ? state.loraBrowser.sort : "title";
+        const loraSort = this.get('[data-role="lora-sort"]');
+        loraSort.value = savedLoraSort;
+        const sortLabel = savedLoraSort === "name" ? "Filename" : savedLoraSort === "newest" ? "Newest" : "Title";
+        const loraSortButton = this.get('[data-role="lora-sort-button"]');
+        loraSortButton.title = `Sort LoRAs: ${sortLabel}`;
+        loraSortButton.setAttribute("aria-label", `Sort LoRAs: ${sortLabel}`);
+        for (const choice of this.root.querySelectorAll('[data-action="select-lora-sort"]')){
+            choice.dataset.selected = String(choice.dataset.sortValue === savedLoraSort);
+        }
         const sizes = {
             generationWidth: "--ss-generation-width",
             historyWidth: "--ss-history-width",
@@ -7982,6 +8301,11 @@ are removed when CSS is applied.</pre>
                 details: {
                     advanced: this.root.querySelector("details.ss-advanced")?.open === true,
                     visual: this.root.querySelector('details[data-role="library-visual-profile"]')?.open === true
+                },
+                loraBrowser: {
+                    open: this.loraFoldersOpen,
+                    folder: this.selectedLoraFolder,
+                    sort: this.get('[data-role="lora-sort"]').value
                 },
                 sizes: {
                     generationWidth: size("--ss-generation-width"),
@@ -9459,6 +9783,9 @@ class TaggedImageController {
     jobs = new Map();
     tagPayloads = new Map();
     tagFingerprints = new Map();
+    settledTagLookups = new Set();
+    settledAttachmentRequests = new Set();
+    settledMessageTargets = new Map();
     cleanups = new Map();
     reconciliationQueues = new Map();
     destroyed = false;
@@ -9528,6 +9855,19 @@ class TaggedImageController {
             slot
         });
         const fingerprint = widgetKeyHash(String(payload.fullMatch || payload.content || ""));
+        if (payload.isStreaming !== true) {
+            this.settledTagLookups.add(lookup);
+            const content = String(payload.content || "").trim();
+            const existing = [
+                ...this.jobs.values()
+            ].find((job)=>this.lookupKey(job.chatId, job.messageId, job.slot) === lookup) || [
+                ...this.jobs.values()
+            ].find((job)=>job.chatId === String(payload.chatId) && job.slot === slot && job.prompt === content && !job.inserted);
+            if (existing) {
+                this.settledMessageTargets.set(existing.id, String(payload.messageId));
+                this.retrySettledAttachment(existing);
+            }
+        }
         if (this.tagFingerprints.get(lookup) === fingerprint) return;
         this.tagFingerprints.set(lookup, fingerprint);
         for (const [id, existing] of this.jobs){
@@ -9575,6 +9915,7 @@ class TaggedImageController {
             for (const job of jobs){
                 if (!job?.id || !job?.messageId) continue;
                 this.jobs.set(job.id, job);
+                this.retrySettledAttachment(job);
                 if (!job.inserted && !this.inlineFigureForJob(job.id) && this.shouldRenderPlaceholder(job)) {
                     this.render(job);
                 } else {
@@ -9598,6 +9939,12 @@ class TaggedImageController {
                 ...job
             };
             this.jobs.set(job.id, next);
+            if (next.inserted) {
+                this.settledAttachmentRequests.delete(next.id);
+                this.settledMessageTargets.delete(next.id);
+            } else {
+                this.retrySettledAttachment(next);
+            }
             const inlineFigure = this.inlineFigureForJob(next.id);
             if (inlineFigure) {
                 inlineFigure.dataset.state = next.inserted ? "ready" : next.status;
@@ -9620,7 +9967,23 @@ class TaggedImageController {
         this.jobs.clear();
         this.tagPayloads.clear();
         this.tagFingerprints.clear();
+        this.settledTagLookups.clear();
+        this.settledAttachmentRequests.clear();
+        this.settledMessageTargets.clear();
         this.reconciliationQueues.clear();
+    }
+    retrySettledAttachment(job) {
+        if (job.status !== "ready" || job.inserted || !job.id) return;
+        const messageId = this.settledMessageTargets.get(job.id) || job.messageId;
+        const lookup = this.lookupKey(job.chatId, messageId, job.slot);
+        if (!this.settledTagLookups.has(lookup) || this.settledAttachmentRequests.has(job.id)) return;
+        this.settledAttachmentRequests.add(job.id);
+        this.ctx.sendToBackend({
+            type: "retry_tagged_attachment",
+            requestId: crypto.randomUUID(),
+            jobId: job.id,
+            messageId
+        });
     }
     lookupKey(chatId, messageId, slot) {
         return `${chatId}:${messageId}:${slot}`;

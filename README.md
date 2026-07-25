@@ -13,7 +13,7 @@ It adds:
 - Positive and negative prompting, checkpoint selection, chain-linked aspect-ratio sizing, steps, CFG, seed, live sampler/scheduler lists, ordered Swarm preset stacking, in-app Swarm preset management, model-component overrides, and raw request JSON
 - Saved SwarmUI/ComfyUI workflows presented through a focused setup modal: choose a workflow, edit the grouped parameters its author exposed, upload workflow image inputs, and generate without touching the node graph
 - Context-aware orientation and seed actions that flip to the useful next state, with fixed-seed reuse from the selected output
-- A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API and filtered against the selected checkpoint's `compat_class`
+- A multi-keyword searchable LoRA library read directly from SwarmUI's official `ListModels` API, filtered against the selected checkpoint's `compat_class`, and navigable through a persistent directory-tree sidebar built from Swarm's relative model paths
 - LoRA preview images and inherited metadata: title, author, description, tags, architecture/compatibility, usage hints, trigger phrase, and default weight
 - Ordered visual LoRA stacking with square metadata previews, per-item enable/disable, weights, opt-in trigger phrases, reorder controls, reusable saved stack presets, and one-click materialization of a Swarm preset into editable Studio controls
 - Shareable Studio stack JSON, direct in-app application to Lumiverse Image Gen LoRA presets, and an in-Studio, progress-aware SwarmUI downloader for selected missing LoRAs or pasted/dropped Civitai and Hugging Face links
@@ -40,7 +40,11 @@ It adds:
 - Shared float-player/Studio output and draft state, so Quick create inherits the last model, dimensions, sampler, scheduler, presets, LoRAs, workflow, init image, and overrides—and the full Studio restores them when it reopens
 - The drawer’s picture-frame wall emblem reused consistently in the float player, Studio header, drawer registration, and chat input action
 
-Generation itself goes through `spindle.imageGen.generate()`. That means it continues to use the SwarmUI connection, encrypted secret, persistence, and ownership behavior already managed by Lumiverse.
+Generation goes through `spindle.imageGen.generateStream()` when the installed
+Lumiverse runtime exposes it, with a clone-safe `spindle.imageGen.generate()`
+fallback for older runtimes. Both paths continue to use the SwarmUI connection,
+encrypted secret, persistence, and ownership behavior already managed by
+Lumiverse.
 
 ## Install
 
@@ -146,6 +150,16 @@ checkpoint's SwarmUI `compat_class` with each LoRA. If exact metadata is
 missing, Swarm Studio falls back to conservative family detection for Anima,
 Illustrious, Pony, SDXL, SD 1.5, Flux, SD3, Chroma, Qwen, and Hunyuan. LoRAs
 with no identifiable family remain visible instead of being silently lost.
+
+The folder button beside the compact sort control opens a directory tree made
+from each model's relative SwarmUI filename. **All LoRAs** spans the complete
+library, **Root** shows models stored directly in the LoRA directory, and
+selecting a folder includes its nested descendants while preserving keyword and
+model-family filters. The selected folder, sort order, and desktop sidebar state
+survive closing Studio. On mobile the same tree opens as a temporary drawer so
+the card grid keeps its usable width. Folder navigation is intentionally
+read-only: Swarm's metadata API does not expose a supported move/rename
+operation, so Studio never mutates model files behind SwarmUI's back.
 
 Saved LoRA stacks and recent generation details are kept in Lumiverse's scoped
 per-user extension storage. Generation details are associated with the
