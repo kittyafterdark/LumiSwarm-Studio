@@ -312,6 +312,16 @@ export function createRequestId(cryptoApi: Crypto | null | undefined = globalThi
     .slice(2, 10)}`
 }
 
+export function reportStudioError(scope: string, error: unknown, details?: unknown): void {
+  const label = `[Swarm Studio] ${String(scope || "Error").trim() || "Error"}`
+  if (error instanceof Error) {
+    console.error(label, error.message, error, details ?? "")
+    return
+  }
+  const message = String(error || "Unknown error")
+  console.error(label, message, details ?? error)
+}
+
 type ModelFamily =
   | "anima"
   | "illustrious"
@@ -3871,6 +3881,24 @@ export function applyPresetStackPrompts(
   return { prompt: resolvedPrompt, negativePrompt: resolvedNegative }
 }
 
+export function applySwarmPresetTokens(prompt: string, titles: string[]): string {
+  const tokens = titles
+    .map((title) => String(title || "").replace(/[<>\r\n]+/g, "").trim())
+    .filter(Boolean)
+    .map((title) => `<preset:${title}>`)
+  const tokenList = tokens.join(", ")
+  let resolved = String(prompt || "")
+    .replace(/\{\{\s*swarm_preset\s*\}\}/gi, tokenList)
+    .trim()
+  const lower = resolved.toLowerCase()
+  const missing = tokens.filter((token) => !lower.includes(token.toLowerCase()))
+  if (missing.length) resolved = [missing.join(", "), resolved].filter(Boolean).join(", ")
+  return resolved
+    .replace(/(?:\s*,\s*){2,}/g, ", ")
+    .replace(/^\s*,\s*|\s*,\s*$/g, "")
+    .trim()
+}
+
 function presetListValue(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean)
   const text = String(value || "").trim()
@@ -3894,6 +3922,13 @@ export function lorasFromSwarmPreset(paramMap: Record<string, string>): Array<{ 
     name,
     weight: Number.isFinite(weights[index]) ? clamp(weights[index], -10, 10) : 1,
   }))
+}
+
+export function serializeSwarmPresetList(values: unknown[]): string {
+  return values
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(",")
 }
 
 function labelFromName(name: string): string {
@@ -4397,6 +4432,7 @@ class MiniPlayerController {
 
   fail(jobId: string, message: string): void {
     if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return
+    reportStudioError("Quick Create generation", message || "Generation stopped.")
     this.state = "error"
     this.snapshotValue = {
       ...this.snapshotValue,
@@ -7428,8 +7464,11 @@ are removed when CSS is applied.</pre>
     add("refinermodel", this.get<HTMLInputElement>('[data-role="unet"]').value)
     const enabledLoras = this.state.stack.filter((item) => item.enabled)
     if (enabledLoras.length) {
-      add("loras", JSON.stringify(enabledLoras.map((item) => item.lora.name)))
-      add("loraweights", JSON.stringify(enabledLoras.map((item) => clamp(Number(item.weight) || 1, -10, 10))))
+      add("loras", serializeSwarmPresetList(enabledLoras.map((item) => item.lora.name)))
+      add(
+        "loraweights",
+        serializeSwarmPresetList(enabledLoras.map((item) => clamp(Number(item.weight) || 1, -10, 10))),
+      )
     }
     if (this.state.selectedWorkflow) add("comfyuicustomworkflow", this.state.selectedWorkflow.name)
     return paramMap
@@ -7870,7 +7909,7 @@ are removed when CSS is applied.</pre>
     pill.textContent = enabled.length === 1 ? enabled[0].title : `${enabled.length} presets`
     pill.title = enabled.map((preset) => preset.title).join(" → ")
     status.textContent =
-      `${enabled.length} preset${enabled.length === 1 ? "" : "s"} sent in order: ${enabled.map((preset) => preset.title).join(" → ")}. Swarm resolves their parameter maps server-side; Studio records the submitted prompt and preset names.`
+      `${enabled.length} preset${enabled.length === 1 ? "" : "s"} applied in order: ${enabled.map((preset) => preset.title).join(" → ")}. Studio sends native preset directives alongside the complete composed prompt so Swarm preserves both.`
   }
 
   private refreshMetadata(): void {
@@ -9971,7 +10010,11 @@ are removed when CSS is applied.</pre>
       }
     }
     const triggers = this.inheritedTriggers().filter((trigger) => !layeredPrompt.toLowerCase().includes(trigger.toLowerCase()))
-    return [triggers.join(", "), layeredPrompt].filter(Boolean).join(", ")
+    const composed = [triggers.join(", "), layeredPrompt].filter(Boolean).join(", ")
+    const presets = this.state.selectedPresets
+      .filter((preset) => preset.enabled)
+      .map((preset) => preset.title)
+    return applySwarmPresetTokens(composed, presets)
   }
 
   private finalNegativePrompt(): string {
@@ -9992,12 +10035,10 @@ are removed when CSS is applied.</pre>
       }
       parsed = value as Record<string, unknown>
     }
-    const presets = this.state.selectedPresets
-      .filter((preset) => preset.enabled)
-      .map((preset) => preset.title)
-    if (presets.length) parsed.presets = presets
-    else delete parsed.presets
     Object.assign(parsed, this.workflowRawOverrides())
+    for (const key of Object.keys(parsed)) {
+      if (key.toLowerCase().replace(/[^a-z0-9]/g, "") === "presets") delete parsed[key]
+    }
     return Object.keys(parsed).length ? JSON.stringify(parsed) : undefined
   }
 
@@ -10523,6 +10564,7 @@ are removed when CSS is applied.</pre>
   }
 
   private setRunStatus(message: string, error = false): void {
+    if (error && message) reportStudioError("Studio", message)
     for (const status of this.root.querySelectorAll<HTMLElement>(
       '[data-role="run-status"], [data-role="prompt-run-status"]',
     )) {
@@ -11313,6 +11355,7 @@ class ChatVisualsController {
   }
 
   private setStatus(message: string, error = false): void {
+    if (error && message) reportStudioError("Chat Visuals", message)
     const status = this.get<HTMLElement>("chat-visuals-status")
     status.textContent = message
     status.dataset.error = String(error)
@@ -12067,6 +12110,15 @@ export function setup(ctx: FrontendContext): () => void {
   const removeActionClick =
     typeof inputAction?.onClick === "function" ? inputAction.onClick(() => openStudio("studio")) : () => {}
   const unsubscribeMessages = ctx.onBackendMessage((payload: any) => {
+    const backendError =
+      payload?.error
+      || payload?.data?.error
+      || payload?.data?.metadataError
+      || payload?.data?.workflowError
+      || ((/error|failed/i.test(String(payload?.type || ""))) ? payload?.message : "")
+    if (backendError) {
+      reportStudioError(`Backend ${String(payload?.type || "message")}`, backendError, payload)
+    }
     if (payload?.type === "bootstrap_result" && payload?.data?.tagAutomation) {
       applyBehaviorState(behaviorFromServer(payload.data.tagAutomation))
     }
@@ -12101,6 +12153,11 @@ export function setup(ctx: FrontendContext): () => void {
     activeStudio?.onImageGenerationEvent("complete", payload)
   })
   const unsubscribeError = subscribeToImageEvent("IMAGE_GEN_ERROR", (payload: any) => {
+    reportStudioError(
+      "Image generation event",
+      payload?.error || payload?.message || "Image generation failed.",
+      payload,
+    )
     miniplayer?.onImageGenerationEvent("error", payload)
     activeStudio?.onImageGenerationEvent("error", payload)
   })

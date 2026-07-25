@@ -132,7 +132,7 @@ interaction: character 1 turns toward character 2; distinct hands and silhouette
 
 Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; 3:4 is available for portrait framing. The protocol asks models to reserve 9:16 and 16:9 for layouts explicitly presented as phone or widescreen media. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the character visual positive and negative, removes that binding's LoRAs from the request, and adds a no-person/character negative guard while preserving unrelated Studio style LoRAs, presets, and generation controls. `persona="active"` opts the active persona's bound visual identity into the request; it defaults to `none`. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request.
 
-The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives; tagged jobs remove the duplicate raw preset field before submission. A literal `{{swarm_preset}}` in a tag resolves to the same directive list without adding it twice. Scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. An enabled character-folder visual binding contributes its base positive, base negative, and saved LoRA stack to both manual and tagged generation. Native Character LoRA `base_tags` remain a fallback when a binding has no positive base; the separately bound native Character LoRA is never injected.
+The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives inside the complete composed positive prompt for both manual and tagged jobs; Studio removes the conflicting duplicate raw preset field before submission. This keeps the user's scene prompt, character/persona visual layers, and inherited LoRA triggers alongside Swarm's saved preset behavior. A literal `{{swarm_preset}}` resolves to the same directive list without adding it twice, and scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. An enabled character-folder visual binding contributes its base positive, base negative, and saved LoRA stack to both manual and tagged generation. Native Character LoRA `base_tags` remain a fallback when a binding has no positive base; the separately bound native Character LoRA is never injected.
 
 The injected protocol identifies this as generation through the user's configured local SwarmUI, so the language model emits a request instead of claiming it lacks an image tool. It includes the exact active identity blocks that Studio will prepend and forbids substituting chat display names for visual tags. Two-subject requests use compact `character 1:`, `character 2:`, and `interaction:` lines so pose ownership remains clear without repeating the identity prompt. Anima-family checkpoints receive a condensed hybrid Danbooru/natural-language guide, the `safe` / `sensitive` / `nsfw` / `explicit` safety vocabulary, concrete scene-layer ordering, and a subject-action pattern for unambiguous multi-character staging.
 
@@ -232,7 +232,11 @@ a checklist built from the current schema so prompt, model, sizing, sampling,
 LoRAs, workflow, overrides, and seed can be included or omitted individually
 before Studio calls SwarmUI's `AddNewPreset` API. The adjacent settings button
 opens a manager where existing presets can be deleted directly through
-SwarmUI's `DeletePreset` API.
+SwarmUI's `DeletePreset` API. LoRA filenames and weights are saved using
+SwarmUI's native comma-separated preset fields. Studio still understands the
+JSON-array fields written by versions 1.0.4 and 1.0.5 when **Apply** is used,
+but those malformed server-side presets should be deleted and saved again
+before they are invoked natively during generation.
 
 Each selected Swarm preset has an **Apply** action. It copies the preset's known
 values into the editable Studio controls, moves any LoRA filename/weight pairs
@@ -255,6 +259,12 @@ LoRA workspace and selected in both stack selectors. Subsequent manual edits
 are left alone rather than being overwritten on every folder refresh.
 
 Preview images are fetched lazily from the configured SwarmUI origin. Cross-origin preview URLs are refused.
+
+Compact UI status messages are mirrored without truncation to the browser
+console. Backend request failures additionally retain the original `Error`
+object and stack in Lumiverse's server console. Search for `[Swarm Studio]`
+when reporting a generation, preset, metadata, downloader, Quick Create, or
+Chat Visuals failure.
 
 ## Saved Swarm workflows
 

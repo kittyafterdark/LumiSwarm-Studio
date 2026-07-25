@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.7
+
+### Fixed
+
+- Enabled Swarm prompt presets now use native `<preset:exact saved name>`
+  directives inside Studio's complete composed positive prompt. This preserves
+  the user's scene prompt, character/persona visual layers, inherited LoRA
+  triggers, and selected preset behavior in the same Swarm request.
+- Studio strips the conflicting raw `presets` override from manual generation,
+  including stale overrides restored from older saved Studio state. This
+  prevents Swarm from replacing the submitted prompt after Lumiverse builds the
+  request.
+- Existing native preset directives are detected case-insensitively and are not
+  duplicated. The `{{swarm_preset}}` macro expands to the enabled directive
+  list in manual generation just as it does for tagged chat illustrations.
+
 ## 1.0.6
 
 ### Fixed

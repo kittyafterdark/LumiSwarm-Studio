@@ -14,6 +14,15 @@ export function createRequestId(cryptoApi = globalThis.crypto) {
     fallbackRequestIdCounter += 1;
     return `swarm-studio-${Date.now().toString(36)}-${fallbackRequestIdCounter.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
+export function reportStudioError(scope, error, details) {
+    const label = `[Swarm Studio] ${String(scope || "Error").trim() || "Error"}`;
+    if (error instanceof Error) {
+        console.error(label, error.message, error, details ?? "");
+        return;
+    }
+    const message = String(error || "Unknown error");
+    console.error(label, message, details ?? error);
+}
 const PORTRAIT_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="m10 8 2-2 2 2M12 6v7"/></svg>
 `;
@@ -3551,6 +3560,18 @@ export function applyPresetStackPrompts(prompt, negativePrompt, titles, presets)
         negativePrompt: resolvedNegative
     };
 }
+export function applySwarmPresetTokens(prompt, titles) {
+    const tokens = titles.map((title)=>String(title || "").replace(/[<>\r\n]+/g, "").trim()).filter(Boolean).map((title)=>`<preset:${title}>`);
+    const tokenList = tokens.join(", ");
+    let resolved = String(prompt || "").replace(/\{\{\s*swarm_preset\s*\}\}/gi, tokenList).trim();
+    const lower = resolved.toLowerCase();
+    const missing = tokens.filter((token)=>!lower.includes(token.toLowerCase()));
+    if (missing.length) resolved = [
+        missing.join(", "),
+        resolved
+    ].filter(Boolean).join(", ");
+    return resolved.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
+}
 function presetListValue(value) {
     if (Array.isArray(value)) return value.map(String).map((item)=>item.trim()).filter(Boolean);
     const text = String(value || "").trim();
@@ -3572,6 +3593,9 @@ export function lorasFromSwarmPreset(paramMap) {
             name,
             weight: Number.isFinite(weights[index]) ? clamp(weights[index], -10, 10) : 1
         }));
+}
+export function serializeSwarmPresetList(values) {
+    return values.map((value)=>String(value ?? "").trim()).filter(Boolean).join(",");
 }
 function labelFromName(name) {
     const leaf = name.replace(/\\/g, "/").split("/").pop() || name;
@@ -4006,6 +4030,7 @@ class MiniPlayerController {
     }
     fail(jobId, message) {
         if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return;
+        reportStudioError("Quick Create generation", message || "Generation stopped.");
         this.state = "error";
         this.snapshotValue = {
             ...this.snapshotValue,
@@ -6907,8 +6932,8 @@ are removed when CSS is applied.</pre>
         add("refinermodel", this.get('[data-role="unet"]').value);
         const enabledLoras = this.state.stack.filter((item)=>item.enabled);
         if (enabledLoras.length) {
-            add("loras", JSON.stringify(enabledLoras.map((item)=>item.lora.name)));
-            add("loraweights", JSON.stringify(enabledLoras.map((item)=>clamp(Number(item.weight) || 1, -10, 10))));
+            add("loras", serializeSwarmPresetList(enabledLoras.map((item)=>item.lora.name)));
+            add("loraweights", serializeSwarmPresetList(enabledLoras.map((item)=>clamp(Number(item.weight) || 1, -10, 10))));
         }
         if (this.state.selectedWorkflow) add("comfyuicustomworkflow", this.state.selectedWorkflow.name);
         return paramMap;
@@ -7327,7 +7352,7 @@ are removed when CSS is applied.</pre>
         pill.hidden = false;
         pill.textContent = enabled.length === 1 ? enabled[0].title : `${enabled.length} presets`;
         pill.title = enabled.map((preset)=>preset.title).join(" → ");
-        status.textContent = `${enabled.length} preset${enabled.length === 1 ? "" : "s"} sent in order: ${enabled.map((preset)=>preset.title).join(" → ")}. Swarm resolves their parameter maps server-side; Studio records the submitted prompt and preset names.`;
+        status.textContent = `${enabled.length} preset${enabled.length === 1 ? "" : "s"} applied in order: ${enabled.map((preset)=>preset.title).join(" → ")}. Studio sends native preset directives alongside the complete composed prompt so Swarm preserves both.`;
     }
     refreshMetadata() {
         if (!this.state.connection) return;
@@ -9302,10 +9327,12 @@ are removed when CSS is applied.</pre>
             }
         }
         const triggers = this.inheritedTriggers().filter((trigger)=>!layeredPrompt.toLowerCase().includes(trigger.toLowerCase()));
-        return [
+        const composed = [
             triggers.join(", "),
             layeredPrompt
         ].filter(Boolean).join(", ");
+        const presets = this.state.selectedPresets.filter((preset)=>preset.enabled).map((preset)=>preset.title);
+        return applySwarmPresetTokens(composed, presets);
     }
     finalNegativePrompt() {
         const prompt = this.get('[data-role="negative"]').value.trim();
@@ -9327,10 +9354,10 @@ are removed when CSS is applied.</pre>
             }
             parsed = value;
         }
-        const presets = this.state.selectedPresets.filter((preset)=>preset.enabled).map((preset)=>preset.title);
-        if (presets.length) parsed.presets = presets;
-        else delete parsed.presets;
         Object.assign(parsed, this.workflowRawOverrides());
+        for (const key of Object.keys(parsed)){
+            if (key.toLowerCase().replace(/[^a-z0-9]/g, "") === "presets") delete parsed[key];
+        }
         return Object.keys(parsed).length ? JSON.stringify(parsed) : undefined;
     }
     collectGenerationParameters(rawRequestOverride, enabled = this.effectiveStack().filter((item)=>item.enabled)) {
@@ -9772,6 +9799,7 @@ are removed when CSS is applied.</pre>
         this.get(".ss-connection-wrap").style.setProperty("--ss-status-color", colors[status]);
     }
     setRunStatus(message, error = false) {
+        if (error && message) reportStudioError("Studio", message);
         for (const status of this.root.querySelectorAll('[data-role="run-status"], [data-role="prompt-run-status"]')){
             status.textContent = message;
             status.style.color = error ? "#ef7777" : "";
@@ -10464,6 +10492,7 @@ class ChatVisualsController {
         });
     }
     setStatus(message, error = false) {
+        if (error && message) reportStudioError("Chat Visuals", message);
         const status = this.get("chat-visuals-status");
         status.textContent = message;
         status.dataset.error = String(error);
@@ -11028,6 +11057,10 @@ export function setup(ctx) {
     }) : null;
     const removeActionClick = typeof inputAction?.onClick === "function" ? inputAction.onClick(()=>openStudio("studio")) : ()=>{};
     const unsubscribeMessages = ctx.onBackendMessage((payload)=>{
+        const backendError = payload?.error || payload?.data?.error || payload?.data?.metadataError || payload?.data?.workflowError || (/error|failed/i.test(String(payload?.type || "")) ? payload?.message : "");
+        if (backendError) {
+            reportStudioError(`Backend ${String(payload?.type || "message")}`, backendError, payload);
+        }
         if (payload?.type === "bootstrap_result" && payload?.data?.tagAutomation) {
             applyBehaviorState(behaviorFromServer(payload.data.tagAutomation));
         }
@@ -11062,6 +11095,7 @@ export function setup(ctx) {
         activeStudio?.onImageGenerationEvent("complete", payload);
     });
     const unsubscribeError = subscribeToImageEvent("IMAGE_GEN_ERROR", (payload)=>{
+        reportStudioError("Image generation event", payload?.error || payload?.message || "Image generation failed.", payload);
         miniplayer?.onImageGenerationEvent("error", payload);
         activeStudio?.onImageGenerationEvent("error", payload);
     });
