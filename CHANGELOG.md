@@ -14,9 +14,6 @@
 - Remapped jobs acquire their mutation lock using the final message ID, keeping
   multiple images completing in the same message serialized without one
   attachment overwriting another.
-- This failure was unrelated to IPv4 or remote mobile access; the same race
-  could occur locally whenever character/persona layers or preset directives
-  changed the submitted prompt.
 
 ## 1.0.7
 
