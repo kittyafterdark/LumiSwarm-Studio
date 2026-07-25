@@ -41,6 +41,8 @@ const taggedMessage = {
   metadata: {},
 }
 const taggedMessages = [taggedMessage]
+let hiddenTaggedMessageId = ""
+let taggedMessageReadMisses = 0
 const activePersona = {
   id: "persona-1",
   name: "User",
@@ -256,6 +258,10 @@ globalThis.spindle = {
     },
     async getMessages(chatId) {
       assert.equal(chatId, "chat-1")
+      if (hiddenTaggedMessageId && taggedMessageReadMisses > 0) {
+        taggedMessageReadMisses -= 1
+        return taggedMessages.filter((message) => message.id !== hiddenTaggedMessageId)
+      }
       return taggedMessages
     },
     async updateMessage(chatId, messageId, patch) {
@@ -966,6 +972,13 @@ assert.equal(taggedGenerationCount, 1)
 const taggedResult = sent.find((entry) => entry.payload.type === "tagged_generation_result")
 assert.equal(taggedResult.payload.data.record.imageId, "image-tag-1")
 assert.equal(taggedResult.payload.data.taggedJob.status, "ready")
+const taggedReconciliation = sent.find((entry) =>
+  entry.payload.type === "tagged_message_reconciled"
+  && entry.payload.data.jobId === taggedResult.payload.data.taggedJob.id
+)
+assert.equal(taggedReconciliation.payload.data.chatId, "chat-1")
+assert.equal(taggedReconciliation.payload.data.messageId, taggedMessage.id)
+assert.match(taggedReconciliation.payload.data.content, /data-swarm-studio-job-id=/)
 assert.match(taggedMessage.content, /<img src="\/api\/v1\/image-gen\/results\/image-tag-1"/)
 assert.match(taggedMessage.content, /data-swarm-studio-slot="post"/)
 assert.match(taggedMessage.content, /data-swarm-studio-fit="cover"/)
@@ -1062,6 +1075,37 @@ assert.deepEqual(
   "disabled character visuals must leave newly generated images Unfiled",
 )
 
+const delayedTaggedMessage = {
+  id: "message-tag-delayed",
+  role: "assistant",
+  content: `<article><swarm-image request="generate" slot="delayed" aspect="4:3" alt="Delayed attachment">{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition></swarm-image></article>`,
+  metadata: {},
+}
+taggedMessages.push(delayedTaggedMessage)
+const delayedMatch = delayedTaggedMessage.content.match(/<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image>/i)
+assert.ok(delayedMatch)
+hiddenTaggedMessageId = delayedTaggedMessage.id
+taggedMessageReadMisses = 2
+await frontendHandler({
+  type: "tag_generate",
+  requestId: "tag-generate-delayed",
+  chatId: "chat-1",
+  messageId: delayedTaggedMessage.id,
+  fullMatch: delayedMatch[0],
+  attrs: { request: "generate", slot: "delayed", aspect: "4:3", alt: "Delayed attachment" },
+  content: delayedMatch[2],
+}, "user-1")
+hiddenTaggedMessageId = ""
+assert.equal(taggedMessageReadMisses, 0, "attachment finalization should retry until the chat message becomes available")
+assert.match(delayedTaggedMessage.content, /data-swarm-studio-image="true"/)
+assert.doesNotMatch(delayedTaggedMessage.content, /<swarm-image\b/i)
+const delayedTaggedResult = sent.filter((entry) => entry.payload.type === "tagged_generation_result").at(-1)
+assert.equal(delayedTaggedResult.payload.data.record.imageId, "image-tag-5")
+assert.ok(sent.some((entry) =>
+  entry.payload.type === "tagged_message_reconciled"
+  && entry.payload.data.jobId === delayedTaggedResult.payload.data.taggedJob.id
+))
+
 const originalOutput = await request("download_swarm_output", {
   connectionId: "swarm-1",
   swarmPath: generated.data.record.swarmPath,
@@ -1089,12 +1133,17 @@ assert.match(source, /folder\.binding\?\.characterId === characterId/)
 assert.match(source, /type: "character"/)
 assert.match(source, /rawBinding\.type === "character" \|\| rawBinding\.type === "chat"/)
 assert.match(source, /const taggedMessageFinalizeLocks = new Map<string, Promise<void>>\(\)/)
+assert.match(source, /const taggedFinalizeRetries = new Map<string, Promise<boolean>>\(\)/)
+assert.match(source, /TAGGED_FINALIZE_RETRY_DELAYS_MS/)
 assert.match(source, /withTaggedMessageFinalizeLock\(lockKey/)
+assert.match(source, /finalizeTaggedImageJobWithRetry\(job, userId\)/)
+assert.match(source, /type: "tagged_message_reconciled"/)
 assert.match(source, /replaceTaggedImagePlaceholder\(content, job, markup\)/)
 assert.match(source, /data-swarm-studio-image="true"/)
 assert.match(source, /data-swarm-studio-inline-action="true"/)
 assert.match(source, /case "list_tagged_jobs"/)
 assert.match(source, /case "retry_tagged_job"/)
+assert.match(source, /case "retry_tagged_attachment"/)
 assert.match(source, /if \(characterFolder\?\.binding && !characterFolder\.binding\.enabled\) return/)
 assert.match(source, /folder\.binding\?\.characterId === characterId && folder\.binding\.enabled/)
 

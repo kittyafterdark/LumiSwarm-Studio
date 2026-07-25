@@ -288,6 +288,7 @@ const PERSONA_VISUAL_PRESET_LIMIT = 80
 const GENERATION_RECORD_LIMIT = 100
 const OUTPUT_FOLDER_LIMIT = 80
 const TAGGED_IMAGE_JOB_LIMIT = 160
+const TAGGED_FINALIZE_RETRY_DELAYS_MS = [0, 250, 750, 1_500, 3_000, 5_000] as const
 const HISTORY_PAGE_SIZE = 12
 const CONTEXT_IMAGE_MEMORY_LIMIT = 6
 const DEFAULT_SWARMUI_URL = "http://localhost:7801"
@@ -301,6 +302,7 @@ const generationControllers = new Map<string, {
 }>()
 const runningTaggedJobs = new Set<string>()
 const taggedMessageFinalizeLocks = new Map<string, Promise<void>>()
+const taggedFinalizeRetries = new Map<string, Promise<boolean>>()
 const swarmProtocolContexts = new Map<string, SwarmProtocolContext>()
 
 const SWARM_IMAGE_PROTOCOL_BASE = `SWARM STUDIO IMAGE REQUEST PROTOCOL
@@ -2817,6 +2819,18 @@ function sendTaggedJobState(job: TaggedImageJob, userId?: string): void {
   spindle.sendToFrontend({ type: "tagged_image_job", data: taggedJobPublic(job) }, userId)
 }
 
+function sendTaggedMessageReconciliation(job: TaggedImageJob, content: string, userId?: string): void {
+  spindle.sendToFrontend({
+    type: "tagged_message_reconciled",
+    data: {
+      jobId: job.id,
+      chatId: job.chatId,
+      messageId: job.messageId,
+      content,
+    },
+  }, userId)
+}
+
 function escapeHtmlAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
@@ -2877,8 +2891,10 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Pro
     if (!replacement.replaced) {
       if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) {
         job.inserted = true
+        job.error = ""
         await upsertTaggedImageJob(job, userId)
         sendTaggedJobState(job, userId)
+        sendTaggedMessageReconciliation(job, content, userId)
         return true
       }
       return false
@@ -2903,10 +2919,47 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Pro
       },
     })
     job.inserted = true
+    job.error = ""
     await upsertTaggedImageJob(job, userId)
     sendTaggedJobState(job, userId)
+    sendTaggedMessageReconciliation(job, replacement.content, userId)
     return true
   })
+}
+
+async function finalizeTaggedImageJobWithRetry(job: TaggedImageJob, userId?: string): Promise<boolean> {
+  const active = taggedFinalizeRetries.get(job.id)
+  if (active) return active
+
+  const task = (async () => {
+    let lastError = ""
+    job.error = ""
+    for (const delayMs of TAGGED_FINALIZE_RETRY_DELAYS_MS) {
+      if (delayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+      }
+      if (job.status !== "ready" || !job.imageUrl) return false
+      try {
+        if (await finalizeTaggedImageJob(job, userId)) return true
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error)
+      }
+    }
+
+    job.inserted = false
+    job.error = lastError
+      ? `Image generated, but Lumiverse could not attach it to the chat yet: ${lastError}`
+      : "Image generated, but the chat message was not ready for attachment. Use Attach image to try again."
+    await upsertTaggedImageJob(job, userId)
+    sendTaggedJobState(job, userId)
+    return false
+  })()
+
+  taggedFinalizeRetries.set(job.id, task)
+  void task.finally(() => {
+    if (taggedFinalizeRetries.get(job.id) === task) taggedFinalizeRetries.delete(job.id)
+  }).catch(() => {})
+  return task
 }
 
 interface TaggedImageRetryOverrides {
@@ -3058,9 +3111,8 @@ async function runTaggedImageJob(
         ...outputPage,
       },
     }, userId)
-    const inserted = await finalizeTaggedImageJob(job, userId)
-    if (!inserted) sendTaggedJobState(job, userId)
-    if ((await loadTagAutomationConfig(userId)).completionToast && typeof spindle.toast?.success === "function") {
+    const inserted = await finalizeTaggedImageJobWithRetry(job, userId)
+    if (inserted && (await loadTagAutomationConfig(userId)).completionToast && typeof spindle.toast?.success === "function") {
       spindle.toast.success(`Swarm Studio attached ${job.alt || "an illustration"}.`)
     }
   } catch (error) {
@@ -3097,7 +3149,7 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
   let job = jobs.find((candidate) => candidate.key === key)
   if (job) {
     job.fullMatch = fullMatch
-    if (job.status === "ready" && !job.inserted) await finalizeTaggedImageJob(job, userId)
+    if (job.status === "ready") await finalizeTaggedImageJobWithRetry(job, userId)
     if (!force || job.status === "generating") {
       sendTaggedJobState(job, userId)
       return job
@@ -3586,6 +3638,16 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           overrides,
           userId,
         )
+        return
+      }
+      case "retry_tagged_attachment": {
+        const jobId = asString(payload?.jobId).trim()
+        const job = (await loadTaggedImageJobs(userId)).find((candidate) => candidate.id === jobId)
+        if (!job) throw new Error("That inline image job no longer exists.")
+        if (job.status !== "ready" || !job.imageUrl) {
+          throw new Error("The image must finish generating before it can be attached.")
+        }
+        await finalizeTaggedImageJobWithRetry(job, userId)
         return
       }
       case "load_connection": {

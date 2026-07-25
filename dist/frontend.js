@@ -9460,6 +9460,8 @@ class TaggedImageController {
     tagPayloads = new Map();
     tagFingerprints = new Map();
     cleanups = new Map();
+    reconciliationQueues = new Map();
+    destroyed = false;
     eventClosest(event, selector) {
         for (const node of event.composedPath()){
             if (!(node instanceof HTMLElement)) continue;
@@ -9564,6 +9566,10 @@ class TaggedImageController {
         });
     }
     onMessage(payload) {
+        if (payload?.type === "tagged_message_reconciled") {
+            this.reconcileMessage(payload.data);
+            return;
+        }
         if (payload?.type === "tagged_image_jobs_result") {
             const jobs = Array.isArray(payload.data) ? payload.data : [];
             for (const job of jobs){
@@ -9605,6 +9611,7 @@ class TaggedImageController {
         }
     }
     destroy() {
+        this.destroyed = true;
         window.removeEventListener("click", this.handleInlineClick, true);
         window.removeEventListener("contextmenu", this.handleInlineContextMenu, true);
         window.removeEventListener("keydown", this.handleInlineKeyDown, true);
@@ -9613,6 +9620,7 @@ class TaggedImageController {
         this.jobs.clear();
         this.tagPayloads.clear();
         this.tagFingerprints.clear();
+        this.reconciliationQueues.clear();
     }
     lookupKey(chatId, messageId, slot) {
         return `${chatId}:${messageId}:${slot}`;
@@ -9662,7 +9670,43 @@ class TaggedImageController {
         this.cleanups.delete(id);
     }
     shouldRenderPlaceholder(job) {
-        return job.status === "requested" || job.status === "failed" || job.status === "cancelled";
+        return job.status === "requested" || job.status === "failed" || job.status === "cancelled" || job.status === "ready" && !job.inserted;
+    }
+    reconcileMessage(value) {
+        const jobId = String(value?.jobId || "");
+        const chatId = String(value?.chatId || "");
+        const messageId = String(value?.messageId || "");
+        const content = String(value?.content || "");
+        if (!jobId || !chatId || !messageId || !content) return;
+        const key = `${chatId}:${messageId}`;
+        const previous = this.reconciliationQueues.get(key) || Promise.resolve();
+        const task = previous.catch(()=>{}).then(async ()=>{
+            if (this.destroyed) return;
+            const job = this.jobs.get(jobId);
+            try {
+                if (typeof this.ctx.chats?.updateMessage !== "function") {
+                    throw new Error("This Lumiverse build does not expose live message refresh.");
+                }
+                await this.ctx.chats.updateMessage(chatId, messageId, {
+                    content
+                });
+                if (this.destroyed) return;
+                if (job) {
+                    job.inserted = true;
+                    job.error = "";
+                    this.remove(job);
+                }
+            } catch (error) {
+                if (this.destroyed || !job) return;
+                job.inserted = false;
+                job.error = error instanceof Error ? `The image is saved, but this chat view could not refresh: ${error.message}` : "The image is saved, but this chat view could not refresh.";
+                this.render(job);
+            }
+        });
+        this.reconciliationQueues.set(key, task);
+        void task.finally(()=>{
+            if (this.reconciliationQueues.get(key) === task) this.reconciliationQueues.delete(key);
+        }).catch(()=>{});
     }
     requestedAspect(job) {
         const aspect = String(job.aspect || "").trim();
@@ -9683,7 +9727,7 @@ class TaggedImageController {
             failed: "Illustration unavailable",
             cancelled: "Illustration stopped"
         };
-        const action = job.status === "requested" ? `<button data-action="generate">Generate image</button>` : job.status === "failed" || job.status === "cancelled" ? `<button data-action="retry">Retry</button>` : "";
+        const action = job.status === "requested" ? `<button data-action="generate">Generate image</button>` : job.status === "ready" && !job.inserted ? `<button data-action="attach">Attach image</button>` : job.status === "failed" || job.status === "cancelled" ? `<button data-action="retry">Retry</button>` : "";
         const error = job.error ? `<p class="error">${widgetEscape(job.error)}</p>` : "";
         const html = `
       <style>
@@ -9732,6 +9776,16 @@ class TaggedImageController {
     async handleWidgetAction(job, action) {
         if (action === "generate" || action === "retry") {
             this.retry(job, "current");
+            return;
+        }
+        if (action === "attach") {
+            job.error = "";
+            this.render(job);
+            this.ctx.sendToBackend({
+                type: "retry_tagged_attachment",
+                requestId: crypto.randomUUID(),
+                jobId: job.id
+            });
             return;
         }
         if (action !== "menu") return;

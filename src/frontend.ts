@@ -10210,6 +10210,8 @@ class TaggedImageController {
   private readonly tagPayloads = new Map<string, any>()
   private readonly tagFingerprints = new Map<string, string>()
   private readonly cleanups = new Map<string, () => void>()
+  private readonly reconciliationQueues = new Map<string, Promise<void>>()
+  private destroyed = false
 
   private eventClosest<T extends HTMLElement>(
     event: Event,
@@ -10366,6 +10368,10 @@ class TaggedImageController {
   }
 
   onMessage(payload: any): void {
+    if (payload?.type === "tagged_message_reconciled") {
+      this.reconcileMessage(payload.data)
+      return
+    }
     if (payload?.type === "tagged_image_jobs_result") {
       const jobs = Array.isArray(payload.data) ? payload.data as TaggedImageJobView[] : []
       for (const job of jobs) {
@@ -10405,6 +10411,7 @@ class TaggedImageController {
   }
 
   destroy(): void {
+    this.destroyed = true
     window.removeEventListener("click", this.handleInlineClick, true)
     window.removeEventListener("contextmenu", this.handleInlineContextMenu, true)
     window.removeEventListener("keydown", this.handleInlineKeyDown, true)
@@ -10413,6 +10420,7 @@ class TaggedImageController {
     this.jobs.clear()
     this.tagPayloads.clear()
     this.tagFingerprints.clear()
+    this.reconciliationQueues.clear()
   }
 
   private lookupKey(chatId: string, messageId: string, slot: string): string {
@@ -10465,7 +10473,48 @@ class TaggedImageController {
   }
 
   private shouldRenderPlaceholder(job: TaggedImageJobView): boolean {
-    return job.status === "requested" || job.status === "failed" || job.status === "cancelled"
+    return job.status === "requested"
+      || job.status === "failed"
+      || job.status === "cancelled"
+      || (job.status === "ready" && !job.inserted)
+  }
+
+  private reconcileMessage(value: any): void {
+    const jobId = String(value?.jobId || "")
+    const chatId = String(value?.chatId || "")
+    const messageId = String(value?.messageId || "")
+    const content = String(value?.content || "")
+    if (!jobId || !chatId || !messageId || !content) return
+
+    const key = `${chatId}:${messageId}`
+    const previous = this.reconciliationQueues.get(key) || Promise.resolve()
+    const task = previous.catch(() => {}).then(async () => {
+      if (this.destroyed) return
+      const job = this.jobs.get(jobId)
+      try {
+        if (typeof this.ctx.chats?.updateMessage !== "function") {
+          throw new Error("This Lumiverse build does not expose live message refresh.")
+        }
+        await this.ctx.chats.updateMessage(chatId, messageId, { content })
+        if (this.destroyed) return
+        if (job) {
+          job.inserted = true
+          job.error = ""
+          this.remove(job)
+        }
+      } catch (error) {
+        if (this.destroyed || !job) return
+        job.inserted = false
+        job.error = error instanceof Error
+          ? `The image is saved, but this chat view could not refresh: ${error.message}`
+          : "The image is saved, but this chat view could not refresh."
+        this.render(job)
+      }
+    })
+    this.reconciliationQueues.set(key, task)
+    void task.finally(() => {
+      if (this.reconciliationQueues.get(key) === task) this.reconciliationQueues.delete(key)
+    }).catch(() => {})
   }
 
   private requestedAspect(job: TaggedImageJobView): string {
@@ -10492,6 +10541,8 @@ class TaggedImageController {
     }
     const action = job.status === "requested"
       ? `<button data-action="generate">Generate image</button>`
+      : job.status === "ready" && !job.inserted
+        ? `<button data-action="attach">Attach image</button>`
       : job.status === "failed" || job.status === "cancelled"
         ? `<button data-action="retry">Retry</button>`
         : ""
@@ -10540,6 +10591,16 @@ class TaggedImageController {
   private async handleWidgetAction(job: TaggedImageJobView, action: string): Promise<void> {
     if (action === "generate" || action === "retry") {
       this.retry(job, "current")
+      return
+    }
+    if (action === "attach") {
+      job.error = ""
+      this.render(job)
+      this.ctx.sendToBackend({
+        type: "retry_tagged_attachment",
+        requestId: crypto.randomUUID(),
+        jobId: job.id,
+      })
       return
     }
     if (action !== "menu") return
