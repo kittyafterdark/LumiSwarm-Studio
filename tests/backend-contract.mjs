@@ -985,6 +985,7 @@ const customCharacterVisuals = await request("save_chat_visuals", {
   positivePrompt: "1boy, black hair, red eyes",
   negativePrompt: "wrong eye color",
   checkpoint: "base.safetensors",
+  sourcePresetId: "lumi-character-preset-1",
   stackPresetId: "",
   stackSnapshot: [{
     name: "styles/ink.safetensors",
@@ -999,6 +1000,7 @@ assert.equal(customCharacterVisuals.data.characterFolder.binding.stackPresetId, 
 assert.equal(customCharacterVisuals.data.characterFolder.binding.stackSnapshot[0].weight, 0.61)
 assert.equal(customCharacterVisuals.data.characterFolder.binding.negativePrompt, "wrong eye color")
 assert.equal(customCharacterVisuals.data.characterFolder.binding.checkpoint, "base.safetensors")
+assert.equal(customCharacterVisuals.data.characterFolder.binding.sourcePresetId, "lumi-character-preset-1")
 
 const visualFolders = await request("update_output_folder_profile", {
   folderId: storedFoldersAfterTag[0].id,

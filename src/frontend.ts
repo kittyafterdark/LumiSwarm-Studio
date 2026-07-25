@@ -178,6 +178,7 @@ interface OutputFolder {
     checkpoint: string
     stackPresetId: string
     stackSnapshot: StackPresetItem[]
+    sourcePresetId: string
     enabled: boolean
   } | null
   updatedAt: number
@@ -191,7 +192,7 @@ interface PersonaVisualPreset {
   updatedAt: number
 }
 
-interface LumiversePersonaPromptPreset {
+interface LumiversePromptPreset {
   id: string
   name: string
   prompt: string
@@ -321,6 +322,10 @@ const CURRENT_SEED_ICON = `
 
 const LINK_SIZE_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5"/><path d="M7.2 16.8 5.7 18.3a3.5 3.5 0 0 1-5-5l3.1-3.1a3.5 3.5 0 0 1 5 0"/><path d="m16.8 7.2 1.5-1.5a3.5 3.5 0 1 1 5 5l-3.1 3.1a3.5 3.5 0 0 1-5 0"/></svg>
+`
+
+const BINDING_LINK_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 14.5 5-5"/><path d="M7.2 16.8 5.7 18.3a3.5 3.5 0 0 1-5-5l3.1-3.1a3.5 3.5 0 0 1 5 0"/><path d="m16.8 7.2 1.5-1.5a3.5 3.5 0 1 1 5 5l-3.1 3.1a3.5 3.5 0 0 1-5 0"/></svg>
 `
 
 const LIBRARY_ICON = `
@@ -756,17 +761,48 @@ const STYLES = `
     text-transform: uppercase;
   }
   .ss-chat-visuals-field .ss-textarea { min-height: 88px; resize: vertical; }
+  .ss-chat-visuals-field .ss-select {
+    min-width: 0;
+    padding-inline: 8px 25px;
+    font-size: 10px;
+    text-overflow: ellipsis;
+  }
+  .ss-chat-visuals-field .ss-select option { font-size: 11px; }
   .ss-chat-visuals-row > :is(.ss-select, .ss-input) { min-width: 0; flex: 1; }
   .ss-chat-visuals-row .ss-icon-button { flex: 0 0 auto; }
   .ss-chat-visuals-actions {
     justify-content: flex-end;
     flex-wrap: wrap;
   }
+  .ss-chat-visuals-binding-state {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: auto;
+    color: var(--lumiverse-text-muted);
+    font-size: 9px;
+    opacity: .5;
+    transition: color .15s ease, opacity .15s ease;
+  }
+  .ss-chat-visuals-binding-state svg {
+    width: 13px;
+    height: 13px;
+    flex: 0 0 auto;
+  }
+  .ss-chat-visuals-binding-state[data-state="bound"] {
+    color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 88%, white);
+    opacity: 1;
+  }
+  .ss-chat-visuals-binding-state[data-state="dirty"] {
+    color: #f6c177;
+    opacity: .92;
+  }
   .ss-chat-visuals-status {
-    min-height: 18px;
     color: var(--lumiverse-text-muted);
     font-size: 9px;
   }
+  .ss-chat-visuals-status:empty { display: none; }
   .ss-chat-visuals-status[data-error="true"] { color: #fb7185; }
   .ss-chat-visuals-footer {
     display: flex;
@@ -778,8 +814,10 @@ const STYLES = `
   @media (max-width: 720px) {
     .ss-chat-visuals-grid { grid-template-columns: 1fr; }
     .ss-chat-visuals-row { align-items: stretch; }
+    .ss-chat-visuals-field .ss-select { font-size: 9px; }
     .ss-chat-visuals-actions { justify-content: stretch; }
-    .ss-chat-visuals-actions .ss-button { flex: 1; }
+    .ss-chat-visuals-actions .ss-button { flex: 1 1 100%; }
+    .ss-chat-visuals-binding-state { width: 100%; }
   }
   :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="lumiverse"],
   :is(.ss-shell, .ss-launcher, .ss-modal-theme)[data-theme="custom"] {
@@ -10593,7 +10631,9 @@ class ChatVisualsController {
   private selectedPersonaPresetId = ""
   private selectedStackValue = ""
   private importedSourcePresetId = ""
-  private lumiversePersonaPresets: LumiversePersonaPromptPreset[] = []
+  private importedCharacterSourcePresetId = ""
+  private lumiversePersonaPresets: LumiversePromptPreset[] = []
+  private lumiverseCharacterPresets: LumiversePromptPreset[] = []
   private lumiversePresetLoadToken = 0
 
   constructor(
@@ -10615,7 +10655,7 @@ class ChatVisualsController {
         <button class="ss-icon-button" data-action="visuals-back" title="Back to Swarm Studio" aria-label="Back">${BACK_ICON}</button>
         <div class="ss-chat-visuals-head-copy">
           <strong>Chat Visuals</strong>
-          <span class="ss-muted ss-tiny">Bind image identity without crowding the generation modal.</span>
+          <span class="ss-muted ss-tiny">Bind visual identity.</span>
         </div>
         <button class="ss-icon-button" data-action="visuals-refresh" title="Refresh active chat context" aria-label="Refresh">↻</button>
       </div>
@@ -10647,7 +10687,8 @@ class ChatVisualsController {
             <textarea id="ss-chat-persona-positive" class="ss-textarea" data-role="persona-positive" placeholder="Visual traits for the active persona…"></textarea>
           </div>
           <div class="ss-chat-visuals-actions">
-            <button class="ss-button ss-button-primary" data-action="save-persona-visual">Save &amp; bind to active persona</button>
+            <span class="ss-chat-visuals-binding-state" data-role="persona-binding-state" data-state="unbound">${BINDING_LINK_ICON}<span>Not bound</span></span>
+            <button class="ss-button ss-button-primary" data-role="save-persona-visual" data-action="save-persona-visual">Save &amp; bind to active persona</button>
           </div>
         </section>
 
@@ -10655,6 +10696,13 @@ class ChatVisualsController {
           <div class="ss-chat-visuals-section-head">
             <div><strong>Character folder</strong><span data-role="character-folder-caption">Creates the Library folder and keeps these prompts synchronized with it.</span></div>
             <label class="ss-toggle-line"><input type="checkbox" data-role="character-visual-enabled" checked> Active</label>
+          </div>
+          <div class="ss-chat-visuals-field">
+            <label for="ss-chat-lumi-character-preset">Lumiverse Image Gen character preset</label>
+            <div class="ss-chat-visuals-row">
+              <select id="ss-chat-lumi-character-preset" class="ss-select" data-role="lumiverse-character-preset"><option value="">Loading character presets…</option></select>
+              <button class="ss-button" data-action="import-character-prompt">Use preset</button>
+            </div>
           </div>
           <div class="ss-chat-visuals-grid">
             <div class="ss-chat-visuals-field">
@@ -10682,7 +10730,8 @@ class ChatVisualsController {
           </div>
           <div class="ss-muted ss-tiny" data-role="character-stack-caption"></div>
           <div class="ss-chat-visuals-actions">
-            <button class="ss-button ss-button-primary" data-action="save-character-visuals">Save character visuals</button>
+            <span class="ss-chat-visuals-binding-state" data-role="character-binding-state" data-state="unbound">${BINDING_LINK_ICON}<span>Not bound</span></span>
+            <button class="ss-button ss-button-primary" data-role="save-character-visuals" data-action="save-character-visuals">Save character visuals</button>
           </div>
         </section>
 
@@ -10702,6 +10751,7 @@ class ChatVisualsController {
       if (action === "new-persona-visual") this.createPersonaVisual()
       if (action === "delete-persona-visual") this.deletePersonaVisual()
       if (action === "import-persona-prompt") this.importPersonaPrompt()
+      if (action === "import-character-prompt") this.importCharacterPrompt()
       if (action === "save-persona-visual") this.savePersonaVisual()
       if (action === "save-character-visuals") this.saveCharacterVisuals()
       if (action === "visuals-open-studio") this.openStudio()
@@ -10717,8 +10767,16 @@ class ChatVisualsController {
         this.importedSourcePresetId = target.value
         this.importPersonaPrompt()
       }
-      if (target.dataset.role === "character-stack") this.selectedStackValue = target.value
+      if (target.dataset.role === "lumiverse-character-preset") {
+        this.importedCharacterSourcePresetId = target.value
+        this.importCharacterPrompt()
+      }
+      if (target.dataset.role === "character-stack") {
+        this.selectedStackValue = target.value
+      }
+      this.refreshBindingIndicators()
     })
+    this.page.addEventListener("input", () => this.refreshBindingIndicators())
   }
 
   show(): void {
@@ -10744,9 +10802,10 @@ class ChatVisualsController {
         || this.data.personaPresets?.[0]?.id
         || ""
       this.selectedStackValue = this.defaultStackSelection()
+      this.importedCharacterSourcePresetId = this.data.characterFolder?.binding?.sourcePresetId || ""
       this.render()
-      this.setStatus("Chat visual bindings are synchronized.")
-      void this.hydrateLumiversePersonaPresets()
+      this.setStatus("")
+      void this.hydrateLumiversePresets()
       return
     }
     if (payload?.type === "studio_error" && [
@@ -10812,7 +10871,7 @@ class ChatVisualsController {
     this.get<HTMLInputElement>("persona-visual-enabled").disabled = !this.data.activePersona
     this.get<HTMLElement>("persona-caption").textContent = this.data.activePersona
       ? `Binding target: ${this.data.activePersona.name}`
-      : "Select a Lumiverse persona to bind an image identity."
+      : "Select a Lumiverse persona to bind a visual identity."
 
     this.renderPersonaEditor()
     this.renderLumiversePersonaPresets()
@@ -10827,6 +10886,7 @@ class ChatVisualsController {
     this.get<HTMLTextAreaElement>("character-negative").value = folder?.binding?.negativePrompt || ""
     this.get<HTMLInputElement>("character-visual-enabled").checked = folder?.binding?.enabled !== false
     this.get<HTMLInputElement>("character-visual-enabled").disabled = !this.data.activeChat
+    this.renderLumiverseCharacterPresets()
     const checkpoint = this.get<HTMLSelectElement>("character-checkpoint")
     checkpoint.replaceChildren()
     const currentModel = folder?.binding?.checkpoint || this.data.studioModel || ""
@@ -10884,6 +10944,7 @@ class ChatVisualsController {
         : stack.value.startsWith("preset:")
           ? "This named saved stack will load with the character."
           : "No character-specific LoRAs will be inherited."
+    this.refreshBindingIndicators()
   }
 
   private renderPersonaEditor(): void {
@@ -10912,7 +10973,25 @@ class ChatVisualsController {
       : ""
   }
 
-  private async hydrateLumiversePersonaPresets(): Promise<void> {
+  private renderLumiverseCharacterPresets(): void {
+    const select = this.get<HTMLSelectElement>("lumiverse-character-preset")
+    select.replaceChildren()
+    const blank = element("option", "", this.lumiverseCharacterPresets.length
+      ? "Choose Image Gen character preset…"
+      : "No Image Gen character presets")
+    blank.value = ""
+    select.appendChild(blank)
+    for (const preset of this.lumiverseCharacterPresets) {
+      const option = element("option", "", preset.name)
+      option.value = preset.id
+      select.appendChild(option)
+    }
+    select.value = this.lumiverseCharacterPresets.some((preset) => preset.id === this.importedCharacterSourcePresetId)
+      ? this.importedCharacterSourcePresetId
+      : ""
+  }
+
+  private async hydrateLumiversePresets(): Promise<void> {
     const token = ++this.lumiversePresetLoadToken
     try {
       const exportResponse = await fetch("/api/v1/image-gen/export", {
@@ -10930,55 +11009,76 @@ class ChatVisualsController {
       if (!exportResponse.ok) {
         throw new Error(String(exported?.error || `Could not read Lumiverse Image Gen presets (${exportResponse.status}).`))
       }
-      const presets = (Array.isArray(exported?.presets) ? exported.presets : [])
-        .filter((preset: any) => String(preset?.kind || "main") === "persona")
-        .map((preset: any): LumiversePersonaPromptPreset => ({
+      const exportedPresets = Array.isArray(exported?.presets) ? exported.presets : []
+      const readPresets = (kind: "persona" | "character"): LumiversePromptPreset[] => exportedPresets
+        .filter((preset: any) => String(preset?.kind || "main") === kind)
+        .map((preset: any): LumiversePromptPreset => ({
           id: String(preset?.id || "").trim(),
           name: String(preset?.name || "").trim(),
           prompt: String(preset?.prompt || "").trim(),
           negativePrompt: String(preset?.negativePrompt || "").trim(),
         }))
-        .filter((preset: LumiversePersonaPromptPreset) => preset.id && preset.name)
+        .filter((preset: LumiversePromptPreset) => preset.id && preset.name)
+      const personaPresets = readPresets("persona")
+      const characterPresets = readPresets("character")
       if (token !== this.lumiversePresetLoadToken) return
-      this.lumiversePersonaPresets = presets
+      this.lumiversePersonaPresets = personaPresets
+      this.lumiverseCharacterPresets = characterPresets
 
-      let nativeBindingId = ""
-      const personaId = this.data?.activePersona?.id || ""
-      if (personaId) {
-        const bindingResponse = await fetch(`/api/v1/image-gen/preset-bindings/persona/${encodeURIComponent(personaId)}`, {
+      const readNativeBinding = async (kind: "persona" | "character", id: string): Promise<string> => {
+        if (!id) return ""
+        const response = await fetch(`/api/v1/image-gen/preset-bindings/${kind}/${encodeURIComponent(id)}`, {
           credentials: "include",
           headers: { "Accept": "application/json" },
         })
-        if (bindingResponse.ok) {
-          const binding = await bindingResponse.json().catch(() => ({}))
-          nativeBindingId = String(binding?.preset_id || "")
-        }
+        if (!response.ok) return ""
+        const binding = await response.json().catch(() => ({}))
+        return String(binding?.preset_id || "")
       }
+      const personaId = this.data?.activePersona?.id || ""
+      const characterId = this.data?.activeChat?.characterId || ""
+      const [nativePersonaBindingId, nativeCharacterBindingId] = await Promise.all([
+        readNativeBinding("persona", personaId),
+        readNativeBinding("character", characterId),
+      ])
       if (token !== this.lumiversePresetLoadToken) return
       this.renderLumiversePersonaPresets()
+      this.renderLumiverseCharacterPresets()
       if (
         !this.selectedPersonaPresetId
         && !this.importedSourcePresetId
-        && presets.some((preset) => preset.id === nativeBindingId)
+        && personaPresets.some((preset) => preset.id === nativePersonaBindingId)
       ) {
-        this.importedSourcePresetId = nativeBindingId
+        this.importedSourcePresetId = nativePersonaBindingId
         this.renderLumiversePersonaPresets()
         this.importPersonaPrompt(false)
       }
+      if (
+        !this.data?.characterFolder
+        && !this.importedCharacterSourcePresetId
+        && characterPresets.some((preset) => preset.id === nativeCharacterBindingId)
+      ) {
+        this.importedCharacterSourcePresetId = nativeCharacterBindingId
+        this.renderLumiverseCharacterPresets()
+        this.importCharacterPrompt(false)
+      }
+      this.refreshBindingIndicators()
     } catch (error) {
       if (token !== this.lumiversePresetLoadToken) return
       this.lumiversePersonaPresets = []
+      this.lumiverseCharacterPresets = []
       this.renderLumiversePersonaPresets()
-      this.setStatus(error instanceof Error ? error.message : "Could not read Lumiverse Image Gen persona presets.", true)
+      this.renderLumiverseCharacterPresets()
+      this.setStatus(error instanceof Error ? error.message : "Could not read Lumiverse Image Gen presets.", true)
     }
   }
 
   private defaultStackSelection(): string {
     if (!this.data) return ""
-    if (this.data.studioStack.length) return "__studio__"
     const binding = this.data.characterFolder?.binding
     if (binding?.stackPresetId) return `preset:${binding.stackPresetId}`
     if (binding?.stackSnapshot?.length) return "__bound_custom__"
+    if (this.data.studioStack.length) return "__studio__"
     return ""
   }
 
@@ -11046,6 +11146,7 @@ class ChatVisualsController {
     this.importedSourcePresetId = preset.id
     this.get<HTMLSelectElement>("lumiverse-persona-preset").value = preset.id
     this.get<HTMLTextAreaElement>("persona-positive").value = preset.prompt
+    this.refreshBindingIndicators()
     if (announce) {
       this.setStatus(
         preset.prompt
@@ -11056,27 +11157,183 @@ class ChatVisualsController {
     }
   }
 
+  private importCharacterPrompt(announce = true): void {
+    const presetId = this.get<HTMLSelectElement>("lumiverse-character-preset").value
+      || this.importedCharacterSourcePresetId
+    const preset = this.lumiverseCharacterPresets.find((candidate) => candidate.id === presetId)
+    if (!preset) {
+      this.setStatus("Choose a Lumiverse character preset first.", true)
+      return
+    }
+    this.importedCharacterSourcePresetId = preset.id
+    this.get<HTMLSelectElement>("lumiverse-character-preset").value = preset.id
+    this.get<HTMLTextAreaElement>("character-positive").value = preset.prompt
+    this.get<HTMLTextAreaElement>("character-negative").value = preset.negativePrompt
+    this.refreshBindingIndicators()
+    if (announce) {
+      this.setStatus(
+        preset.prompt || preset.negativePrompt
+          ? `Loaded “${preset.name}” from Lumiverse Image Gen. Review it, then save the character visuals.`
+          : `“${preset.name}” has no prompt content yet; enter the character identity manually.`,
+        !preset.prompt && !preset.negativePrompt,
+      )
+    }
+  }
+
+  private selectedCharacterStackBinding(): {
+    stackPresetId: string
+    stackSnapshot: StackPresetItem[]
+  } {
+    if (!this.data) return { stackPresetId: "", stackSnapshot: [] }
+    const value = this.get<HTMLSelectElement>("character-stack").value
+    if (value === "__studio__") {
+      return {
+        stackPresetId: this.data.studioStackCustom ? "" : this.data.studioStackPresetId,
+        stackSnapshot: this.data.studioStack,
+      }
+    }
+    if (value === "__bound_custom__") {
+      return {
+        stackPresetId: "",
+        stackSnapshot: this.data.characterFolder?.binding?.stackSnapshot || [],
+      }
+    }
+    if (value.startsWith("preset:")) {
+      return {
+        stackPresetId: value.slice("preset:".length),
+        stackSnapshot: [],
+      }
+    }
+    return { stackPresetId: "", stackSnapshot: [] }
+  }
+
+  private stackFingerprint(items: StackPresetItem[]): string {
+    return JSON.stringify(items.map((item) => [
+      item.name,
+      item.title,
+      Number(item.weight),
+      item.enabled !== false,
+      item.useTrigger === true,
+      item.sourceUrl || "",
+    ]))
+  }
+
+  private setBindingIndicator(
+    role: "persona-binding-state" | "character-binding-state",
+    state: "bound" | "dirty" | "unbound",
+    label: string,
+  ): void {
+    const indicator = this.get<HTMLElement>(role)
+    indicator.dataset.state = state
+    const text = indicator.querySelector<HTMLSpanElement>("span")
+    if (text) text.textContent = label
+  }
+
+  private refreshBindingIndicators(): void {
+    if (!this.data) return
+
+    const personaPreset = this.data.personaPresets.find((preset) => preset.id === this.selectedPersonaPresetId)
+    const personaValuesMatch = Boolean(personaPreset)
+      && this.get<HTMLTextAreaElement>("persona-positive").value.trim() === personaPreset!.positivePrompt.trim()
+      && this.importedSourcePresetId === (personaPreset!.sourcePresetId || "")
+      && this.get<HTMLInputElement>("persona-visual-enabled").checked === (this.data.personaBinding?.enabled !== false)
+    const personaIsBound = Boolean(
+      this.data.activePersona
+      && personaPreset
+      && this.data.personaBinding?.presetId === personaPreset.id
+      && personaValuesMatch,
+    )
+    const personaHasDraft = Boolean(
+      this.get<HTMLTextAreaElement>("persona-positive").value.trim()
+      || this.importedSourcePresetId
+      || personaPreset,
+    )
+    const personaIsDirty = Boolean(
+      this.data.activePersona
+      && !personaIsBound
+      && (
+        (personaPreset && !personaValuesMatch)
+        || (!personaPreset && personaHasDraft)
+        || this.data.personaBinding?.presetId === personaPreset?.id
+      ),
+    )
+    this.setBindingIndicator(
+      "persona-binding-state",
+      personaIsBound ? "bound" : personaIsDirty ? "dirty" : "unbound",
+      !this.data.activePersona
+        ? "No active persona"
+        : personaIsBound
+          ? "Bound"
+          : personaIsDirty
+            ? "Unsaved changes"
+            : "Not bound",
+    )
+    const personaButton = this.get<HTMLButtonElement>("save-persona-visual")
+    personaButton.disabled = !this.data.activePersona || personaIsBound
+    personaButton.textContent = personaIsBound
+      ? "Bound to active persona"
+      : personaPreset && !personaIsDirty
+        ? "Bind selected profile"
+        : "Save & bind to active persona"
+
+    const folder = this.data.characterFolder
+    const binding = folder?.binding
+    const requestedStack = this.selectedCharacterStackBinding()
+    const stackMatches = Boolean(binding) && (
+      requestedStack.stackPresetId
+        ? requestedStack.stackPresetId === binding!.stackPresetId
+        : !binding!.stackPresetId
+          && this.stackFingerprint(requestedStack.stackSnapshot) === this.stackFingerprint(binding!.stackSnapshot)
+    )
+    const characterIsBound = Boolean(
+      this.data.activeChat
+      && binding
+      && this.get<HTMLTextAreaElement>("character-positive").value.trim() === binding.positivePrompt.trim()
+      && this.get<HTMLTextAreaElement>("character-negative").value.trim() === binding.negativePrompt.trim()
+      && this.get<HTMLSelectElement>("character-checkpoint").value === binding.checkpoint
+      && this.importedCharacterSourcePresetId === (binding.sourcePresetId || "")
+      && this.get<HTMLInputElement>("character-visual-enabled").checked === (binding.enabled !== false)
+      && stackMatches,
+    )
+    const characterHasDraft = Boolean(
+      this.get<HTMLTextAreaElement>("character-positive").value.trim()
+      || this.get<HTMLTextAreaElement>("character-negative").value.trim()
+      || this.get<HTMLSelectElement>("character-checkpoint").value
+      || this.importedCharacterSourcePresetId
+      || requestedStack.stackPresetId
+      || requestedStack.stackSnapshot.length,
+    )
+    const characterIsDirty = Boolean(this.data.activeChat && !characterIsBound && (binding || characterHasDraft))
+    this.setBindingIndicator(
+      "character-binding-state",
+      characterIsBound ? "bound" : characterIsDirty ? "dirty" : "unbound",
+      !this.data.activeChat
+        ? "No active character"
+        : characterIsBound
+          ? "Bound"
+          : characterIsDirty
+            ? "Unsaved changes"
+            : "Not bound",
+    )
+    const characterButton = this.get<HTMLButtonElement>("save-character-visuals")
+    characterButton.disabled = !this.data.activeChat || characterIsBound
+    characterButton.textContent = characterIsBound
+      ? "Character visuals bound"
+      : "Save character visuals"
+  }
+
   private saveCharacterVisuals(): void {
     if (!this.data?.activeChat) {
       this.setStatus("Open a character chat first.", true)
       return
     }
-    const value = this.get<HTMLSelectElement>("character-stack").value
-    let stackPresetId = ""
-    let stackSnapshot: StackPresetItem[] = []
-    if (value === "__studio__") {
-      stackPresetId = this.data.studioStackCustom ? "" : this.data.studioStackPresetId
-      stackSnapshot = this.data.studioStack
-    } else if (value === "__bound_custom__") {
-      stackSnapshot = this.data.characterFolder?.binding?.stackSnapshot || []
-    } else if (value.startsWith("preset:")) {
-      stackPresetId = value.slice("preset:".length)
-    }
+    const { stackPresetId, stackSnapshot } = this.selectedCharacterStackBinding()
     this.send("save_chat_visuals", {
       folderName: this.data.activeChat.characterName || "Character visuals",
       positivePrompt: this.get<HTMLTextAreaElement>("character-positive").value,
       negativePrompt: this.get<HTMLTextAreaElement>("character-negative").value,
       checkpoint: this.get<HTMLSelectElement>("character-checkpoint").value,
+      sourcePresetId: this.importedCharacterSourcePresetId,
       stackPresetId,
       stackSnapshot,
       enabled: this.get<HTMLInputElement>("character-visual-enabled").checked,

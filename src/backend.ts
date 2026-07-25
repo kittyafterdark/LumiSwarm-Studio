@@ -163,6 +163,7 @@ interface OutputFolderBinding {
   checkpoint: string
   stackPresetId: string
   stackSnapshot: StackPresetItem[]
+  sourcePresetId: string
   enabled: boolean
 }
 
@@ -1530,6 +1531,7 @@ function cleanOutputFolders(value: unknown): OutputFolder[] {
           checkpoint: asString(rawBinding.checkpoint).trim().slice(0, 500),
           stackPresetId: asString(rawBinding.stackPresetId).trim().slice(0, 200),
           stackSnapshot: cleanStackPresetItems(rawBinding.stackSnapshot),
+          sourcePresetId: asString(rawBinding.sourcePresetId).trim().slice(0, 200),
           enabled: asBoolean(rawBinding.enabled, true),
         }
       : null
@@ -1615,6 +1617,7 @@ async function createOutputFolder(name: string, bindingType: string, userId?: st
       checkpoint: "",
       stackPresetId: "",
       stackSnapshot: [],
+      sourcePresetId: "",
       enabled: true,
     }
     const legacy = characterId
@@ -1665,6 +1668,9 @@ async function updateOutputFolderProfile(
     stackSnapshot: Object.prototype.hasOwnProperty.call(input, "stackSnapshot")
       ? cleanStackPresetItems(input.stackSnapshot)
       : folder.binding.stackSnapshot,
+    sourcePresetId: Object.prototype.hasOwnProperty.call(input, "sourcePresetId")
+      ? asString(input.sourcePresetId).trim().slice(0, 200)
+      : folder.binding.sourcePresetId,
     enabled: asBoolean(input.enabled, folder.binding.enabled),
   }
   folder.updatedAt = Date.now()
@@ -2756,6 +2762,7 @@ async function ensureCharacterOutputFolder(
         checkpoint: "",
         stackPresetId: "",
         stackSnapshot: [],
+        sourcePresetId: "",
         enabled: true,
       },
       updatedAt: Date.now(),
@@ -2771,6 +2778,7 @@ async function ensureCharacterOutputFolder(
       checkpoint: "",
       stackPresetId: "",
       stackSnapshot: [],
+      sourcePresetId: "",
       enabled: true,
     }
   }
@@ -3540,6 +3548,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           positivePrompt: asString(payload?.positivePrompt),
           negativePrompt: asString(payload?.negativePrompt),
           checkpoint: asString(payload?.checkpoint),
+          sourcePresetId: asString(payload?.sourcePresetId),
           stackPresetId: stackPreset?.id || "",
           stackSnapshot: stackPreset?.items || cleanStackPresetItems(payload?.stackSnapshot),
           enabled: asBoolean(payload?.enabled, true),
