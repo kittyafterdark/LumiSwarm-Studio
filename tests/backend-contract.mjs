@@ -1166,6 +1166,47 @@ assert.ok(sent.some((entry) =>
   && entry.payload.data.jobId === delayedTaggedResult.payload.data.taggedJob.id
 ))
 
+const remappedTaggedMessage = {
+  id: "message-tag-final",
+  role: "assistant",
+  content: `<article><swarm-image request="generate" slot="remapped" aspect="4:3" alt="Remapped attachment">{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition></swarm-image></article>`,
+  metadata: {},
+}
+taggedMessages.push(remappedTaggedMessage)
+const remappedMatch = remappedTaggedMessage.content.match(/<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image>/i)
+assert.ok(remappedMatch)
+await frontendHandler({
+  type: "tag_generate",
+  requestId: "tag-generate-remapped",
+  chatId: "chat-1",
+  messageId: "message-tag-transient",
+  fullMatch: remappedMatch[0],
+  attrs: { request: "generate", slot: "remapped", aspect: "4:3", alt: "Remapped attachment" },
+  content: remappedMatch[2],
+}, "user-1")
+for (
+  let attempt = 0;
+  attempt < 100 && !remappedTaggedMessage.content.includes('data-swarm-studio-image="true"');
+  attempt += 1
+) {
+  await new Promise((resolve) => setTimeout(resolve, 1))
+}
+assert.equal(taggedGenerationCount, 6)
+assert.match(remappedTaggedMessage.content, /data-swarm-studio-image="true"/)
+assert.doesNotMatch(remappedTaggedMessage.content, /<swarm-image\b/i)
+const remappedReconciliation = sent.filter((entry) =>
+  entry.payload.type === "tagged_message_reconciled"
+  && entry.payload.data.messageId === remappedTaggedMessage.id
+).at(-1)
+assert.ok(remappedReconciliation, "the backend should remap a transient streaming message ID without frontend assistance")
+const remappedJobState = sent.filter((entry) =>
+  entry.payload.type === "tagged_image_job"
+  && entry.payload.data.messageId === remappedTaggedMessage.id
+  && entry.payload.data.inserted === true
+).at(-1)
+assert.ok(remappedJobState)
+assert.match(remappedJobState.payload.data.tagFingerprint, /^[a-z0-9]+$/)
+
 const originalOutput = await request("download_swarm_output", {
   connectionId: "swarm-1",
   swarmPath: generated.data.record.swarmPath,

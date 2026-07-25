@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.8
+
+### Fixed
+
+- Inline image attachment recovery now identifies a completed tag by its
+  immutable tag fingerprint instead of comparing the raw scene text with the
+  fully layered generation prompt.
+- The backend now scans the persisted chat for the matching tag and remaps a
+  transient streaming message ID to the final saved assistant message before
+  mutation. Recovery no longer depends entirely on the browser observing a
+  second, non-streaming render pass.
+- Remapped jobs acquire their mutation lock using the final message ID, keeping
+  multiple images completing in the same message serialized without one
+  attachment overwriting another.
+- This failure was unrelated to IPv4 or remote mobile access; the same race
+  could occur locally whenever character/persona layers or preset directives
+  changed the submitted prompt.
+
 ## 1.0.7
 
 ### Fixed

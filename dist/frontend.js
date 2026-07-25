@@ -9905,7 +9905,7 @@ class TaggedImageController {
                 ...this.jobs.values()
             ].find((job)=>this.lookupKey(job.chatId, job.messageId, job.slot) === lookup) || [
                 ...this.jobs.values()
-            ].find((job)=>job.chatId === String(payload.chatId) && job.slot === slot && job.prompt === content && !job.inserted);
+            ].find((job)=>job.chatId === String(payload.chatId) && job.slot === slot && (job.tagFingerprint === fingerprint || job.prompt === content) && !job.inserted);
             if (existing) {
                 this.settledMessageTargets.set(existing.id, String(payload.messageId));
                 this.retrySettledAttachment(existing);

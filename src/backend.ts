@@ -2810,6 +2810,7 @@ function taggedJobPublic(job: TaggedImageJob): JsonObject {
   return {
     id: job.id,
     key: job.key,
+    tagFingerprint: stableTextHash(job.fullMatch),
     chatId: job.chatId,
     messageId: job.messageId,
     slot: job.slot,
@@ -2891,14 +2892,66 @@ function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, mar
   return { content, replaced: false }
 }
 
+function normalizedTaggedPrompt(value: string): string {
+  return value.replace(/\s+/g, " ").trim()
+}
+
+function taggedMessageMatchScore(message: any, job: TaggedImageJob): number {
+  const role = asString(message?.role).trim().toLowerCase()
+  if (role && role !== "assistant") return 0
+  const content = asString(message?.content)
+  if (!content) return 0
+  if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) return 4
+  if (job.fullMatch && content.includes(job.fullMatch)) return 3
+
+  const sourceTag = parseSwarmImageTags(job.fullMatch)[0]
+  const sourcePrompt = normalizedTaggedPrompt(sourceTag?.content || "")
+  if (!sourcePrompt) return 0
+  for (const tag of parseSwarmImageTags(content)) {
+    if (cleanTagSlot(tag.attrs.slot) !== job.slot) continue
+    if (normalizedTaggedPrompt(tag.content) === sourcePrompt) return 2
+  }
+  return 0
+}
+
+function findTaggedMessageTarget(messages: any[], job: TaggedImageJob): any | null {
+  const direct = messages.find((message: any) => asString(message?.id) === job.messageId)
+  if (direct && taggedMessageMatchScore(direct, job) > 0) return direct
+
+  let best: any | null = null
+  let bestScore = 0
+  for (const message of messages) {
+    const score = taggedMessageMatchScore(message, job)
+    if (score >= bestScore && score > 0) {
+      best = message
+      bestScore = score
+    }
+  }
+  return best
+}
+
 async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Promise<boolean> {
   if (!job.imageUrl || !spindle.permissions.has("chat_mutation")) return false
+  const initialMessages = await spindle.chat.getMessages(job.chatId)
+  const initialTarget = findTaggedMessageTarget(initialMessages, job)
+  if (!initialTarget) return false
+  const initialMessageId = asString(initialTarget?.id)
+  if (!initialMessageId) return false
+  if (initialMessageId !== job.messageId) {
+    job.messageId = initialMessageId
+    job.key = `${job.chatId}:${job.messageId}:${job.slot}`
+  }
   const lockKey = `${userId || "default"}:${job.chatId}:${job.messageId}`
   return withTaggedMessageFinalizeLock(lockKey, async () => {
     const messages = await spindle.chat.getMessages(job.chatId)
-    const target = messages.find((message: any) => asString(message?.id) === job.messageId)
+    const target = findTaggedMessageTarget(messages, job)
+    const targetMessageId = asString(target?.id)
+    if (targetMessageId && targetMessageId !== job.messageId) {
+      job.messageId = targetMessageId
+      job.key = `${job.chatId}:${job.messageId}:${job.slot}`
+    }
     const content = asString(target?.content)
-    if (!target) return false
+    if (!target || !job.messageId) return false
     const alt = job.alt || `Generated illustration for ${job.slot}`
     const markup = `<figure data-swarm-studio-image="true" data-swarm-studio-job-id="${escapeHtmlAttribute(job.id)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" tabindex="0" style="position:relative;display:block;width:100%;height:100%;margin:0;"><img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" data-swarm-studio-fit="cover" loading="lazy" style="display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center;"><span data-swarm-studio-inline-action="true" tabindex="0" role="button" aria-label="Illustration actions">↻</span></figure>`
     const replacement = replaceTaggedImagePlaceholder(content, job, markup)

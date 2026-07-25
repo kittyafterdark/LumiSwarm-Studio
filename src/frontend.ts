@@ -10577,6 +10577,7 @@ are removed when CSS is applied.</pre>
 interface TaggedImageJobView {
   id: string
   key: string
+  tagFingerprint?: string
   chatId: string
   messageId: string
   slot: string
@@ -10757,7 +10758,7 @@ class TaggedImageController {
       ) || [...this.jobs.values()].find((job) =>
         job.chatId === String(payload.chatId)
         && job.slot === slot
-        && job.prompt === content
+        && (job.tagFingerprint === fingerprint || job.prompt === content)
         && !job.inserted,
       )
       if (existing) {
