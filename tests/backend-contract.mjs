@@ -1041,6 +1041,13 @@ assert.ok(
   taggedResult,
   `Tagged generation did not finish in time: ${JSON.stringify(sent.slice(-12).map((entry) => entry.payload))}`,
 )
+const taggedReadyState = sent.find((entry) =>
+  entry.payload.type === "tagged_image_job"
+  && entry.payload.data?.clientJobId === taggedResult.payload.data.taggedJob.clientJobId
+  && entry.payload.data?.status === "ready"
+)
+assert.ok(taggedReadyState)
+assert.ok(sent.indexOf(taggedReadyState) < sent.indexOf(taggedResult))
 assert.equal(taggedResult.payload.data.record.imageId, "image-tag-1")
 assert.equal(taggedResult.payload.data.taggedJob.status, "ready")
 const taggedReconciliation = sent.find((entry) =>

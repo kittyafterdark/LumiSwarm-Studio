@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.10
+
+### Fixed
+
+- Completed message illustrations now emit an explicit terminal `ready` event
+  before their full result payload. Studio and Quick Create retire their progress
+  UI from either terminal event, so a delayed result can no longer leave
+  “Preparing generation” and “Interrupt generation” stuck over a finished image.
+- Tagged generation state now tracks concurrent message illustrations separately
+  from manual Studio generations. A finished job hands the preview to the next
+  genuinely active tagged job, while late queued/progress messages for settled
+  jobs are ignored instead of resurrecting the spinner.
+
 ## 1.0.9
 
 ### Added

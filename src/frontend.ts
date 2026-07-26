@@ -4324,6 +4324,7 @@ class MiniPlayerController {
   private quickPending: GenerationDetails | null = null
   private quickConfirm: ((prompt: string, negativePrompt: string) => void) | null = null
   private readonly bootstrapRequestId = createRequestId()
+  private readonly settledTaggedJobIds = new Set<string>()
   private state: "idle" | "running" | "done" | "error" = "idle"
   private snapshotValue: StudioActivitySnapshot = {
     active: false,
@@ -4675,6 +4676,22 @@ class MiniPlayerController {
     this.render()
   }
 
+  private settleTaggedJob(jobId: string): void {
+    if (!jobId) return
+    this.settledTaggedJobIds.add(jobId)
+    if (this.settledTaggedJobIds.size > 64) {
+      const oldest = this.settledTaggedJobIds.values().next().value
+      if (oldest) this.settledTaggedJobIds.delete(oldest)
+    }
+    if (jobId !== this.snapshotValue.jobId) return
+    this.snapshotValue.active = false
+    this.snapshotValue.jobId = ""
+    this.snapshotValue.connectionId = ""
+    this.snapshotValue.status = "Finalizing message illustration…"
+    this.state = "done"
+    this.render()
+  }
+
   onMessage(payload: any): void {
     const data = payload?.data || {}
     if (payload?.type === "bootstrap_result") {
@@ -4696,7 +4713,9 @@ class MiniPlayerController {
     }
     if (payload?.type === "tagged_image_jobs_result") {
       const active = (Array.isArray(data) ? data : []).find((job: any) =>
-        (job?.status === "queued" || job?.status === "generating") && String(job?.clientJobId || ""),
+        (job?.status === "queued" || job?.status === "generating")
+        && String(job?.clientJobId || "")
+        && !this.settledTaggedJobIds.has(String(job.clientJobId)),
       )
       if (active && (!this.snapshotValue.active || this.snapshotValue.jobId === String(active.clientJobId))) {
         this.begin(
@@ -4711,11 +4730,17 @@ class MiniPlayerController {
       const job = data || {}
       const jobId = String(job.clientJobId || "")
       if ((job.status === "queued" || job.status === "generating") && jobId) {
+        if (this.settledTaggedJobIds.has(jobId)) return
         if (!this.snapshotValue.active || this.snapshotValue.jobId === jobId) {
           this.begin(jobId, "", `Rendering message illustration · ${String(job.alt || job.slot || "SwarmUI")}`)
         }
-      } else if ((job.status === "failed" || job.status === "cancelled") && jobId === this.snapshotValue.jobId) {
-        this.fail(jobId, String(job.error || (job.status === "cancelled" ? "Message illustration stopped." : "Message illustration failed.")))
+      } else if (job.status === "ready") {
+        this.settleTaggedJob(jobId)
+      } else if (job.status === "failed" || job.status === "cancelled") {
+        this.settleTaggedJob(jobId)
+        if (jobId === this.snapshotValue.jobId || !this.snapshotValue.active) {
+          this.fail(jobId, String(job.error || (job.status === "cancelled" ? "Message illustration stopped." : "Message illustration failed.")))
+        }
       }
       return
     }
@@ -4736,11 +4761,7 @@ class MiniPlayerController {
     }
     if (payload?.type === "tagged_generation_result") {
       const taggedJobId = String(data?.taggedJob?.clientJobId || "")
-      if (taggedJobId && taggedJobId === this.snapshotValue.jobId) {
-        this.snapshotValue.active = false
-        this.snapshotValue.jobId = ""
-        this.snapshotValue.connectionId = ""
-      }
+      this.settleTaggedJob(taggedJobId)
       this.syncTaggedOutput(data)
       return
     }
@@ -5211,6 +5232,9 @@ class StudioController {
   private generating = false
   private currentJobId = ""
   private currentJobConnectionId = ""
+  private currentJobSource: "manual" | "tagged" | "" = ""
+  private readonly activeTaggedJobs = new Map<string, any>()
+  private readonly settledTaggedJobIds = new Set<string>()
   private progressStep = 0
   private pendingDraftRestore: StudioDraft | null = null
   private pendingTaggedPrompt: { prompt: string; negativePrompt: string } | null = null
@@ -6945,6 +6969,61 @@ are removed when CSS is applied.</pre>
     })
   }
 
+  private rememberSettledTaggedJob(jobId: string): void {
+    if (!jobId) return
+    this.settledTaggedJobIds.add(jobId)
+    if (this.settledTaggedJobIds.size > 64) {
+      const oldest = this.settledTaggedJobIds.values().next().value
+      if (oldest) this.settledTaggedJobIds.delete(oldest)
+    }
+  }
+
+  private adoptTaggedJob(job: any): void {
+    const jobId = String(job?.clientJobId || "")
+    if (!jobId || this.settledTaggedJobIds.has(jobId)) return
+    this.activeTaggedJobs.set(jobId, job)
+    if (this.generating && this.currentJobSource === "manual") return
+    if (
+      this.currentJobSource === "tagged"
+      && this.currentJobId
+      && this.activeTaggedJobs.has(this.currentJobId)
+    ) return
+    if (!this.generating) this.preGenerationImage = this.state.currentImage
+    this.generating = true
+    this.currentJobId = jobId
+    this.currentJobConnectionId = ""
+    this.currentJobSource = "tagged"
+    this.setGenerating(true)
+    this.updateGenerationProgress(0, 0)
+    this.setRunStatus("Rendering a message illustration in SwarmUI…")
+  }
+
+  private settleTaggedJob(jobId: string): boolean {
+    if (!jobId) return false
+    this.rememberSettledTaggedJob(jobId)
+    this.activeTaggedJobs.delete(jobId)
+    if (this.currentJobSource !== "tagged") return false
+    if (
+      this.currentJobId
+      && this.currentJobId !== jobId
+      && this.activeTaggedJobs.has(this.currentJobId)
+    ) return false
+
+    const next = this.activeTaggedJobs.values().next().value
+    if (next) {
+      this.currentJobId = ""
+      this.adoptTaggedJob(next)
+      return false
+    }
+
+    this.generating = false
+    this.currentJobId = ""
+    this.currentJobConnectionId = ""
+    this.currentJobSource = ""
+    this.setGenerating(false)
+    return true
+  }
+
   onMessage(payload: any): void {
     if (this.disposed) return
     const data = payload?.data || {}
@@ -7097,40 +7176,43 @@ are removed when CSS is applied.</pre>
         this.setRunStatus(`Loaded workflow “${this.state.selectedWorkflow.name}”.`)
         break
       case "tagged_image_jobs_result": {
-        const active = (Array.isArray(data) ? data : []).find((job: any) =>
-          (job?.status === "queued" || job?.status === "generating") && String(job?.clientJobId || ""),
-        )
-        if (active && (!this.currentJobId || this.currentJobId === String(active.clientJobId))) {
-          if (!this.generating) this.preGenerationImage = this.state.currentImage
-          this.generating = true
-          this.currentJobId = String(active.clientJobId)
-          this.currentJobConnectionId = ""
-          this.setGenerating(true)
-          this.updateGenerationProgress(0, 0)
-          this.setRunStatus("Rendering a message illustration in SwarmUI…")
+        const jobs = Array.isArray(data) ? data : []
+        this.activeTaggedJobs.clear()
+        for (const job of jobs) {
+          const jobId = String(job?.clientJobId || "")
+          if (!jobId) continue
+          if (job?.status === "queued" || job?.status === "generating") {
+            if (!this.settledTaggedJobIds.has(jobId)) this.activeTaggedJobs.set(jobId, job)
+          } else if (job?.status === "ready" || job?.status === "failed" || job?.status === "cancelled") {
+            this.rememberSettledTaggedJob(jobId)
+          }
+        }
+        if (
+          this.currentJobSource === "tagged"
+          && this.currentJobId
+          && !this.activeTaggedJobs.has(this.currentJobId)
+        ) {
+          this.settleTaggedJob(this.currentJobId)
+        } else {
+          const active = this.activeTaggedJobs.values().next().value
+          if (active) this.adoptTaggedJob(active)
         }
         break
       }
       case "tagged_image_job": {
         const jobId = String(data.clientJobId || "")
         if ((data.status === "queued" || data.status === "generating") && jobId) {
-          if (!this.currentJobId || this.currentJobId === jobId) {
-            if (!this.generating) this.preGenerationImage = this.state.currentImage
-            this.generating = true
-            this.currentJobId = jobId
-            this.currentJobConnectionId = ""
-            this.setGenerating(true)
-            this.updateGenerationProgress(0, 0)
-            this.setRunStatus("Rendering a message illustration in SwarmUI…")
+          this.adoptTaggedJob(data)
+        } else if (data.status === "ready") {
+          this.settleTaggedJob(jobId)
+        } else if (data.status === "failed" || data.status === "cancelled") {
+          const wasCurrent = this.currentJobSource === "tagged" && jobId === this.currentJobId
+          const idle = this.settleTaggedJob(jobId)
+          if (wasCurrent && idle) {
+            if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
+            this.preGenerationImage = null
+            this.setRunStatus(String(data.error || "Message illustration stopped."), data.status === "failed")
           }
-        } else if ((data.status === "failed" || data.status === "cancelled") && jobId === this.currentJobId) {
-          this.generating = false
-          this.currentJobId = ""
-          this.currentJobConnectionId = ""
-          this.setGenerating(false)
-          if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
-          this.preGenerationImage = null
-          this.setRunStatus(String(data.error || "Message illustration stopped."), data.status === "failed")
         }
         break
       }
@@ -7139,6 +7221,7 @@ are removed when CSS is applied.</pre>
           this.generating = true
           this.currentJobId = String(payload.clientJobId || this.currentJobId)
           this.currentJobConnectionId = String(data.connectionId || this.currentJobConnectionId)
+          this.currentJobSource = "manual"
           this.setGenerating(true)
         }
         break
@@ -7152,6 +7235,7 @@ are removed when CSS is applied.</pre>
         this.generating = false
         this.currentJobId = ""
         this.currentJobConnectionId = ""
+        this.currentJobSource = ""
         this.setGenerating(false)
         this.acceptOutputPage(data)
         if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
@@ -7172,13 +7256,8 @@ are removed when CSS is applied.</pre>
         break
       case "tagged_generation_result": {
         const taggedJobId = String(data?.taggedJob?.clientJobId || "")
-        if (taggedJobId && taggedJobId === this.currentJobId) {
-          this.generating = false
-          this.currentJobId = ""
-          this.currentJobConnectionId = ""
-          this.setGenerating(false)
-          this.preGenerationImage = null
-        }
+        const idle = this.settleTaggedJob(taggedJobId)
+        if (idle) this.preGenerationImage = null
         this.acceptOutputPage(data)
         if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
         const imageSrc = String(data.result?.imageDataUrl || data.result?.imageUrl || data.record?.imageUrl || "")
@@ -7193,7 +7272,9 @@ are removed when CSS is applied.</pre>
         }
         this.renderOutputs()
         this.updateActiveVisualPill()
-        this.setRunStatus("Message illustration complete. Output synced to Studio.")
+        this.setRunStatus(idle || this.currentJobSource !== "tagged"
+          ? "Message illustration complete. Output synced to Studio."
+          : "Message illustration complete. Rendering the remaining queued image…")
         break
       }
       case "generation_progress": {
@@ -7217,6 +7298,7 @@ are removed when CSS is applied.</pre>
           this.generating = false
           this.currentJobId = ""
           this.currentJobConnectionId = ""
+          this.currentJobSource = ""
           this.pendingGeneration = null
           this.setGenerating(false)
           if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
@@ -7332,6 +7414,7 @@ are removed when CSS is applied.</pre>
           this.generating = false
           this.currentJobId = ""
           this.currentJobConnectionId = ""
+          this.currentJobSource = ""
           this.pendingGeneration = null
           this.setGenerating(false)
           if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
@@ -7370,6 +7453,7 @@ are removed when CSS is applied.</pre>
     this.generating = false
     this.currentJobId = ""
     this.currentJobConnectionId = ""
+    this.currentJobSource = ""
     this.setGenerating(false)
     if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
     this.preGenerationImage = null
@@ -10575,6 +10659,7 @@ are removed when CSS is applied.</pre>
     this.generating = true
     this.currentJobId = clientJobId
     this.currentJobConnectionId = this.state.connection.id
+    this.currentJobSource = "manual"
     this.activity?.begin(
       clientJobId,
       this.state.connection.id,

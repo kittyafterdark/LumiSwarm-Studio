@@ -3201,6 +3201,11 @@ async function runTaggedImageJob(
     job.status = "ready"
     job.error = ""
     await upsertTaggedImageJob(job, userId)
+    // A completed tagged job is a terminal lifecycle event in its own right.
+    // Broadcast it before the richer result payload so every frontend surface
+    // can retire its progress UI even if result delivery is delayed or arrives
+    // out of order with an earlier progress/list message.
+    sendTaggedJobState(job, userId)
     spindle.updateMacroValue("last_genned", job.imageUrl)
     await ensureCharacterOutputFolder(characterLayer.characterId, characterLayer.characterName, job.imageId, userId)
     const taggedChat = spindle.permissions.has("chats")

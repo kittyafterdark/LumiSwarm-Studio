@@ -2570,6 +2570,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         job.status = "ready";
         job.error = "";
         await upsertTaggedImageJob(job, userId);
+        sendTaggedJobState(job, userId);
         spindle.updateMacroValue("last_genned", job.imageUrl);
         await ensureCharacterOutputFolder(characterLayer.characterId, characterLayer.characterName, job.imageId, userId);
         const taggedChat = spindle.permissions.has("chats") ? await spindle.chats.get(job.chatId, userId) : {
