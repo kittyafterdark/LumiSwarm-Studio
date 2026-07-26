@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.11
+
+### Fixed
+
+- Lumiverse's shared `IMAGE_GEN_COMPLETE` event is now an authoritative
+  completion fallback for Studio and Quick Create. Because that event already
+  contains the saved image ID and URL, both surfaces immediately retire their
+  progress and interrupt controls and display the final output even when the
+  extension-specific result message is delayed or never delivered.
+- The fallback preserves normal result hydration when it arrives later and
+  continues to hand off correctly between multiple queued message images.
+- Settled job IDs are now remembered across Studio, Quick Create, tagged jobs,
+  host progress, and interruption/error paths. Late `generation_started` or
+  progress messages can no longer resurrect a completed generation's controls.
+
 ## 1.0.10
 
 ### Fixed

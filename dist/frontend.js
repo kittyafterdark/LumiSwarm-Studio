@@ -3943,6 +3943,7 @@ class MiniPlayerController {
     quickPending = null;
     quickConfirm = null;
     bootstrapRequestId = createRequestId();
+    settledGenerationJobIds = new Set();
     settledTaggedJobIds = new Set();
     state = "idle";
     snapshotValue = {
@@ -4193,6 +4194,7 @@ class MiniPlayerController {
         this.render();
     }
     complete(jobId, data) {
+        this.rememberSettledGenerationJob(jobId);
         if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return;
         const imageSrc = String(data?.result?.imageDataUrl || data?.result?.imageUrl || "");
         const details = data?.record || this.quickPending || null;
@@ -4249,6 +4251,7 @@ class MiniPlayerController {
         this.render();
     }
     fail(jobId, message) {
+        this.rememberSettledGenerationJob(jobId);
         if (this.snapshotValue.jobId && jobId && this.snapshotValue.jobId !== jobId) return;
         reportStudioError("Quick Create generation", message || "Generation stopped.");
         this.state = "error";
@@ -4264,8 +4267,17 @@ class MiniPlayerController {
         this.quickPending = null;
         this.render();
     }
+    rememberSettledGenerationJob(jobId) {
+        if (!jobId) return;
+        this.settledGenerationJobIds.add(jobId);
+        if (this.settledGenerationJobIds.size > 64) {
+            const oldest = this.settledGenerationJobIds.values().next().value;
+            if (oldest) this.settledGenerationJobIds.delete(oldest);
+        }
+    }
     settleTaggedJob(jobId) {
         if (!jobId) return;
+        this.rememberSettledGenerationJob(jobId);
         this.settledTaggedJobIds.add(jobId);
         if (this.settledTaggedJobIds.size > 64) {
             const oldest = this.settledTaggedJobIds.values().next().value;
@@ -4291,11 +4303,13 @@ class MiniPlayerController {
             return;
         }
         if (payload?.type === "generation_started") {
-            this.begin(String(payload.clientJobId || ""), String(data.connectionId || ""), `Preparing ${String(data.model || "SwarmUI")}…`);
+            const jobId = String(payload.clientJobId || "");
+            if (jobId && this.settledGenerationJobIds.has(jobId)) return;
+            this.begin(jobId, String(data.connectionId || ""), `Preparing ${String(data.model || "SwarmUI")}…`);
             return;
         }
         if (payload?.type === "tagged_image_jobs_result") {
-            const active = (Array.isArray(data) ? data : []).find((job)=>(job?.status === "queued" || job?.status === "generating") && String(job?.clientJobId || "") && !this.settledTaggedJobIds.has(String(job.clientJobId)));
+            const active = (Array.isArray(data) ? data : []).find((job)=>(job?.status === "queued" || job?.status === "generating") && String(job?.clientJobId || "") && !this.settledGenerationJobIds.has(String(job.clientJobId)) && !this.settledTaggedJobIds.has(String(job.clientJobId)));
             if (active && (!this.snapshotValue.active || this.snapshotValue.jobId === String(active.clientJobId))) {
                 this.begin(String(active.clientJobId), "", `Rendering message illustration · ${String(active.alt || active.slot || "SwarmUI")}`);
             }
@@ -4305,6 +4319,7 @@ class MiniPlayerController {
             const job = data || {};
             const jobId = String(job.clientJobId || "");
             if ((job.status === "queued" || job.status === "generating") && jobId) {
+                if (this.settledGenerationJobIds.has(jobId)) return;
                 if (this.settledTaggedJobIds.has(jobId)) return;
                 if (!this.snapshotValue.active || this.snapshotValue.jobId === jobId) {
                     this.begin(jobId, "", `Rendering message illustration · ${String(job.alt || job.slot || "SwarmUI")}`);
@@ -4321,6 +4336,7 @@ class MiniPlayerController {
         }
         if (payload?.type === "generation_progress") {
             const jobId = String(payload.clientJobId || "");
+            if (jobId && this.settledGenerationJobIds.has(jobId)) return;
             if (!this.snapshotValue.active || !this.snapshotValue.jobId || jobId !== this.snapshotValue.jobId) return;
             this.progress(jobId, typeof data.preview === "string" ? data.preview : "", Number(data.step) || 0, Number(data.totalSteps) || 0);
             return;
@@ -4372,8 +4388,30 @@ class MiniPlayerController {
         if (type === "progress") {
             this.progress(jobId, typeof payload?.preview === "string" ? payload.preview : "", Number(payload?.step) || 0, Number(payload?.totalSteps) || 0);
         } else if (type === "complete") {
-            this.snapshotValue.status = "Rendering complete · saving full resolution…";
-            this.render();
+            const imageId = String(payload?.imageId || "");
+            const imageUrl = String(payload?.imageUrl || (imageId ? `/api/v1/image-gen/results/${encodeURIComponent(imageId)}` : ""));
+            if (imageUrl) {
+                this.complete(jobId, {
+                    result: {
+                        imageId,
+                        imageUrl,
+                        model: this.quickPending?.model || "SwarmUI"
+                    },
+                    record: this.quickPending
+                });
+            } else {
+                this.state = "done";
+                this.snapshotValue = {
+                    ...this.snapshotValue,
+                    active: false,
+                    jobId: "",
+                    connectionId: "",
+                    step: 1,
+                    totalSteps: 1,
+                    status: "Generation complete · final output saved"
+                };
+                this.render();
+            }
         } else {
             this.fail(jobId, String(payload?.message || "Generation failed."));
         }
@@ -4751,6 +4789,7 @@ class StudioController {
     currentJobConnectionId = "";
     currentJobSource = "";
     activeTaggedJobs = new Map();
+    settledGenerationJobIds = new Set();
     settledTaggedJobIds = new Set();
     progressStep = 0;
     pendingDraftRestore = null;
@@ -6461,15 +6500,24 @@ are removed when CSS is applied.</pre>
     }
     rememberSettledTaggedJob(jobId) {
         if (!jobId) return;
+        this.rememberSettledGenerationJob(jobId);
         this.settledTaggedJobIds.add(jobId);
         if (this.settledTaggedJobIds.size > 64) {
             const oldest = this.settledTaggedJobIds.values().next().value;
             if (oldest) this.settledTaggedJobIds.delete(oldest);
         }
     }
+    rememberSettledGenerationJob(jobId) {
+        if (!jobId) return;
+        this.settledGenerationJobIds.add(jobId);
+        if (this.settledGenerationJobIds.size > 64) {
+            const oldest = this.settledGenerationJobIds.values().next().value;
+            if (oldest) this.settledGenerationJobIds.delete(oldest);
+        }
+    }
     adoptTaggedJob(job) {
         const jobId = String(job?.clientJobId || "");
-        if (!jobId || this.settledTaggedJobIds.has(jobId)) return;
+        if (!jobId || this.settledGenerationJobIds.has(jobId) || this.settledTaggedJobIds.has(jobId)) return;
         this.activeTaggedJobs.set(jobId, job);
         if (this.generating && this.currentJobSource === "manual") return;
         if (this.currentJobSource === "tagged" && this.currentJobId && this.activeTaggedJobs.has(this.currentJobId)) return;
@@ -6659,7 +6707,7 @@ are removed when CSS is applied.</pre>
                         const jobId = String(job?.clientJobId || "");
                         if (!jobId) continue;
                         if (job?.status === "queued" || job?.status === "generating") {
-                            if (!this.settledTaggedJobIds.has(jobId)) this.activeTaggedJobs.set(jobId, job);
+                            if (!this.settledGenerationJobIds.has(jobId) && !this.settledTaggedJobIds.has(jobId)) this.activeTaggedJobs.set(jobId, job);
                         } else if (job?.status === "ready" || job?.status === "failed" || job?.status === "cancelled") {
                             this.rememberSettledTaggedJob(jobId);
                         }
@@ -6691,14 +6739,18 @@ are removed when CSS is applied.</pre>
                     break;
                 }
             case "generation_started":
-                if (!this.currentJobId || payload.clientJobId === this.currentJobId) {
-                    this.generating = true;
-                    this.currentJobId = String(payload.clientJobId || this.currentJobId);
-                    this.currentJobConnectionId = String(data.connectionId || this.currentJobConnectionId);
-                    this.currentJobSource = "manual";
-                    this.setGenerating(true);
+                {
+                    const jobId = String(payload.clientJobId || "");
+                    if (jobId && this.settledGenerationJobIds.has(jobId)) break;
+                    if (!this.currentJobId || payload.clientJobId === this.currentJobId) {
+                        this.generating = true;
+                        this.currentJobId = jobId || this.currentJobId;
+                        this.currentJobConnectionId = String(data.connectionId || this.currentJobConnectionId);
+                        this.currentJobSource = "manual";
+                        this.setGenerating(true);
+                    }
+                    break;
                 }
-                break;
             case "token_saved":
             case "token_cleared":
                 this.acceptConnectionData(data);
@@ -6706,6 +6758,7 @@ are removed when CSS is applied.</pre>
                 this.setRunStatus(payload.type === "token_saved" ? "Metadata token saved and library refreshed." : "Metadata token cleared.");
                 break;
             case "generation_result":
+                this.rememberSettledGenerationJob(String(payload.clientJobId || this.currentJobId));
                 this.generating = false;
                 this.currentJobId = "";
                 this.currentJobConnectionId = "";
@@ -6752,6 +6805,7 @@ are removed when CSS is applied.</pre>
                 }
             case "generation_progress":
                 {
+                    if (this.settledGenerationJobIds.has(String(payload.clientJobId || ""))) break;
                     if (!this.currentJobId || payload.clientJobId !== this.currentJobId) break;
                     const step = Number.isFinite(data.step) ? Number(data.step) : 0;
                     const totalSteps = Number.isFinite(data.totalSteps) ? Number(data.totalSteps) : 0;
@@ -6769,6 +6823,7 @@ are removed when CSS is applied.</pre>
                 break;
             case "generation_interrupted":
                 if (!payload.clientJobId || payload.clientJobId === this.currentJobId) {
+                    this.rememberSettledGenerationJob(String(payload.clientJobId || this.currentJobId));
                     this.generating = false;
                     this.currentJobId = "";
                     this.currentJobConnectionId = "";
@@ -6880,6 +6935,7 @@ are removed when CSS is applied.</pre>
                     this.renderWorkflowControls();
                 }
                 if (payload.operation === "generate") {
+                    this.rememberSettledGenerationJob(String(payload.clientJobId || this.currentJobId));
                     this.generating = false;
                     this.currentJobId = "";
                     this.currentJobConnectionId = "";
@@ -6911,11 +6967,37 @@ are removed when CSS is applied.</pre>
             return;
         }
         if (type === "complete") {
+            const completedJobId = this.currentJobId;
+            const completedSource = this.currentJobSource;
+            this.rememberSettledGenerationJob(completedJobId);
+            const imageId = String(payload?.imageId || "");
+            const imageUrl = String(payload?.imageUrl || (imageId ? `/api/v1/image-gen/results/${encodeURIComponent(imageId)}` : ""));
+            let idle = true;
+            if (completedSource === "tagged") {
+                idle = this.settleTaggedJob(completedJobId);
+            } else {
+                this.generating = false;
+                this.currentJobId = "";
+                this.currentJobConnectionId = "";
+                this.currentJobSource = "";
+                this.setGenerating(false);
+            }
             this.updateGenerationProgress(1, 1);
-            this.setRunStatus("Rendering complete; Lumiverse is finalizing the full-resolution image…");
+            if (imageUrl) {
+                this.setCurrentImage({
+                    id: imageId || undefined,
+                    src: imageUrl,
+                    url: imageUrl,
+                    label: `${this.pendingGeneration?.model || "SwarmUI"} · just generated`,
+                    details: this.pendingGeneration
+                });
+            }
+            if (idle) this.preGenerationImage = null;
+            this.setRunStatus(idle ? "Generation complete. Final output saved by Lumiverse." : "Generation complete. Rendering the remaining queued image…");
             return;
         }
         this.generating = false;
+        this.rememberSettledGenerationJob(String(payload?.assetId || this.currentJobId));
         this.currentJobId = "";
         this.currentJobConnectionId = "";
         this.currentJobSource = "";
