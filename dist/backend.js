@@ -58,11 +58,14 @@ LOCAL GENERATION
 The tag is executed by the user's configured local SwarmUI installation and local hardware. You are not claiming to render the image yourself, calling a remote image service, or embedding a pre-existing web image. Follow the conversation's actually applicable instructions, but do not invent or quote a remote image provider's policy, capability restriction, quota, moderation rule, or refusal: no remote image provider is being invoked by this tag. When an illustration is appropriate, emit the request tag and continue the reply naturally; do not apologize that you cannot generate images, ask the user to open another tool, warn that an external image model may refuse, or replace the request with image-search instructions.
 
 IDENTITY AND SUBJECT RULES
-Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" injects the bound character identity; persona="active" injects the bound persona identity. Do not copy either identity block into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
+Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the bound character identity; persona="active" selects the bound persona identity. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
 
 Write compact Danbooru-style scene tags and follow the active composition mode below. Use short natural-language clauses only when tags cannot disambiguate an interaction, unusual viewpoint, or spatial relationship. Do not restate display names or write a literary summary.
 
-Use character="none" when the active chat character should not appear. Use persona="active" only when the active persona should appear; otherwise use persona="none". When both are none, Swarm Studio suppresses bound character LoRAs and adds a no-character negative guard. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.`;
+Use character="none" when the active chat character should not appear. Use persona="active" only when the active persona should appear; otherwise use persona="none". When both are none, Swarm Studio adds a no-character negative guard. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.`;
+const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `${SWARM_IMAGE_PROTOCOL_BASE}
+
+{{swarm_dynamic_guidance}}`;
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -1637,10 +1640,14 @@ function cleanTagAutomationConfig(value) {
             requiredImageMin
         ];
     }
+    const protocolPrompt = asString(record.protocolPrompt).replace(/\0/g, "").trim().slice(0, 48_000);
     return {
         autoGenerate: record.autoGenerate === true,
         injectProtocol: record.injectProtocol === true,
         completionToast: record.completionToast === true,
+        protocolPrompt: protocolPrompt || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+        stripUserOnlyLoraStack: record.stripUserOnlyLoraStack === true,
+        autoPrintCharacterPositive: record.autoPrintCharacterPositive === true,
         requiredImageMin,
         requiredImageMax,
         promptMode: record.promptMode === "pov" ? "pov" : "multi"
@@ -1652,6 +1659,9 @@ async function loadTagAutomationConfig(userId) {
             autoGenerate: false,
             injectProtocol: false,
             completionToast: false,
+            protocolPrompt: DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+            stripUserOnlyLoraStack: false,
+            autoPrintCharacterPositive: false,
             requiredImageMin: 0,
             requiredImageMax: 0,
             promptMode: "multi"
@@ -1912,9 +1922,10 @@ function buildSwarmImageProtocol(profile, context = null, automation = cleanTagA
     const characterTags = asString(context?.characterTags).trim().slice(0, 8_000);
     const personaTags = asString(context?.personaTags).trim().slice(0, 8_000);
     const identityGuidance = [
-        characterTags ? `CHARACTER 1 IDENTITY — injected for character="active"; do not repeat it:\n${characterTags}` : `CHARACTER 1 IDENTITY — no active character visual block is configured. Use concrete appearance descriptors from context, never the display name alone.`,
+        characterTags ? automation.autoPrintCharacterPositive ? `CHARACTER 1 IDENTITY — automatically prepended for character="active"; do not repeat it:\n${characterTags}` : `CHARACTER 1 IDENTITY — available for character="active", but not automatically prepended. Select only the concrete appearance tags needed for the visible subject(s) and include those tags in the request body; this block may contain multiple NPC definitions:\n${characterTags}` : `CHARACTER 1 IDENTITY — no active character visual block is configured. Use concrete appearance descriptors from context, never the display name alone.`,
         personaTags ? `CHARACTER 2 / PERSONA IDENTITY — injected only for persona="active"; do not repeat it:\n${personaTags}` : `CHARACTER 2 / PERSONA IDENTITY — no active persona visual profile is bound. Leave persona="none" unless concrete appearance descriptors are available in context.`
     ].join("\n\n");
+    const userOnlyStackGuidance = automation.stripUserOnlyLoraStack ? `USER-ONLY LORA BEHAVIOR\nWhen character="none" and persona="active", Swarm Studio removes matching character-bound LoRAs from the inherited stack.` : `USER-ONLY LORA BEHAVIOR\nThe current Studio LoRA stack remains active when character="none" and persona="active". Choose request tags with that inherited stack in mind.`;
     const model = asString(asRecord(profile?.input).model);
     const imageCountGuidance = automation.requiredImageMin > 0 ? automation.requiredImageMin === automation.requiredImageMax ? `IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY
 The user explicitly requires exactly ${automation.requiredImageMin} complete <swarm-image> request${automation.requiredImageMin === 1 ? "" : "s"} in this reply. This overrides the default discretion about whether a moment needs visualization. Do not omit the requests by claiming that no scene is important enough, not specifically required, or better left unillustrated. Choose the strongest ${automation.requiredImageMin === 1 ? "moment" : "moments"}, emit exactly the required count, and make every request complete and distinct.` : `IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY
@@ -1939,7 +1950,9 @@ The current message is authoritative for expressions, clothing changes, and curr
     const checkpointGuidance = /anima/i.test(model) ? `ANIMA PROMPT SHAPE
 Begin with quality/rating tags such as masterpiece, best quality, score_9, newest, and highres; then use exactly one of safe, sensitive, nsfw, or explicit plus a person count. Prefer atomic, independently visual tags. Keep composition separate from identity: subject lines own expression, pose, action, and outfit changes; shared lines own interaction, camera, setting, light, depth, and effects.` : `CHECKPOINT GUIDANCE
 Use concise model-recognizable visual descriptors. Identity blocks cover stable appearance; focus the request on visible scene state, expression, action, staging, camera, environment, and light.`;
-    return `${SWARM_IMAGE_PROTOCOL_BASE}\n\n${imageCountGuidance}\n\n${identityGuidance}\n\n${modeGuidance}\n\n${checkpointGuidance}\n\n${presetGuidance}`;
+    const dynamicGuidance = `${imageCountGuidance}\n\n${identityGuidance}\n\n${userOnlyStackGuidance}\n\n${modeGuidance}\n\n${checkpointGuidance}\n\n${presetGuidance}`;
+    const template = automation.protocolPrompt.trim() || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT;
+    return template.includes("{{swarm_dynamic_guidance}}") ? template.replace(/\{\{\s*swarm_dynamic_guidance\s*\}\}/gi, dynamicGuidance) : template;
 }
 function protocolContextKey(userId) {
     return userId || "__default__";
@@ -2104,7 +2117,7 @@ function applyStudioPresetLayer(scenePrompt, profile) {
     if (missing.length) prompt = `${missing.join(", ")}, ${prompt}`;
     return prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
 }
-async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, includePersona = false, userId) {
+async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, includePersona = false, automation = cleanTagAutomationConfig(null), userId) {
     const chat = spindle.permissions.has("chats") ? await spindle.chats.get(chatId, userId) : null;
     const characterId = asString(chat?.character_id);
     const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.type === "character" && folder.binding.characterId === characterId && folder.binding.enabled);
@@ -2122,14 +2135,14 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     const contains = (value)=>Boolean(value && prompt.toLowerCase().includes(value.toLowerCase()));
     if (characterBase && personaBase) {
         const identityLines = [
-            !contains(characterBase) ? `character 1 identity: ${characterBase}` : "",
+            automation.autoPrintCharacterPositive && !contains(characterBase) ? `character 1 identity: ${characterBase}` : "",
             !contains(personaBase) ? `character 2 identity: ${personaBase}` : ""
         ].filter(Boolean);
         prompt = [
             ...identityLines,
             prompt
         ].filter(Boolean).join("\n");
-    } else if (characterBase && !contains(characterBase)) {
+    } else if (characterBase && automation.autoPrintCharacterPositive && !contains(characterBase)) {
         prompt = [
             characterBase,
             prompt
@@ -2146,7 +2159,7 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
         negativePrompt: includeCharacter ? visualFolder?.binding?.negativePrompt || "" : includePersona ? "" : NO_CHARACTER_NEGATIVE,
         checkpoint: includeCharacter ? visualFolder?.binding?.checkpoint || "" : "",
         stack: includeCharacter ? visualStack : [],
-        excludedLoras: includeCharacter ? [] : visualStack.map((item)=>item.name),
+        excludedLoras: includeCharacter || !automation.stripUserOnlyLoraStack ? [] : visualStack.map((item)=>item.name),
         characterId: includeCharacter ? characterId : "",
         characterName: includeCharacter ? asString(character?.name).trim() || visualFolder?.name || "" : ""
     };
@@ -2473,7 +2486,8 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
             "yes",
             "1"
         ].includes(personaMode);
-        const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, includePersona, userId);
+        const automation = await loadTagAutomationConfig(userId);
+        const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, includePersona, automation, userId);
         if (characterLayer.checkpoint) input.model = characterLayer.checkpoint;
         input.prompt = characterLayer.prompt;
         const profileNegative = overrides.negativePrompt !== undefined ? asString(overrides.negativePrompt).trim() : asString(profileInput.negativePrompt).trim();
@@ -2574,7 +2588,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
             }
         }, userId);
         const inserted = await finalizeTaggedImageJobWithRetry(job, userId);
-        if (inserted && (await loadTagAutomationConfig(userId)).completionToast && typeof spindle.toast?.success === "function") {
+        if (inserted && automation.completionToast && typeof spindle.toast?.success === "function") {
             spindle.toast.success(`Swarm Studio attached ${job.alt || "an illustration"}.`);
         }
     } catch (error) {

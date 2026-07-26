@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.0.9
+
+### Added
+
+- Replaced the crowded gear popover with a responsive Studio settings modal:
+  desktop uses a left navigation rail, while mobile uses a horizontally scrolling
+  top tab strip. General, Theme, and Metadata now have independent pages.
+- The complete inline-image protocol is editable in General settings, with
+  explicit save/reset controls and a collapsible macro reference. The
+  `{{swarm_dynamic_guidance}}` insertion point keeps image-count, identity,
+  composition, checkpoint, LoRA, and preset guidance live inside a custom
+  protocol.
+- Added default-off controls to strip a character-bound LoRA stack from
+  persona-only requests and to automatically prepend the active character
+  positive prompt. Leaving automatic character printing off lets the model
+  select only the relevant concrete identity tags from multi-NPC visual blocks.
+- Added centered inline-image scale controls for full, 75%, and 50% display.
+
+### Fixed
+
+- Chat-tagged generations now register as the active shared generation in both
+  Studio and the floating Quick Create player. Swarm stream preview frames and
+  step progress are therefore visible again without restoring the removed
+  in-message loading strip.
+- The settings layer is mounted at the Studio shell instead of inside the
+  transformed header controls, preventing clipping and stacking-context bugs on
+  desktop and mobile.
+
 ## 1.0.8
 
 ### Fixed
@@ -14,6 +42,9 @@
 - Remapped jobs acquire their mutation lock using the final message ID, keeping
   multiple images completing in the same message serialized without one
   attachment overwriting another.
+- This failure was unrelated to IPv4 or remote mobile access; the same race
+  could occur locally whenever character/persona layers or preset directives
+  changed the submitted prompt.
 
 ## 1.0.7
 

@@ -101,10 +101,19 @@ If metadata access is unavailable, generation still works; restore metadata acce
 
 ## In-message image tags
 
-Studio settings contains two independent, default-off controls:
+Studio settings contains independent inline-image controls:
 
 - **Automatically generate completed `<swarm-image>` tags** executes image requests. When disabled, the tag becomes a lazy **Generate image** card instead of spending GPU time.
 - **Teach the model the Swarm image-tag protocol** injects a short attributed system instruction. The copyable example and `{{swarm_image_protocol}}` macro remain available when this toggle is disabled, so prompt authors can place the protocol themselves.
+- **Strip LoRA stack from User-only composition** is off by default. When enabled, `character="none" persona="active"` removes LoRAs matching the active character binding; when disabled, the current Studio stack remains intact.
+- **Auto-print current character positive prompt** is off by default. When enabled, the active character visual identity is prepended automatically. When disabled, the protocol presents that visual block to the language model so it can select only the concrete subject tags needed for the request—especially useful when one card contains multiple NPC definitions.
+
+The complete protocol is editable in **Studio settings → General**. **Reset**
+restores Studio's current default and **Save current** persists the editor.
+`{{swarm_dynamic_guidance}}` marks where Studio inserts the live image-count,
+identity, composition, checkpoint, LoRA, and preset guidance. Removing that
+marker is supported for fully custom protocols, but also opts out of all of
+those dynamic instructions.
 
 **Prompt composition** selects one of two protocol shapes:
 
@@ -130,13 +139,13 @@ interaction: character 1 turns toward character 2; distinct hands and silhouette
 </swarm-image>
 ```
 
-Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; 3:4 is available for portrait framing. The protocol asks models to reserve 9:16 and 16:9 for layouts explicitly presented as phone or widescreen media. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the character visual positive and negative, removes that binding's LoRAs from the request, and adds a no-person/character negative guard while preserving unrelated Studio style LoRAs, presets, and generation controls. `persona="active"` opts the active persona's bound visual identity into the request; it defaults to `none`. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request.
+Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; 3:4 is available for portrait framing. The protocol asks models to reserve 9:16 and 16:9 for layouts explicitly presented as phone or widescreen media. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the character visual positive and negative and adds a no-person/character negative guard. The current Studio LoRA stack remains active by default; the settings toggle above can additionally strip LoRAs matching the character binding from persona-only requests. `persona="active"` opts the active persona's bound visual identity into the request; it defaults to `none`. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request.
 
 The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives inside the complete composed positive prompt for both manual and tagged jobs; Studio removes the conflicting duplicate raw preset field before submission. This keeps the user's scene prompt, character/persona visual layers, and inherited LoRA triggers alongside Swarm's saved preset behavior. A literal `{{swarm_preset}}` resolves to the same directive list without adding it twice, and scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. An enabled character-folder visual binding contributes its base positive, base negative, and saved LoRA stack to both manual and tagged generation. Native Character LoRA `base_tags` remain a fallback when a binding has no positive base; the separately bound native Character LoRA is never injected.
 
 Streaming and persisted assistant messages may use different IDs. Studio fingerprints the immutable source tag and scans the saved chat on the backend before attachment, allowing it to remap a transient streaming ID without relying on prompt equality or a second browser render. Multiple completed tags targeting the same final message share its mutation lock so their inserts remain ordered.
 
-The injected protocol identifies this as generation through the user's configured local SwarmUI, so the language model emits a request instead of claiming it lacks an image tool. It includes the exact active identity blocks that Studio will prepend and forbids substituting chat display names for visual tags. Two-subject requests use compact `character 1:`, `character 2:`, and `interaction:` lines so pose ownership remains clear without repeating the identity prompt. Anima-family checkpoints receive a condensed hybrid Danbooru/natural-language guide, the `safe` / `sensitive` / `nsfw` / `explicit` safety vocabulary, concrete scene-layer ordering, and a subject-action pattern for unambiguous multi-character staging.
+The injected protocol identifies this as generation through the user's configured local SwarmUI, so the language model emits a request instead of claiming it lacks an image tool. It includes the active identity blocks and explicitly states whether the character block will be prepended or must be selectively represented in the tag body; chat display names are never treated as visual tokens. Two-subject requests use compact `character 1:`, `character 2:`, and `interaction:` lines so pose ownership remains clear without repeating the identity prompt. Anima-family checkpoints receive a condensed hybrid Danbooru/natural-language guide, the `safe` / `sensitive` / `nsfw` / `explicit` safety vocabulary, concrete scene-layer ordering, and a subject-action pattern for unambiguous multi-character staging.
 
 Each request is keyed by chat, message, slot, and tag content. The streaming tag interceptor delivers complete requests once. Completions targeting the same assistant message are finalized through a per-message queue and re-read the latest message before every replacement, so two or more fast parallel generations cannot overwrite one another. Automatic generations do not mount a progress strip in chat; only an aspect-aware fallback remains when a request fails, is cancelled, or still needs explicit approval. Right-click or long-press that fallback for current-profile retry, original-profile retry, prompt editing and confirmation in Quick Create, or the output library. A completed image keeps a small per-image action overlay with the same regeneration choices, including after reload. Finished tags are frozen to their specific Lumiverse image URL rather than leaving the global `{{last_genned}}` macro in old messages.
 
@@ -152,7 +161,7 @@ Profile macros resolve to raw values so authored HTML and display regexes remain
 - `{{swarm_checkpoint}}` / `{{swarm_aspect}}` — current profile details
 - `{{last_genned}}` — latest successful Studio output URL
 
-The macro reference remains behind **Studio settings → In-message images**. Character and persona visuals live on the drawer's **Chat Visuals** page (with character output organization still backed by Output Library), so the settings popover stays compact.
+The macro reference is collapsed beneath the editable protocol in **Studio settings → General**. Character and persona visuals live on the drawer's **Chat Visuals** page, with character output organization still backed by Output Library.
 
 ## Metadata behavior
 
@@ -349,16 +358,21 @@ backdrop blur are adjustable with sliders and apply throughout the
 modal—including the output library and inspector. Appearance preferences are
 kept in browser-local storage.
 
-The settings panel also includes a persisted custom CSS editor and a compact
-guide to useful selectors and variables. CSS is inserted as stylesheet text,
-not HTML; `@import` rules are removed. Prefix selectors with `.ss-shell` to
-keep overrides inside the Studio, or use `.ss-launcher` to style its drawer
-composition. Its dot field, broken corner ornaments, picture-frame glyph, and
-sparkle are static CSS or inline SVG, with no animated or fetched assets.
-Metadata refresh and the optional encrypted `swarm_token` live in this same
-opaque gear panel. Completion toasts are off by default and can be opted into
-from its Behavior section. That section also enables or disables the floating
-widget and independently opts mobile into the full Quick Create panel.
+The settings cog opens a responsive modal. Desktop uses a left navigation rail;
+mobile uses a horizontally scrolling top tab strip. **General** contains
+behavior, inline-image automation, the editable protocol, and its macro
+reference. **Theme** contains appearance controls, custom CSS, and centered
+100%, 75%, or 50% inline-image sizing. **Metadata** keeps the infrequently used
+refresh and encrypted `swarm_token` controls out of the generation workspace.
+
+The Theme page includes a persisted custom CSS editor and a compact guide to
+useful selectors and variables. CSS is inserted as stylesheet text, not HTML;
+`@import` rules are removed. Prefix selectors with `.ss-shell` to keep overrides
+inside the Studio, or use `.ss-launcher` to style its drawer composition. Its dot
+field, broken corner ornaments, picture-frame glyph, and sparkle are static CSS
+or inline SVG, with no animated or fetched assets. Completion toasts remain off
+by default. General settings also enables or disables the floating widget and
+independently opts mobile into the full Quick Create panel.
 
 ## Live generation previews and interruption
 
@@ -394,6 +408,10 @@ targets the active client job; clicking the preview reopens Studio with the same
 live or completed output and draft already restored. Size preferences are stored
 locally, while generation state and draft data stay in memory only for the
 current Lumiverse session.
+Chat-tagged generations join this same shared activity state: opening Studio or
+expanding Quick Create while an inline request is running shows its live Swarm
+preview and step progress. The extension does not restore a layout-shifting
+progress strip inside the chat message itself.
 On mobile, the extension keeps a Lumiverse app-overlay lifecycle mount but
 portals the visible miniplayer surface to the document root, so the collapsed
 widget remains a complete 64 × 64 square instead of inheriting either the host's

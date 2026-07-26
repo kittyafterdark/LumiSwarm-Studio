@@ -669,6 +669,10 @@ assert.equal(bootstrap.data.offset, 0)
 assert.equal(bootstrap.data.limit, 12)
 assert.deepEqual(bootstrap.data.stackPresets, [])
 assert.deepEqual(bootstrap.data.outputFolders, [])
+assert.equal(bootstrap.data.tagAutomation.stripUserOnlyLoraStack, false)
+assert.equal(bootstrap.data.tagAutomation.autoPrintCharacterPositive, false)
+assert.match(bootstrap.data.tagAutomation.protocolPrompt, /SWARM STUDIO IMAGE REQUEST PROTOCOL/)
+assert.match(bootstrap.data.tagAutomation.protocolPrompt, /\{\{swarm_dynamic_guidance\}\}/)
 assert.equal(bootstrap.data.characterBaseTags.characterId, "char-1")
 assert.equal(bootstrap.data.characterBaseTags.characterName, "Lior")
 assert.equal(bootstrap.data.characterBaseTags.source, "lumiverse")
@@ -896,21 +900,28 @@ const tagConfig = await request("set_tag_automation", {
     autoGenerate: true,
     injectProtocol: true,
     completionToast: false,
+    stripUserOnlyLoraStack: false,
+    autoPrintCharacterPositive: true,
     requiredImageMin: 2,
     requiredImageMax: 4,
     promptMode: "pov",
   },
 })
-assert.deepEqual(tagConfig.data, {
-  autoGenerate: true,
-  injectProtocol: true,
-  completionToast: false,
-  requiredImageMin: 2,
-  requiredImageMax: 4,
-  promptMode: "pov",
-})
+assert.equal(tagConfig.data.autoGenerate, true)
+assert.equal(tagConfig.data.injectProtocol, true)
+assert.equal(tagConfig.data.completionToast, false)
+assert.equal(tagConfig.data.stripUserOnlyLoraStack, false)
+assert.equal(tagConfig.data.autoPrintCharacterPositive, true)
+assert.equal(tagConfig.data.requiredImageMin, 2)
+assert.equal(tagConfig.data.requiredImageMax, 4)
+assert.equal(tagConfig.data.promptMode, "pov")
+assert.match(tagConfig.data.protocolPrompt, /SWARM STUDIO IMAGE REQUEST PROTOCOL/)
+assert.match(tagConfig.data.protocolPrompt, /\{\{swarm_dynamic_guidance\}\}/)
 assert.match(macroValues.get("swarm_image_protocol"), /between 2 and 4 complete <swarm-image> requests/)
 assert.match(macroValues.get("swarm_image_protocol"), /CHARACTER-ONLY \/ POV/)
+assert.doesNotMatch(macroValues.get("swarm_image_protocol"), /\{\{swarm_dynamic_guidance\}\}/)
+assert.match(macroValues.get("swarm_image_protocol"), /automatically prepended/)
+assert.match(macroValues.get("swarm_image_protocol"), /current Studio LoRA stack remains active/)
 const characterBaseTags = await request("set_character_base_tags", {
   characterId: "char-1",
   tags: "1boy, black hair, red eyes",
@@ -1221,7 +1232,7 @@ assert.match(source, /character="active"/)
 assert.match(source, /Use character="none" when the active chat character should not appear/)
 assert.match(source, /const NO_CHARACTER_NEGATIVE = "people, person, character/)
 assert.match(source, /const includeCharacter = !\["none", "off", "false", "no", "0"\]\.includes\(characterMode\)/)
-assert.match(source, /excludedLoras: includeCharacter \? \[\] : visualStack\.map\(\(item\) => item\.name\)/)
+assert.match(source, /excludedLoras: includeCharacter \|\| !automation\.stripUserOnlyLoraStack[\s\S]*?\? \[\][\s\S]*?: visualStack\.map\(\(item\) => item\.name\)/)
 assert.match(source, /if \(excluded\.has\(name\.toLowerCase\(\)\)\) return/)
 assert.match(source, /LOCAL GENERATION/)
 assert.match(source, /configured local SwarmUI installation and local hardware/)

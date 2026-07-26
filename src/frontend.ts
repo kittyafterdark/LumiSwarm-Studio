@@ -16,6 +16,10 @@ interface StudioBehavior {
   mobileQuickCreate: boolean
   tagAutoGenerate: boolean
   tagPromptInjection: boolean
+  protocolPrompt: string
+  stripUserOnlyLoraStack: boolean
+  autoPrintCharacterPositive: boolean
+  inlineImageScale: 100 | 75 | 50
   requiredImageMin: number
   requiredImageMax: number
   tagPromptMode: "multi" | "pov"
@@ -464,6 +468,31 @@ character 1: smiling, holding a paper tray
 character 2: amused expression, leaning closer
 interaction: character 1 offers character 2 a bite, standing side by side
 medium shot, city street, food stall, evening lights</swarm-image>`
+
+const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `SWARM STUDIO IMAGE REQUEST PROTOCOL
+Place this exact XML-like request wherever an illustration selected under the image-count instructions should appear. Attributes may be written on one line or separate lines:
+<swarm-image
+  request="generate"
+  slot="short-stable-name"
+  aspect="4:3"
+  character="active"
+  persona="none"
+  alt="brief accessible description"
+>
+scene-specific SwarmUI prompt</swarm-image>
+The request="generate" marker is required. Emit the tag only as an actual image request: never quote it, explain it, demonstrate it in visible prose, or emit an empty/partial opening tag. The tag body is a diffusion prompt, not prose for the user and not an HTML shell. Do not nest another <swarm-image> tag inside it.
+
+LOCAL GENERATION
+The tag is executed by the user's configured local SwarmUI installation and local hardware. You are not claiming to render the image yourself, calling a remote image service, or embedding a pre-existing web image. Follow the conversation's actually applicable instructions, but do not invent or quote a remote image provider's policy, capability restriction, quota, moderation rule, or refusal: no remote image provider is being invoked by this tag. When an illustration is appropriate, emit the request tag and continue the reply naturally; do not apologize that you cannot generate images, ask the user to open another tool, warn that an external image model may refuse, or replace the request with image-search instructions.
+
+IDENTITY AND SUBJECT RULES
+Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the bound character identity; persona="active" selects the bound persona identity. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
+
+Write compact Danbooru-style scene tags and follow the active composition mode below. Use short natural-language clauses only when tags cannot disambiguate an interaction, unusual viewpoint, or spatial relationship. Do not restate display names or write a literary summary.
+
+Use character="none" when the active chat character should not appear. Use persona="active" only when the active persona should appear; otherwise use persona="none". When both are none, Swarm Studio adds a no-character negative guard. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.
+
+{{swarm_dynamic_guidance}}`
 
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1"
 const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1"
@@ -1272,33 +1301,169 @@ const STYLES = `
     stroke-linecap: round;
     stroke-linejoin: round;
   }
-  .ss-config-popover {
+  .ss-settings-layer {
     position: absolute;
-    right: 0;
-    top: 40px;
-    z-index: 40;
-    width: min(460px, calc(100vw - 28px));
-    max-height: min(780px, calc(100dvh - 72px));
-    overflow-y: auto;
+    inset: 0;
+    z-index: 110;
     display: grid;
-    gap: 11px;
-    padding: 12px;
+    place-items: center;
+    padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+      max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  }
+  .ss-settings-layer[hidden] { display: none; }
+  .ss-settings-backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(0,0,0,.68);
+    backdrop-filter: blur(7px);
+  }
+  .ss-settings-dialog {
+    position: relative;
+    width: min(1040px, calc(100% - 36px));
+    height: min(760px, calc(100% - 36px));
+    min-height: 460px;
+    display: grid;
+    grid-template-columns: 176px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
     border: 1px solid var(--ss-outline, var(--lumiverse-border));
-    border-radius: var(--ss-panel-radius, var(--lumiverse-radius, 10px));
+    border-radius: var(--ss-panel-radius, var(--lumiverse-radius, 12px));
     background:
       linear-gradient(var(--ss-panel-bg, rgba(20,21,26,.98)), var(--ss-panel-bg, rgba(20,21,26,.98))),
-      #0a0a0e;
-    box-shadow: 0 18px 54px rgba(0,0,0,.68), inset 0 1px rgba(255,255,255,.035);
-    backdrop-filter: blur(max(14px, var(--ss-backdrop-blur, 10px)));
+      #090a0d;
+    box-shadow: 0 28px 90px rgba(0,0,0,.72), inset 0 1px rgba(255,255,255,.04);
+    backdrop-filter: blur(max(16px, var(--ss-backdrop-blur, 10px)));
   }
-  .ss-config-popover[hidden] { display: none; }
-  .ss-config-section { display: grid; gap: 7px; }
-  .ss-config-section + .ss-config-section { padding-top: 10px; border-top: 1px solid var(--ss-outline, var(--lumiverse-border)); }
-  .ss-config-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 7px; }
-  .ss-config-section-head strong { font-size: 10px; }
-  .ss-config-section-head span { color: var(--lumiverse-text-muted); font-size: 8.5px; }
-  .ss-config-toggle { display: flex; align-items: center; gap: 7px; color: var(--lumiverse-text-muted); font-size: 9px; }
-  .ss-config-toggle input { accent-color: var(--lumiverse-accent, #7dd3fc); }
+  .ss-settings-header {
+    grid-column: 1 / -1;
+    min-height: 54px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px 10px 18px;
+    border-bottom: 1px solid var(--ss-outline, var(--lumiverse-border));
+    background: color-mix(in srgb, var(--ss-header-bg, #13141a) 82%, transparent);
+  }
+  .ss-settings-title { display: grid; gap: 2px; }
+  .ss-settings-title strong { font: 650 15px/1.1 Georgia, ui-serif, serif; }
+  .ss-settings-title span { color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-settings-tabs {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    gap: 5px;
+    padding: 12px 9px;
+    overflow-y: auto;
+    border-right: 1px solid var(--ss-outline, var(--lumiverse-border));
+    background: color-mix(in srgb, var(--ss-canvas, #090a0d) 76%, transparent);
+  }
+  .ss-settings-tab {
+    width: 100%;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--ss-control-radius, 8px);
+    background: transparent;
+    color: var(--lumiverse-text-muted);
+    font-size: 10px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ss-settings-tab svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; }
+  .ss-settings-tab:hover { color: var(--ss-text, var(--lumiverse-text)); background: color-mix(in srgb, var(--ss-button-bg, #171820) 72%, transparent); }
+  .ss-settings-tab[data-active="true"] {
+    color: var(--ss-text, var(--lumiverse-text));
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 34%, var(--ss-outline, var(--lumiverse-border)));
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 13%, var(--ss-button-bg, #171820));
+    box-shadow: inset 3px 0 var(--lumiverse-accent, #7dd3fc);
+  }
+  .ss-settings-content {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px 18px 24px;
+  }
+  .ss-settings-panel { display: grid; align-content: start; gap: 14px; }
+  .ss-settings-panel[hidden] { display: none; }
+  .ss-config-section {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    border-radius: var(--ss-panel-radius, var(--lumiverse-radius, 10px));
+    background: color-mix(in srgb, var(--ss-canvas, #090a0d) 62%, transparent);
+  }
+  .ss-config-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .ss-config-section-head strong { font-size: 11px; }
+  .ss-config-section-head span { color: var(--lumiverse-text-muted); font-size: 9px; }
+  .ss-settings-toggle {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 11px;
+    border: 1px solid color-mix(in srgb, var(--ss-outline, var(--lumiverse-border)) 82%, transparent);
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--ss-header-bg, #13141a) 52%, transparent);
+    cursor: pointer;
+  }
+  .ss-settings-toggle-copy { min-width: 0; display: grid; gap: 4px; }
+  .ss-settings-toggle-copy strong { color: var(--ss-text, var(--lumiverse-text)); font-size: 10px; }
+  .ss-settings-toggle-copy span { color: var(--lumiverse-text-muted); font-size: 9px; line-height: 1.45; }
+  .ss-settings-toggle input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .ss-switch-track {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--ss-canvas, #090a0d) 78%, transparent);
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .ss-switch-track::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--lumiverse-text-muted);
+    box-shadow: 0 1px 5px rgba(0,0,0,.4);
+    transition: transform .15s ease, background .15s ease;
+  }
+  .ss-settings-toggle input:checked + .ss-switch-track {
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 70%, var(--ss-outline, var(--lumiverse-border)));
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 32%, var(--ss-canvas, #090a0d));
+  }
+  .ss-settings-toggle input:checked + .ss-switch-track::after {
+    transform: translateX(16px);
+    background: var(--lumiverse-accent, #7dd3fc);
+  }
+  .ss-settings-toggle:focus-within { outline: 1px solid var(--lumiverse-accent, #7dd3fc); outline-offset: 2px; }
+  .ss-protocol-editor { min-height: 290px; resize: vertical; font: 9px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .ss-protocol-actions { display: flex; justify-content: flex-end; gap: 7px; }
+  .ss-image-scale-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .ss-image-scale-button { min-height: 92px; display: grid; place-items: center; align-content: center; gap: 8px; }
+  .ss-image-scale-button svg { width: 54px; height: 38px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+  .ss-image-scale-button span { font-size: 9px; }
+  .ss-image-scale-button[data-active="true"] {
+    color: var(--ss-text, var(--lumiverse-text));
+    border-color: var(--lumiverse-accent, #7dd3fc);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 12%, var(--ss-button-bg, #171820));
+  }
   .ss-image-count-range {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 58px auto 58px;
@@ -1366,6 +1531,16 @@ const STYLES = `
     object-position: center !important;
   }
   figure[data-swarm-studio-image="true"] { position: relative; display: block; cursor: default; isolation: isolate; }
+  html[data-swarm-studio-inline-scale="75"] figure[data-swarm-studio-image="true"] {
+    width: 75% !important;
+    height: auto !important;
+    margin-inline: auto !important;
+  }
+  html[data-swarm-studio-inline-scale="50"] figure[data-swarm-studio-image="true"] {
+    width: 50% !important;
+    height: auto !important;
+    margin-inline: auto !important;
+  }
   figure[data-swarm-studio-image="true"] > [data-swarm-studio-inline-action] {
     position: absolute;
     top: 8px;
@@ -2828,7 +3003,48 @@ const STUDIO_V3_STYLES = `
     .ss-top-actions { grid-column: 2; grid-row: 1; }
     .ss-top-actions [data-action="toggle-fullscreen"] { display: none; }
     .ss-close-studio { display: inline-flex; }
-    .ss-config-popover { position: fixed; top: 54px; right: 8px; width: calc(100vw - 16px); }
+    .ss-settings-layer {
+      padding: max(7px, env(safe-area-inset-top)) max(7px, env(safe-area-inset-right))
+        max(7px, env(safe-area-inset-bottom)) max(7px, env(safe-area-inset-left));
+    }
+    .ss-settings-dialog {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto auto minmax(0, 1fr);
+      border-radius: max(10px, var(--ss-panel-radius, var(--lumiverse-radius, 12px)));
+    }
+    .ss-settings-header { grid-column: 1; min-height: 48px; padding: 8px 10px 8px 13px; }
+    .ss-settings-title span { display: none; }
+    .ss-settings-tabs {
+      display: flex;
+      gap: 5px;
+      padding: 7px 9px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      border-right: 0;
+      border-bottom: 1px solid var(--ss-outline, var(--lumiverse-border));
+      scrollbar-width: none;
+    }
+    .ss-settings-tabs::-webkit-scrollbar { display: none; }
+    .ss-settings-tab {
+      width: auto;
+      min-width: max-content;
+      min-height: 34px;
+      flex: 0 0 auto;
+      padding: 7px 11px;
+      border-radius: 999px;
+    }
+    .ss-settings-tab[data-active="true"] { box-shadow: inset 0 -2px var(--lumiverse-accent, #7dd3fc); }
+    .ss-settings-content { padding: 10px 9px max(18px, env(safe-area-inset-bottom)); }
+    .ss-config-section { padding: 11px; }
+    .ss-config-section-head { align-items: flex-start; }
+    .ss-config-section-head span { text-align: right; }
+    .ss-settings-toggle { padding: 9px; }
+    .ss-protocol-editor { min-height: 250px; font-size: 8.5px; }
+    .ss-image-scale-grid { grid-template-columns: repeat(3, minmax(84px, 1fr)); overflow-x: auto; }
+    .ss-image-scale-button { min-height: 80px; }
     .ss-mobile-tabs {
       display: flex;
       flex: 0 0 36px;
@@ -3598,6 +3814,10 @@ function defaultStudioBehavior(): StudioBehavior {
     mobileQuickCreate: false,
     tagAutoGenerate: false,
     tagPromptInjection: false,
+    protocolPrompt: DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+    stripUserOnlyLoraStack: false,
+    autoPrintCharacterPositive: false,
+    inlineImageScale: 100,
     requiredImageMin: 0,
     requiredImageMax: 0,
     tagPromptMode: "multi",
@@ -3626,6 +3846,14 @@ function storedStudioBehavior(): StudioBehavior {
       mobileQuickCreate: parsed?.mobileQuickCreate === true,
       tagAutoGenerate: parsed?.tagAutoGenerate === true,
       tagPromptInjection: parsed?.tagPromptInjection === true,
+      protocolPrompt: typeof parsed?.protocolPrompt === "string" && parsed.protocolPrompt.trim()
+        ? parsed.protocolPrompt
+        : DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+      stripUserOnlyLoraStack: parsed?.stripUserOnlyLoraStack === true,
+      autoPrintCharacterPositive: parsed?.autoPrintCharacterPositive === true,
+      inlineImageScale: parsed?.inlineImageScale === 75 || parsed?.inlineImageScale === 50
+        ? parsed.inlineImageScale
+        : 100,
       requiredImageMin: imageRange.min,
       requiredImageMax: imageRange.max,
       tagPromptMode: parsed?.tagPromptMode === "pov" ? "pov" : "multi",
@@ -4466,6 +4694,31 @@ class MiniPlayerController {
       )
       return
     }
+    if (payload?.type === "tagged_image_jobs_result") {
+      const active = (Array.isArray(data) ? data : []).find((job: any) =>
+        (job?.status === "queued" || job?.status === "generating") && String(job?.clientJobId || ""),
+      )
+      if (active && (!this.snapshotValue.active || this.snapshotValue.jobId === String(active.clientJobId))) {
+        this.begin(
+          String(active.clientJobId),
+          "",
+          `Rendering message illustration · ${String(active.alt || active.slot || "SwarmUI")}`,
+        )
+      }
+      return
+    }
+    if (payload?.type === "tagged_image_job") {
+      const job = data || {}
+      const jobId = String(job.clientJobId || "")
+      if ((job.status === "queued" || job.status === "generating") && jobId) {
+        if (!this.snapshotValue.active || this.snapshotValue.jobId === jobId) {
+          this.begin(jobId, "", `Rendering message illustration · ${String(job.alt || job.slot || "SwarmUI")}`)
+        }
+      } else if ((job.status === "failed" || job.status === "cancelled") && jobId === this.snapshotValue.jobId) {
+        this.fail(jobId, String(job.error || (job.status === "cancelled" ? "Message illustration stopped." : "Message illustration failed.")))
+      }
+      return
+    }
     if (payload?.type === "generation_progress") {
       const jobId = String(payload.clientJobId || "")
       if (!this.snapshotValue.active || !this.snapshotValue.jobId || jobId !== this.snapshotValue.jobId) return
@@ -4482,6 +4735,12 @@ class MiniPlayerController {
       return
     }
     if (payload?.type === "tagged_generation_result") {
+      const taggedJobId = String(data?.taggedJob?.clientJobId || "")
+      if (taggedJobId && taggedJobId === this.snapshotValue.jobId) {
+        this.snapshotValue.active = false
+        this.snapshotValue.jobId = ""
+        this.snapshotValue.connectionId = ""
+      }
       this.syncTaggedOutput(data)
       return
     }
@@ -5191,6 +5450,17 @@ class StudioController {
     if (tagAutoGenerate) tagAutoGenerate.checked = this.behavior.tagAutoGenerate
     const tagPromptInjection = this.root.querySelector<HTMLInputElement>('[data-role="tag-prompt-injection"]')
     if (tagPromptInjection) tagPromptInjection.checked = this.behavior.tagPromptInjection
+    const protocolPrompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="tag-protocol-prompt"]')
+    if (protocolPrompt && document.activeElement !== protocolPrompt) {
+      protocolPrompt.value = this.behavior.protocolPrompt || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT
+    }
+    const stripUserOnlyLoraStack = this.root.querySelector<HTMLInputElement>('[data-role="strip-user-only-lora-stack"]')
+    if (stripUserOnlyLoraStack) stripUserOnlyLoraStack.checked = this.behavior.stripUserOnlyLoraStack
+    const autoPrintCharacterPositive = this.root.querySelector<HTMLInputElement>('[data-role="auto-print-character-positive"]')
+    if (autoPrintCharacterPositive) autoPrintCharacterPositive.checked = this.behavior.autoPrintCharacterPositive
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="set-inline-image-scale"]')) {
+      button.dataset.active = String(Number(button.dataset.scale) === this.behavior.inlineImageScale)
+    }
     const requiredImageMin = this.root.querySelector<HTMLInputElement>('[data-role="required-image-min"]')
     if (requiredImageMin) requiredImageMin.value = String(this.behavior.requiredImageMin)
     const requiredImageMax = this.root.querySelector<HTMLInputElement>('[data-role="required-image-max"]')
@@ -5586,119 +5856,153 @@ class StudioController {
             <button class="ss-icon-button ss-header-library" data-action="open-output-library" title="Open output library" aria-label="Open output library">${LIBRARY_ICON}</button>
             <div class="ss-config-wrap">
               <button class="ss-icon-button ss-config-button" data-action="toggle-config" aria-expanded="false" title="Studio settings" aria-label="Studio settings">${SETTINGS_ICON}</button>
-              <div class="ss-config-popover" data-role="config-popover" hidden>
-                <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>Swarm metadata</strong><span>Models, LoRAs and previews</span></div>
-                  <button class="ss-button" data-action="refresh-metadata">Refresh metadata</button>
-                </section>
-                <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>Behavior</strong><span>Notifications and floating widget</span></div>
-                  <label class="ss-config-toggle"><input type="checkbox" data-role="completion-toast" ${this.behavior.completionToast ? "checked" : ""} /><span>Toast when a generation finishes</span></label>
-                  <label class="ss-config-toggle"><input type="checkbox" data-role="widget-enabled" ${this.behavior.widgetEnabled ? "checked" : ""} /><span>Enable floating Studio widget</span></label>
-                  <label class="ss-config-toggle"><input type="checkbox" data-role="mobile-quick-create" ${this.behavior.mobileQuickCreate ? "checked" : ""} /><span>Enable Quick Create on mobile</span></label>
-                  <p class="ss-muted ss-tiny">Right-click or long-press the image for Quick Create, Studio, Library, and hide actions. Mobile stays a 64px image until Quick Create is explicitly enabled.</p>
-                </section>
-                <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>In-message images</strong><span>Explicitly opt in</span></div>
-                  <label class="ss-config-toggle"><input type="checkbox" data-role="tag-auto-generate" ${this.behavior.tagAutoGenerate ? "checked" : ""} /><span>Automatically generate completed &lt;swarm-image&gt; tags</span></label>
-                  <label class="ss-config-toggle"><input type="checkbox" data-role="tag-prompt-injection" ${this.behavior.tagPromptInjection ? "checked" : ""} /><span>Teach the model the Swarm image-tag protocol</span></label>
-                  <label class="ss-config-field">
-                    <span>Prompt composition</span>
-                    <select class="ss-select" data-role="tag-prompt-mode">
-                      <option value="multi" ${this.behavior.tagPromptMode === "multi" ? "selected" : ""}>Multi-character / ensemble</option>
-                      <option value="pov" ${this.behavior.tagPromptMode === "pov" ? "selected" : ""}>Character-only / POV</option>
-                    </select>
-                  </label>
-                  <div class="ss-image-count-range">
-                    <span>Required images per reply</span>
-                    <input class="ss-input" type="number" min="0" max="6" step="1" inputmode="numeric" data-role="required-image-min" value="${this.behavior.requiredImageMin}" aria-label="Minimum required images" title="Minimum required images" />
-                    <span class="ss-range-separator">to</span>
-                    <input class="ss-input" type="number" min="0" max="6" step="1" inputmode="numeric" data-role="required-image-max" value="${this.behavior.requiredImageMax}" aria-label="Maximum required images" title="Maximum required images" />
-                  </div>
-                  <p class="ss-muted ss-tiny">0–0 lets the model decide. Any other range explicitly requires that many complete image requests in the reply.</p>
-                  <code class="ss-tag-protocol-example">{{swarm_image_protocol}}
-
-&lt;swarm-image
-  request="generate"
-  slot="instagram-photo"
-  aspect="4:3"
-  character="active"
-  persona="active"
-  alt="Two people sharing food at a city stall"
-&gt;
-character 1: smiling, holding a paper tray
-character 2: amused expression, leaning closer
-interaction: character 1 offers character 2 a bite, standing side by side
-medium shot, city street, food stall, evening lights&lt;/swarm-image&gt;</code>
-                  <button class="ss-button" data-action="copy-tag-protocol">Copy protocol example</button>
-                  <details class="ss-css-guide ss-macro-guide">
-                    <summary>Macro and preset guide</summary>
-                    <div class="ss-macro-guide-grid">
-                      <code>{{swarm_image_protocol}}</code><span>Local-generation instructions, active identity tags, checkpoint-aware prompting guidance, and preset state.</span>
-                      <code>{{swarm_preset}}</code><span>Active preset titles as exact native directives: &lt;preset:name one&gt;, &lt;preset:name two&gt;.</span>
-                      <code>{{swarm_negative}}</code><span>Current Studio negative prompt.</span>
-                      <code>{{char_base}}</code><span>Active character base image tags. Tagged jobs apply these automatically.</span>
-                      <code>{{persona_base}}</code><span>Visual identity bound to the active persona in Chat Visuals.</span>
-                      <code>{{char_profile}}</code><span>Active character avatar URL for HTML shells.</span>
-                      <code>{{user_profile}}</code><span>Active persona avatar URL for HTML shells.</span>
-                      <code>{{swarm_checkpoint}}</code><span>Current Studio checkpoint.</span>
-                      <code>{{swarm_aspect}}</code><span>Closest named Studio aspect ratio.</span>
-                      <code>{{last_genned}}</code><span>URL of the latest completed Swarm Studio image.</span>
+              <div class="ss-settings-layer" data-role="config-popover" hidden>
+                <button class="ss-settings-backdrop" data-action="close-settings" aria-label="Close Studio settings"></button>
+                <section class="ss-settings-dialog" role="dialog" aria-modal="true" aria-label="Swarm Studio settings">
+                  <header class="ss-settings-header">
+                    <div class="ss-settings-title"><strong>Studio settings</strong><span>Generation behavior, appearance, and Swarm metadata</span></div>
+                    <button class="ss-icon-button" data-action="close-settings" title="Close settings" aria-label="Close settings">×</button>
+                  </header>
+                  <nav class="ss-settings-tabs" aria-label="Settings sections">
+                    <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="general" data-active="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M10 14v6"/></svg><span>General</span>
+                    </button>
+                    <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="theme" data-active="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 0-3.6h-.8a1.7 1.7 0 0 1 0-3.4H15a6 6 0 0 0 0-12h-3Z"/><path d="M7.5 9h.01M9.5 6.5h.01M6.5 13h.01"/></svg><span>Theme</span>
+                    </button>
+                    <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="metadata" data-active="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/></svg><span>Metadata</span>
+                    </button>
+                  </nav>
+                  <div class="ss-settings-content">
+                    <div class="ss-settings-panel" data-settings-panel="general">
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Current behavior</strong><span>Notifications and floating widget</span></div>
+                        <label class="ss-settings-toggle">
+                          <span class="ss-settings-toggle-copy"><strong>Finished generation toast</strong><span>Show a Lumiverse notification after a generation is saved. Off by default.</span></span>
+                          <input type="checkbox" data-role="completion-toast" ${this.behavior.completionToast ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="ss-settings-toggle">
+                          <span class="ss-settings-toggle-copy"><strong>Floating Studio widget</strong><span>Keep Quick Create available over chats. Right-click or long-press it for Studio, Library, and visibility actions.</span></span>
+                          <input type="checkbox" data-role="widget-enabled" ${this.behavior.widgetEnabled ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="ss-settings-toggle">
+                          <span class="ss-settings-toggle-copy"><strong>Quick Create on mobile</strong><span>Allow the floating image widget to expand into the prompt editor on small screens.</span></span>
+                          <input type="checkbox" data-role="mobile-quick-create" ${this.behavior.mobileQuickCreate ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
+                        </label>
+                      </section>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Inline images</strong><span>Model requests and composition</span></div>
+                        <label class="ss-settings-toggle">
+                          <span class="ss-settings-toggle-copy"><strong>Automatically generate image tags</strong><span>Completed &lt;swarm-image&gt; requests start immediately. When off, they become lazy Generate placeholders.</span></span>
+                          <input type="checkbox" data-role="tag-auto-generate" ${this.behavior.tagAutoGenerate ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="ss-settings-toggle">
+                          <span class="ss-settings-toggle-copy"><strong>Inject image protocol</strong><span>Teach the active model how to request local SwarmUI illustrations in its replies.</span></span>
+                          <input type="checkbox" data-role="tag-prompt-injection" ${this.behavior.tagPromptInjection ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="ss-settings-toggle">
+                          <span class="ss-settings-toggle-copy"><strong>Strip LoRA stack from User-only composition</strong><span>When character="none" and only the active persona is requested, remove matching character-bound LoRAs. Off keeps the current Studio stack intact.</span></span>
+                          <input type="checkbox" data-role="strip-user-only-lora-stack" ${this.behavior.stripUserOnlyLoraStack ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="ss-settings-toggle">
+                          <span class="ss-settings-toggle-copy"><strong>Auto-print current character positive prompt</strong><span>Always prepend the bound character identity to tagged generations. Off lets the model choose only the relevant identities from the protocol—useful for multi-NPC character cards.</span></span>
+                          <input type="checkbox" data-role="auto-print-character-positive" ${this.behavior.autoPrintCharacterPositive ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="ss-config-field">
+                          <span>Prompt composition</span>
+                          <select class="ss-select" data-role="tag-prompt-mode">
+                            <option value="multi" ${this.behavior.tagPromptMode === "multi" ? "selected" : ""}>Multi-character / ensemble</option>
+                            <option value="pov" ${this.behavior.tagPromptMode === "pov" ? "selected" : ""}>Character-only / POV</option>
+                          </select>
+                        </label>
+                        <div class="ss-image-count-range">
+                          <span>Required images per reply</span>
+                          <input class="ss-input" type="number" min="0" max="6" step="1" inputmode="numeric" data-role="required-image-min" value="${this.behavior.requiredImageMin}" aria-label="Minimum required images" title="Minimum required images" />
+                          <span class="ss-range-separator">to</span>
+                          <input class="ss-input" type="number" min="0" max="6" step="1" inputmode="numeric" data-role="required-image-max" value="${this.behavior.requiredImageMax}" aria-label="Maximum required images" title="Maximum required images" />
+                        </div>
+                        <p class="ss-muted ss-tiny">0–0 lets the model decide. Any other range explicitly requires that many complete image requests in the reply.</p>
+                      </section>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Protocol prompt</strong><span>Editable system instruction</span></div>
+                        <textarea class="ss-textarea ss-protocol-editor" data-role="tag-protocol-prompt" spellcheck="false"></textarea>
+                        <p class="ss-muted ss-tiny"><code>{{swarm_dynamic_guidance}}</code> is replaced at runtime with the active image count, identities, composition mode, checkpoint guidance, and Swarm preset stack. Remove it only when your custom protocol deliberately replaces all dynamic guidance.</p>
+                        <div class="ss-protocol-actions">
+                          <button class="ss-button" data-action="copy-tag-protocol">Copy example</button>
+                          <button class="ss-button" data-action="reset-tag-protocol">Reset</button>
+                          <button class="ss-button ss-button-primary" data-action="save-tag-protocol">Save current</button>
+                        </div>
+                        <details class="ss-css-guide ss-macro-guide">
+                          <summary>Macro reference</summary>
+                          <div class="ss-macro-guide-grid">
+                            <code>{{swarm_dynamic_guidance}}</code><span>Insertion point inside the editable protocol for live identity, composition, checkpoint, image-count, and preset guidance.</span>
+                            <code>{{swarm_image_protocol}}</code><span>The fully resolved local-generation protocol used by prompt injection.</span>
+                            <code>{{swarm_preset}}</code><span>Active preset titles as exact native directives: &lt;preset:name one&gt;, &lt;preset:name two&gt;.</span>
+                            <code>{{swarm_negative}}</code><span>Current Studio negative prompt.</span>
+                            <code>{{char_base}}</code><span>Active character visual tags. Include this explicitly when automatic character printing is off.</span>
+                            <code>{{persona_base}}</code><span>Visual identity bound to the active persona in Chat Visuals.</span>
+                            <code>{{char_profile}}</code><span>Active character avatar URL for HTML shells.</span>
+                            <code>{{user_profile}}</code><span>Active persona avatar URL for HTML shells.</span>
+                            <code>{{swarm_checkpoint}}</code><span>Current Studio checkpoint.</span>
+                            <code>{{swarm_aspect}}</code><span>Closest named Studio aspect ratio.</span>
+                            <code>{{last_genned}}</code><span>URL of the latest completed Swarm Studio image.</span>
+                          </div>
+                        </details>
+                      </section>
                     </div>
-                  </details>
-                  <p class="ss-muted ss-tiny">With automatic generation off, tags become lazy Generate placeholders. Multi-character mode isolates each subject and shared interaction; Character-only / POV favors the active character and uses only scene-required parts of the User. Both modes track visible expression and current outfit changes. Character-folder visuals, the current Studio stack, active presets, and the current negative prompt are inherited. Set <code>character="none"</code> to skip the chat character and <code>persona="active"</code> to include the bound persona. The request runs on local SwarmUI; one-line and multiline tags both work.</p>
-                </section>
-                <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
-                  <p class="ss-muted ss-tiny">Only needed when SwarmUI blocks anonymous metadata access. Lumiverse stores it encrypted.</p>
-                  <div class="ss-token-row">
-                    <input class="ss-input" data-role="metadata-token" type="password" autocomplete="off" placeholder="swarm_token value" />
-                    <button class="ss-button ss-button-primary" data-action="save-token">Save</button>
-                    <button class="ss-button ss-button-danger" data-action="clear-token">Clear</button>
-                  </div>
-                </section>
-                <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>Profile</strong><span>Editing below activates Custom</span></div>
-                  <div class="ss-config-theme-grid">
-                    ${STUDIO_THEMES.map((theme) => `<button class="ss-button ss-config-theme" data-action="set-theme" data-theme-value="${theme.id}" style="--ss-swatch:${theme.color}">${theme.label}</button>`).join("")}
-                  </div>
-                </section>
-                <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>Component colors</strong><button class="ss-button ss-tiny" data-action="reset-appearance">Reset overrides</button></div>
-                  <div class="ss-appearance-colors">
-                    ${APPEARANCE_COLORS.map((color) => `<label class="ss-color-control"><input type="color" data-role="appearance-color" data-color-key="${color.key}" value="#7dd3fc" /><span>${color.label}</span></label>`).join("")}
-                  </div>
-                </section>
-                <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>Shape and glass</strong><span>Applied across the modal</span></div>
-                  <div class="ss-appearance-range">
-                    <label for="ss-radius-control">Border radius</label>
-                    <input id="ss-radius-control" data-role="appearance-radius" type="range" min="0" max="28" step="1" value="8" />
-                    <output data-role="appearance-radius-output">8px</output>
-                  </div>
-                  <div class="ss-appearance-range">
-                    <label for="ss-opacity-control">Surface opacity</label>
-                    <input id="ss-opacity-control" data-role="appearance-opacity" type="range" min="45" max="100" step="1" value="96" />
-                    <output data-role="appearance-opacity-output">96%</output>
-                  </div>
-                  <div class="ss-appearance-range">
-                    <label for="ss-blur-control">Backdrop blur</label>
-                    <input id="ss-blur-control" data-role="appearance-blur" type="range" min="0" max="30" step="1" value="12" />
-                    <output data-role="appearance-blur-output">12px</output>
-                  </div>
-                </section>
-                <section class="ss-config-section">
-                  <div class="ss-config-section-head"><strong>Custom CSS</strong><span>Persisted locally · apply when ready</span></div>
-                  <textarea class="ss-textarea ss-css-override" data-role="custom-css" spellcheck="false" placeholder="/* Example */
+                    <div class="ss-settings-panel" data-settings-panel="theme" hidden>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Profile</strong><span>Editing below activates Custom</span></div>
+                        <div class="ss-config-theme-grid">
+                          ${STUDIO_THEMES.map((theme) => `<button class="ss-button ss-config-theme" data-action="set-theme" data-theme-value="${theme.id}" style="--ss-swatch:${theme.color}">${theme.label}</button>`).join("")}
+                        </div>
+                      </section>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Inline image size</strong><span>Centered in its message container</span></div>
+                        <div class="ss-image-scale-grid">
+                          ${([100, 75, 50] as const).map((scale) => `<button class="ss-button ss-image-scale-button" data-action="set-inline-image-scale" data-scale="${scale}" data-active="${this.behavior.inlineImageScale === scale}">
+                            <svg viewBox="0 0 64 44" aria-hidden="true"><rect x="2" y="2" width="60" height="40" rx="3" opacity=".25"/><rect x="${scale === 100 ? 2 : scale === 75 ? 10 : 17}" y="${scale === 100 ? 2 : scale === 75 ? 7 : 12}" width="${scale === 100 ? 60 : scale === 75 ? 44 : 30}" height="${scale === 100 ? 40 : scale === 75 ? 30 : 20}" rx="2"/></svg>
+                            <span>${scale}% × ${scale}%</span>
+                          </button>`).join("")}
+                        </div>
+                      </section>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Component colors</strong><button class="ss-button ss-tiny" data-action="reset-appearance">Reset overrides</button></div>
+                        <div class="ss-appearance-colors">
+                          ${APPEARANCE_COLORS.map((color) => `<label class="ss-color-control"><input type="color" data-role="appearance-color" data-color-key="${color.key}" value="#7dd3fc" /><span>${color.label}</span></label>`).join("")}
+                        </div>
+                      </section>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Shape and glass</strong><span>Applied across the modal</span></div>
+                        <div class="ss-appearance-range">
+                          <label for="ss-radius-control">Border radius</label>
+                          <input id="ss-radius-control" data-role="appearance-radius" type="range" min="0" max="28" step="1" value="8" />
+                          <output data-role="appearance-radius-output">8px</output>
+                        </div>
+                        <div class="ss-appearance-range">
+                          <label for="ss-opacity-control">Surface opacity</label>
+                          <input id="ss-opacity-control" data-role="appearance-opacity" type="range" min="45" max="100" step="1" value="96" />
+                          <output data-role="appearance-opacity-output">96%</output>
+                        </div>
+                        <div class="ss-appearance-range">
+                          <label for="ss-blur-control">Backdrop blur</label>
+                          <input id="ss-blur-control" data-role="appearance-blur" type="range" min="0" max="30" step="1" value="12" />
+                          <output data-role="appearance-blur-output">12px</output>
+                        </div>
+                      </section>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Custom CSS</strong><span>Persisted locally · apply when ready</span></div>
+                        <textarea class="ss-textarea ss-css-override" data-role="custom-css" spellcheck="false" placeholder="/* Example */
 .ss-current-preview { box-shadow: 0 0 28px color-mix(in srgb, var(--lumiverse-accent) 28%, transparent); }
 .ss-stack-row { border-style: dashed; }"></textarea>
-                  <div class="ss-config-actions">
-                    <button class="ss-button ss-button-danger" data-action="clear-custom-css">Clear</button>
-                    <button class="ss-button ss-button-primary" data-action="apply-custom-css">Apply CSS</button>
-                  </div>
-                  <details class="ss-css-guide">
-                    <summary>Stylesheet guide</summary>
-                    <pre>Useful roots
+                        <div class="ss-config-actions">
+                          <button class="ss-button ss-button-danger" data-action="clear-custom-css">Clear</button>
+                          <button class="ss-button ss-button-primary" data-action="apply-custom-css">Apply CSS</button>
+                        </div>
+                        <details class="ss-css-guide">
+                          <summary>Stylesheet guide</summary>
+                          <pre>Useful roots
 .ss-shell                 whole Studio
 .ss-launcher              drawer composition
 .ss-generation-pane       generation sidebar
@@ -5725,7 +6029,26 @@ Theme variables
 Use .ss-shell before a selector to keep
 an override inside Studio. @import rules
 are removed when CSS is applied.</pre>
-                  </details>
+                        </details>
+                      </section>
+                    </div>
+                    <div class="ss-settings-panel" data-settings-panel="metadata" hidden>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Swarm metadata</strong><span>Models, LoRAs, folders, and preview art</span></div>
+                        <p class="ss-muted ss-tiny">Rescan the selected SwarmUI connection after adding or moving checkpoints and LoRAs.</p>
+                        <button class="ss-button" data-action="refresh-metadata">Refresh metadata</button>
+                      </section>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Metadata token</strong><span data-role="token-status">No token saved</span></div>
+                        <p class="ss-muted ss-tiny">Only needed when SwarmUI blocks anonymous metadata access. Lumiverse stores the token in its encrypted enclave.</p>
+                        <div class="ss-token-row">
+                          <input class="ss-input" data-role="metadata-token" type="password" autocomplete="off" placeholder="swarm_token value" />
+                          <button class="ss-button ss-button-primary" data-action="save-token">Save</button>
+                          <button class="ss-button ss-button-danger" data-action="clear-token">Clear</button>
+                        </div>
+                      </section>
+                    </div>
+                  </div>
                 </section>
               </div>
             </div>
@@ -6236,6 +6559,9 @@ are removed when CSS is applied.</pre>
         </div>
       </div>
     `
+    const settingsLayer = this.root.querySelector<HTMLElement>('[data-role="config-popover"]')
+    const shell = this.root.querySelector<HTMLElement>(".ss-shell")
+    if (settingsLayer && shell) shell.appendChild(settingsLayer)
   }
 
   private bind(): void {
@@ -6316,6 +6642,18 @@ are removed when CSS is applied.</pre>
       this.onBehaviorChange({
         ...this.behavior,
         tagPromptInjection: (event.currentTarget as HTMLInputElement).checked,
+      })
+    })
+    this.get<HTMLInputElement>('[data-role="strip-user-only-lora-stack"]').addEventListener("change", (event) => {
+      this.onBehaviorChange({
+        ...this.behavior,
+        stripUserOnlyLoraStack: (event.currentTarget as HTMLInputElement).checked,
+      })
+    })
+    this.get<HTMLInputElement>('[data-role="auto-print-character-positive"]').addEventListener("change", (event) => {
+      this.onBehaviorChange({
+        ...this.behavior,
+        autoPrintCharacterPositive: (event.currentTarget as HTMLInputElement).checked,
       })
     })
     this.get<HTMLSelectElement>('[data-role="tag-prompt-mode"]').addEventListener("change", (event) => {
@@ -6444,7 +6782,7 @@ are removed when CSS is applied.</pre>
         event.stopPropagation()
         return
       }
-      if (!target.closest(".ss-config-wrap")) this.closeConfigPopover()
+      if (!target.closest(".ss-config-wrap, .ss-settings-layer")) this.closeConfigPopover()
       if (!target.closest(".ss-history-card")) this.closeHistoryMenus()
       if (!target.closest(".ss-lora-sort-wrap")) this.closeLoraSortMenu()
       const button = target.closest<HTMLElement>("[data-action]")
@@ -6452,7 +6790,17 @@ are removed when CSS is applied.</pre>
       const action = button.dataset.action
       if (action === "refresh-metadata") this.refreshMetadata()
       if (action === "toggle-config") this.toggleConfigPopover(button)
+      if (action === "close-settings") this.closeConfigPopover()
+      if (action === "settings-tab") this.setSettingsTab(button.dataset.settingsTab || "general")
       if (action === "copy-tag-protocol") void this.copyTagProtocol()
+      if (action === "reset-tag-protocol") this.resetTagProtocol()
+      if (action === "save-tag-protocol") this.saveTagProtocol()
+      if (action === "set-inline-image-scale") {
+        const scale = Number(button.dataset.scale)
+        if (scale === 100 || scale === 75 || scale === 50) {
+          this.onBehaviorChange({ ...this.behavior, inlineImageScale: scale })
+        }
+      }
       if (action === "save-character-base-tags") this.saveCharacterBaseTags()
       if (action === "clear-character-base-tags") this.clearCharacterBaseTags()
       if (action === "set-theme") {
@@ -6748,6 +7096,44 @@ are removed when CSS is applied.</pre>
         this.workflowOpenOnLoad = true
         this.setRunStatus(`Loaded workflow “${this.state.selectedWorkflow.name}”.`)
         break
+      case "tagged_image_jobs_result": {
+        const active = (Array.isArray(data) ? data : []).find((job: any) =>
+          (job?.status === "queued" || job?.status === "generating") && String(job?.clientJobId || ""),
+        )
+        if (active && (!this.currentJobId || this.currentJobId === String(active.clientJobId))) {
+          if (!this.generating) this.preGenerationImage = this.state.currentImage
+          this.generating = true
+          this.currentJobId = String(active.clientJobId)
+          this.currentJobConnectionId = ""
+          this.setGenerating(true)
+          this.updateGenerationProgress(0, 0)
+          this.setRunStatus("Rendering a message illustration in SwarmUI…")
+        }
+        break
+      }
+      case "tagged_image_job": {
+        const jobId = String(data.clientJobId || "")
+        if ((data.status === "queued" || data.status === "generating") && jobId) {
+          if (!this.currentJobId || this.currentJobId === jobId) {
+            if (!this.generating) this.preGenerationImage = this.state.currentImage
+            this.generating = true
+            this.currentJobId = jobId
+            this.currentJobConnectionId = ""
+            this.setGenerating(true)
+            this.updateGenerationProgress(0, 0)
+            this.setRunStatus("Rendering a message illustration in SwarmUI…")
+          }
+        } else if ((data.status === "failed" || data.status === "cancelled") && jobId === this.currentJobId) {
+          this.generating = false
+          this.currentJobId = ""
+          this.currentJobConnectionId = ""
+          this.setGenerating(false)
+          if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
+          this.preGenerationImage = null
+          this.setRunStatus(String(data.error || "Message illustration stopped."), data.status === "failed")
+        }
+        break
+      }
       case "generation_started":
         if (!this.currentJobId || payload.clientJobId === this.currentJobId) {
           this.generating = true
@@ -6785,6 +7171,14 @@ are removed when CSS is applied.</pre>
         this.setRunStatus("Generation complete. Output saved to Lumiverse.")
         break
       case "tagged_generation_result": {
+        const taggedJobId = String(data?.taggedJob?.clientJobId || "")
+        if (taggedJobId && taggedJobId === this.currentJobId) {
+          this.generating = false
+          this.currentJobId = ""
+          this.currentJobConnectionId = ""
+          this.setGenerating(false)
+          this.preGenerationImage = null
+        }
         this.acceptOutputPage(data)
         if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
         const imageSrc = String(data.result?.imageDataUrl || data.result?.imageUrl || data.record?.imageUrl || "")
@@ -7929,6 +8323,15 @@ are removed when CSS is applied.</pre>
     const popover = this.get<HTMLElement>('[data-role="config-popover"]')
     popover.hidden = !popover.hidden
     button.setAttribute("aria-expanded", String(!popover.hidden))
+    if (!popover.hidden) {
+      this.setSettingsTab(
+        this.root.querySelector<HTMLElement>('[data-action="settings-tab"][data-active="true"]')
+          ?.dataset.settingsTab || "general",
+      )
+      window.setTimeout(() => {
+        this.root.querySelector<HTMLElement>('[data-action="settings-tab"][data-active="true"]')?.focus()
+      }, 0)
+    }
   }
 
   private closeConfigPopover(): void {
@@ -7937,6 +8340,33 @@ are removed when CSS is applied.</pre>
     popover.hidden = true
     this.root.querySelector<HTMLElement>('[data-action="toggle-config"]')
       ?.setAttribute("aria-expanded", "false")
+  }
+
+  private setSettingsTab(tab: string): void {
+    const selected = ["general", "theme", "metadata"].includes(tab) ? tab : "general"
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="settings-tab"]')) {
+      const active = button.dataset.settingsTab === selected
+      button.dataset.active = String(active)
+      button.setAttribute("aria-selected", String(active))
+    }
+    for (const panel of this.root.querySelectorAll<HTMLElement>("[data-settings-panel]")) {
+      panel.hidden = panel.dataset.settingsPanel !== selected
+    }
+  }
+
+  private resetTagProtocol(): void {
+    const input = this.get<HTMLTextAreaElement>('[data-role="tag-protocol-prompt"]')
+    input.value = DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT
+    input.focus()
+    this.setRunStatus("Protocol editor reset to the Studio default. Save current to apply it.")
+  }
+
+  private saveTagProtocol(): void {
+    const input = this.get<HTMLTextAreaElement>('[data-role="tag-protocol-prompt"]')
+    const protocolPrompt = input.value.trim() || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT
+    input.value = protocolPrompt
+    this.onBehaviorChange({ ...this.behavior, protocolPrompt })
+    this.setRunStatus("Inline image protocol saved.")
   }
 
   private async copyTagProtocol(): Promise<void> {
@@ -11912,6 +12342,9 @@ export function setup(ctx: FrontendContext): () => void {
   const applyBehaviorState = (next: StudioBehavior) => {
     behavior = { ...next }
     persistStudioBehavior(behavior)
+    if (typeof document !== "undefined") {
+      document.documentElement.dataset.swarmStudioInlineScale = String(behavior.inlineImageScale)
+    }
     miniplayer?.setBehavior(behavior)
     activeStudio?.setBehavior(behavior)
     taggedImages?.setBehavior(behavior)
@@ -11924,6 +12357,11 @@ export function setup(ctx: FrontendContext): () => void {
       completionToast: value?.completionToast === true,
       tagAutoGenerate: value?.autoGenerate === true,
       tagPromptInjection: value?.injectProtocol === true,
+      protocolPrompt: typeof value?.protocolPrompt === "string" && value.protocolPrompt.trim()
+        ? value.protocolPrompt
+        : DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+      stripUserOnlyLoraStack: value?.stripUserOnlyLoraStack === true,
+      autoPrintCharacterPositive: value?.autoPrintCharacterPositive === true,
       requiredImageMin: range.min,
       requiredImageMax: range.max,
       tagPromptMode: value?.promptMode === "pov" ? "pov" : "multi",
@@ -11939,6 +12377,9 @@ export function setup(ctx: FrontendContext): () => void {
         autoGenerate: behavior.tagAutoGenerate,
         injectProtocol: behavior.tagPromptInjection,
         completionToast: behavior.completionToast,
+        protocolPrompt: behavior.protocolPrompt,
+        stripUserOnlyLoraStack: behavior.stripUserOnlyLoraStack,
+        autoPrintCharacterPositive: behavior.autoPrintCharacterPositive,
         requiredImageMin: behavior.requiredImageMin,
         requiredImageMax: behavior.requiredImageMax,
         promptMode: behavior.tagPromptMode,
@@ -12183,6 +12624,7 @@ export function setup(ctx: FrontendContext): () => void {
     chatVisuals = null
     miniplayer?.destroy()
     miniplayer = null
+    delete document.documentElement.dataset.swarmStudioInlineScale
     removeCustomStyle?.()
     removeStyle()
   }
