@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.12
+
+### Fixed
+
+- Inline-image regeneration now tracks the stable tagged-image job ID separately
+  from the fresh per-attempt generation ID used for every random-seed retry.
+  Replacing an old attempt no longer leaves Studio or Quick Create waiting for a
+  terminal event under the superseded ID.
+- Regeneration with current Studio settings, original settings, and a prompt
+  edited through Quick Create now share the same terminal ownership cleanup.
+  When the final image is attached to chat, both Studio and the floating player
+  retire their progress, preview, and Stop/Interrupt controls together.
+- Generic generation-start events preserve an already identified tagged-image
+  source instead of reclassifying the retry as a manual Studio generation.
+- Concurrent inline illustrations still hand the shared preview surface to the
+  next active attempt after one completes.
+
 ## 1.0.11
 
 ### Fixed
