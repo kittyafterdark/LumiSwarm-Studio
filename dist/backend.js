@@ -2130,7 +2130,7 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     const persona = includePersona && spindle.permissions.has("personas") ? await spindle.personas.getActive(userId) : null;
     const personaPresets = persona ? await loadPersonaVisualPresets(userId) : [];
     const personaPreset = activePersonaVisualPreset(persona, personaPresets);
-    const personaBase = includePersona ? (personaPreset?.positivePrompt || asString(persona?.description)).trim() : "";
+    const personaBase = includePersona ? (personaPreset?.positivePrompt || "").trim() : "";
     let prompt = scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, characterBase).replace(/\{\{\s*persona_base\s*\}\}/gi, personaBase).trim();
     const contains = (value)=>Boolean(value && prompt.toLowerCase().includes(value.toLowerCase()));
     if (characterBase && personaBase) {
@@ -2337,6 +2337,49 @@ function findTaggedMessageTarget(messages, job) {
         }
     }
     return best;
+}
+async function removeTaggedImageFromChat(job, userId) {
+    if (!spindle.permissions.has("chat_mutation")) {
+        throw new Error("Grant Chat Mutation permission to remove inline images from chat.");
+    }
+    const initialMessages = await spindle.chat.getMessages(job.chatId);
+    const initialTarget = findTaggedMessageTarget(initialMessages, job);
+    const initialMessageId = asString(initialTarget?.id);
+    if (!initialTarget || !initialMessageId) {
+        throw new Error("The chat message containing that image no longer exists.");
+    }
+    const lockKey = `${userId || "default"}:${job.chatId}:${initialMessageId}`;
+    return withTaggedMessageFinalizeLock(lockKey, async ()=>{
+        const messages = await spindle.chat.getMessages(job.chatId);
+        const target = findTaggedMessageTarget(messages, job);
+        const messageId = asString(target?.id);
+        if (!target || !messageId) {
+            throw new Error("The chat message containing that image no longer exists.");
+        }
+        const content = asString(target.content);
+        const escapedJobId = escapeRegex(job.id);
+        const figurePattern = new RegExp(`<figure\\b(?=[^>]*data-swarm-studio-job-id=(?:"${escapedJobId}"|'${escapedJobId}'))[^>]*>[\\s\\S]*?<\\/figure>`, "i");
+        if (!figurePattern.test(content)) {
+            throw new Error("That inline image is no longer attached to the chat message.");
+        }
+        const nextContent = content.replace(figurePattern, "");
+        const metadata = asRecord(target.metadata);
+        const taggedImages = Array.isArray(metadata.swarm_studio_tagged_images) ? metadata.swarm_studio_tagged_images.filter((item)=>asString(item?.jobId) !== job.id) : [];
+        await spindle.chat.updateMessage(job.chatId, messageId, {
+            content: nextContent,
+            metadata: {
+                ...metadata,
+                swarm_studio_tagged_images: taggedImages
+            }
+        });
+        await persistTaggedImageJobs((await loadTaggedImageJobs(userId)).filter((candidate)=>candidate.id !== job.id), userId);
+        taggedFinalizeRetries.delete(job.id);
+        taggedFinalizeMessageTargets.delete(job.id);
+        return {
+            messageId,
+            content: nextContent
+        };
+    });
 }
 async function finalizeTaggedImageJob(job, userId) {
     if (!job.imageUrl || !spindle.permissions.has("chat_mutation")) return false;
@@ -3072,6 +3115,24 @@ async function handleMessage(payload, userId) {
                         await upsertTaggedImageJob(job, userId);
                     }
                     await finalizeTaggedImageJobWithRetry(job, userId);
+                    return;
+                }
+            case "remove_tagged_image_from_chat":
+                {
+                    const jobId = asString(payload?.jobId).trim();
+                    const job = (await loadTaggedImageJobs(userId)).find((candidate)=>candidate.id === jobId);
+                    if (!job) throw new Error("That inline image job no longer exists.");
+                    const removed = await removeTaggedImageFromChat(job, userId);
+                    spindle.sendToFrontend({
+                        type: "tagged_image_removed",
+                        requestId,
+                        data: {
+                            jobId: job.id,
+                            chatId: job.chatId,
+                            messageId: removed.messageId,
+                            content: removed.content
+                        }
+                    }, userId);
                     return;
                 }
             case "load_connection":

@@ -1225,6 +1225,24 @@ const remappedJobState = sent.filter((entry) =>
 assert.ok(remappedJobState)
 assert.match(remappedJobState.payload.data.tagFingerprint, /^[a-z0-9]+$/)
 
+const removedInlineImage = await request("remove_tagged_image_from_chat", {
+  jobId: remappedJobState.payload.data.id,
+})
+assert.equal(removedInlineImage.type, "tagged_image_removed")
+assert.equal(removedInlineImage.data.messageId, remappedTaggedMessage.id)
+assert.doesNotMatch(removedInlineImage.data.content, /data-swarm-studio-image="true"/)
+assert.doesNotMatch(remappedTaggedMessage.content, /data-swarm-studio-image="true"/)
+assert.equal(remappedTaggedMessage.metadata.swarm_studio_tagged_images.length, 0)
+assert.equal(
+  userFiles.get("tagged-image-jobs.json").some((job) => job.id === remappedJobState.payload.data.id),
+  false,
+)
+assert.equal(
+  userFiles.get("generation-records.json").some((record) => record.imageId === "image-tag-6"),
+  true,
+  "removing an inline image must preserve its Lumiverse Library output",
+)
+
 const originalOutput = await request("download_swarm_output", {
   connectionId: "swarm-1",
   swarmPath: generated.data.record.swarmPath,
@@ -1263,6 +1281,9 @@ assert.match(source, /data-swarm-studio-inline-action="true"/)
 assert.match(source, /case "list_tagged_jobs"/)
 assert.match(source, /case "retry_tagged_job"/)
 assert.match(source, /case "retry_tagged_attachment"/)
+assert.match(source, /case "remove_tagged_image_from_chat"/)
+assert.match(source, /personaPreset\?\.positivePrompt \|\| ""/)
+assert.doesNotMatch(source, /personaPreset\?\.positivePrompt \|\| asString\(persona\?\.description\)/)
 assert.match(source, /if \(characterFolder\?\.binding && !characterFolder\.binding\.enabled\) return/)
 assert.match(source, /folder\.binding\?\.characterId === characterId && folder\.binding\.enabled/)
 

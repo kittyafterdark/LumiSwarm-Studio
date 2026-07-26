@@ -2739,7 +2739,7 @@ async function applyCharacterLayer(
   const personaPresets = persona ? await loadPersonaVisualPresets(userId) : []
   const personaPreset = activePersonaVisualPreset(persona, personaPresets)
   const personaBase = includePersona
-    ? (personaPreset?.positivePrompt || asString(persona?.description)).trim()
+    ? (personaPreset?.positivePrompt || "").trim()
     : ""
 
   let prompt = scenePrompt
@@ -2958,6 +2958,58 @@ function findTaggedMessageTarget(messages: any[], job: TaggedImageJob): any | nu
     }
   }
   return best
+}
+
+async function removeTaggedImageFromChat(
+  job: TaggedImageJob,
+  userId?: string,
+): Promise<{ messageId: string; content: string }> {
+  if (!spindle.permissions.has("chat_mutation")) {
+    throw new Error("Grant Chat Mutation permission to remove inline images from chat.")
+  }
+  const initialMessages = await spindle.chat.getMessages(job.chatId)
+  const initialTarget = findTaggedMessageTarget(initialMessages, job)
+  const initialMessageId = asString(initialTarget?.id)
+  if (!initialTarget || !initialMessageId) {
+    throw new Error("The chat message containing that image no longer exists.")
+  }
+  const lockKey = `${userId || "default"}:${job.chatId}:${initialMessageId}`
+  return withTaggedMessageFinalizeLock(lockKey, async () => {
+    const messages = await spindle.chat.getMessages(job.chatId)
+    const target = findTaggedMessageTarget(messages, job)
+    const messageId = asString(target?.id)
+    if (!target || !messageId) {
+      throw new Error("The chat message containing that image no longer exists.")
+    }
+    const content = asString(target.content)
+    const escapedJobId = escapeRegex(job.id)
+    const figurePattern = new RegExp(
+      `<figure\\b(?=[^>]*data-swarm-studio-job-id=(?:"${escapedJobId}"|'${escapedJobId}'))[^>]*>[\\s\\S]*?<\\/figure>`,
+      "i",
+    )
+    if (!figurePattern.test(content)) {
+      throw new Error("That inline image is no longer attached to the chat message.")
+    }
+    const nextContent = content.replace(figurePattern, "")
+    const metadata = asRecord(target.metadata)
+    const taggedImages = Array.isArray(metadata.swarm_studio_tagged_images)
+      ? metadata.swarm_studio_tagged_images.filter((item: any) => asString(item?.jobId) !== job.id)
+      : []
+    await spindle.chat.updateMessage(job.chatId, messageId, {
+      content: nextContent,
+      metadata: {
+        ...metadata,
+        swarm_studio_tagged_images: taggedImages,
+      },
+    })
+    await persistTaggedImageJobs(
+      (await loadTaggedImageJobs(userId)).filter((candidate) => candidate.id !== job.id),
+      userId,
+    )
+    taggedFinalizeRetries.delete(job.id)
+    taggedFinalizeMessageTargets.delete(job.id)
+    return { messageId, content: nextContent }
+  })
 }
 
 async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Promise<boolean> {
@@ -3767,6 +3819,23 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           await upsertTaggedImageJob(job, userId)
         }
         await finalizeTaggedImageJobWithRetry(job, userId)
+        return
+      }
+      case "remove_tagged_image_from_chat": {
+        const jobId = asString(payload?.jobId).trim()
+        const job = (await loadTaggedImageJobs(userId)).find((candidate) => candidate.id === jobId)
+        if (!job) throw new Error("That inline image job no longer exists.")
+        const removed = await removeTaggedImageFromChat(job, userId)
+        spindle.sendToFrontend({
+          type: "tagged_image_removed",
+          requestId,
+          data: {
+            jobId: job.id,
+            chatId: job.chatId,
+            messageId: removed.messageId,
+            content: removed.content,
+          },
+        }, userId)
         return
       }
       case "load_connection": {

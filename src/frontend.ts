@@ -11519,6 +11519,10 @@ class TaggedImageController {
   }
 
   onMessage(payload: any): void {
+    if (payload?.type === "tagged_image_removed") {
+      this.reconcileMessage({ ...payload.data, removed: true })
+      return
+    }
     if (payload?.type === "tagged_message_reconciled") {
       this.reconcileMessage(payload.data)
       return
@@ -11658,8 +11662,10 @@ class TaggedImageController {
     const jobId = String(value?.jobId || "")
     const chatId = String(value?.chatId || "")
     const messageId = String(value?.messageId || "")
-    const content = String(value?.content || "")
-    if (!jobId || !chatId || !messageId || !content) return
+    const hasContent = typeof value?.content === "string"
+    const content = hasContent ? value.content : ""
+    const removed = value?.removed === true
+    if (!jobId || !chatId || !messageId || !hasContent) return
 
     const key = `${chatId}:${messageId}`
     const previous = this.reconciliationQueues.get(key) || Promise.resolve()
@@ -11672,6 +11678,13 @@ class TaggedImageController {
         }
         await this.ctx.chats.updateMessage(chatId, messageId, { content })
         if (this.destroyed) return
+        if (removed) {
+          if (job) this.remove(job)
+          this.jobs.delete(jobId)
+          this.settledAttachmentRequests.delete(jobId)
+          this.settledMessageTargets.delete(jobId)
+          return
+        }
         if (job) {
           job.inserted = true
           job.error = ""
@@ -11679,6 +11692,7 @@ class TaggedImageController {
         }
       } catch (error) {
         if (this.destroyed || !job) return
+        if (removed) return
         job.inserted = false
         job.error = error instanceof Error
           ? `The image is saved, but this chat view could not refresh: ${error.message}`
@@ -11792,6 +11806,8 @@ class TaggedImageController {
         { key: "divider", label: "", type: "divider" },
         { key: "studio", label: "Open Swarm Studio" },
         { key: "library", label: "Open output library" },
+        { key: "remove-divider", label: "", type: "divider" },
+        { key: "remove-chat", label: "Remove from chat (keeps Library copy)", disabled: !job.inserted },
       ],
     })
     if (result.selectedKey === "retry-current") this.retry(job, "current")
@@ -11809,6 +11825,13 @@ class TaggedImageController {
     }
     if (result.selectedKey === "studio") this.openStudioWithPrompt("", "")
     if (result.selectedKey === "library") this.openLibrary()
+    if (result.selectedKey === "remove-chat") {
+      this.ctx.sendToBackend({
+        type: "remove_tagged_image_from_chat",
+        requestId: createRequestId(),
+        jobId: job.id,
+      })
+    }
   }
 
   private retry(

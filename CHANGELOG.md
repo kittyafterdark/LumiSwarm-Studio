@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.13
+
+### Added
+
+- Finished in-chat illustrations now offer **Remove from chat (keeps Library
+  copy)** in their image-actions menu. Removal updates the saved chat message,
+  clears its inline attachment metadata and retired job state, and deliberately
+  preserves the generated Lumiverse Library output.
+
+### Fixed
+
+- `persona="active"` no longer falls back to the active persona's full
+  biographical description when no explicit Studio visual profile is bound.
+  Only the positive identity prompt from an enabled, bound persona visual
+  profile is submitted to SwarmUI; otherwise the persona identity layer stays
+  empty.
+- Live message reconciliation now accepts an empty message body, allowing an
+  image-only assistant message to be cleanly removed without requiring a page
+  refresh.
+
 ## 1.0.12
 
 ### Fixed
