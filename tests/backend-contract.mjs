@@ -14,7 +14,7 @@ let frontendHandler
 const sent = []
 const secrets = new Map()
 const userFiles = new Map()
-const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "characters", "personas", "chat_mutation", "interceptor"])
+const permissions = new Set(["image_gen", "cors_proxy", "images", "chats", "characters", "personas", "chat_mutation", "interceptor", "generation"])
 let imageDeleted = false
 let presetAdded = false
 let presetDeleted = false
@@ -31,6 +31,7 @@ let holdLoraDownload = false
 let taggedGenerationCount = 0
 const taggedGenerationInputs = []
 const legacyGenerationInputs = []
+const quietParserCalls = []
 const taggedMessage = {
   id: "message-tag-1",
   role: "assistant",
@@ -220,6 +221,33 @@ globalThis.spindle = {
         imageId: input.clientJobId === "studio-job-1" ? "image-1" : taggedImageId,
         model: input.model,
         provider: "swarmui",
+      }
+    },
+  },
+  connections: {
+    async list() {
+      return [{
+        id: "text-1",
+        name: "Local parser",
+        provider: "openai-compatible",
+        model: "connection-model",
+        is_default: true,
+      }]
+    },
+  },
+  generate: {
+    async quiet(input) {
+      quietParserCalls.push(structuredClone(input))
+      return {
+        content: `<swarm-image
+  request="generate"
+  slot="parsed-scene"
+  aspect="4:3"
+  character="active"
+  persona="none"
+  alt="Train platform"
+>
+train platform, waving, <preset:composition></swarm-image>`,
       }
     },
   },
@@ -649,7 +677,7 @@ assert.equal(macroDefinitions.has("char_profile"), true)
 assert.equal(macroDefinitions.has("user_profile"), true)
 assert.match(macroValues.get("swarm_image_protocol"), /<swarm-image/)
 assert.equal(typeof interceptorHandler, "function")
-assert.equal(eventHandlers.has("GENERATION_ENDED"), false)
+assert.equal(eventHandlers.has("GENERATION_ENDED"), true)
 
 async function request(type, extra = {}) {
   const requestId = `${type}-${sent.length}`
@@ -663,6 +691,8 @@ async function request(type, extra = {}) {
 const bootstrap = await request("bootstrap")
 assert.equal(bootstrap.data.connections.length, 1)
 assert.equal(bootstrap.data.connections[0].provider, "swarmui")
+assert.equal(bootstrap.data.parserConnections.length, 1)
+assert.equal(bootstrap.data.parserConnections[0].id, "text-1")
 assert.equal(bootstrap.data.outputs.length, 1)
 assert.equal(bootstrap.data.total, 1)
 assert.equal(bootstrap.data.offset, 0)
@@ -671,6 +701,9 @@ assert.deepEqual(bootstrap.data.stackPresets, [])
 assert.deepEqual(bootstrap.data.outputFolders, [])
 assert.equal(bootstrap.data.tagAutomation.stripUserOnlyLoraStack, false)
 assert.equal(bootstrap.data.tagAutomation.autoPrintCharacterPositive, false)
+assert.equal(bootstrap.data.tagAutomation.requestMode, "inline")
+assert.equal(bootstrap.data.tagAutomation.parserConnectionId, "")
+assert.equal(bootstrap.data.tagAutomation.parserModel, "")
 assert.match(bootstrap.data.tagAutomation.protocolPrompt, /SWARM STUDIO IMAGE REQUEST PROTOCOL/)
 assert.match(bootstrap.data.tagAutomation.protocolPrompt, /\{\{swarm_dynamic_guidance\}\}/)
 assert.equal(bootstrap.data.characterBaseTags.characterId, "char-1")
@@ -1383,5 +1416,59 @@ assert.match(source, /TAGGED_FINALIZE_RETRY_DELAYS_MS[\s\S]*?25_000/)
 assert.match(source, /taggedFinalizeMessageTargets/)
 assert.match(source, /finalMessageId = asString\(payload\?\.messageId\)\.trim\(\)/)
 assert.match(source, /job\.messageId = finalMessageId/)
+assert.match(source, /SWARM STUDIO IMAGE PLACEMENT PROTOCOL/)
+assert.match(source, /spindle\.connections\.list\(userId\)/)
+assert.match(source, /spindle\.generate\.quiet\(/)
+assert.match(source, /config\.parserModel \? \{ model: config\.parserModel \}/)
+assert.match(source, /spindle\.on\("GENERATION_ENDED"/)
+assert.match(source, /const legacy = !attrs\.request/)
+
+const parserConfig = await request("set_tag_automation", {
+  config: {
+    autoGenerate: true,
+    injectProtocol: true,
+    requestMode: "parser",
+    parserConnectionId: "text-1",
+    parserModel: "parser-override",
+    autoPrintCharacterPositive: true,
+  },
+})
+assert.equal(parserConfig.data.requestMode, "parser")
+assert.equal(parserConfig.data.parserConnectionId, "text-1")
+assert.equal(parserConfig.data.parserModel, "parser-override")
+assert.match(macroValues.get("swarm_image_protocol"), /request="parse"/)
+assert.doesNotMatch(macroValues.get("swarm_image_protocol"), /request="generate"/)
+
+taggedMessages.push({
+  id: "message-parser-1",
+  role: "assistant",
+  content: `Before.<swarm-image
+    request="parse"
+    slot="parsed-scene"
+    aspect="4:3"
+    character="active"
+    persona="none"
+    alt="Train platform"
+  >a character waving at a train platform</swarm-image>After.`,
+  metadata: {},
+})
+eventHandlers.get("GENERATION_ENDED")({
+  generationId: "generation-parser-1",
+  chatId: "chat-1",
+  messageId: "message-parser-1",
+  content: taggedMessages.at(-1).content,
+}, "user-1")
+for (let attempt = 0; attempt < 100 && !quietParserCalls.length; attempt++) {
+  await new Promise((resolve) => setTimeout(resolve, 2))
+}
+for (let attempt = 0; attempt < 100 && !taggedMessages.at(-1).content.includes("data-swarm-studio-image"); attempt++) {
+  await new Promise((resolve) => setTimeout(resolve, 2))
+}
+assert.equal(quietParserCalls.length, 1)
+assert.equal(quietParserCalls[0].connection_id, "text-1")
+assert.equal(quietParserCalls[0].parameters.model, "parser-override")
+assert.match(quietParserCalls[0].messages[0].content, /local image-request parser/)
+assert.match(taggedMessages.at(-1).content, /^Before\.<figure/)
+assert.match(taggedMessages.at(-1).content, /<\/figure>After\.$/)
 
 console.log("backend contract: ok")

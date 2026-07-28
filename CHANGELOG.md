@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.14
+
+### Added
+
+- Studio settings now have a dedicated **Generation** tab for inline-image
+  behavior, composition, image-count requirements, and the editable protocol
+  prompt.
+- Image requests can use either the existing one-pass **Inline protocol** or a
+  new two-stage **Parser model** flow. Parser mode lets the chat model place a
+  lightweight visual request in its reply, then expands that request in place
+  through a selected Lumiverse text connection before SwarmUI generation.
+- Parser mode hydrates Lumiverse's saved text connections, follows its default
+  connection when no explicit choice is stored, and accepts an optional
+  per-parser model override without changing the model used by the active chat.
+- Parser failures are reported to both the browser console and Studio's normal
+  backend error channel instead of leaving a silent unfinished request.
+
+### Changed
+
+- The `{{swarm_image_protocol}}` macro and automatic prompt injection now switch
+  between the complete inline protocol and the compact parser-placement
+  protocol according to the selected Generation mode.
+- Swarm Studio requests Lumiverse's **Generation** permission only for parser
+  connection discovery, generation lifecycle handling, and quiet parser calls.
+  Existing inline-protocol behavior remains the default.
+
 ## 1.0.13
 
 ### Added

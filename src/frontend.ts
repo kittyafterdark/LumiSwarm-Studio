@@ -17,6 +17,9 @@ interface StudioBehavior {
   tagAutoGenerate: boolean
   tagPromptInjection: boolean
   protocolPrompt: string
+  requestMode: "inline" | "parser"
+  parserConnectionId: string
+  parserModel: string
   stripUserOnlyLoraStack: boolean
   autoPrintCharacterPositive: boolean
   inlineImageScale: 100 | 75 | 50
@@ -265,6 +268,7 @@ interface CharacterBaseTagState {
 
 interface StudioState {
   connections: any[]
+  parserConnections: any[]
   connection: any | null
   models: Array<{ id: string; label: string }>
   checkpoints: CheckpointMetadata[]
@@ -1453,6 +1457,46 @@ const STYLES = `
     background: var(--lumiverse-accent, #7dd3fc);
   }
   .ss-settings-toggle:focus-within { outline: 1px solid var(--lumiverse-accent, #7dd3fc); outline-offset: 2px; }
+  .ss-request-mode-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .ss-request-mode-button {
+    min-width: 0;
+    min-height: 82px;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 11px;
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--ss-header-bg, #13141a) 56%, transparent);
+    color: var(--lumiverse-text-muted);
+    text-align: left;
+    cursor: pointer;
+  }
+  .ss-request-mode-button:hover { color: var(--ss-text, var(--lumiverse-text)); border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 42%, var(--ss-outline, var(--lumiverse-border))); }
+  .ss-request-mode-button[data-active="true"] {
+    color: var(--ss-text, var(--lumiverse-text));
+    border-color: var(--lumiverse-accent, #7dd3fc);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 12%, var(--ss-button-bg, #171820));
+  }
+  .ss-request-mode-button > span:last-child { min-width: 0; display: grid; gap: 5px; }
+  .ss-request-mode-button strong { font-size: 10px; }
+  .ss-request-mode-button small { color: var(--lumiverse-text-muted); font-size: 8.5px; line-height: 1.45; }
+  .ss-request-mode-icon { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid currentColor; border-radius: 9px; opacity: .82; }
+  .ss-request-mode-icon svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+  .ss-parser-settings {
+    display: grid;
+    gap: 9px;
+    padding: 11px;
+    border: 1px dashed color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 42%, var(--ss-outline, var(--lumiverse-border)));
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 5%, transparent);
+  }
+  .ss-parser-settings[hidden] { display: none; }
+  .ss-parser-field { display: grid; grid-template-columns: minmax(120px, .42fr) minmax(0, 1fr); align-items: center; gap: 10px; color: var(--ss-text, var(--lumiverse-text)); font-size: 9px; font-weight: 650; }
+  .ss-parser-field > span small { color: var(--lumiverse-text-muted); font-weight: 400; }
+  .ss-parser-field .ss-select,
+  .ss-parser-field .ss-input { min-width: 0; height: 32px; font-size: 9px; }
   .ss-protocol-editor { min-height: 290px; resize: vertical; font: 9px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
   .ss-protocol-actions { display: flex; justify-content: flex-end; gap: 7px; }
   .ss-image-scale-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -3042,6 +3086,8 @@ const STUDIO_V3_STYLES = `
     .ss-config-section-head { align-items: flex-start; }
     .ss-config-section-head span { text-align: right; }
     .ss-settings-toggle { padding: 9px; }
+    .ss-request-mode-grid { grid-template-columns: minmax(0, 1fr); }
+    .ss-parser-field { grid-template-columns: minmax(0, 1fr); gap: 5px; }
     .ss-protocol-editor { min-height: 250px; font-size: 8.5px; }
     .ss-image-scale-grid { grid-template-columns: repeat(3, minmax(84px, 1fr)); overflow-x: auto; }
     .ss-image-scale-button { min-height: 80px; }
@@ -3815,6 +3861,9 @@ function defaultStudioBehavior(): StudioBehavior {
     tagAutoGenerate: false,
     tagPromptInjection: false,
     protocolPrompt: DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+    requestMode: "inline",
+    parserConnectionId: "",
+    parserModel: "",
     stripUserOnlyLoraStack: false,
     autoPrintCharacterPositive: false,
     inlineImageScale: 100,
@@ -3849,6 +3898,9 @@ function storedStudioBehavior(): StudioBehavior {
       protocolPrompt: typeof parsed?.protocolPrompt === "string" && parsed.protocolPrompt.trim()
         ? parsed.protocolPrompt
         : DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+      requestMode: parsed?.requestMode === "parser" ? "parser" : "inline",
+      parserConnectionId: typeof parsed?.parserConnectionId === "string" ? parsed.parserConnectionId : "",
+      parserModel: typeof parsed?.parserModel === "string" ? parsed.parserModel : "",
       stripUserOnlyLoraStack: parsed?.stripUserOnlyLoraStack === true,
       autoPrintCharacterPositive: parsed?.autoPrintCharacterPositive === true,
       inlineImageScale: parsed?.inlineImageScale === 75 || parsed?.inlineImageScale === 50
@@ -5472,6 +5524,7 @@ class StudioController {
     this.onBehaviorChange = onBehaviorChange
     this.state = {
       connections: [],
+      parserConnections: [],
       connection: null,
       models: [],
       checkpoints: [],
@@ -5587,6 +5640,15 @@ class StudioController {
     if (protocolPrompt && document.activeElement !== protocolPrompt) {
       protocolPrompt.value = this.behavior.protocolPrompt || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT
     }
+    const parserConnection = this.root.querySelector<HTMLSelectElement>('[data-role="parser-connection"]')
+    if (parserConnection) parserConnection.value = this.behavior.parserConnectionId
+    const parserModel = this.root.querySelector<HTMLInputElement>('[data-role="parser-model"]')
+    if (parserModel && document.activeElement !== parserModel) parserModel.value = this.behavior.parserModel
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="set-request-mode"]')) {
+      button.dataset.active = String(button.dataset.requestMode === this.behavior.requestMode)
+    }
+    const parserSettings = this.root.querySelector<HTMLElement>('[data-role="parser-settings"]')
+    if (parserSettings) parserSettings.hidden = this.behavior.requestMode !== "parser"
     const stripUserOnlyLoraStack = this.root.querySelector<HTMLInputElement>('[data-role="strip-user-only-lora-stack"]')
     if (stripUserOnlyLoraStack) stripUserOnlyLoraStack.checked = this.behavior.stripUserOnlyLoraStack
     const autoPrintCharacterPositive = this.root.querySelector<HTMLInputElement>('[data-role="auto-print-character-positive"]')
@@ -5600,6 +5662,41 @@ class StudioController {
     if (requiredImageMax) requiredImageMax.value = String(this.behavior.requiredImageMax)
     const tagPromptMode = this.root.querySelector<HTMLSelectElement>('[data-role="tag-prompt-mode"]')
     if (tagPromptMode) tagPromptMode.value = this.behavior.tagPromptMode
+  }
+
+  private renderParserConnections(): void {
+    const select = this.root.querySelector<HTMLSelectElement>('[data-role="parser-connection"]')
+    const summary = this.root.querySelector<HTMLElement>('[data-role="parser-connection-summary"]')
+    if (!select) return
+    const current = this.behavior.parserConnectionId
+    select.replaceChildren()
+    const placeholder = document.createElement("option")
+    placeholder.value = ""
+    placeholder.textContent = this.state.permissions.generation
+      ? "Use Lumiverse default connection"
+      : "Generation permission required"
+    select.appendChild(placeholder)
+    for (const connection of this.state.parserConnections) {
+      const option = document.createElement("option")
+      option.value = String(connection?.id || "")
+      const provider = String(connection?.provider || "").trim()
+      option.textContent = [String(connection?.name || "Unnamed connection"), provider].filter(Boolean).join(" · ")
+      select.appendChild(option)
+    }
+    select.disabled = !this.state.permissions.generation || !this.state.parserConnections.length
+    select.value = this.state.parserConnections.some((connection) => String(connection?.id || "") === current)
+      ? current
+      : ""
+    const selected = this.state.parserConnections.find((connection) =>
+      String(connection?.id || "") === (select.value || current),
+    ) || this.state.parserConnections.find((connection) => connection?.is_default) || this.state.parserConnections[0]
+    if (summary) {
+      summary.textContent = selected
+        ? `Connection model: ${String(selected?.model || "not specified")}${selected?.is_default ? " · Lumiverse default" : ""}`
+        : this.state.permissions.generation
+          ? "No Lumiverse text connections are available."
+          : "Grant Generation permission in Extensions, then restart Swarm Studio."
+    }
   }
 
   exportDraft(): StudioDraft | null {
@@ -6000,6 +6097,9 @@ class StudioController {
                     <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="general" data-active="true">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M10 14v6"/></svg><span>General</span>
                     </button>
+                    <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="generation" data-active="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z"/></svg><span>Generation</span>
+                    </button>
                     <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="theme" data-active="false">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 0-3.6h-.8a1.7 1.7 0 0 1 0-3.4H15a6 6 0 0 0 0-12h-3Z"/><path d="M7.5 9h.01M9.5 6.5h.01M6.5 13h.01"/></svg><span>Theme</span>
                     </button>
@@ -6023,6 +6123,35 @@ class StudioController {
                           <span class="ss-settings-toggle-copy"><strong>Quick Create on mobile</strong><span>Allow the floating image widget to expand into the prompt editor on small screens.</span></span>
                           <input type="checkbox" data-role="mobile-quick-create" ${this.behavior.mobileQuickCreate ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
                         </label>
+                      </section>
+                    </div>
+                    <div class="ss-settings-panel" data-settings-panel="generation" hidden>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Request completion</strong><span>One-pass or dedicated parser</span></div>
+                        <div class="ss-request-mode-grid" role="group" aria-label="Image request completion mode">
+                          <button class="ss-request-mode-button" data-action="set-request-mode" data-request-mode="inline" data-active="${this.behavior.requestMode === "inline"}">
+                            <span class="ss-request-mode-icon">${FRAME_WALL_ICON}</span>
+                            <span><strong>Inline protocol</strong><small>The active chat model writes complete SwarmUI prompts directly in its reply.</small></span>
+                          </button>
+                          <button class="ss-request-mode-button" data-action="set-request-mode" data-request-mode="parser" data-active="${this.behavior.requestMode === "parser"}">
+                            <span class="ss-request-mode-icon">${SPARKLE_ICON}</span>
+                            <span><strong>Parser model</strong><small>The chat model places a brief request; a second Lumiverse text connection completes it after the reply.</small></span>
+                          </button>
+                        </div>
+                        <div class="ss-parser-settings" data-role="parser-settings" ${this.behavior.requestMode === "parser" ? "" : "hidden"}>
+                          <label class="ss-parser-field">
+                            <span>Lumiverse connection</span>
+                            <select class="ss-select" data-role="parser-connection">
+                              <option value="">Use Lumiverse default connection</option>
+                            </select>
+                          </label>
+                          <label class="ss-parser-field">
+                            <span>Model override <small>optional</small></span>
+                            <input class="ss-input" data-role="parser-model" value="${this.behavior.parserModel.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" placeholder="Use the connection's selected model" autocomplete="off" />
+                          </label>
+                          <p class="ss-muted ss-tiny" data-role="parser-connection-summary">Loading Lumiverse text connections…</p>
+                          <p class="ss-muted ss-tiny">The override changes only parser calls. Chat replies continue using the model selected by Lumiverse for the active conversation.</p>
+                        </div>
                       </section>
                       <section class="ss-config-section">
                         <div class="ss-config-section-head"><strong>Inline images</strong><span>Model requests and composition</span></div>
@@ -6058,9 +6187,10 @@ class StudioController {
                         <p class="ss-muted ss-tiny">0–0 lets the model decide. Any other range explicitly requires that many complete image requests in the reply.</p>
                       </section>
                       <section class="ss-config-section">
-                        <div class="ss-config-section-head"><strong>Protocol prompt</strong><span>Editable system instruction</span></div>
+                        <div class="ss-config-section-head"><strong>Protocol prompt</strong><span>Inline-mode system instruction</span></div>
                         <textarea class="ss-textarea ss-protocol-editor" data-role="tag-protocol-prompt" spellcheck="false"></textarea>
                         <p class="ss-muted ss-tiny"><code>{{swarm_dynamic_guidance}}</code> is replaced at runtime with the active image count, identities, composition mode, checkpoint guidance, and Swarm preset stack. Remove it only when your custom protocol deliberately replaces all dynamic guidance.</p>
+                        <p class="ss-muted ss-tiny">Parser mode injects its own compact placement protocol and uses this fully resolved protocol privately when completing each request.</p>
                         <div class="ss-protocol-actions">
                           <button class="ss-button" data-action="copy-tag-protocol">Copy example</button>
                           <button class="ss-button" data-action="reset-tag-protocol">Reset</button>
@@ -6777,6 +6907,19 @@ are removed when CSS is applied.</pre>
         tagPromptInjection: (event.currentTarget as HTMLInputElement).checked,
       })
     })
+    this.get<HTMLSelectElement>('[data-role="parser-connection"]').addEventListener("change", (event) => {
+      this.onBehaviorChange({
+        ...this.behavior,
+        parserConnectionId: (event.currentTarget as HTMLSelectElement).value,
+      })
+      this.renderParserConnections()
+    })
+    this.get<HTMLInputElement>('[data-role="parser-model"]').addEventListener("change", (event) => {
+      this.onBehaviorChange({
+        ...this.behavior,
+        parserModel: (event.currentTarget as HTMLInputElement).value.trim(),
+      })
+    })
     this.get<HTMLInputElement>('[data-role="strip-user-only-lora-stack"]').addEventListener("change", (event) => {
       this.onBehaviorChange({
         ...this.behavior,
@@ -6925,6 +7068,10 @@ are removed when CSS is applied.</pre>
       if (action === "toggle-config") this.toggleConfigPopover(button)
       if (action === "close-settings") this.closeConfigPopover()
       if (action === "settings-tab") this.setSettingsTab(button.dataset.settingsTab || "general")
+      if (action === "set-request-mode") {
+        const requestMode = button.dataset.requestMode === "parser" ? "parser" : "inline"
+        this.onBehaviorChange({ ...this.behavior, requestMode })
+      }
       if (action === "copy-tag-protocol") void this.copyTagProtocol()
       if (action === "reset-tag-protocol") this.resetTagProtocol()
       if (action === "save-tag-protocol") this.saveTagProtocol()
@@ -7177,6 +7324,7 @@ are removed when CSS is applied.</pre>
     switch (payload?.type) {
       case "bootstrap_result":
         this.state.connections = Array.isArray(data.connections) ? data.connections : []
+        this.state.parserConnections = Array.isArray(data.parserConnections) ? data.parserConnections : []
         this.acceptOutputPage(data)
         this.state.stackPresets = Array.isArray(data.stackPresets) ? data.stackPresets : []
         this.state.outputFolders = Array.isArray(data.outputFolders) ? data.outputFolders : []
@@ -7185,6 +7333,7 @@ are removed when CSS is applied.</pre>
         this.state.chatVisuals = data.chatVisuals || null
         this.acceptCharacterBaseTags(data.characterBaseTags)
         this.renderPermissions()
+        this.renderParserConnections()
         this.populateConnections()
         this.renderOutputs()
         this.renderStackPresets()
@@ -8626,7 +8775,7 @@ are removed when CSS is applied.</pre>
   }
 
   private setSettingsTab(tab: string): void {
-    const selected = ["general", "theme", "metadata"].includes(tab) ? tab : "general"
+    const selected = ["general", "generation", "theme", "metadata"].includes(tab) ? tab : "general"
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="settings-tab"]')) {
       const active = button.dataset.settingsTab === selected
       button.dataset.active = String(active)
@@ -12667,6 +12816,9 @@ export function setup(ctx: FrontendContext): () => void {
       protocolPrompt: typeof value?.protocolPrompt === "string" && value.protocolPrompt.trim()
         ? value.protocolPrompt
         : DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+      requestMode: value?.requestMode === "parser" ? "parser" : "inline",
+      parserConnectionId: typeof value?.parserConnectionId === "string" ? value.parserConnectionId : "",
+      parserModel: typeof value?.parserModel === "string" ? value.parserModel : "",
       stripUserOnlyLoraStack: value?.stripUserOnlyLoraStack === true,
       autoPrintCharacterPositive: value?.autoPrintCharacterPositive === true,
       requiredImageMin: range.min,
@@ -12685,6 +12837,9 @@ export function setup(ctx: FrontendContext): () => void {
         injectProtocol: behavior.tagPromptInjection,
         completionToast: behavior.completionToast,
         protocolPrompt: behavior.protocolPrompt,
+        requestMode: behavior.requestMode,
+        parserConnectionId: behavior.parserConnectionId,
+        parserModel: behavior.parserModel,
         stripUserOnlyLoraStack: behavior.stripUserOnlyLoraStack,
         autoPrintCharacterPositive: behavior.autoPrintCharacterPositive,
         requiredImageMin: behavior.requiredImageMin,
@@ -12763,6 +12918,7 @@ export function setup(ctx: FrontendContext): () => void {
     () => openStudio("library"),
   )
   let unregisterTagInterceptor = () => {}
+  let unregisterParserTagInterceptor = () => {}
   const registerTagInterceptor = ctx.messages?.registerTagInterceptor
   if (typeof registerTagInterceptor === "function") {
     try {
@@ -12770,6 +12926,11 @@ export function setup(ctx: FrontendContext): () => void {
         ctx.messages,
         { tagName: "swarm-image", attrs: { request: "generate" }, removeFromMessage: true },
         (payload: any) => taggedImages?.handleTag(payload),
+      )
+      unregisterParserTagInterceptor = registerTagInterceptor.call(
+        ctx.messages,
+        { tagName: "swarm-image", attrs: { request: "parse" }, removeFromMessage: true },
+        () => {},
       )
     } catch (error) {
       console.warn("[Swarm Studio] Inline image tag interception is unavailable in this Lumiverse build.", error)
@@ -12925,6 +13086,7 @@ export function setup(ctx: FrontendContext): () => void {
     inputAction?.destroy()
     drawer.destroy()
     unregisterTagInterceptor()
+    unregisterParserTagInterceptor()
     taggedImages?.destroy()
     taggedImages = null
     chatVisuals?.destroy()

@@ -185,6 +185,9 @@ interface TagAutomationConfig {
   injectProtocol: boolean
   completionToast: boolean
   protocolPrompt: string
+  requestMode: "inline" | "parser"
+  parserConnectionId: string
+  parserModel: string
   stripUserOnlyLoraStack: boolean
   autoPrintCharacterPositive: boolean
   requiredImageMin: number
@@ -309,6 +312,7 @@ const generationControllers = new Map<string, {
 }>()
 let legacyGenerationFallbackLogged = false
 const runningTaggedJobs = new Set<string>()
+const runningParserCompletions = new Set<string>()
 const taggedMessageFinalizeLocks = new Map<string, Promise<void>>()
 const taggedFinalizeRetries = new Map<string, Promise<boolean>>()
 const taggedFinalizeMessageTargets = new Map<string, string>()
@@ -339,6 +343,21 @@ Use character="none" when the active chat character should not appear. Use perso
 const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `${SWARM_IMAGE_PROTOCOL_BASE}
 
 {{swarm_dynamic_guidance}}`
+const SWARM_PARSER_REQUEST_PROTOCOL_BASE = `SWARM STUDIO IMAGE PLACEMENT PROTOCOL
+When an illustration should appear in the reply, place this exact lightweight XML-like request at that position. Attributes may be written on one line or separate lines:
+<swarm-image
+  request="parse"
+  slot="short-stable-name"
+  aspect="4:3"
+  character="active"
+  persona="none"
+  alt="brief accessible description"
+>
+brief visual intent grounded in the current scene</swarm-image>
+
+The request="parse" marker is required. The tag body is a concise visual brief for a separate local parser model, not a finished diffusion prompt and not prose for the user. Include the visible subjects, action, expression, framing, environment, and lighting without copying biographies, mannerisms, lore, or display names into the body. The local parser receives the active Studio identities, presets, checkpoint guidance, and negative prompt separately and expands this request after the reply finishes.
+
+Use character="active" only when the active chat character appears and character="none" otherwise. Use persona="active" only when the active persona appears and persona="none" otherwise. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait). Preserve the request in the exact place where the finished image belongs. Do not quote, explain, demonstrate, or wrap it in Markdown fences.`
 
 function asRecord(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -2203,6 +2222,9 @@ function cleanTagAutomationConfig(value: unknown): TagAutomationConfig {
     injectProtocol: record.injectProtocol === true,
     completionToast: record.completionToast === true,
     protocolPrompt: protocolPrompt || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+    requestMode: record.requestMode === "parser" ? "parser" : "inline",
+    parserConnectionId: asString(record.parserConnectionId).trim().slice(0, 200),
+    parserModel: asString(record.parserModel).trim().slice(0, 300),
     stripUserOnlyLoraStack: record.stripUserOnlyLoraStack === true,
     autoPrintCharacterPositive: record.autoPrintCharacterPositive === true,
     requiredImageMin,
@@ -2218,6 +2240,9 @@ async function loadTagAutomationConfig(userId?: string): Promise<TagAutomationCo
       injectProtocol: false,
       completionToast: false,
       protocolPrompt: DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+      requestMode: "inline",
+      parserConnectionId: "",
+      parserModel: "",
       stripUserOnlyLoraStack: false,
       autoPrintCharacterPositive: false,
       requiredImageMin: 0,
@@ -2233,7 +2258,7 @@ async function saveTagAutomationConfig(value: unknown, userId?: string): Promise
   await spindle.userStorage.setJson(TAG_AUTOMATION_CONFIG_FILE, config, { indent: 2, userId })
   spindle.updateMacroValue(
     "swarm_image_protocol",
-    buildSwarmImageProtocol(
+    buildInjectedSwarmProtocol(
       await loadStudioGenerationProfile(userId),
       swarmProtocolContexts.get(protocolContextKey(userId)) || null,
       config,
@@ -2523,6 +2548,34 @@ Use concise model-recognizable visual descriptors. Identity blocks cover stable 
     : template
 }
 
+function buildSwarmParserRequestProtocol(automation: TagAutomationConfig): string {
+  const imageCountGuidance = automation.requiredImageMin > 0
+    ? automation.requiredImageMin === automation.requiredImageMax
+      ? `The user explicitly requires exactly ${automation.requiredImageMin} complete request="parse" tag${automation.requiredImageMin === 1 ? "" : "s"} in this reply.`
+      : `The user explicitly requires between ${automation.requiredImageMin} and ${automation.requiredImageMax} complete request="parse" tags in this reply.`
+    : "No explicit image count is active. Request an illustration only when it materially improves the reply."
+  const compositionGuidance = automation.promptMode === "pov"
+    ? "Favor a single focal character or POV composition. The brief must identify visible expression, current outfit changes, action, framing, setting, and lighting."
+    : "Use no more than five visually necessary subjects. Briefly disambiguate each visible subject's expression, position, action, and current outfit before the shared framing and environment."
+  return `${SWARM_PARSER_REQUEST_PROTOCOL_BASE}
+
+IMAGE COUNT
+${imageCountGuidance}
+
+COMPOSITION
+${compositionGuidance}`
+}
+
+function buildInjectedSwarmProtocol(
+  profile: StudioGenerationProfile | null,
+  context: SwarmProtocolContext | null = null,
+  automation: TagAutomationConfig = cleanTagAutomationConfig(null),
+): string {
+  return automation.requestMode === "parser"
+    ? buildSwarmParserRequestProtocol(automation)
+    : buildSwarmImageProtocol(profile, context, automation)
+}
+
 function protocolContextKey(userId?: string): string {
   return userId || "__default__"
 }
@@ -2537,7 +2590,7 @@ async function pushStudioProfileMacros(profile: StudioGenerationProfile | null, 
   spindle.updateMacroValue("swarm_aspect", aspectFromParameters(parameters))
   spindle.updateMacroValue(
     "swarm_image_protocol",
-    buildSwarmImageProtocol(
+    buildInjectedSwarmProtocol(
       profile,
       swarmProtocolContexts.get(protocolContextKey(userId)) || null,
       await loadTagAutomationConfig(userId),
@@ -2611,7 +2664,7 @@ async function refreshContextMacros(userId?: string): Promise<void> {
   spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId))
   spindle.updateMacroValue(
     "swarm_image_protocol",
-    buildSwarmImageProtocol(
+    buildInjectedSwarmProtocol(
       await loadStudioGenerationProfile(userId),
       protocolContext,
       await loadTagAutomationConfig(userId),
@@ -2639,10 +2692,140 @@ function parseSwarmImageTags(content: string): Array<{ fullMatch: string; attrs:
   while ((match = pattern.exec(content)) && tags.length < 6) {
     const attrs = parseTagAttributes(match[1])
     const strict = attrs.request?.toLowerCase() === "generate"
-    const legacy = Boolean(attrs.slot && (attrs.aspect || attrs.alt))
+    const legacy = !attrs.request && Boolean(attrs.slot && (attrs.aspect || attrs.alt))
     if (strict || legacy) tags.push({ fullMatch: match[0], attrs, content: match[2] })
   }
   return tags
+}
+
+function parseSwarmParserRequests(content: string): Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> {
+  return parseSwarmImageTagsByRequest(content, "parse")
+}
+
+function parseSwarmImageTagsByRequest(
+  content: string,
+  request: string,
+): Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> {
+  const tags: Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> = []
+  const pattern = /<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(content)) && tags.length < 6) {
+    const attrs = parseTagAttributes(match[1])
+    if (attrs.request?.toLowerCase() === request) {
+      tags.push({ fullMatch: match[0], attrs, content: match[2] })
+    }
+  }
+  return tags
+}
+
+function parserCompletionInstruction(
+  profile: StudioGenerationProfile | null,
+  context: SwarmProtocolContext | null,
+  automation: TagAutomationConfig,
+): string {
+  return `You are Swarm Studio's local image-request parser. Convert every request="parse" tag in the user message into exactly one complete request="generate" tag.
+
+Return only the completed tags, in the same order, with no prose or Markdown fences. Preserve each tag's slot, aspect, character, persona, and alt attributes exactly. Expand only the body into a compact, checkpoint-appropriate diffusion prompt. Do not copy biographies, personality, backstory, or conversational display names. Do not invent additional images or omit an input request.
+
+The completed tags must follow this Studio protocol and its live identity/preset guidance:
+
+${buildSwarmImageProtocol(profile, context, automation)}`
+}
+
+async function completeParserImageRequests(payload: any, userId?: string): Promise<void> {
+  const config = await loadTagAutomationConfig(userId)
+  if (!config.injectProtocol || config.requestMode !== "parser") return
+  const chatId = asString(payload?.chatId).trim()
+  const messageId = asString(payload?.messageId).trim()
+  const content = asString(payload?.content)
+  const requests = parseSwarmParserRequests(content)
+  if (!chatId || !messageId || !requests.length) return
+
+  const completionKey = asString(payload?.generationId).trim() || `${chatId}:${messageId}:${stableTextHash(content)}`
+  if (runningParserCompletions.has(completionKey)) return
+  runningParserCompletions.add(completionKey)
+
+  try {
+    if (!spindle.permissions.has("generation")) {
+      throw new Error("Grant the Generation permission to use a parser model for inline image requests.")
+    }
+    const listed = await spindle.connections.list(userId)
+    const connections = Array.isArray(listed) ? listed : []
+    const connection = connections.find((candidate: any) => asString(candidate?.id) === config.parserConnectionId)
+      || connections.find((candidate: any) => candidate?.is_default)
+      || connections[0]
+    if (!connection?.id) throw new Error("Choose a Lumiverse text connection for the Swarm Studio parser.")
+
+    const profile = await loadStudioGenerationProfile(userId)
+    const context = swarmProtocolContexts.get(protocolContextKey(userId)) || null
+    const response = await spindle.generate.quiet({
+      connection_id: connection.id,
+      messages: [
+        { role: "system", content: parserCompletionInstruction(profile, context, config) },
+        { role: "user", content: requests.map((request) => request.fullMatch).join("\n\n") },
+      ],
+      parameters: {
+        temperature: 0.2,
+        ...(config.parserModel ? { model: config.parserModel } : {}),
+      },
+      reasoning: { source: "off" },
+    }, userId)
+    const completedTags = parseSwarmImageTags(asString(response?.content))
+    if (completedTags.length !== requests.length) {
+      throw new Error(`The parser returned ${completedTags.length} completed image request${completedTags.length === 1 ? "" : "s"} for ${requests.length} placed request${requests.length === 1 ? "" : "s"}.`)
+    }
+
+    let completedContent = content
+    for (let index = 0; index < requests.length; index++) {
+      const request = requests[index]
+      const bySlot = completedTags.find((tag) =>
+        asString(tag.attrs.slot) && asString(tag.attrs.slot) === asString(request.attrs.slot),
+      )
+      const completed = bySlot || completedTags[index]
+      completed.attrs.slot = asString(request.attrs.slot)
+      completed.attrs.aspect = asString(request.attrs.aspect)
+      completed.attrs.character = asString(request.attrs.character)
+      completed.attrs.persona = asString(request.attrs.persona)
+      completed.attrs.alt = asString(request.attrs.alt)
+      const replacement = `<swarm-image
+  request="generate"
+  slot="${completed.attrs.slot.replace(/"/g, "&quot;")}"
+  aspect="${(cleanAspect(completed.attrs.aspect) || "4:3").replace(/"/g, "")}"
+  character="${completed.attrs.character === "none" ? "none" : "active"}"
+  persona="${completed.attrs.persona === "active" ? "active" : "none"}"
+  alt="${completed.attrs.alt.replace(/"/g, "&quot;")}"
+>
+${completed.content.trim()}</swarm-image>`
+      completedContent = completedContent.replace(request.fullMatch, replacement)
+    }
+
+    await spindle.chat.updateMessage(chatId, messageId, { content: completedContent }, userId)
+    const generatedTags = parseSwarmImageTags(completedContent)
+    for (const tag of generatedTags) {
+      await requestTaggedImageGeneration({
+        chatId,
+        messageId,
+        fullMatch: tag.fullMatch,
+        attrs: tag.attrs,
+        content: tag.content,
+        isStreaming: false,
+      }, userId)
+    }
+    spindle.sendToFrontend({
+      type: "parser_completion_result",
+      data: { chatId, messageId, count: generatedTags.length },
+    }, userId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error("[Swarm Studio] Parser-model image completion failed.", error)
+    spindle.sendToFrontend({
+      type: "parser_completion_error",
+      error: message,
+      data: { chatId, messageId },
+    }, userId)
+  } finally {
+    runningParserCompletions.delete(completionKey)
+  }
 }
 
 function cleanAspect(value: unknown): string {
@@ -3470,13 +3653,13 @@ async function taggedImagePromptInterceptor(messages: any[], context: any): Prom
   }))
   const config = await loadTagAutomationConfig(userId)
   if (!config.injectProtocol) return cleaned
-  if (cleaned.some((message) => typeof message?.content === "string" && message.content.includes("SWARM STUDIO IMAGE REQUEST PROTOCOL"))) {
+  if (cleaned.some((message) => typeof message?.content === "string" && message.content.includes("SWARM STUDIO IMAGE "))) {
     return cleaned
   }
   await refreshContextMacros(userId)
   const injected = {
     role: "system",
-    content: buildSwarmImageProtocol(
+    content: buildInjectedSwarmProtocol(
       await loadStudioGenerationProfile(userId),
       swarmProtocolContexts.get(protocolContextKey(userId)) || null,
       config,
@@ -3498,6 +3681,7 @@ function permissionSnapshot(): Record<string, boolean> {
     personas: spindle.permissions.has("personas"),
     chatMutation: spindle.permissions.has("chat_mutation"),
     interceptor: spindle.permissions.has("interceptor"),
+    generation: spindle.permissions.has("generation"),
   }
 }
 
@@ -3579,6 +3763,15 @@ async function bootstrap(userId?: string): Promise<JsonObject> {
     : []
   const connections = (Array.isArray(allConnections) ? allConnections : [])
     .filter((connection: any) => connection?.provider === "swarmui")
+  let parserConnections: any[] = []
+  if (permissions.generation) {
+    try {
+      const listed = await spindle.connections.list(userId)
+      parserConnections = Array.isArray(listed) ? listed : []
+    } catch (error) {
+      spindle.log.warn(`Could not list parser connections: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
 
   const activeChat = permissions.chats
     ? await spindle.chats.getActive(userId)
@@ -3588,6 +3781,7 @@ async function bootstrap(userId?: string): Promise<JsonObject> {
   return {
     permissions,
     connections,
+    parserConnections,
     activeChat,
     ...outputPage,
     stackPresets: await loadStackPresets(userId),
@@ -4464,10 +4658,16 @@ for (const macro of [
     returnType: "string",
     handler: "",
   })
-  spindle.updateMacroValue(macro.name, macro.name === "swarm_image_protocol" ? buildSwarmImageProtocol(null) : "")
+  spindle.updateMacroValue(macro.name, macro.name === "swarm_image_protocol" ? buildInjectedSwarmProtocol(null) : "")
 }
 
 spindle.registerInterceptor(taggedImagePromptInterceptor, 90)
+
+if (spindle.permissions.has("generation")) {
+  spindle.on("GENERATION_ENDED", (payload: any, userId?: string) => {
+    void completeParserImageRequests(payload, userId)
+  })
+}
 
 for (const eventName of ["CHAT_SWITCHED", "PERSONA_CHANGED", "CHARACTER_AVATAR_CHANGED"]) {
   spindle.on(eventName, async (_payload: any, userId?: string) => {
