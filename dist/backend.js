@@ -5,6 +5,8 @@ const PREVIEW_CACHE_LIMIT = 64;
 const STACK_PRESETS_FILE = "lora-stack-presets.json";
 const GENERATION_RECORDS_FILE = "generation-records.json";
 const OUTPUT_FOLDERS_FILE = "output-folders.json";
+const FAVORITES_FOLDER_ID = "__swarm_studio_favorites__";
+const FAVORITES_FOLDER_NAME = "Favorites";
 const TAG_AUTOMATION_CONFIG_FILE = "tag-automation-config.json";
 const TAGGED_IMAGE_JOBS_FILE = "tagged-image-jobs.json";
 const STUDIO_GENERATION_PROFILE_FILE = "studio-generation-profile.json";
@@ -37,6 +39,7 @@ const loraDownloadJobs = new Map();
 const generationControllers = new Map();
 let legacyGenerationFallbackLogged = false;
 const runningTaggedJobs = new Set();
+const runningParserCompletions = new Set();
 const taggedMessageFinalizeLocks = new Map();
 const taggedFinalizeRetries = new Map();
 const taggedFinalizeMessageTargets = new Map();
@@ -66,11 +69,44 @@ Use character="none" when the active chat character should not appear. Use perso
 const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `${SWARM_IMAGE_PROTOCOL_BASE}
 
 {{swarm_dynamic_guidance}}`;
+const SWARM_PARSER_REQUEST_PROTOCOL_BASE = `SWARM STUDIO IMAGE PLACEMENT PROTOCOL
+When an illustration should appear in the reply, place this exact lightweight XML-like request at that position. Attributes may be written on one line or separate lines:
+<swarm-image
+  request="parse"
+  slot="short-stable-name"
+  aspect="4:3"
+  character="active"
+  persona="none"
+  alt="brief accessible description"
+>
+brief visual intent grounded in the current scene</swarm-image>
+
+The request="parse" marker is required. The tag body is a concise visual brief for a separate local parser model, not a finished diffusion prompt and not prose for the user. Include the visible subjects, action, expression, framing, environment, and lighting without copying biographies, mannerisms, lore, or display names into the body. The local parser receives the active Studio identities, presets, checkpoint guidance, and negative prompt separately and expands this request after the reply finishes.
+
+Use character="active" only when the active chat character appears and character="none" otherwise. Use persona="active" only when the active persona appears and persona="none" otherwise. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait). Preserve the request in the exact place where the finished image belongs. Do not quote, explain, demonstrate, or wrap it in Markdown fences.`;
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 function asString(value) {
     return typeof value === "string" ? value : "";
+}
+function reportBackendError(scope, error, details) {
+    const message = error instanceof Error ? `${error.message}${error.stack ? `\n${error.stack}` : ""}` : String(error || "Unknown error");
+    let detailText = "";
+    if (details !== undefined) {
+        try {
+            detailText = typeof details === "string" ? details : JSON.stringify(details);
+        } catch  {
+            detailText = String(details);
+        }
+    }
+    const suffix = detailText ? `\nDetails: ${detailText}` : "";
+    const output = `[Swarm Studio] ${scope}: ${message}${suffix}`;
+    try {
+        spindle.log.error(output);
+    } catch  {
+        console.error(output);
+    }
 }
 function asNullableNumber(value) {
     const number = Number(value);
@@ -1129,7 +1165,17 @@ async function chatVisualsState(userId, currentStack) {
     };
 }
 function cleanOutputFolders(value) {
-    if (!Array.isArray(value)) return [];
+    if (!Array.isArray(value)) {
+        return [
+            {
+                id: FAVORITES_FOLDER_ID,
+                name: FAVORITES_FOLDER_NAME,
+                imageIds: [],
+                binding: null,
+                updatedAt: Date.now()
+            }
+        ];
+    }
     const seen = new Set();
     const parsed = value.slice(0, OUTPUT_FOLDER_LIMIT).flatMap((raw)=>{
         const item = asRecord(raw);
@@ -1187,7 +1233,23 @@ function cleanOutputFolders(value) {
             updatedAt: Math.max(...group.map((candidate)=>candidate.updatedAt))
         });
     }
-    return result.slice(0, OUTPUT_FOLDER_LIMIT);
+    const favorite = result.find((folder)=>folder.id === FAVORITES_FOLDER_ID);
+    const ordinary = result.filter((folder)=>folder.id !== FAVORITES_FOLDER_ID);
+    const favoritesFolder = favorite ? {
+        ...favorite,
+        name: FAVORITES_FOLDER_NAME,
+        binding: null
+    } : {
+        id: FAVORITES_FOLDER_ID,
+        name: FAVORITES_FOLDER_NAME,
+        imageIds: [],
+        binding: null,
+        updatedAt: Date.now()
+    };
+    return [
+        favoritesFolder,
+        ...ordinary.slice(0, Math.max(0, OUTPUT_FOLDER_LIMIT - 1))
+    ];
 }
 async function loadOutputFolders(userId) {
     return cleanOutputFolders(await spindle.userStorage.getJson(OUTPUT_FOLDERS_FILE, {
@@ -1242,7 +1304,7 @@ async function createOutputFolder(name, bindingType, userId) {
         }
     }
     if (!cleanName) throw new Error("Give the output folder a name.");
-    if (folders.some((folder)=>folder.name.toLowerCase() === cleanName.toLowerCase())) {
+    if (cleanName.toLowerCase() === FAVORITES_FOLDER_NAME.toLowerCase() || folders.some((folder)=>folder.name.toLowerCase() === cleanName.toLowerCase())) {
         throw new Error(`An output folder named “${cleanName}” already exists.`);
     }
     folders.unshift({
@@ -1279,7 +1341,24 @@ async function updateOutputFolderProfile(folderId, value, userId) {
     return saved;
 }
 async function deleteOutputFolder(folderId, userId) {
+    if (folderId === FAVORITES_FOLDER_ID) throw new Error("Favorites is a permanent Studio folder.");
     return persistOutputFolders((await loadOutputFolders(userId)).filter((folder)=>folder.id !== folderId), userId);
+}
+async function setOutputsFavorite(imageIds, favorite, userId) {
+    const cleanIds = [
+        ...new Set(imageIds.map((id)=>id.trim()).filter(Boolean))
+    ].slice(0, 200);
+    if (!cleanIds.length) throw new Error("Choose at least one output to favorite.");
+    const folders = await loadOutputFolders(userId);
+    const favorites = folders.find((folder)=>folder.id === FAVORITES_FOLDER_ID);
+    if (!favorites) throw new Error("The Favorites folder could not be initialized.");
+    const changed = new Set(cleanIds);
+    favorites.imageIds = favorite ? [
+        ...cleanIds,
+        ...favorites.imageIds.filter((id)=>!changed.has(id))
+    ].slice(0, 500) : favorites.imageIds.filter((id)=>!changed.has(id));
+    favorites.updatedAt = Date.now();
+    return persistOutputFolders(folders, userId);
 }
 async function moveOutputToFolder(imageId, folderId, userId) {
     return moveOutputsToFolder([
@@ -1295,8 +1374,12 @@ async function moveOutputsToFolder(imageIds, folderId, userId) {
     if (folderId && !folders.some((folder)=>folder.id === folderId)) {
         throw new Error("That output folder no longer exists.");
     }
+    if (folderId === FAVORITES_FOLDER_ID) {
+        return setOutputsFavorite(cleanIds, true, userId);
+    }
     const moved = new Set(cleanIds);
     for (const folder of folders){
+        if (folder.id === FAVORITES_FOLDER_ID) continue;
         folder.imageIds = folder.imageIds.filter((id)=>!moved.has(id));
         if (folder.id === folderId) folder.imageIds.unshift(...cleanIds);
         folder.updatedAt = Date.now();
@@ -1646,6 +1729,9 @@ function cleanTagAutomationConfig(value) {
         injectProtocol: record.injectProtocol === true,
         completionToast: record.completionToast === true,
         protocolPrompt: protocolPrompt || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+        requestMode: record.requestMode === "parser" ? "parser" : "inline",
+        parserConnectionId: asString(record.parserConnectionId).trim().slice(0, 200),
+        parserModel: asString(record.parserModel).trim().slice(0, 300),
         stripUserOnlyLoraStack: record.stripUserOnlyLoraStack === true,
         autoPrintCharacterPositive: record.autoPrintCharacterPositive === true,
         requiredImageMin,
@@ -1660,6 +1746,9 @@ async function loadTagAutomationConfig(userId) {
             injectProtocol: false,
             completionToast: false,
             protocolPrompt: DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
+            requestMode: "inline",
+            parserConnectionId: "",
+            parserModel: "",
             stripUserOnlyLoraStack: false,
             autoPrintCharacterPositive: false,
             requiredImageMin: 0,
@@ -1675,7 +1764,7 @@ async function saveTagAutomationConfig(value, userId) {
         indent: 2,
         userId
     });
-    spindle.updateMacroValue("swarm_image_protocol", buildSwarmImageProtocol(await loadStudioGenerationProfile(userId), swarmProtocolContexts.get(protocolContextKey(userId)) || null, config));
+    spindle.updateMacroValue("swarm_image_protocol", buildInjectedSwarmProtocol(await loadStudioGenerationProfile(userId), swarmProtocolContexts.get(protocolContextKey(userId)) || null, config));
     return config;
 }
 function cleanCharacterBaseTagEntries(value) {
@@ -1954,6 +2043,20 @@ Use concise model-recognizable visual descriptors. Identity blocks cover stable 
     const template = automation.protocolPrompt.trim() || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT;
     return template.includes("{{swarm_dynamic_guidance}}") ? template.replace(/\{\{\s*swarm_dynamic_guidance\s*\}\}/gi, dynamicGuidance) : template;
 }
+function buildSwarmParserRequestProtocol(automation) {
+    const imageCountGuidance = automation.requiredImageMin > 0 ? automation.requiredImageMin === automation.requiredImageMax ? `The user explicitly requires exactly ${automation.requiredImageMin} complete request="parse" tag${automation.requiredImageMin === 1 ? "" : "s"} in this reply.` : `The user explicitly requires between ${automation.requiredImageMin} and ${automation.requiredImageMax} complete request="parse" tags in this reply.` : "No explicit image count is active. Request an illustration only when it materially improves the reply.";
+    const compositionGuidance = automation.promptMode === "pov" ? "Favor a single focal character or POV composition. The brief must identify visible expression, current outfit changes, action, framing, setting, and lighting." : "Use no more than five visually necessary subjects. Briefly disambiguate each visible subject's expression, position, action, and current outfit before the shared framing and environment.";
+    return `${SWARM_PARSER_REQUEST_PROTOCOL_BASE}
+
+IMAGE COUNT
+${imageCountGuidance}
+
+COMPOSITION
+${compositionGuidance}`;
+}
+function buildInjectedSwarmProtocol(profile, context = null, automation = cleanTagAutomationConfig(null)) {
+    return automation.requestMode === "parser" ? buildSwarmParserRequestProtocol(automation) : buildSwarmImageProtocol(profile, context, automation);
+}
 function protocolContextKey(userId) {
     return userId || "__default__";
 }
@@ -1965,7 +2068,7 @@ async function pushStudioProfileMacros(profile, userId) {
     spindle.updateMacroValue("swarm_preset", presetTokens);
     spindle.updateMacroValue("swarm_checkpoint", asString(input.model));
     spindle.updateMacroValue("swarm_aspect", aspectFromParameters(parameters));
-    spindle.updateMacroValue("swarm_image_protocol", buildSwarmImageProtocol(profile, swarmProtocolContexts.get(protocolContextKey(userId)) || null, await loadTagAutomationConfig(userId)));
+    spindle.updateMacroValue("swarm_image_protocol", buildInjectedSwarmProtocol(profile, swarmProtocolContexts.get(protocolContextKey(userId)) || null, await loadTagAutomationConfig(userId)));
 }
 async function saveStudioGenerationProfile(input, recordHints, userId) {
     const profile = sanitizeStudioProfile({
@@ -2031,7 +2134,7 @@ async function refreshContextMacros(userId) {
     spindle.updateMacroValue("persona_base", personaTags);
     spindle.updateMacroValue("char_profile", await imageUrlForMacro(asString(character?.image_id), userId));
     spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId));
-    spindle.updateMacroValue("swarm_image_protocol", buildSwarmImageProtocol(await loadStudioGenerationProfile(userId), protocolContext, await loadTagAutomationConfig(userId)));
+    spindle.updateMacroValue("swarm_image_protocol", buildInjectedSwarmProtocol(await loadStudioGenerationProfile(userId), protocolContext, await loadTagAutomationConfig(userId)));
 }
 function parseTagAttributes(raw) {
     const attrs = {};
@@ -2049,7 +2152,7 @@ function parseSwarmImageTags(content) {
     while((match = pattern.exec(content)) && tags.length < 6){
         const attrs = parseTagAttributes(match[1]);
         const strict = attrs.request?.toLowerCase() === "generate";
-        const legacy = Boolean(attrs.slot && (attrs.aspect || attrs.alt));
+        const legacy = !attrs.request && Boolean(attrs.slot && (attrs.aspect || attrs.alt));
         if (strict || legacy) tags.push({
             fullMatch: match[0],
             attrs,
@@ -2057,6 +2160,139 @@ function parseSwarmImageTags(content) {
         });
     }
     return tags;
+}
+function parseSwarmParserRequests(content) {
+    return parseSwarmImageTagsByRequest(content, "parse");
+}
+function parseSwarmImageTagsByRequest(content, request) {
+    const tags = [];
+    const pattern = /<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi;
+    let match;
+    while((match = pattern.exec(content)) && tags.length < 6){
+        const attrs = parseTagAttributes(match[1]);
+        if (attrs.request?.toLowerCase() === request) {
+            tags.push({
+                fullMatch: match[0],
+                attrs,
+                content: match[2]
+            });
+        }
+    }
+    return tags;
+}
+function parserCompletionInstruction(profile, context, automation) {
+    return `You are Swarm Studio's local image-request parser. Convert every request="parse" tag in the user message into exactly one complete request="generate" tag.
+
+Return only the completed tags, in the same order, with no prose or Markdown fences. Preserve each tag's slot, aspect, character, persona, and alt attributes exactly. Expand only the body into a compact, checkpoint-appropriate diffusion prompt. Do not copy biographies, personality, backstory, or conversational display names. Do not invent additional images or omit an input request.
+
+The completed tags must follow this Studio protocol and its live identity/preset guidance:
+
+${buildSwarmImageProtocol(profile, context, automation)}`;
+}
+async function completeParserImageRequests(payload, userId) {
+    const config = await loadTagAutomationConfig(userId);
+    if (!config.injectProtocol || config.requestMode !== "parser") return;
+    const chatId = asString(payload?.chatId).trim();
+    const messageId = asString(payload?.messageId).trim();
+    const content = asString(payload?.content);
+    const requests = parseSwarmParserRequests(content);
+    if (!chatId || !messageId || !requests.length) return;
+    const completionKey = asString(payload?.generationId).trim() || `${chatId}:${messageId}:${stableTextHash(content)}`;
+    if (runningParserCompletions.has(completionKey)) return;
+    runningParserCompletions.add(completionKey);
+    try {
+        if (!spindle.permissions.has("generation")) {
+            throw new Error("Grant the Generation permission to use a parser model for inline image requests.");
+        }
+        const listed = await spindle.connections.list(userId);
+        const connections = Array.isArray(listed) ? listed : [];
+        const connection = connections.find((candidate)=>asString(candidate?.id) === config.parserConnectionId) || connections.find((candidate)=>candidate?.is_default) || connections[0];
+        if (!connection?.id) throw new Error("Choose a Lumiverse text connection for the Swarm Studio parser.");
+        const profile = await loadStudioGenerationProfile(userId);
+        const context = swarmProtocolContexts.get(protocolContextKey(userId)) || null;
+        const response = await spindle.generate.quiet({
+            connection_id: connection.id,
+            messages: [
+                {
+                    role: "system",
+                    content: parserCompletionInstruction(profile, context, config)
+                },
+                {
+                    role: "user",
+                    content: requests.map((request)=>request.fullMatch).join("\n\n")
+                }
+            ],
+            parameters: {
+                temperature: 0.2,
+                ...config.parserModel ? {
+                    model: config.parserModel
+                } : {}
+            },
+            reasoning: {
+                source: "off"
+            }
+        }, userId);
+        const completedTags = parseSwarmImageTags(asString(response?.content));
+        if (completedTags.length !== requests.length) {
+            throw new Error(`The parser returned ${completedTags.length} completed image request${completedTags.length === 1 ? "" : "s"} for ${requests.length} placed request${requests.length === 1 ? "" : "s"}.`);
+        }
+        let completedContent = content;
+        for(let index = 0; index < requests.length; index++){
+            const request = requests[index];
+            const bySlot = completedTags.find((tag)=>asString(tag.attrs.slot) && asString(tag.attrs.slot) === asString(request.attrs.slot));
+            const completed = bySlot || completedTags[index];
+            completed.attrs.slot = asString(request.attrs.slot);
+            completed.attrs.aspect = asString(request.attrs.aspect);
+            completed.attrs.character = asString(request.attrs.character);
+            completed.attrs.persona = asString(request.attrs.persona);
+            completed.attrs.alt = asString(request.attrs.alt);
+            const replacement = `<swarm-image
+  request="generate"
+  slot="${completed.attrs.slot.replace(/"/g, "&quot;")}"
+  aspect="${(cleanAspect(completed.attrs.aspect) || "4:3").replace(/"/g, "")}"
+  character="${completed.attrs.character === "none" ? "none" : "active"}"
+  persona="${completed.attrs.persona === "active" ? "active" : "none"}"
+  alt="${completed.attrs.alt.replace(/"/g, "&quot;")}"
+>
+${completed.content.trim()}</swarm-image>`;
+            completedContent = completedContent.replace(request.fullMatch, replacement);
+        }
+        await spindle.chat.updateMessage(chatId, messageId, {
+            content: completedContent
+        }, userId);
+        const generatedTags = parseSwarmImageTags(completedContent);
+        for (const tag of generatedTags){
+            await requestTaggedImageGeneration({
+                chatId,
+                messageId,
+                fullMatch: tag.fullMatch,
+                attrs: tag.attrs,
+                content: tag.content,
+                isStreaming: false
+            }, userId);
+        }
+        spindle.sendToFrontend({
+            type: "parser_completion_result",
+            data: {
+                chatId,
+                messageId,
+                count: generatedTags.length
+            }
+        }, userId);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[Swarm Studio] Parser-model image completion failed.", error);
+        spindle.sendToFrontend({
+            type: "parser_completion_error",
+            error: message,
+            data: {
+                chatId,
+                messageId
+            }
+        }, userId);
+    } finally{
+        runningParserCompletions.delete(completionKey);
+    }
 }
 function cleanAspect(value) {
     const aspect = asString(value).trim();
@@ -2638,6 +2874,12 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
     } catch (error) {
         job.status = isAbortError(error) ? "cancelled" : "failed";
         job.error = error instanceof Error ? error.message : String(error);
+        reportBackendError("Tagged image generation failed", error, {
+            jobId: job.id,
+            chatId: job.chatId,
+            messageId: job.messageId,
+            slot: job.slot
+        });
         await upsertTaggedImageJob(job, userId);
         sendTaggedJobState(job, userId);
     } finally{
@@ -2790,13 +3032,13 @@ async function taggedImagePromptInterceptor(messages, context) {
     }));
     const config = await loadTagAutomationConfig(userId);
     if (!config.injectProtocol) return cleaned;
-    if (cleaned.some((message)=>typeof message?.content === "string" && message.content.includes("SWARM STUDIO IMAGE REQUEST PROTOCOL"))) {
+    if (cleaned.some((message)=>typeof message?.content === "string" && message.content.includes("SWARM STUDIO IMAGE "))) {
         return cleaned;
     }
     await refreshContextMacros(userId);
     const injected = {
         role: "system",
-        content: buildSwarmImageProtocol(await loadStudioGenerationProfile(userId), swarmProtocolContexts.get(protocolContextKey(userId)) || null, config)
+        content: buildInjectedSwarmProtocol(await loadStudioGenerationProfile(userId), swarmProtocolContexts.get(protocolContextKey(userId)) || null, config)
     };
     return {
         messages: [
@@ -2820,7 +3062,8 @@ function permissionSnapshot() {
         characters: spindle.permissions.has("characters"),
         personas: spindle.permissions.has("personas"),
         chatMutation: spindle.permissions.has("chat_mutation"),
-        interceptor: spindle.permissions.has("interceptor")
+        interceptor: spindle.permissions.has("interceptor"),
+        generation: spindle.permissions.has("generation")
     };
 }
 function markdownImageMessage(label, url) {
@@ -2881,6 +3124,72 @@ async function listLibraryOutputs(userId) {
         folders: await loadOutputFolders(userId)
     };
 }
+function collectConnectionModels(value, models, depth = 0) {
+    if (depth > 3 || value === null || value === undefined) return;
+    if (typeof value === "string") {
+        const id = value.trim();
+        if (id) models.set(id, models.get(id) || id);
+        return;
+    }
+    if (Array.isArray(value)) {
+        for (const entry of value.slice(0, 2_000))collectConnectionModels(entry, models, depth + 1);
+        return;
+    }
+    const record = asRecord(value);
+    const id = asString(record.id || record.model || record.value).trim();
+    const label = asString(record.label || record.name || record.title).trim();
+    if (id) models.set(id, label || models.get(id) || id);
+    for (const key of [
+        "models",
+        "model_list",
+        "modelList",
+        "available_models",
+        "availableModels"
+    ]){
+        if (Object.prototype.hasOwnProperty.call(record, key)) {
+            collectConnectionModels(record[key], models, depth + 1);
+        }
+    }
+}
+async function listParserModels(connectionId, userId) {
+    if (!spindle.permissions.has("generation")) {
+        throw new Error("Grant Generation permission to list parser models.");
+    }
+    const listed = await spindle.connections.list(userId);
+    const connections = Array.isArray(listed) ? listed : [];
+    const connection = connections.find((candidate)=>asString(candidate?.id) === connectionId) || connections.find((candidate)=>candidate?.is_default) || connections[0];
+    if (!connection?.id) return {
+        connectionId: "",
+        models: [],
+        live: false
+    };
+    const models = new Map();
+    let live = false;
+    const liveList = spindle.connections?.getModels || spindle.connections?.models || spindle.connections?.listModels;
+    if (typeof liveList === "function") {
+        try {
+            collectConnectionModels(await liveList.call(spindle.connections, connection.id, userId), models);
+            live = models.size > 0;
+        } catch (error) {
+            reportBackendError("Could not load the parser connection's live model list", error, {
+                connectionId: connection.id,
+                connectionName: connection.name
+            });
+        }
+    }
+    collectConnectionModels(connection.model, models);
+    collectConnectionModels(connection.metadata, models);
+    return {
+        connectionId: asString(connection.id),
+        models: [
+            ...models
+        ].map(([id, label])=>({
+                id,
+                label
+            })),
+        live
+    };
+}
 async function bootstrap(userId) {
     const permissions = permissionSnapshot();
     const profile = await loadStudioGenerationProfile(userId);
@@ -2888,11 +3197,22 @@ async function bootstrap(userId) {
     await refreshContextMacros(userId);
     const allConnections = permissions.imageGen ? await spindle.imageGen.listConnections(userId) : [];
     const connections = (Array.isArray(allConnections) ? allConnections : []).filter((connection)=>connection?.provider === "swarmui");
+    let parserConnections = [];
+    if (permissions.generation) {
+        try {
+            const listed = await spindle.connections.list(userId);
+            parserConnections = Array.isArray(listed) ? listed : [];
+        } catch (error) {
+            reportBackendError("Could not list parser connections", error);
+            spindle.log.warn(`Could not list parser connections: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
     const activeChat = permissions.chats ? await spindle.chats.getActive(userId) : null;
     const outputPage = await listOutputs(userId, activeChat);
     return {
         permissions,
         connections,
+        parserConnections,
         activeChat,
         ...outputPage,
         stackPresets: await loadStackPresets(userId),
@@ -2923,16 +3243,25 @@ async function loadConnection(connectionId, userId) {
         try {
             loras = await listLoras(connection, token, userId);
         } catch (error) {
+            reportBackendError("Could not load SwarmUI LoRA metadata", error, {
+                connectionId
+            });
             metadataErrors.push(error instanceof Error ? error.message : String(error));
         }
         try {
             checkpoints = await listCheckpoints(connection, token, userId);
         } catch (error) {
+            reportBackendError("Could not load SwarmUI checkpoint metadata", error, {
+                connectionId
+            });
             metadataErrors.push(error instanceof Error ? error.message : String(error));
         }
         try {
             swarmOptions = await loadSwarmOptions(connection, token, userId);
         } catch (error) {
+            reportBackendError("Could not load SwarmUI generation controls", error, {
+                connectionId
+            });
             metadataErrors.push(`Swarm controls: ${error instanceof Error ? error.message : String(error)}`);
         }
     } else {
@@ -2959,6 +3288,15 @@ async function handleMessage(payload, userId) {
                         type: "bootstrap_result",
                         requestId,
                         data: await bootstrap(userId)
+                    }, userId);
+                    return;
+                }
+            case "list_parser_models":
+                {
+                    spindle.sendToFrontend({
+                        type: "parser_models_result",
+                        requestId,
+                        data: await listParserModels(asString(payload?.connectionId), userId)
                     }, userId);
                     return;
                 }
@@ -3596,6 +3934,24 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
+            case "set_output_favorite":
+            case "bulk_set_output_favorite":
+                {
+                    const imageIds = type === "set_output_favorite" ? [
+                        asString(payload?.imageId)
+                    ] : stringList(payload?.imageIds, 200);
+                    const favorite = payload?.favorite !== false;
+                    spindle.sendToFrontend({
+                        type: "output_favorites_result",
+                        requestId,
+                        data: {
+                            imageIds,
+                            favorite,
+                            folders: await setOutputsFavorite(imageIds, favorite, userId)
+                        }
+                    }, userId);
+                    return;
+                }
             case "delete_output":
                 {
                     if (!spindle.permissions.has("images")) {
@@ -3606,7 +3962,10 @@ async function handleMessage(payload, userId) {
                     const deleted = await spindle.images.delete(imageId, userId);
                     if (!deleted) throw new Error("Lumiverse could not delete that output.");
                     await deleteGenerationRecord(imageId, userId);
-                    const folders = await moveOutputToFolder(imageId, "", userId);
+                    await moveOutputToFolder(imageId, "", userId);
+                    const folders = await setOutputsFavorite([
+                        imageId
+                    ], false, userId);
                     const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
                     spindle.sendToFrontend({
                         type: "output_deleted",
@@ -3632,12 +3991,19 @@ async function handleMessage(payload, userId) {
                         try {
                             if (await spindle.images.delete(imageId, userId)) deletedIds.push(imageId);
                             else failedIds.push(imageId);
-                        } catch  {
+                        } catch (error) {
+                            reportBackendError("Could not delete a selected Lumiverse output", error, {
+                                imageId
+                            });
                             failedIds.push(imageId);
                         }
                     }
                     if (deletedIds.length) await deleteGenerationRecords(deletedIds, userId);
-                    const folders = deletedIds.length ? await moveOutputsToFolder(deletedIds, "", userId) : await loadOutputFolders(userId);
+                    let folders = await loadOutputFolders(userId);
+                    if (deletedIds.length) {
+                        await moveOutputsToFolder(deletedIds, "", userId);
+                        folders = await setOutputsFavorite(deletedIds, false, userId);
+                    }
                     const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
                     spindle.sendToFrontend({
                         type: "outputs_bulk_deleted",
@@ -3655,7 +4021,10 @@ async function handleMessage(payload, userId) {
                 throw new Error(`Unknown Swarm Studio request: ${type || "(missing type)"}`);
         }
     } catch (error) {
-        console.error(`[Swarm Studio] Backend request “${type || "(missing type)"}” failed.`, error);
+        reportBackendError(`Backend request “${type || "(missing type)"}” failed`, error, {
+            requestId,
+            clientJobId: asString(payload?.clientJobId) || asString(asRecord(payload?.input).clientJobId)
+        });
         spindle.sendToFrontend({
             type: "studio_error",
             requestId,
@@ -3716,9 +4085,14 @@ for (const macro of [
         returnType: "string",
         handler: ""
     });
-    spindle.updateMacroValue(macro.name, macro.name === "swarm_image_protocol" ? buildSwarmImageProtocol(null) : "");
+    spindle.updateMacroValue(macro.name, macro.name === "swarm_image_protocol" ? buildInjectedSwarmProtocol(null) : "");
 }
 spindle.registerInterceptor(taggedImagePromptInterceptor, 90);
+if (spindle.permissions.has("generation")) {
+    spindle.on("GENERATION_ENDED", (payload, userId)=>{
+        void completeParserImageRequests(payload, userId);
+    });
+}
 for (const eventName of [
     "CHAT_SWITCHED",
     "PERSONA_CHANGED",

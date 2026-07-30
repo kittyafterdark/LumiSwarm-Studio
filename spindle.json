@@ -1,5 +1,5 @@
 {
-  "version": "1.0.13",
+  "version": "1.0.15",
   "name": "Swarm Studio",
   "identifier": "swarm_studio",
   "author": "kittyafterdark",
@@ -15,6 +15,7 @@
     "personas",
     "chat_mutation",
     "interceptor",
+    "generation",
     "ui_panels",
     "app_manipulation"
   ],
