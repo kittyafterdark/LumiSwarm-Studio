@@ -269,6 +269,7 @@ interface CharacterBaseTagState {
 interface StudioState {
   connections: any[]
   parserConnections: any[]
+  parserModels: Array<{ id: string; label: string }>
   connection: any | null
   models: Array<{ id: string; label: string }>
   checkpoints: CheckpointMetadata[]
@@ -422,6 +423,14 @@ const NEW_FOLDER_ICON = `
 const TRASH_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 3h6l1 4H8zM7 7l1 14h8l1-14M10 11v6M14 11v6"/></svg>
 `
+
+const STAR_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="m12 3.7 2.55 5.17 5.71.83-4.13 4.03.98 5.69L12 16.73l-5.11 2.69.98-5.69L3.74 9.7l5.71-.83L12 3.7Z"></path>
+  </svg>
+`
+
+const FAVORITES_FOLDER_ID = "__swarm_studio_favorites__"
 
 const CHAT_VISUALS_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14v11H8l-3 2.5z"/><path d="M9 9h6m-6 3h4"/><path d="M18.5 2.5c.25 1.55.95 2.25 2.5 2.5-1.55.25-2.25.95-2.5 2.5-.25-1.55-.95-2.25-2.5-2.5 1.55-.25 2.25-.95 2.5-2.5Z"/></svg>
@@ -1208,6 +1217,42 @@ const STYLES = `
   }
   .ss-current-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
   .ss-current-preview img[hidden] { display: none !important; }
+  .ss-favorite-button,
+  .ss-library-favorite-selected {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  .ss-favorite-button svg,
+  .ss-library-favorite-selected svg,
+  .ss-library-output-star svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .ss-favorite-button[data-active="true"] {
+    color: #ffd85e;
+    border-color: color-mix(in srgb, #ffd85e 62%, var(--lumiverse-border));
+    background: color-mix(in srgb, #ffd85e 12%, var(--lumiverse-fill));
+  }
+  .ss-favorite-button[data-active="true"] svg,
+  .ss-library-output-star svg { fill: currentColor; }
+  .ss-current-favorite {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 4;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    box-shadow: 0 5px 20px rgba(0,0,0,.34);
+    backdrop-filter: blur(7px);
+  }
   .ss-preview-empty { max-width: 190px; text-align: center; color: var(--lumiverse-text-muted); line-height: 1.55; }
   .ss-preview-empty strong { display: block; color: var(--lumiverse-text); margin-bottom: 5px; }
   .ss-preview-loading {
@@ -2901,6 +2946,18 @@ const STUDIO_V3_STYLES = `
   .ss-library-selectbar { flex: 0 0 38px; min-height: 38px; display: flex; align-items: center; gap: 7px; padding: 5px 10px; border-bottom: 1px solid var(--lumiverse-border); background: color-mix(in srgb, var(--lumiverse-fill-subtle) 72%, transparent); }
   .ss-library-select-page { min-height: 28px; padding: 4px 9px; font-size: 9px; }
   .ss-library-select-page[hidden] { display: none; }
+  .ss-library-nonstarred {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--lumiverse-text-muted);
+    font-size: 9px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .ss-library-nonstarred[hidden] { display: none; }
+  .ss-library-nonstarred input { margin: 0; accent-color: var(--lumiverse-accent, #7dd3fc); }
   .ss-library-selectbar .ss-library-selection-actions { margin-left: auto; border-left: 0; padding-left: 0; }
   .ss-library-visual-profile {
     flex: 0 0 auto;
@@ -2993,6 +3050,22 @@ const STUDIO_V3_STYLES = `
   }
   .ss-library-output-check input:checked::after { opacity: 1; transform: scale(1); }
   .ss-output-library[data-selection-mode="false"] .ss-library-output-check { display: none; }
+  .ss-library-output-star {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    z-index: 4;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(255,216,94,.52);
+    border-radius: 7px;
+    color: #ffd85e;
+    background: rgba(0,0,0,.72);
+    box-shadow: 0 3px 10px rgba(0,0,0,.35);
+    pointer-events: none;
+  }
   .ss-library-output-button {
     width: 100%;
     aspect-ratio: 1;
@@ -5414,6 +5487,8 @@ class StudioController {
   private librarySelectionAnchorId = ""
   private librarySearchOpen = false
   private librarySelectionMode = false
+  private librarySelectOnlyNonStarred = false
+  private parserModelRequestId = ""
   private hydratedVisualCharacterId = ""
   private pendingCreatedFolder: { name: string; bindingType: "unbound" | "character" } | null = null
   private missingLoras: StackPresetItem[] = []
@@ -5525,6 +5600,7 @@ class StudioController {
     this.state = {
       connections: [],
       parserConnections: [],
+      parserModels: [],
       connection: null,
       models: [],
       checkpoints: [],
@@ -5697,6 +5773,34 @@ class StudioController {
           ? "No Lumiverse text connections are available."
           : "Grant Generation permission in Extensions, then restart Swarm Studio."
     }
+    this.renderParserModels()
+  }
+
+  private selectedParserConnectionId(): string {
+    const selected = this.state.parserConnections.find((connection) =>
+      String(connection?.id || "") === this.behavior.parserConnectionId,
+    ) || this.state.parserConnections.find((connection) => connection?.is_default) || this.state.parserConnections[0]
+    return String(selected?.id || "")
+  }
+
+  private renderParserModels(): void {
+    const list = this.root.querySelector<HTMLDataListElement>('[data-role="parser-model-options"]')
+    if (!list) return
+    list.replaceChildren()
+    for (const model of this.state.parserModels) {
+      const option = document.createElement("option")
+      option.value = model.id
+      option.label = model.label || model.id
+      list.appendChild(option)
+    }
+  }
+
+  private loadParserModels(): void {
+    const connectionId = this.selectedParserConnectionId()
+    this.state.parserModels = []
+    this.renderParserModels()
+    if (!connectionId || !this.state.permissions.generation) return
+    this.parserModelRequestId = this.send("list_parser_models", { connectionId })
   }
 
   exportDraft(): StudioDraft | null {
@@ -6147,7 +6251,8 @@ class StudioController {
                           </label>
                           <label class="ss-parser-field">
                             <span>Model override <small>optional</small></span>
-                            <input class="ss-input" data-role="parser-model" value="${this.behavior.parserModel.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" placeholder="Use the connection's selected model" autocomplete="off" />
+                            <input class="ss-input" data-role="parser-model" list="ss-parser-model-options" value="${this.behavior.parserModel.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" placeholder="Use the connection's selected model" autocomplete="off" />
+                            <datalist id="ss-parser-model-options" data-role="parser-model-options"></datalist>
                           </label>
                           <p class="ss-muted ss-tiny" data-role="parser-connection-summary">Loading Lumiverse text connections…</p>
                           <p class="ss-muted ss-tiny">The override changes only parser calls. Chat replies continue using the model selected by Lumiverse for the active conversation.</p>
@@ -6479,6 +6584,7 @@ are removed when CSS is applied.</pre>
                 </div>
               </div>
               <div class="ss-current-preview" data-role="current-preview" data-action="inspect-output" title="Open full-size image and generation details">
+                <button class="ss-icon-button ss-favorite-button ss-current-favorite" data-action="toggle-current-favorite" data-role="current-favorite" type="button" aria-label="Favorite current output" title="Add to Favorites" disabled>${STAR_ICON}</button>
                 <div class="ss-preview-empty" data-role="preview-empty"><strong>No output yet</strong>Generate an image or open one from History.</div>
                 <img data-role="preview-image" alt="Generated image preview" hidden />
                 <div class="ss-preview-loading" data-role="preview-loading">
@@ -6739,6 +6845,7 @@ are removed when CSS is applied.</pre>
         <div class="ss-inspector" data-role="inspector" hidden>
           <div class="ss-inspector-stage" data-role="inspector-stage">
             <div class="ss-inspector-toolbar">
+              <button class="ss-icon-button ss-favorite-button" data-action="toggle-current-favorite" data-role="inspector-favorite" aria-label="Favorite output" title="Add to Favorites">${STAR_ICON}</button>
               <button class="ss-icon-button" data-action="zoom-out" aria-label="Zoom out">−</button>
               <button class="ss-button" data-action="zoom-reset" data-role="zoom-label">100%</button>
               <button class="ss-icon-button" data-action="zoom-in" aria-label="Zoom in">+</button>
@@ -6798,7 +6905,12 @@ are removed when CSS is applied.</pre>
               <button class="ss-icon-button ss-library-tool-icon" data-action="toggle-library-selection" title="Select outputs" aria-label="Select outputs">${CHECK_ICON}</button>
               <span class="ss-library-selection-count" data-role="library-selection-count">Select</span>
               <button class="ss-button ss-library-select-page" data-action="select-library-page" data-role="library-select-page" hidden>Select page</button>
+              <label class="ss-library-nonstarred" data-role="library-nonstarred" hidden>
+                <input type="checkbox" data-role="library-select-nonstarred" />
+                <span>Select only non-starred</span>
+              </label>
               <div class="ss-library-selection-actions" data-role="library-selection-actions" hidden>
+                <button class="ss-button ss-library-favorite-selected" data-action="bulk-favorite-outputs">${STAR_ICON}<span>Favorite</span></button>
                 <button class="ss-button" data-action="bulk-move-outputs">Move…</button>
                 <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs">Delete</button>
               </div>
@@ -6852,6 +6964,10 @@ are removed when CSS is applied.</pre>
     this.get<HTMLInputElement>('[data-role="library-search"]').addEventListener("input", () => {
       this.libraryPage = 0
       this.renderOutputLibrary()
+    })
+    this.get<HTMLInputElement>('[data-role="library-select-nonstarred"]').addEventListener("change", (event) => {
+      this.librarySelectOnlyNonStarred = (event.currentTarget as HTMLInputElement).checked
+      this.syncVisibleLibrarySelection()
     })
     for (const input of this.root.querySelectorAll<HTMLInputElement>('[data-role="appearance-color"]')) {
       input.addEventListener("input", () => {
@@ -6913,6 +7029,7 @@ are removed when CSS is applied.</pre>
         parserConnectionId: (event.currentTarget as HTMLSelectElement).value,
       })
       this.renderParserConnections()
+      this.loadParserModels()
     })
     this.get<HTMLInputElement>('[data-role="parser-model"]').addEventListener("change", (event) => {
       this.onBehaviorChange({
@@ -7186,7 +7303,9 @@ are removed when CSS is applied.</pre>
       if (action === "library-next") this.changeLibraryPage(1)
       if (action === "select-library-page") this.toggleLibraryPageSelection()
       if (action === "bulk-move-outputs") this.bulkMoveOutputs()
+      if (action === "bulk-favorite-outputs") this.bulkFavoriteOutputs()
       if (action === "bulk-delete-outputs") this.bulkDeleteOutputs()
+      if (action === "toggle-current-favorite") this.toggleCurrentFavorite()
       if (action === "preset-up") this.moveSelectedPreset(Number(button.dataset.presetIndex), -1)
       if (action === "preset-down") this.moveSelectedPreset(Number(button.dataset.presetIndex), 1)
       if (action === "preset-apply") this.applySelectedPreset(Number(button.dataset.presetIndex))
@@ -7334,12 +7453,27 @@ are removed when CSS is applied.</pre>
         this.acceptCharacterBaseTags(data.characterBaseTags)
         this.renderPermissions()
         this.renderParserConnections()
+        this.loadParserModels()
         this.populateConnections()
         this.renderOutputs()
         this.renderStackPresets()
         this.hydrateActiveVisualStack()
         this.updateActiveVisualPill()
         this.updateActivePersonaVisualPill()
+        this.syncFavoriteControls()
+        break
+      case "parser_models_result":
+        if (payload.requestId !== this.parserModelRequestId) break
+        if (String(data.connectionId || "") !== this.selectedParserConnectionId()) break
+        this.state.parserModels = Array.isArray(data.models)
+          ? data.models
+              .map((model: any) => ({
+                id: String(model?.id || "").trim(),
+                label: String(model?.label || model?.id || "").trim(),
+              }))
+              .filter((model: { id: string; label: string }) => model.id)
+          : []
+        this.renderParserModels()
         break
       case "chat_visuals_result":
         this.state.chatVisuals = data as ChatVisualsState
@@ -7667,8 +7801,24 @@ are removed when CSS is applied.</pre>
         this.librarySelectionMode = false
         this.renderOutputLibrary()
         this.updateActiveVisualPill()
+        this.syncFavoriteControls()
         this.setRunStatus("Output folders updated.")
         break
+      case "output_favorites_result": {
+        this.state.outputFolders = Array.isArray(data.folders) ? data.folders : this.state.outputFolders
+        const imageIds = Array.isArray(data.imageIds) ? data.imageIds.map(String) : []
+        imageIds.forEach((imageId) => this.librarySelection.delete(imageId))
+        if (!this.librarySelection.size) this.librarySelectionAnchorId = ""
+        this.renderOutputLibrary()
+        this.renderOutputs()
+        this.syncFavoriteControls()
+        this.setRunStatus(
+          data.favorite
+            ? `Added ${imageIds.length} output${imageIds.length === 1 ? "" : "s"} to Favorites.`
+            : `Removed ${imageIds.length} output${imageIds.length === 1 ? "" : "s"} from Favorites.`,
+        )
+        break
+      }
       case "output_appended_to_chat":
         this.setRunStatus(`Appended “${data.label || "output"}” to the active Lumiverse chat.`)
         break
@@ -10029,6 +10179,7 @@ are removed when CSS is applied.</pre>
     this.get<HTMLButtonElement>('[data-action="use-as-init"]').disabled = !image.src
     this.get<HTMLButtonElement>('[data-action="delete-output"]').disabled = !image.id
     this.updateAppendControls()
+    this.syncFavoriteControls()
     inspector.hidden = false
     this.setInspectorZoom(1)
     requestAnimationFrame(() => this.fitInspectorToSpace())
@@ -10332,7 +10483,10 @@ are removed when CSS is applied.</pre>
   private toggleLibrarySelectionMode(): void {
     this.librarySelectionMode = !this.librarySelectionMode
     this.librarySelectionAnchorId = ""
-    if (!this.librarySelectionMode) this.librarySelection.clear()
+    if (!this.librarySelectionMode) {
+      this.librarySelection.clear()
+      this.librarySelectOnlyNonStarred = false
+    }
     this.renderOutputLibrary()
   }
 
@@ -10540,6 +10694,10 @@ are removed when CSS is applied.</pre>
 
   private deleteSelectedOutputFolder(): void {
     const folder = this.state.outputFolders.find((item) => item.id === this.libraryFolderId)
+    if (folder?.id === FAVORITES_FOLDER_ID) {
+      this.setRunStatus("Favorites is a built-in collection and cannot be deleted.", true)
+      return
+    }
     if (!folder || !window.confirm(`Delete folder “${folder.name}”? Its images stay in Lumiverse.`)) return
     this.send("delete_output_folder", { folderId: folder.id })
     this.libraryFolderId = ""
@@ -10567,8 +10725,15 @@ are removed when CSS is applied.</pre>
     )
   }
 
+  private librarySelectablePageOutputs(): any[] {
+    const outputs = this.libraryPageOutputs()
+    return this.librarySelectOnlyNonStarred
+      ? outputs.filter((output) => !this.isOutputFavorite(String(output.id)))
+      : outputs
+  }
+
   private toggleLibraryPageSelection(): void {
-    const ids = this.libraryPageOutputs().map((output) => String(output.id))
+    const ids = this.librarySelectablePageOutputs().map((output) => String(output.id))
     const allSelected = ids.length > 0 && ids.every((id) => this.librarySelection.has(id))
     for (const id of ids) {
       if (allSelected) this.librarySelection.delete(id)
@@ -10603,12 +10768,22 @@ are removed when CSS is applied.</pre>
     library.dataset.selectionMode = String(this.librarySelectionMode)
     this.get<HTMLElement>('[data-role="library-selection-count"]').textContent =
       this.librarySelectionMode ? `${selected} selected` : "Select"
-    const pageIds = this.libraryPageOutputs().map((output) => String(output.id))
+    const pageIds = this.librarySelectablePageOutputs().map((output) => String(output.id))
     const allPageSelected = pageIds.length > 0 && pageIds.every((id) => this.librarySelection.has(id))
     const selectPage = this.get<HTMLButtonElement>('[data-role="library-select-page"]')
     selectPage.hidden = !this.librarySelectionMode
     selectPage.disabled = pageIds.length === 0
-    selectPage.textContent = allPageSelected ? "Clear page" : "Select page"
+    selectPage.textContent = allPageSelected
+      ? (this.librarySelectOnlyNonStarred ? "Clear non-starred" : "Clear page")
+      : (this.librarySelectOnlyNonStarred ? "Select non-starred" : "Select page")
+    const nonStarred = this.get<HTMLElement>('[data-role="library-nonstarred"]')
+    nonStarred.hidden = !this.librarySelectionMode
+    this.get<HTMLInputElement>('[data-role="library-select-nonstarred"]').checked = this.librarySelectOnlyNonStarred
+    const favoriteButton = this.get<HTMLButtonElement>('[data-action="bulk-favorite-outputs"]')
+    const selectedIds = [...this.librarySelection]
+    const allFavorite = selectedIds.length > 0 && selectedIds.every((id) => this.isOutputFavorite(id))
+    favoriteButton.dataset.active = String(allFavorite)
+    favoriteButton.innerHTML = `${STAR_ICON}<span>${allFavorite ? "Unfavorite" : "Favorite"}</span>`
     this.get<HTMLElement>('[data-role="library-selection-actions"]').hidden = selected === 0
   }
 
@@ -10629,6 +10804,16 @@ are removed when CSS is applied.</pre>
     const imageIds = [...this.librarySelection]
     if (!imageIds.length) return
     this.openMoveFolderModal(imageIds)
+  }
+
+  private bulkFavoriteOutputs(): void {
+    const imageIds = [...this.librarySelection]
+    if (!imageIds.length) return
+    const favorite = !imageIds.every((id) => this.isOutputFavorite(id))
+    this.send("bulk_set_output_favorite", { imageIds, favorite })
+    this.setRunStatus(
+      `${favorite ? "Favoriting" : "Removing from Favorites"} ${imageIds.length} output${imageIds.length === 1 ? "" : "s"}…`,
+    )
   }
 
   private openMoveFolderModal(imageIds: string[]): void {
@@ -10674,7 +10859,11 @@ are removed when CSS is applied.</pre>
   private filteredLibraryOutputs(): any[] {
     let outputs = this.state.libraryOutputs
     if (this.libraryFolderId) {
-      const assigned = new Set(this.state.outputFolders.flatMap((folder) => folder.imageIds))
+      const assigned = new Set(
+        this.state.outputFolders
+          .filter((folder) => folder.id !== FAVORITES_FOLDER_ID)
+          .flatMap((folder) => folder.imageIds),
+      )
       if (this.libraryFolderId === "__unfiled__") {
         outputs = outputs.filter((output) => !assigned.has(String(output.id)))
       } else {
@@ -10727,7 +10916,11 @@ are removed when CSS is applied.</pre>
       scroll.appendChild(button)
     }
     appendFolder("", "All outputs", this.state.libraryOutputs.length)
-    const assigned = new Set(this.state.outputFolders.flatMap((folder) => folder.imageIds))
+    const assigned = new Set(
+      this.state.outputFolders
+        .filter((folder) => folder.id !== FAVORITES_FOLDER_ID)
+        .flatMap((folder) => folder.imageIds),
+    )
     appendFolder(
       "__unfiled__",
       "Unfiled",
@@ -10737,12 +10930,14 @@ are removed when CSS is applied.</pre>
       const ids = new Set(folder.imageIds)
       appendFolder(
         folder.id,
-        folder.binding ? `✦ ${folder.name}` : folder.name,
+        folder.id === FAVORITES_FOLDER_ID ? `★ ${folder.name}` : folder.binding ? `✦ ${folder.name}` : folder.name,
         this.state.libraryOutputs.filter((output) => ids.has(String(output.id))).length,
       )
     }
     folderPane.append(create, scroll)
-    if (this.state.outputFolders.some((folder) => folder.id === this.libraryFolderId)) {
+    if (this.state.outputFolders.some((folder) =>
+      folder.id === this.libraryFolderId && folder.id !== FAVORITES_FOLDER_ID,
+    )) {
       const remove = element("button", "ss-icon-button ss-library-folder-anchor ss-button-danger ss-library-folder-delete")
       remove.dataset.action = "delete-output-folder"
       remove.title = "Delete selected folder"
@@ -10806,6 +11001,13 @@ are removed when CSS is applied.</pre>
       const meta = element("div", "ss-library-output-meta")
       meta.appendChild(element("div", "ss-library-output-name", output.original_filename || `Output ${output.id}`))
       card.append(checkLabel, open, meta)
+      if (this.isOutputFavorite(imageId)) {
+        const favorite = element("span", "ss-library-output-star")
+        favorite.title = "Favorite"
+        favorite.setAttribute("aria-label", "Favorite")
+        favorite.innerHTML = STAR_ICON
+        card.appendChild(favorite)
+      }
       grid.appendChild(card)
     }
     this.updateLibrarySelectionControls()
@@ -11257,6 +11459,36 @@ are removed when CSS is applied.</pre>
     }
   }
 
+  private favoritesFolder(): OutputFolder | null {
+    return this.state.outputFolders.find((folder) => folder.id === FAVORITES_FOLDER_ID) || null
+  }
+
+  private isOutputFavorite(imageId: string): boolean {
+    return Boolean(imageId && this.favoritesFolder()?.imageIds.includes(imageId))
+  }
+
+  private syncFavoriteControls(): void {
+    const imageId = String(this.state.currentImage?.id || "")
+    const active = this.isOutputFavorite(imageId)
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="toggle-current-favorite"]')) {
+      button.disabled = !imageId
+      button.dataset.active = String(active)
+      button.setAttribute("aria-pressed", String(active))
+      button.title = imageId
+        ? (active ? "Remove from Favorites" : "Add to Favorites")
+        : "Select a saved output to favorite it"
+      button.setAttribute("aria-label", button.title)
+    }
+  }
+
+  private toggleCurrentFavorite(): void {
+    const imageId = String(this.state.currentImage?.id || "")
+    if (!imageId) return
+    const favorite = !this.isOutputFavorite(imageId)
+    this.send("set_output_favorite", { imageId, favorite })
+    this.setRunStatus(favorite ? "Adding output to Favorites…" : "Removing output from Favorites…")
+  }
+
   private setCurrentImage(image: CurrentImage): void {
     this.state.currentImage = image
     const preview = this.get<HTMLImageElement>('[data-role="preview-image"]')
@@ -11279,6 +11511,7 @@ are removed when CSS is applied.</pre>
     this.get<HTMLButtonElement>('[data-action="copy-output"]').disabled = !image.url
     this.updateAppendControls()
     this.updateContextControls()
+    this.syncFavoriteControls()
   }
 
   private clearCurrentImage(): void {
@@ -11295,6 +11528,7 @@ are removed when CSS is applied.</pre>
     this.get<HTMLButtonElement>('[data-action="copy-output"]').disabled = true
     this.updateAppendControls()
     this.updateContextControls()
+    this.syncFavoriteControls()
   }
 
   private updateAppendControls(): void {

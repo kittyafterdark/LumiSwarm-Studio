@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.15
+
+### Added
+
+- The parser-model override now offers connection-aware model suggestions. Studio
+  asks the selected Lumiverse text connection for its model list when that host
+  capability is available, then falls back to the connection's active model and
+  cached model metadata without inventing provider-specific entries. Free-form
+  overrides remain supported.
+- Extension backend failures now print a scoped message, details, and stack trace
+  through Lumiverse's terminal logger, with `console.error` as a fallback. Browser
+  errors continue to surface normally.
+- Outputs can now be starred from the current-output stage and the full-size
+  inspector. Starred generations appear in a permanent **Favorites** collection
+  while retaining their ordinary or character-folder membership.
+- Library selection mode now supports **Non-starred only**, so **Select page** can
+  safely target disposable outputs without selecting favorites.
+- Bulk-selected outputs can be favorited or unfavorited in one action. Moving
+  outputs to **Favorites** also stars them automatically.
+
+### Changed
+
+- Favorites behaves as a protected label-like collection rather than an exclusive
+  destination: starring never removes an output from its existing folder, and
+  the Favorites collection itself cannot be deleted.
+
 ## 1.0.14
 
 ### Added

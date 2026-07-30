@@ -5,6 +5,8 @@ const PREVIEW_CACHE_LIMIT = 64;
 const STACK_PRESETS_FILE = "lora-stack-presets.json";
 const GENERATION_RECORDS_FILE = "generation-records.json";
 const OUTPUT_FOLDERS_FILE = "output-folders.json";
+const FAVORITES_FOLDER_ID = "__swarm_studio_favorites__";
+const FAVORITES_FOLDER_NAME = "Favorites";
 const TAG_AUTOMATION_CONFIG_FILE = "tag-automation-config.json";
 const TAGGED_IMAGE_JOBS_FILE = "tagged-image-jobs.json";
 const STUDIO_GENERATION_PROFILE_FILE = "studio-generation-profile.json";
@@ -87,6 +89,24 @@ function asRecord(value) {
 }
 function asString(value) {
     return typeof value === "string" ? value : "";
+}
+function reportBackendError(scope, error, details) {
+    const message = error instanceof Error ? `${error.message}${error.stack ? `\n${error.stack}` : ""}` : String(error || "Unknown error");
+    let detailText = "";
+    if (details !== undefined) {
+        try {
+            detailText = typeof details === "string" ? details : JSON.stringify(details);
+        } catch  {
+            detailText = String(details);
+        }
+    }
+    const suffix = detailText ? `\nDetails: ${detailText}` : "";
+    const output = `[Swarm Studio] ${scope}: ${message}${suffix}`;
+    try {
+        spindle.log.error(output);
+    } catch  {
+        console.error(output);
+    }
 }
 function asNullableNumber(value) {
     const number = Number(value);
@@ -1145,7 +1165,17 @@ async function chatVisualsState(userId, currentStack) {
     };
 }
 function cleanOutputFolders(value) {
-    if (!Array.isArray(value)) return [];
+    if (!Array.isArray(value)) {
+        return [
+            {
+                id: FAVORITES_FOLDER_ID,
+                name: FAVORITES_FOLDER_NAME,
+                imageIds: [],
+                binding: null,
+                updatedAt: Date.now()
+            }
+        ];
+    }
     const seen = new Set();
     const parsed = value.slice(0, OUTPUT_FOLDER_LIMIT).flatMap((raw)=>{
         const item = asRecord(raw);
@@ -1203,7 +1233,23 @@ function cleanOutputFolders(value) {
             updatedAt: Math.max(...group.map((candidate)=>candidate.updatedAt))
         });
     }
-    return result.slice(0, OUTPUT_FOLDER_LIMIT);
+    const favorite = result.find((folder)=>folder.id === FAVORITES_FOLDER_ID);
+    const ordinary = result.filter((folder)=>folder.id !== FAVORITES_FOLDER_ID);
+    const favoritesFolder = favorite ? {
+        ...favorite,
+        name: FAVORITES_FOLDER_NAME,
+        binding: null
+    } : {
+        id: FAVORITES_FOLDER_ID,
+        name: FAVORITES_FOLDER_NAME,
+        imageIds: [],
+        binding: null,
+        updatedAt: Date.now()
+    };
+    return [
+        favoritesFolder,
+        ...ordinary.slice(0, Math.max(0, OUTPUT_FOLDER_LIMIT - 1))
+    ];
 }
 async function loadOutputFolders(userId) {
     return cleanOutputFolders(await spindle.userStorage.getJson(OUTPUT_FOLDERS_FILE, {
@@ -1258,7 +1304,7 @@ async function createOutputFolder(name, bindingType, userId) {
         }
     }
     if (!cleanName) throw new Error("Give the output folder a name.");
-    if (folders.some((folder)=>folder.name.toLowerCase() === cleanName.toLowerCase())) {
+    if (cleanName.toLowerCase() === FAVORITES_FOLDER_NAME.toLowerCase() || folders.some((folder)=>folder.name.toLowerCase() === cleanName.toLowerCase())) {
         throw new Error(`An output folder named “${cleanName}” already exists.`);
     }
     folders.unshift({
@@ -1295,7 +1341,24 @@ async function updateOutputFolderProfile(folderId, value, userId) {
     return saved;
 }
 async function deleteOutputFolder(folderId, userId) {
+    if (folderId === FAVORITES_FOLDER_ID) throw new Error("Favorites is a permanent Studio folder.");
     return persistOutputFolders((await loadOutputFolders(userId)).filter((folder)=>folder.id !== folderId), userId);
+}
+async function setOutputsFavorite(imageIds, favorite, userId) {
+    const cleanIds = [
+        ...new Set(imageIds.map((id)=>id.trim()).filter(Boolean))
+    ].slice(0, 200);
+    if (!cleanIds.length) throw new Error("Choose at least one output to favorite.");
+    const folders = await loadOutputFolders(userId);
+    const favorites = folders.find((folder)=>folder.id === FAVORITES_FOLDER_ID);
+    if (!favorites) throw new Error("The Favorites folder could not be initialized.");
+    const changed = new Set(cleanIds);
+    favorites.imageIds = favorite ? [
+        ...cleanIds,
+        ...favorites.imageIds.filter((id)=>!changed.has(id))
+    ].slice(0, 500) : favorites.imageIds.filter((id)=>!changed.has(id));
+    favorites.updatedAt = Date.now();
+    return persistOutputFolders(folders, userId);
 }
 async function moveOutputToFolder(imageId, folderId, userId) {
     return moveOutputsToFolder([
@@ -1311,8 +1374,12 @@ async function moveOutputsToFolder(imageIds, folderId, userId) {
     if (folderId && !folders.some((folder)=>folder.id === folderId)) {
         throw new Error("That output folder no longer exists.");
     }
+    if (folderId === FAVORITES_FOLDER_ID) {
+        return setOutputsFavorite(cleanIds, true, userId);
+    }
     const moved = new Set(cleanIds);
     for (const folder of folders){
+        if (folder.id === FAVORITES_FOLDER_ID) continue;
         folder.imageIds = folder.imageIds.filter((id)=>!moved.has(id));
         if (folder.id === folderId) folder.imageIds.unshift(...cleanIds);
         folder.updatedAt = Date.now();
@@ -2807,6 +2874,12 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
     } catch (error) {
         job.status = isAbortError(error) ? "cancelled" : "failed";
         job.error = error instanceof Error ? error.message : String(error);
+        reportBackendError("Tagged image generation failed", error, {
+            jobId: job.id,
+            chatId: job.chatId,
+            messageId: job.messageId,
+            slot: job.slot
+        });
         await upsertTaggedImageJob(job, userId);
         sendTaggedJobState(job, userId);
     } finally{
@@ -3051,6 +3124,72 @@ async function listLibraryOutputs(userId) {
         folders: await loadOutputFolders(userId)
     };
 }
+function collectConnectionModels(value, models, depth = 0) {
+    if (depth > 3 || value === null || value === undefined) return;
+    if (typeof value === "string") {
+        const id = value.trim();
+        if (id) models.set(id, models.get(id) || id);
+        return;
+    }
+    if (Array.isArray(value)) {
+        for (const entry of value.slice(0, 2_000))collectConnectionModels(entry, models, depth + 1);
+        return;
+    }
+    const record = asRecord(value);
+    const id = asString(record.id || record.model || record.value).trim();
+    const label = asString(record.label || record.name || record.title).trim();
+    if (id) models.set(id, label || models.get(id) || id);
+    for (const key of [
+        "models",
+        "model_list",
+        "modelList",
+        "available_models",
+        "availableModels"
+    ]){
+        if (Object.prototype.hasOwnProperty.call(record, key)) {
+            collectConnectionModels(record[key], models, depth + 1);
+        }
+    }
+}
+async function listParserModels(connectionId, userId) {
+    if (!spindle.permissions.has("generation")) {
+        throw new Error("Grant Generation permission to list parser models.");
+    }
+    const listed = await spindle.connections.list(userId);
+    const connections = Array.isArray(listed) ? listed : [];
+    const connection = connections.find((candidate)=>asString(candidate?.id) === connectionId) || connections.find((candidate)=>candidate?.is_default) || connections[0];
+    if (!connection?.id) return {
+        connectionId: "",
+        models: [],
+        live: false
+    };
+    const models = new Map();
+    let live = false;
+    const liveList = spindle.connections?.getModels || spindle.connections?.models || spindle.connections?.listModels;
+    if (typeof liveList === "function") {
+        try {
+            collectConnectionModels(await liveList.call(spindle.connections, connection.id, userId), models);
+            live = models.size > 0;
+        } catch (error) {
+            reportBackendError("Could not load the parser connection's live model list", error, {
+                connectionId: connection.id,
+                connectionName: connection.name
+            });
+        }
+    }
+    collectConnectionModels(connection.model, models);
+    collectConnectionModels(connection.metadata, models);
+    return {
+        connectionId: asString(connection.id),
+        models: [
+            ...models
+        ].map(([id, label])=>({
+                id,
+                label
+            })),
+        live
+    };
+}
 async function bootstrap(userId) {
     const permissions = permissionSnapshot();
     const profile = await loadStudioGenerationProfile(userId);
@@ -3064,6 +3203,7 @@ async function bootstrap(userId) {
             const listed = await spindle.connections.list(userId);
             parserConnections = Array.isArray(listed) ? listed : [];
         } catch (error) {
+            reportBackendError("Could not list parser connections", error);
             spindle.log.warn(`Could not list parser connections: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
@@ -3103,16 +3243,25 @@ async function loadConnection(connectionId, userId) {
         try {
             loras = await listLoras(connection, token, userId);
         } catch (error) {
+            reportBackendError("Could not load SwarmUI LoRA metadata", error, {
+                connectionId
+            });
             metadataErrors.push(error instanceof Error ? error.message : String(error));
         }
         try {
             checkpoints = await listCheckpoints(connection, token, userId);
         } catch (error) {
+            reportBackendError("Could not load SwarmUI checkpoint metadata", error, {
+                connectionId
+            });
             metadataErrors.push(error instanceof Error ? error.message : String(error));
         }
         try {
             swarmOptions = await loadSwarmOptions(connection, token, userId);
         } catch (error) {
+            reportBackendError("Could not load SwarmUI generation controls", error, {
+                connectionId
+            });
             metadataErrors.push(`Swarm controls: ${error instanceof Error ? error.message : String(error)}`);
         }
     } else {
@@ -3139,6 +3288,15 @@ async function handleMessage(payload, userId) {
                         type: "bootstrap_result",
                         requestId,
                         data: await bootstrap(userId)
+                    }, userId);
+                    return;
+                }
+            case "list_parser_models":
+                {
+                    spindle.sendToFrontend({
+                        type: "parser_models_result",
+                        requestId,
+                        data: await listParserModels(asString(payload?.connectionId), userId)
                     }, userId);
                     return;
                 }
@@ -3776,6 +3934,24 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
+            case "set_output_favorite":
+            case "bulk_set_output_favorite":
+                {
+                    const imageIds = type === "set_output_favorite" ? [
+                        asString(payload?.imageId)
+                    ] : stringList(payload?.imageIds, 200);
+                    const favorite = payload?.favorite !== false;
+                    spindle.sendToFrontend({
+                        type: "output_favorites_result",
+                        requestId,
+                        data: {
+                            imageIds,
+                            favorite,
+                            folders: await setOutputsFavorite(imageIds, favorite, userId)
+                        }
+                    }, userId);
+                    return;
+                }
             case "delete_output":
                 {
                     if (!spindle.permissions.has("images")) {
@@ -3786,7 +3962,10 @@ async function handleMessage(payload, userId) {
                     const deleted = await spindle.images.delete(imageId, userId);
                     if (!deleted) throw new Error("Lumiverse could not delete that output.");
                     await deleteGenerationRecord(imageId, userId);
-                    const folders = await moveOutputToFolder(imageId, "", userId);
+                    await moveOutputToFolder(imageId, "", userId);
+                    const folders = await setOutputsFavorite([
+                        imageId
+                    ], false, userId);
                     const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
                     spindle.sendToFrontend({
                         type: "output_deleted",
@@ -3812,12 +3991,19 @@ async function handleMessage(payload, userId) {
                         try {
                             if (await spindle.images.delete(imageId, userId)) deletedIds.push(imageId);
                             else failedIds.push(imageId);
-                        } catch  {
+                        } catch (error) {
+                            reportBackendError("Could not delete a selected Lumiverse output", error, {
+                                imageId
+                            });
                             failedIds.push(imageId);
                         }
                     }
                     if (deletedIds.length) await deleteGenerationRecords(deletedIds, userId);
-                    const folders = deletedIds.length ? await moveOutputsToFolder(deletedIds, "", userId) : await loadOutputFolders(userId);
+                    let folders = await loadOutputFolders(userId);
+                    if (deletedIds.length) {
+                        await moveOutputsToFolder(deletedIds, "", userId);
+                        folders = await setOutputsFavorite(deletedIds, false, userId);
+                    }
                     const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
                     spindle.sendToFrontend({
                         type: "outputs_bulk_deleted",
@@ -3835,7 +4021,10 @@ async function handleMessage(payload, userId) {
                 throw new Error(`Unknown Swarm Studio request: ${type || "(missing type)"}`);
         }
     } catch (error) {
-        console.error(`[Swarm Studio] Backend request “${type || "(missing type)"}” failed.`, error);
+        reportBackendError(`Backend request “${type || "(missing type)"}” failed`, error, {
+            requestId,
+            clientJobId: asString(payload?.clientJobId) || asString(asRecord(payload?.input).clientJobId)
+        });
         spindle.sendToFrontend({
             type: "studio_error",
             requestId,

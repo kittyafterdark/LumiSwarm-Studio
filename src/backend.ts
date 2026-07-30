@@ -284,6 +284,8 @@ const PREVIEW_CACHE_LIMIT = 64
 const STACK_PRESETS_FILE = "lora-stack-presets.json"
 const GENERATION_RECORDS_FILE = "generation-records.json"
 const OUTPUT_FOLDERS_FILE = "output-folders.json"
+const FAVORITES_FOLDER_ID = "__swarm_studio_favorites__"
+const FAVORITES_FOLDER_NAME = "Favorites"
 const TAG_AUTOMATION_CONFIG_FILE = "tag-automation-config.json"
 const TAGGED_IMAGE_JOBS_FILE = "tagged-image-jobs.json"
 const STUDIO_GENERATION_PROFILE_FILE = "studio-generation-profile.json"
@@ -367,6 +369,27 @@ function asRecord(value: unknown): JsonObject {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : ""
+}
+
+function reportBackendError(scope: string, error: unknown, details?: unknown): void {
+  const message = error instanceof Error
+    ? `${error.message}${error.stack ? `\n${error.stack}` : ""}`
+    : String(error || "Unknown error")
+  let detailText = ""
+  if (details !== undefined) {
+    try {
+      detailText = typeof details === "string" ? details : JSON.stringify(details)
+    } catch {
+      detailText = String(details)
+    }
+  }
+  const suffix = detailText ? `\nDetails: ${detailText}` : ""
+  const output = `[Swarm Studio] ${scope}: ${message}${suffix}`
+  try {
+    spindle.log.error(output)
+  } catch {
+    console.error(output)
+  }
 }
 
 function asNullableNumber(value: unknown): number | null {
@@ -1543,7 +1566,15 @@ async function chatVisualsState(userId?: string, currentStack?: unknown): Promis
 }
 
 function cleanOutputFolders(value: unknown): OutputFolder[] {
-  if (!Array.isArray(value)) return []
+  if (!Array.isArray(value)) {
+    return [{
+      id: FAVORITES_FOLDER_ID,
+      name: FAVORITES_FOLDER_NAME,
+      imageIds: [],
+      binding: null,
+      updatedAt: Date.now(),
+    }]
+  }
   const seen = new Set<string>()
   const parsed = value.slice(0, OUTPUT_FOLDER_LIMIT).flatMap((raw): OutputFolder[] => {
     const item = asRecord(raw)
@@ -1607,7 +1638,22 @@ function cleanOutputFolders(value: unknown): OutputFolder[] {
       updatedAt: Math.max(...group.map((candidate) => candidate.updatedAt)),
     })
   }
-  return result.slice(0, OUTPUT_FOLDER_LIMIT)
+  const favorite = result.find((folder) => folder.id === FAVORITES_FOLDER_ID)
+  const ordinary = result.filter((folder) => folder.id !== FAVORITES_FOLDER_ID)
+  const favoritesFolder: OutputFolder = favorite
+    ? {
+        ...favorite,
+        name: FAVORITES_FOLDER_NAME,
+        binding: null,
+      }
+    : {
+        id: FAVORITES_FOLDER_ID,
+        name: FAVORITES_FOLDER_NAME,
+        imageIds: [],
+        binding: null,
+        updatedAt: Date.now(),
+      }
+  return [favoritesFolder, ...ordinary.slice(0, Math.max(0, OUTPUT_FOLDER_LIMIT - 1))]
 }
 
 async function loadOutputFolders(userId?: string): Promise<OutputFolder[]> {
@@ -1664,7 +1710,10 @@ async function createOutputFolder(name: string, bindingType: string, userId?: st
     }
   }
   if (!cleanName) throw new Error("Give the output folder a name.")
-  if (folders.some((folder) => folder.name.toLowerCase() === cleanName.toLowerCase())) {
+  if (
+    cleanName.toLowerCase() === FAVORITES_FOLDER_NAME.toLowerCase()
+    || folders.some((folder) => folder.name.toLowerCase() === cleanName.toLowerCase())
+  ) {
     throw new Error(`An output folder named “${cleanName}” already exists.`)
   }
   folders.unshift({
@@ -1713,10 +1762,29 @@ async function updateOutputFolderProfile(
 }
 
 async function deleteOutputFolder(folderId: string, userId?: string): Promise<OutputFolder[]> {
+  if (folderId === FAVORITES_FOLDER_ID) throw new Error("Favorites is a permanent Studio folder.")
   return persistOutputFolders(
     (await loadOutputFolders(userId)).filter((folder) => folder.id !== folderId),
     userId,
   )
+}
+
+async function setOutputsFavorite(
+  imageIds: string[],
+  favorite: boolean,
+  userId?: string,
+): Promise<OutputFolder[]> {
+  const cleanIds = [...new Set(imageIds.map((id) => id.trim()).filter(Boolean))].slice(0, 200)
+  if (!cleanIds.length) throw new Error("Choose at least one output to favorite.")
+  const folders = await loadOutputFolders(userId)
+  const favorites = folders.find((folder) => folder.id === FAVORITES_FOLDER_ID)
+  if (!favorites) throw new Error("The Favorites folder could not be initialized.")
+  const changed = new Set(cleanIds)
+  favorites.imageIds = favorite
+    ? [...cleanIds, ...favorites.imageIds.filter((id) => !changed.has(id))].slice(0, 500)
+    : favorites.imageIds.filter((id) => !changed.has(id))
+  favorites.updatedAt = Date.now()
+  return persistOutputFolders(folders, userId)
 }
 
 async function moveOutputToFolder(
@@ -1738,8 +1806,12 @@ async function moveOutputsToFolder(
   if (folderId && !folders.some((folder) => folder.id === folderId)) {
     throw new Error("That output folder no longer exists.")
   }
+  if (folderId === FAVORITES_FOLDER_ID) {
+    return setOutputsFavorite(cleanIds, true, userId)
+  }
   const moved = new Set(cleanIds)
   for (const folder of folders) {
+    if (folder.id === FAVORITES_FOLDER_ID) continue
     folder.imageIds = folder.imageIds.filter((id) => !moved.has(id))
     if (folder.id === folderId) folder.imageIds.unshift(...cleanIds)
     folder.updatedAt = Date.now()
@@ -3465,6 +3537,12 @@ async function runTaggedImageJob(
   } catch (error) {
     job.status = isAbortError(error) ? "cancelled" : "failed"
     job.error = error instanceof Error ? error.message : String(error)
+    reportBackendError("Tagged image generation failed", error, {
+      jobId: job.id,
+      chatId: job.chatId,
+      messageId: job.messageId,
+      slot: job.slot,
+    })
     await upsertTaggedImageJob(job, userId)
     sendTaggedJobState(job, userId)
   } finally {
@@ -3753,6 +3831,68 @@ async function listLibraryOutputs(userId?: string): Promise<{
   }
 }
 
+function collectConnectionModels(value: unknown, models: Map<string, string>, depth = 0): void {
+  if (depth > 3 || value === null || value === undefined) return
+  if (typeof value === "string") {
+    const id = value.trim()
+    if (id) models.set(id, models.get(id) || id)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value.slice(0, 2_000)) collectConnectionModels(entry, models, depth + 1)
+    return
+  }
+  const record = asRecord(value)
+  const id = asString(record.id || record.model || record.value).trim()
+  const label = asString(record.label || record.name || record.title).trim()
+  if (id) models.set(id, label || models.get(id) || id)
+  for (const key of ["models", "model_list", "modelList", "available_models", "availableModels"]) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      collectConnectionModels(record[key], models, depth + 1)
+    }
+  }
+}
+
+async function listParserModels(connectionId: string, userId?: string): Promise<{
+  connectionId: string
+  models: Array<{ id: string; label: string }>
+  live: boolean
+}> {
+  if (!spindle.permissions.has("generation")) {
+    throw new Error("Grant Generation permission to list parser models.")
+  }
+  const listed = await spindle.connections.list(userId)
+  const connections = Array.isArray(listed) ? listed : []
+  const connection = connections.find((candidate: any) => asString(candidate?.id) === connectionId)
+    || connections.find((candidate: any) => candidate?.is_default)
+    || connections[0]
+  if (!connection?.id) return { connectionId: "", models: [], live: false }
+
+  const models = new Map<string, string>()
+  let live = false
+  const liveList = spindle.connections?.getModels
+    || spindle.connections?.models
+    || spindle.connections?.listModels
+  if (typeof liveList === "function") {
+    try {
+      collectConnectionModels(await liveList.call(spindle.connections, connection.id, userId), models)
+      live = models.size > 0
+    } catch (error) {
+      reportBackendError("Could not load the parser connection's live model list", error, {
+        connectionId: connection.id,
+        connectionName: connection.name,
+      })
+    }
+  }
+  collectConnectionModels(connection.model, models)
+  collectConnectionModels(connection.metadata, models)
+  return {
+    connectionId: asString(connection.id),
+    models: [...models].map(([id, label]) => ({ id, label })),
+    live,
+  }
+}
+
 async function bootstrap(userId?: string): Promise<JsonObject> {
   const permissions = permissionSnapshot()
   const profile = await loadStudioGenerationProfile(userId)
@@ -3769,6 +3909,7 @@ async function bootstrap(userId?: string): Promise<JsonObject> {
       const listed = await spindle.connections.list(userId)
       parserConnections = Array.isArray(listed) ? listed : []
     } catch (error) {
+      reportBackendError("Could not list parser connections", error)
       spindle.log.warn(`Could not list parser connections: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
@@ -3814,16 +3955,19 @@ async function loadConnection(connectionId: string, userId?: string): Promise<Js
     try {
       loras = await listLoras(connection, token, userId)
     } catch (error) {
+      reportBackendError("Could not load SwarmUI LoRA metadata", error, { connectionId })
       metadataErrors.push(error instanceof Error ? error.message : String(error))
     }
     try {
       checkpoints = await listCheckpoints(connection, token, userId)
     } catch (error) {
+      reportBackendError("Could not load SwarmUI checkpoint metadata", error, { connectionId })
       metadataErrors.push(error instanceof Error ? error.message : String(error))
     }
     try {
       swarmOptions = await loadSwarmOptions(connection, token, userId)
     } catch (error) {
+      reportBackendError("Could not load SwarmUI generation controls", error, { connectionId })
       metadataErrors.push(`Swarm controls: ${error instanceof Error ? error.message : String(error)}`)
     }
   } else {
@@ -3851,6 +3995,14 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           type: "bootstrap_result",
           requestId,
           data: await bootstrap(userId),
+        }, userId)
+        return
+      }
+      case "list_parser_models": {
+        spindle.sendToFrontend({
+          type: "parser_models_result",
+          requestId,
+          data: await listParserModels(asString(payload?.connectionId), userId),
         }, userId)
         return
       }
@@ -4533,6 +4685,23 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         }, userId)
         return
       }
+      case "set_output_favorite":
+      case "bulk_set_output_favorite": {
+        const imageIds = type === "set_output_favorite"
+          ? [asString(payload?.imageId)]
+          : stringList(payload?.imageIds, 200)
+        const favorite = payload?.favorite !== false
+        spindle.sendToFrontend({
+          type: "output_favorites_result",
+          requestId,
+          data: {
+            imageIds,
+            favorite,
+            folders: await setOutputsFavorite(imageIds, favorite, userId),
+          },
+        }, userId)
+        return
+      }
       case "delete_output": {
         if (!spindle.permissions.has("images")) {
           throw new Error("Grant the Images permission to delete Lumiverse outputs.")
@@ -4542,7 +4711,8 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         const deleted = await spindle.images.delete(imageId, userId)
         if (!deleted) throw new Error("Lumiverse could not delete that output.")
         await deleteGenerationRecord(imageId, userId)
-        const folders = await moveOutputToFolder(imageId, "", userId)
+        await moveOutputToFolder(imageId, "", userId)
+        const folders = await setOutputsFavorite([imageId], false, userId)
         const activeChat = spindle.permissions.has("chats")
           ? await spindle.chats.getActive(userId)
           : null
@@ -4569,14 +4739,17 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           try {
             if (await spindle.images.delete(imageId, userId)) deletedIds.push(imageId)
             else failedIds.push(imageId)
-          } catch {
+          } catch (error) {
+            reportBackendError("Could not delete a selected Lumiverse output", error, { imageId })
             failedIds.push(imageId)
           }
         }
         if (deletedIds.length) await deleteGenerationRecords(deletedIds, userId)
-        const folders = deletedIds.length
-          ? await moveOutputsToFolder(deletedIds, "", userId)
-          : await loadOutputFolders(userId)
+        let folders = await loadOutputFolders(userId)
+        if (deletedIds.length) {
+          await moveOutputsToFolder(deletedIds, "", userId)
+          folders = await setOutputsFavorite(deletedIds, false, userId)
+        }
         const activeChat = spindle.permissions.has("chats")
           ? await spindle.chats.getActive(userId)
           : null
@@ -4596,7 +4769,10 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         throw new Error(`Unknown Swarm Studio request: ${type || "(missing type)"}`)
     }
   } catch (error) {
-    console.error(`[Swarm Studio] Backend request “${type || "(missing type)"}” failed.`, error)
+    reportBackendError(`Backend request “${type || "(missing type)"}” failed`, error, {
+      requestId,
+      clientJobId: asString(payload?.clientJobId) || asString(asRecord(payload?.input).clientJobId),
+    })
     spindle.sendToFrontend({
       type: "studio_error",
       requestId,

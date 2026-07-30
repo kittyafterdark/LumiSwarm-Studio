@@ -8,7 +8,12 @@ assert.match(source, /case "cancel_lora_download"/)
 assert.match(source, /DoModelDownloadWS/)
 assert.match(source, /new WebSocket\(wsUrl\)/)
 assert.match(source, /Only Civitai and Hugging Face LoRA downloads/)
-assert.match(source, /console\.error\(`\[Swarm Studio\] Backend request/)
+assert.match(source, /function reportBackendError/)
+assert.match(source, /spindle\.log\.error/)
+assert.match(source, /reportBackendError\(`Backend request/)
+assert.match(source, /case "list_parser_models"/)
+assert.match(source, /case "set_output_favorite"/)
+assert.match(source, /case "bulk_set_output_favorite"/)
 
 let frontendHandler
 const sent = []
@@ -698,7 +703,8 @@ assert.equal(bootstrap.data.total, 1)
 assert.equal(bootstrap.data.offset, 0)
 assert.equal(bootstrap.data.limit, 12)
 assert.deepEqual(bootstrap.data.stackPresets, [])
-assert.deepEqual(bootstrap.data.outputFolders, [])
+assert.equal(bootstrap.data.outputFolders.length, 1)
+assert.equal(bootstrap.data.outputFolders[0].id, "__swarm_studio_favorites__")
 assert.equal(bootstrap.data.tagAutomation.stripUserOnlyLoraStack, false)
 assert.equal(bootstrap.data.tagAutomation.autoPrintCharacterPositive, false)
 assert.equal(bootstrap.data.tagAutomation.requestMode, "inline")
@@ -1097,13 +1103,13 @@ assert.match(taggedMessage.content, /object-fit:cover/)
 assert.equal(taggedMessage.metadata.swarm_studio_tagged_images[0].imageId, "image-tag-1")
 assert.equal(macroValues.get("last_genned"), "/api/v1/image-gen/results/image-tag-1")
 const storedFoldersAfterTag = userFiles.get("output-folders.json")
-assert.equal(storedFoldersAfterTag[0].id, "character:char-1")
-assert.equal(storedFoldersAfterTag[0].name, "Lior")
-assert.deepEqual(storedFoldersAfterTag[0].imageIds, ["image-tag-1"])
-assert.equal(storedFoldersAfterTag[0].binding.type, "character")
-assert.equal(storedFoldersAfterTag[0].binding.chatId, undefined)
-assert.equal(storedFoldersAfterTag[0].binding.characterId, "char-1")
-assert.equal(storedFoldersAfterTag[0].binding.positivePrompt, "1boy, black hair, red eyes")
+const storedCharacterFolderAfterTag = storedFoldersAfterTag.find((folder) => folder.id === "character:char-1")
+assert.equal(storedCharacterFolderAfterTag.name, "Lior")
+assert.deepEqual(storedCharacterFolderAfterTag.imageIds, ["image-tag-1"])
+assert.equal(storedCharacterFolderAfterTag.binding.type, "character")
+assert.equal(storedCharacterFolderAfterTag.binding.chatId, undefined)
+assert.equal(storedCharacterFolderAfterTag.binding.characterId, "char-1")
+assert.equal(storedCharacterFolderAfterTag.binding.positivePrompt, "1boy, black hair, red eyes")
 
 const customCharacterVisuals = await request("save_chat_visuals", {
   positivePrompt: "1boy, black hair, red eyes",
@@ -1127,7 +1133,7 @@ assert.equal(customCharacterVisuals.data.characterFolder.binding.checkpoint, "ba
 assert.equal(customCharacterVisuals.data.characterFolder.binding.sourcePresetId, "lumi-character-preset-1")
 
 const visualFolders = await request("update_output_folder_profile", {
-  folderId: storedFoldersAfterTag[0].id,
+  folderId: storedCharacterFolderAfterTag.id,
   profile: {
     positivePrompt: "1boy, red eyes, black hair, signature coat",
     negativePrompt: "wrong eye color",
@@ -1136,11 +1142,12 @@ const visualFolders = await request("update_output_folder_profile", {
     enabled: false,
   },
 })
-assert.equal(visualFolders.data[0].binding.positivePrompt, "1boy, red eyes, black hair, signature coat")
-assert.equal(visualFolders.data[0].binding.negativePrompt, "wrong eye color")
-assert.equal(visualFolders.data[0].binding.checkpoint, "base.safetensors")
-assert.equal(visualFolders.data[0].binding.stackPresetId, savedStack.data[0].id)
-assert.equal(visualFolders.data[0].binding.enabled, false)
+const updatedVisualFolder = visualFolders.data.find((folder) => folder.id === storedCharacterFolderAfterTag.id)
+assert.equal(updatedVisualFolder.binding.positivePrompt, "1boy, red eyes, black hair, signature coat")
+assert.equal(updatedVisualFolder.binding.negativePrompt, "wrong eye color")
+assert.equal(updatedVisualFolder.binding.checkpoint, "base.safetensors")
+assert.equal(updatedVisualFolder.binding.stackPresetId, savedStack.data[0].id)
+assert.equal(updatedVisualFolder.binding.enabled, false)
 
 await frontendHandler({
   type: "retry_tagged_job",
@@ -1181,7 +1188,7 @@ assert.doesNotMatch(multiTaggedMessage.content, /<swarm-image\b/i)
 assert.equal(multiTaggedMessage.metadata.swarm_studio_tagged_images.length, 2)
 const foldersAfterDisabledVisualGenerations = userFiles.get("output-folders.json")
 assert.deepEqual(
-  foldersAfterDisabledVisualGenerations[0].imageIds,
+  foldersAfterDisabledVisualGenerations.find((folder) => folder.id === "character:char-1").imageIds,
   ["image-tag-1"],
   "disabled character visuals must leave newly generated images Unfiled",
 )
@@ -1352,8 +1359,11 @@ const page = await request("refresh_outputs", { offset: 12, limit: 12 })
 assert.equal(page.data.offset, 12)
 assert.equal(page.data.limit, 12)
 
-const currentCharacterFolder = userFiles.get("output-folders.json")[0]
+const currentFolders = userFiles.get("output-folders.json")
+const currentCharacterFolder = currentFolders.find((folder) => folder.id === "character:char-1")
+const currentFavoritesFolder = currentFolders.find((folder) => folder.id === "__swarm_studio_favorites__")
 userFiles.set("output-folders.json", [
+  currentFavoritesFolder,
   currentCharacterFolder,
   {
     id: "legacy-chat-folder",
@@ -1377,26 +1387,52 @@ assert.equal(migratedCharacterFolder.binding.type, "character")
 assert.equal(migratedCharacterFolder.binding.chatId, undefined)
 assert.deepEqual(migratedCharacterFolder.imageIds, ["image-tag-1", "legacy-chat-image"])
 
-const createdFolders = await request("create_output_folder", { name: "Favorites" })
-assert.equal(createdFolders.data[0].name, "Favorites")
-assert.equal(createdFolders.data[0].binding, null)
-const folderId = createdFolders.data[0].id
+const createdFolders = await request("create_output_folder", { name: "Archive" })
+const favoriteFolder = createdFolders.data.find((folder) => folder.id === "__swarm_studio_favorites__")
+const archiveFolder = createdFolders.data.find((folder) => folder.name === "Archive")
+assert.equal(favoriteFolder.name, "Favorites")
+assert.equal(favoriteFolder.binding, null)
+assert.equal(archiveFolder.binding, null)
+const folderId = archiveFolder.id
 
 const movedFolders = await request("move_output_to_folder", {
   imageId: "image-1",
   folderId,
 })
-assert.deepEqual(movedFolders.data[0].imageIds, ["image-1"])
+assert.deepEqual(movedFolders.data.find((folder) => folder.id === folderId).imageIds, ["image-1"])
+
+const starred = await request("set_output_favorite", {
+  imageId: "image-1",
+  favorite: true,
+})
+assert.deepEqual(
+  starred.data.folders.find((folder) => folder.id === "__swarm_studio_favorites__").imageIds,
+  ["image-1"],
+)
+assert.deepEqual(starred.data.folders.find((folder) => folder.id === folderId).imageIds, ["image-1"])
 
 const library = await request("list_library_outputs")
 assert.equal(library.data.outputs.length, 1)
 assert.equal(library.data.folders[0].name, "Favorites")
 
+const unstarred = await request("bulk_set_output_favorite", {
+  imageIds: ["image-1"],
+  favorite: false,
+})
+assert.deepEqual(
+  unstarred.data.folders.find((folder) => folder.id === "__swarm_studio_favorites__").imageIds,
+  [],
+)
+
 const bulkMoved = await request("bulk_move_outputs", {
   imageIds: ["image-1"],
-  folderId,
+  folderId: "__swarm_studio_favorites__",
 })
-assert.deepEqual(bulkMoved.data[0].imageIds, ["image-1"])
+assert.deepEqual(
+  bulkMoved.data.find((folder) => folder.id === "__swarm_studio_favorites__").imageIds,
+  ["image-1"],
+)
+assert.deepEqual(bulkMoved.data.find((folder) => folder.id === folderId).imageIds, ["image-1"])
 
 const appended = await request("append_output_to_chat", {
   imageId: "image-1",
@@ -1410,7 +1446,7 @@ const deleted = await request("bulk_delete_outputs", { imageIds: ["image-1"] })
 assert.deepEqual(deleted.data.deletedIds, ["image-1"])
 assert.deepEqual(deleted.data.failedIds, [])
 assert.equal(deleted.data.outputs.length, 0)
-assert.deepEqual(deleted.data.folders[0].imageIds, [])
+assert.ok(deleted.data.folders.every((folder) => !folder.imageIds.includes("image-1")))
 
 assert.match(source, /TAGGED_FINALIZE_RETRY_DELAYS_MS[\s\S]*?25_000/)
 assert.match(source, /taggedFinalizeMessageTargets/)
@@ -1422,6 +1458,10 @@ assert.match(source, /spindle\.generate\.quiet\(/)
 assert.match(source, /config\.parserModel \? \{ model: config\.parserModel \}/)
 assert.match(source, /spindle\.on\("GENERATION_ENDED"/)
 assert.match(source, /const legacy = !attrs\.request/)
+
+const parserModels = await request("list_parser_models", { connectionId: "text-1" })
+assert.equal(parserModels.data.connectionId, "text-1")
+assert.deepEqual(parserModels.data.models, [{ id: "connection-model", label: "connection-model" }])
 
 const parserConfig = await request("set_tag_automation", {
   config: {

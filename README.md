@@ -21,6 +21,7 @@ It adds:
 - Native Lumiverse expanded text editors for Studio and Quick Create positive/negative prompts, including the host's macro-aware editing tools
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
 - A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
+- One-click output starring from the current stage or inspector, a protected **Favorites** collection that preserves ordinary folder membership, and bulk Favorite / Unfavorite plus non-starred-only page selection in Library
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker, a server-persisted 0–6 required-image range per reply (`0–0` keeps model discretion), selectable **Multi-character / ensemble** and **Character-only / POV** composition guidance, and an optional `character="none"` scenery/object mode; completed tags begin generating without a chat-shifting progress strip, failures leave an aspect-aware retry placeholder, and finished outputs become permanent container-filling Lumiverse images while syncing back into Studio without taking over Studio's own Generate/Interrupt state
 - Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with a fresh random seed using current/original settings, edit and immediately confirm the prompt in Quick Create, or open the output library; right-clicking the finished image opens the same menu, including inside nested or regex-rendered HTML through composed-path event delegation
@@ -128,7 +129,11 @@ those dynamic instructions.
   connection, replaces them in place with complete generation tags, and starts
   the same normal tagged-image flow. An optional model override applies only to
   those quiet parser calls. Leaving the connection selector empty follows
-  Lumiverse's default text connection and its selected model.
+  Lumiverse's default text connection and its selected model. The override field
+  suggests models reported by the selected connection when the installed
+  Lumiverse runtime exposes model discovery; otherwise it offers that
+  connection's current model and cached metadata while remaining freely
+  editable.
 
 Parser mode keeps identity blocks, Studio presets, checkpoint-specific prompting,
 and negative-prompt behavior in the private completion pass. The main chat model
@@ -338,7 +343,9 @@ the left while folder chips scroll. Search matches every entered keyword across
 submitted positive and negative prompts, model, LoRAs, presets, render
 parameters, filename, and Swarm path; quoted phrases stay together. The
 checkmark enters selection mode, and **Move** / **Delete** appear only after an
-image is selected.
+image is selected. Selection mode can restrict **Select page** to non-starred
+outputs, and its contextual actions can Favorite or Unfavorite the full
+selection before moving or deleting it.
 
 New folders can be unbound collections or bound to the active character. A
 character folder exposes a collapsible visual strip with base positive, base
@@ -351,7 +358,10 @@ Studio stack wins when it intentionally overrides a bound-stack item.
 
 Folders remain lightweight per-user collections stored by the extension;
 moving an output into one does not move or duplicate Lumiverse's underlying
-image asset. Deleting a folder leaves its images intact. **Delete from Lumiverse**
+image asset. The protected **Favorites** collection is label-like: starring an
+output or moving it to Favorites preserves its ordinary or character-folder
+membership, while removing the star leaves the image itself untouched. Deleting
+an ordinary folder leaves its images intact. **Delete from Lumiverse**
 deletes the actual owned image and removes its Swarm Studio metadata and folder
 assignment. When Swarm exposes the generated file path in image metadata, the
 inspector displays it below the recorded LoRA stack as a read-only saved-path
@@ -385,6 +395,9 @@ one-pass/parser selection, parser connection and model controls, the editable
 protocol, and its macro reference. **Theme** contains appearance controls, custom CSS, and centered
 100%, 75%, or 50% inline-image sizing. **Metadata** keeps the infrequently used
 refresh and encrypted `swarm_token` controls out of the generation workspace.
+Backend failures are also written with their scope and stack trace to the
+Lumiverse terminal, which makes diagnostics available even when browser
+developer tools are inaccessible.
 
 The Theme page includes a persisted custom CSS editor and a compact guide to
 useful selectors and variables. CSS is inserted as stylesheet text, not HTML;
