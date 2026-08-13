@@ -1594,14 +1594,16 @@ async function visualLoreState(bookId, entryId, userId) {
     }
     const listedBooks = await spindle.world_books.list({
         limit: 200,
-        offset: 0
-    }, userId);
+        offset: 0,
+        userId
+    });
     const books = Array.isArray(listedBooks?.data) ? listedBooks.data : [];
     const selectedBookId = bookId || asString(books[0]?.id);
     const listedEntries = selectedBookId ? await spindle.world_books.entries.list(selectedBookId, {
         limit: 200,
-        offset: 0
-    }, userId) : {
+        offset: 0,
+        userId
+    }) : {
         data: []
     };
     const entries = Array.isArray(listedEntries?.data) ? listedEntries.data : [];

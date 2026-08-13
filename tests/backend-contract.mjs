@@ -63,6 +63,13 @@ const activePersona = {
   image_id: "user-avatar",
   metadata: {},
 }
+const visualLoreEntry = {
+  id: "lore-entry-1",
+  world_book_id: "world-book-1",
+  comment: "Victoria Manor",
+  key: ["Victoria Manor", "the manor"],
+  extensions: {},
+}
 
 class MockSwarmDownloadSocket extends EventTarget {
   static CONNECTING = 0
@@ -268,6 +275,37 @@ train platform, waving, <preset:composition></swarm-image>`,
     async get(chatId) {
       assert.equal(chatId, "chat-1")
       return { id: "chat-1", character_id: "char-1" }
+    },
+  },
+  world_books: {
+    async list(options, legacyUserId) {
+      assert.equal(options.userId, "user-1")
+      assert.equal(legacyUserId, undefined, "world_books.list() requires userId inside its options object")
+      return { data: [{ id: "world-book-1", name: "Locations" }], total: 1 }
+    },
+    entries: {
+      async list(worldBookId, options, legacyUserId) {
+        assert.equal(worldBookId, "world-book-1")
+        assert.equal(options.userId, "user-1")
+        assert.equal(legacyUserId, undefined, "world_books.entries.list() requires userId inside its options object")
+        return { data: [structuredClone(visualLoreEntry)], total: 1 }
+      },
+      async get(entryId, userId) {
+        assert.equal(entryId, "lore-entry-1")
+        assert.equal(userId, "user-1")
+        return structuredClone(visualLoreEntry)
+      },
+      async update(entryId, input, userId) {
+        assert.equal(entryId, "lore-entry-1")
+        assert.equal(userId, "user-1")
+        visualLoreEntry.extensions = structuredClone(input.extensions)
+        return structuredClone(visualLoreEntry)
+      },
+    },
+    async getActivated(chatId, userId) {
+      assert.equal(chatId, "chat-1")
+      assert.equal(userId, "user-1")
+      return [{ id: "lore-entry-1" }]
     },
   },
   characters: {
@@ -1556,5 +1594,12 @@ assert.equal(quietParserCalls[0].parameters.model, "parser-override")
 assert.match(quietParserCalls[0].messages[0].content, /local image-request parser/)
 assert.match(taggedMessages.at(-1).content, /^Before\.<figure/)
 assert.match(taggedMessages.at(-1).content, /<\/figure>After\.$/)
+
+permissions.add("world_books")
+const visualLore = await request("get_visual_lore")
+assert.equal(visualLore.data.available, true)
+assert.equal(visualLore.data.bookId, "world-book-1")
+assert.equal(visualLore.data.entries[0].id, "lore-entry-1")
+assert.equal(visualLore.data.entries[0].activated, true)
 
 console.log("backend contract: ok")
