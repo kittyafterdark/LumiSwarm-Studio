@@ -20,21 +20,24 @@ It adds:
 - A prompt-header generation action on desktop and a persistent mobile generation action
 - Native Lumiverse expanded text editors for Studio and Quick Create positive/negative prompts, including the host's macro-aware editing tools
 - An aspect-aware output stage that follows the requested dimensions and then the actual returned image
-- A click-to-zoom full-size output inspector with exact submitted positive/negative prompts, used preset provenance, timing pills, render settings, LoRA stack, Swarm's saved path, **Reuse Parameters**, **Use as init image**, and **Append to chat**
+- A click-to-zoom full-size output inspector that resolves the exact Swarm path metadata before showing rendered positive/negative prompts, preset provenance, timing pills, render settings, LoRA stack, and **Reuse Parameters** / **Use as init image** actions
 - One-click output starring from the current stage or inspector, a protected **Favorites** collection that preserves ordinary folder membership, and bulk Favorite / Unfavorite plus non-starred-only page selection in Library
 - Original SwarmUI output downloads (preserving embedded image metadata when Swarm exposes the saved path) and a live `{{last_genned}}` macro for HTML artifacts and presets
 - Opt-in `<swarm-image>` message tags with a required `request="generate"` marker, a server-persisted 0–6 required-image range per reply (`0–0` keeps model discretion), selectable **Multi-character / ensemble** and **Character-only / POV** composition guidance, and an optional `character="none"` scenery/object mode; completed tags begin generating without a chat-shifting progress strip, failures leave an aspect-aware retry placeholder, and finished outputs become permanent container-filling Lumiverse images while syncing back into Studio without taking over Studio's own Generate/Interrupt state
 - Persistent per-image illustration actions: hover/focus on desktop or tap the visible touch overlay to regenerate with a fresh random seed using current/original settings, edit and immediately confirm the prompt in Quick Create, or open the output library; right-clicking the finished image opens the same menu, including inside nested or regex-rendered HTML through composed-path event delegation
 - Regeneration lifecycle ownership keyed by both the stable inline-image job and its fresh per-attempt generation ID, so current/original/edited retries retire Studio and Quick Create progress together instead of leaving either surface stuck on **Stop generation**
 - Automatic prompt-context cleanup that leaves stored chat and visible images untouched while replacing completed Studio figures, appended Lumiverse image Markdown, and embedded image data with short semantic breadcrumbs; only the six newest illustration descriptions remain in outbound history
-- Character visual bindings stored inside Library folders: a checkpoint, base positive, base negative, and saved LoRA stack follow the character across every conversation, appear as a toggleable `Visuals: character` pill above the positive prompt, initialize the editable desktop/mobile model and stack controls when that character becomes active, and file that character's Studio outputs automatically only while the pill is enabled; disabled visuals leave new outputs Unfiled
-- A dedicated **Chat Visuals** drawer page that keeps persona identity profiles, the active character's Library-backed checkpoint/positive/negative base, and its named or custom LoRA-stack snapshot in one compact place; Lumiverse's native Image Gen persona and character prompt presets can hydrate their matching visual identities, while live link indicators distinguish truly bound configurations from unsaved edits
+- Character visual canon stored inside Library folders: the identity checkpoint, base positive/negative prompts, and LoRA stack now own named Looks with inheritable outfit/negative/checkpoint/LoRA overrides, aliases, triggers, reference/init image, thumbnail, and notes; `look="formal"` selects one explicitly and prose can infer a named look from its aliases
+- A Lumiverse-native **Visuals** character-editor tab (on hosts with PR #268 surfaces) showing `Visuals ✓ · N looks`, Look cards, activation, and the complete Look editor without leaving the character workflow
+- One dedicated **Visuals** drawer page with Character, Persona, and Lore tabs. Character and persona identities retain their existing binding editors, while Lore layers visual metadata onto native world-book entries without registering a second competing sidebar tab
+- The **Lore** tab prioritizes entries activated in the current chat, then lists the remaining native lore entries. Positive/negative tags, exact checkpoint overrides, LoRA stacks, preferred aspects, enablement, and bounded reference-image conditioning feed tagged generation; aliases are explicitly identified as descriptive metadata because native lore keys control activation
 - Prompt/profile macros for HTML and authored presets: `{{char_profile}}`, `{{user_profile}}`, `{{char_base}}`, `{{persona_base}}`, `{{swarm_negative}}`, `{{swarm_preset}}`, `{{swarm_checkpoint}}`, `{{swarm_aspect}}`, and `{{swarm_image_protocol}}`
 - Auto-fit full-screen inspection with non-overlapping actions and manual zoom controls
 - SwarmUI img2img through Lumiverse's provider, with local image selection, current-output selection, and a Creativity/denoise control
 - A paged, chat-scoped two-column history with compact square mobile previews and per-image Reuse / Use as init / Append to chat / Delete menus
-- A fullscreen searchable Lumiverse output library with an anchored `+ folder` control, horizontally scrolling folder strip, contextual Select/Clear page, Shift-range selection, conditional batch actions, collapsible chat-visual profiles, and a sticky current-folder/search/pagination rail; pages hold 30 images on desktop and 15 on mobile, and selection updates in place without snapping the mobile gallery back to the top
-- iPhone-safe Output Library navigation with notch/browser-chrome padding, a non-shrinking 44px header close target, intrinsic-width containment for the long title row, and a redundant mobile Close action in the persistent bottom rail
+- A folder-first fullscreen output Library landing page with isolated preview cards for All, Unfiled, Favorites, and custom/character folders; opening a folder replaces the landing with its paged image grid and an above-grid folder toolbar
+- A true sibling **Prompts & visuals** modal with roomy base prompt fields, checkpoint/LoRA controls, and an extensible named-Looks card region instead of the former inline details strip
+- iPhone-safe Output Library navigation with notch/browser-chrome padding, a non-shrinking 44px header close target, two-column folder and image grids, and a full-width responsive visual editor
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
@@ -78,6 +81,7 @@ the host application and any authenticated remote access.
    - `images` — the extension-owned output gallery
    - `chats` — tags outputs to the active chat and character
    - `characters` — reads the active character's portable Character LoRA base tags and avatar
+   - `world_books` — reads activated lore identities and saves Visual Lorebook data in lore-entry extensions
    - `personas` — resolves the active persona avatar and stores its selected Chat Visuals profile
    - `chat_mutation` — explicitly appends a selected output to the active chat
    - `interceptor` — optionally injects the image-tag protocol before LLM generation and cleans extension markup from prompt history
@@ -155,6 +159,7 @@ The tag body is passed to SwarmUI as scene prompt content. Native Swarm syntax i
   slot="instagram-photo"
   aspect="4:3"
   character="active"
+  look="formal"
   persona="active"
   alt="A candid city-street photo"
 >
@@ -164,7 +169,7 @@ interaction: character 1 turns toward character 2; distinct hands and silhouette
 </swarm-image>
 ```
 
-Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; 3:4 is available for portrait framing. The protocol asks models to reserve 9:16 and 16:9 for layouts explicitly presented as phone or widescreen media. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the character visual positive and negative and adds a no-person/character negative guard. The current Studio LoRA stack remains active by default; the settings toggle above can additionally strip LoRAs matching the character binding from persona-only requests. `persona="active"` opts the active persona's bound visual identity into the request; it defaults to `none`. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request.
+Attributes may instead remain on one line. Ordinary illustrations between prose default to 4:3 when the aspect is omitted; an activated Visual Lorebook identity's preferred aspect wins when the request does not state one. `look="name"` selects an active character Look by ID, display name, or alias; when it is omitted Studio can infer a non-default Look whose alias appears in the scene prose, then falls back to the character's active Look. `character="active"` is the default and may be omitted. `character="none"` is an explicit scenery/object/establishing-shot mode: it skips the character visual positive and negative and adds a no-person/character negative guard while still allowing activated visual lore to direct the location/object. The current Studio LoRA stack remains active by default; the settings toggle above can additionally strip LoRAs matching the character binding from persona-only requests. `persona="active"` opts the active persona's bound visual identity into the request; it defaults to `none`. `request="generate"` is deliberately required for streamed requests so a model mentioning a bare `<swarm-image>` token in visible prose cannot consume the later real request.
 
 The current Studio connection, checkpoint, sampler, scheduler, workflow, LoRA stack, negative prompt, and enabled preset stack form the generation profile. Enabled presets are applied exactly once as native `<preset:exact saved name>` directives inside the complete composed positive prompt for both manual and tagged jobs; Studio removes the conflicting duplicate raw preset field before submission. This keeps the user's scene prompt, character/persona visual layers, and inherited LoRA triggers alongside Swarm's saved preset behavior. A literal `{{swarm_preset}}` resolves to the same directive list without adding it twice, and scene-specific native preset directives are preserved alongside it. Init-image bytes and denoise are deliberately excluded from automatic tagged generations. An enabled character-folder visual binding contributes its base positive, base negative, and saved LoRA stack to both manual and tagged generation. Native Character LoRA `base_tags` remain a fallback when a binding has no positive base; the separately bound native Character LoRA is never injected.
 
@@ -186,7 +191,7 @@ Profile macros resolve to raw values so authored HTML and display regexes remain
 - `{{swarm_checkpoint}}` / `{{swarm_aspect}}` — current profile details
 - `{{last_genned}}` — latest successful Studio output URL
 
-The macro reference is collapsed beneath the editable protocol in **Studio settings → Generation**. Character and persona visuals live on the drawer's **Chat Visuals** page, with character output organization still backed by Output Library.
+The macro reference is collapsed beneath the editable protocol in **Studio settings → Generation**. Character, persona, and lore visuals live on the drawer's unified **Visuals** page, with character output organization still backed by Output Library.
 
 ## Metadata behavior
 
@@ -214,7 +219,10 @@ operation, so Studio never mutates model files behind SwarmUI's back.
 Saved LoRA stacks and recent generation details are kept in Lumiverse's scoped
 per-user extension storage. Generation details are associated with the
 persisted Lumiverse image ID so History can show the prompts used by recent
-Swarm Studio outputs.
+Swarm Studio outputs. Opening the inspector, reusing parameters, or choosing
+**Use as init** re-queries the output's verified Swarm directory and exact file
+entry, so resolved prompts and settings come from the same embedded metadata
+path used by original-file downloads instead of the unresolved submitted text.
 
 The stack toolbar can export a portable Studio JSON file. **Apply to Lumi**
 merges the enabled stack into Lumiverse Image Gen's saved LoRA presets and

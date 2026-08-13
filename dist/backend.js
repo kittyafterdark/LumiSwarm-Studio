@@ -12,6 +12,7 @@ const TAGGED_IMAGE_JOBS_FILE = "tagged-image-jobs.json";
 const STUDIO_GENERATION_PROFILE_FILE = "studio-generation-profile.json";
 const CHARACTER_BASE_TAGS_FILE = "character-base-tags.json";
 const PERSONA_VISUAL_PRESETS_FILE = "persona-visual-presets.json";
+const VISUAL_LORE_NAMESPACE = "swarm_studio_visuals";
 const STACK_PRESET_LIMIT = 40;
 const PERSONA_VISUAL_PRESET_LIMIT = 80;
 const GENERATION_RECORD_LIMIT = 100;
@@ -51,6 +52,7 @@ Place this exact XML-like request wherever an illustration selected under the im
   slot="short-stable-name"
   aspect="4:3"
   character="active"
+  look="default"
   persona="none"
   alt="brief accessible description"
 >
@@ -61,7 +63,7 @@ LOCAL GENERATION
 The tag is executed by the user's configured local SwarmUI installation and local hardware. You are not claiming to render the image yourself, calling a remote image service, or embedding a pre-existing web image. Follow the conversation's actually applicable instructions, but do not invent or quote a remote image provider's policy, capability restriction, quota, moderation rule, or refusal: no remote image provider is being invoked by this tag. When an illustration is appropriate, emit the request tag and continue the reply naturally; do not apologize that you cannot generate images, ask the user to open another tool, warn that an external image model may refuse, or replace the request with image-search instructions.
 
 IDENTITY AND SUBJECT RULES
-Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the bound character identity; persona="active" selects the bound persona identity. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
+Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the bound character identity; look="formal" selects a named canonical look (omit it to use the active/default look); persona="active" selects the bound persona identity. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
 
 Write compact Danbooru-style scene tags and follow the active composition mode below. Use short natural-language clauses only when tags cannot disambiguate an interaction, unusual viewpoint, or spatial relationship. Do not restate display names or write a literary summary.
 
@@ -76,6 +78,7 @@ When an illustration should appear in the reply, place this exact lightweight XM
   slot="short-stable-name"
   aspect="4:3"
   character="active"
+  look="default"
   persona="none"
   alt="brief accessible description"
 >
@@ -83,7 +86,7 @@ brief visual intent grounded in the current scene</swarm-image>
 
 The request="parse" marker is required. The tag body is a concise visual brief for a separate local parser model, not a finished diffusion prompt and not prose for the user. Include the visible subjects, action, expression, framing, environment, and lighting without copying biographies, mannerisms, lore, or display names into the body. The local parser receives the active Studio identities, presets, checkpoint guidance, and negative prompt separately and expands this request after the reply finishes.
 
-Use character="active" only when the active chat character appears and character="none" otherwise. Use persona="active" only when the active persona appears and persona="none" otherwise. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait). Preserve the request in the exact place where the finished image belongs. Do not quote, explain, demonstrate, or wrap it in Markdown fences.`;
+Use character="active" only when the active chat character appears and character="none" otherwise. Use look="saved look name" when prose clearly selects a canonical character look; otherwise omit look so the active/default look is inherited. Use persona="active" only when the active persona appears and persona="none" otherwise. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait). Preserve the request in the exact place where the finished image belongs. Do not quote, explain, demonstrate, or wrap it in Markdown fences.`;
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -1164,6 +1167,107 @@ async function chatVisualsState(userId, currentStack) {
         studioStackCustom: suppliedStack.length > 0 && !matchedStack
     };
 }
+function cleanVisualWords(value, limit = 32) {
+    const values = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,\n|]+/) : [];
+    const seen = new Set();
+    return values.flatMap((raw)=>{
+        const word = asString(raw).replace(/\0/g, "").trim().slice(0, 120);
+        const key = word.toLowerCase();
+        if (!word || seen.has(key)) return [];
+        seen.add(key);
+        return [
+            word
+        ];
+    }).slice(0, limit);
+}
+function defaultCharacterLook() {
+    return {
+        id: "default",
+        name: "Default",
+        aliases: [
+            "default",
+            "usual",
+            "normal"
+        ],
+        outfitPrompt: "",
+        negativePrompt: "",
+        checkpoint: "",
+        stackPresetId: "",
+        stackSnapshot: [],
+        referenceImageId: "",
+        referenceImageUrl: "",
+        thumbnailImageId: "",
+        thumbnailUrl: "",
+        triggerWords: [],
+        notes: "",
+        updatedAt: Date.now()
+    };
+}
+function cleanCharacterLooks(value) {
+    const source = Array.isArray(value) ? value.slice(0, 48) : [];
+    const seen = new Set();
+    const looks = source.flatMap((raw)=>{
+        const item = asRecord(raw);
+        const requestedId = asString(item.id).trim().slice(0, 120);
+        const name = asString(item.name).trim().slice(0, 80);
+        if (!name) return [];
+        const id = requestedId || (name.toLowerCase() === "default" ? "default" : crypto.randomUUID());
+        if (seen.has(id)) return [];
+        seen.add(id);
+        return [
+            {
+                id,
+                name,
+                aliases: cleanVisualWords(item.aliases),
+                outfitPrompt: asString(item.outfitPrompt).trim().slice(0, 12_000),
+                negativePrompt: asString(item.negativePrompt).trim().slice(0, 12_000),
+                checkpoint: asString(item.checkpoint).trim().slice(0, 500),
+                stackPresetId: asString(item.stackPresetId).trim().slice(0, 200),
+                stackSnapshot: cleanStackPresetItems(item.stackSnapshot),
+                referenceImageId: asString(item.referenceImageId).trim().slice(0, 200),
+                referenceImageUrl: asString(item.referenceImageUrl).trim().slice(0, 2_000),
+                thumbnailImageId: asString(item.thumbnailImageId).trim().slice(0, 200),
+                thumbnailUrl: asString(item.thumbnailUrl).trim().slice(0, 2_000),
+                triggerWords: cleanVisualWords(item.triggerWords),
+                notes: asString(item.notes).trim().slice(0, 8_000),
+                updatedAt: Number(item.updatedAt) || Date.now()
+            }
+        ];
+    });
+    if (!looks.some((look)=>look.id === "default")) looks.unshift(defaultCharacterLook());
+    return looks;
+}
+function cleanVisualLoreIdentity(value) {
+    const input = asRecord(value);
+    const entityTypes = [
+        "character",
+        "location",
+        "object",
+        "creature",
+        "outfit",
+        "style"
+    ];
+    const entityType = entityTypes.includes(input.entityType) ? input.entityType : "location";
+    const hasVisualData = input.enabled === true || cleanVisualWords(input.aliases).length > 0 || Boolean(asString(input.positivePrompt).trim()) || Boolean(asString(input.referenceImageId).trim());
+    if (!hasVisualData) return null;
+    return {
+        enabled: asBoolean(input.enabled, true),
+        entityType,
+        aliases: cleanVisualWords(input.aliases, 64),
+        positivePrompt: asString(input.positivePrompt).trim().slice(0, 12_000),
+        negativePrompt: asString(input.negativePrompt).trim().slice(0, 12_000),
+        checkpointFamily: asString(input.checkpointFamily).trim().slice(0, 120),
+        checkpoint: asString(input.checkpoint).trim().slice(0, 500),
+        stackPresetId: asString(input.stackPresetId).trim().slice(0, 200),
+        stackSnapshot: cleanStackPresetItems(input.stackSnapshot),
+        referenceImageId: asString(input.referenceImageId).trim().slice(0, 200),
+        referenceImageUrl: asString(input.referenceImageUrl).trim().slice(0, 2_000),
+        preferredAspect: cleanAspect(input.preferredAspect) || "",
+        recipe: asRecord(input.recipe),
+        notes: asString(input.notes).trim().slice(0, 8_000),
+        updatedAt: Number(input.updatedAt) || Date.now()
+    };
+}
 function cleanOutputFolders(value) {
     if (!Array.isArray(value)) {
         return [
@@ -1184,6 +1288,8 @@ function cleanOutputFolders(value) {
         if (!id || !name || seen.has(id)) return [];
         const rawBinding = asRecord(item.binding);
         const characterId = asString(rawBinding.characterId).trim().slice(0, 200);
+        const looks = cleanCharacterLooks(rawBinding.looks);
+        const requestedActiveLookId = asString(rawBinding.activeLookId).trim();
         const binding = (rawBinding.type === "character" || rawBinding.type === "chat") && characterId ? {
             type: "character",
             characterId,
@@ -1193,7 +1299,9 @@ function cleanOutputFolders(value) {
             stackPresetId: asString(rawBinding.stackPresetId).trim().slice(0, 200),
             stackSnapshot: cleanStackPresetItems(rawBinding.stackSnapshot),
             sourcePresetId: asString(rawBinding.sourcePresetId).trim().slice(0, 200),
-            enabled: asBoolean(rawBinding.enabled, true)
+            enabled: asBoolean(rawBinding.enabled, true),
+            activeLookId: looks.some((look)=>look.id === requestedActiveLookId) ? requestedActiveLookId : "default",
+            looks
         } : null;
         seen.add(id);
         return [
@@ -1293,7 +1401,11 @@ async function createOutputFolder(name, bindingType, userId) {
             stackPresetId: "",
             stackSnapshot: [],
             sourcePresetId: "",
-            enabled: true
+            enabled: true,
+            activeLookId: "default",
+            looks: [
+                defaultCharacterLook()
+            ]
         };
         const legacy = characterId ? folders.find((folder)=>folder.id === `character:${characterId}` && !folder.binding) : null;
         if (legacy) {
@@ -1333,12 +1445,239 @@ async function updateOutputFolderProfile(folderId, value, userId) {
         stackPresetId,
         stackSnapshot: Object.prototype.hasOwnProperty.call(input, "stackSnapshot") ? cleanStackPresetItems(input.stackSnapshot) : folder.binding.stackSnapshot,
         sourcePresetId: Object.prototype.hasOwnProperty.call(input, "sourcePresetId") ? asString(input.sourcePresetId).trim().slice(0, 200) : folder.binding.sourcePresetId,
-        enabled: asBoolean(input.enabled, folder.binding.enabled)
+        enabled: asBoolean(input.enabled, folder.binding.enabled),
+        activeLookId: folder.binding.activeLookId,
+        looks: folder.binding.looks
     };
     folder.updatedAt = Date.now();
     const saved = await persistOutputFolders(folders, userId);
     await refreshContextMacros(userId);
     return saved;
+}
+async function saveCharacterLook(folderId, value, activate, userId) {
+    const folders = await loadOutputFolders(userId);
+    const folder = folders.find((candidate)=>candidate.id === folderId);
+    if (!folder?.binding) throw new Error("Choose a character visual folder first.");
+    const input = asRecord(value);
+    const requestedId = asString(input.id).trim().slice(0, 120);
+    const name = asString(input.name).trim().slice(0, 80);
+    if (!name) throw new Error("Give this character look a name.");
+    const existingIndex = requestedId ? folder.binding.looks.findIndex((look)=>look.id === requestedId) : folder.binding.looks.findIndex((look)=>look.name.toLowerCase() === name.toLowerCase());
+    const id = existingIndex >= 0 ? folder.binding.looks[existingIndex].id : requestedId || (name.toLowerCase() === "default" ? "default" : crypto.randomUUID());
+    const stackPresetId = asString(input.stackPresetId).trim().slice(0, 200);
+    const stackPreset = stackPresetId ? (await loadStackPresets(userId)).find((preset)=>preset.id === stackPresetId) : null;
+    if (stackPresetId && !stackPreset) throw new Error("That saved LoRA stack no longer exists.");
+    const look = cleanCharacterLooks([
+        {
+            ...input,
+            id,
+            name,
+            updatedAt: Date.now()
+        }
+    ]).find((candidate)=>candidate.id === id);
+    if (!look) throw new Error("That character look could not be normalized.");
+    look.stackPresetId = stackPreset?.id || "";
+    look.stackSnapshot = stackPreset?.items || cleanStackPresetItems(input.stackSnapshot);
+    if (existingIndex >= 0) folder.binding.looks.splice(existingIndex, 1);
+    folder.binding.looks.push(look);
+    folder.binding.looks = cleanCharacterLooks(folder.binding.looks);
+    if (activate) folder.binding.activeLookId = look.id;
+    folder.updatedAt = Date.now();
+    const saved = await persistOutputFolders(folders, userId);
+    await refreshContextMacros(userId);
+    return saved;
+}
+async function selectCharacterLook(folderId, lookId, userId) {
+    const folders = await loadOutputFolders(userId);
+    const folder = folders.find((candidate)=>candidate.id === folderId);
+    if (!folder?.binding) throw new Error("Choose a character visual folder first.");
+    if (!folder.binding.looks.some((look)=>look.id === lookId)) throw new Error("That character look no longer exists.");
+    folder.binding.activeLookId = lookId;
+    folder.updatedAt = Date.now();
+    const saved = await persistOutputFolders(folders, userId);
+    await refreshContextMacros(userId);
+    return saved;
+}
+async function deleteCharacterLook(folderId, lookId, userId) {
+    if (lookId === "default") throw new Error("Default is the character's permanent fallback look.");
+    const folders = await loadOutputFolders(userId);
+    const folder = folders.find((candidate)=>candidate.id === folderId);
+    if (!folder?.binding) throw new Error("Choose a character visual folder first.");
+    folder.binding.looks = cleanCharacterLooks(folder.binding.looks.filter((look)=>look.id !== lookId));
+    if (folder.binding.activeLookId === lookId) folder.binding.activeLookId = "default";
+    folder.updatedAt = Date.now();
+    const saved = await persistOutputFolders(folders, userId);
+    await refreshContextMacros(userId);
+    return saved;
+}
+async function characterVisualCanonState(characterId, userId) {
+    if (!characterId) return {
+        character: null,
+        folder: null,
+        looks: [],
+        activeLookId: "default"
+    };
+    const character = spindle.permissions.has("characters") ? await spindle.characters.get(characterId, userId) : null;
+    const folders = await loadOutputFolders(userId);
+    const folder = folders.find((candidate)=>candidate.binding?.characterId === characterId) || null;
+    const stackPresets = await loadStackPresets(userId);
+    let models = [];
+    if (spindle.permissions.has("image_gen")) {
+        try {
+            const profile = await loadStudioGenerationProfile(userId);
+            const connection = await connectionForTaggedProfile(profile, userId);
+            models = (await spindle.imageGen.getModels(connection.id, userId)).map((model)=>({
+                    id: asString(model?.id),
+                    label: asString(model?.label) || asString(model?.id)
+                })).filter((model)=>model.id);
+        } catch  {
+            models = [];
+        }
+    }
+    return {
+        character: character ? {
+            id: asString(character.id),
+            name: asString(character.name),
+            imageId: asString(character.image_id)
+        } : null,
+        folder,
+        looks: folder?.binding?.looks || [],
+        activeLookId: folder?.binding?.activeLookId || "default",
+        stackPresets,
+        models,
+        badge: folder?.binding ? `Visuals ✓ · ${folder.binding.looks.length} look${folder.binding.looks.length === 1 ? "" : "s"}` : "Add visuals"
+    };
+}
+async function ensureCharacterVisualFolderForId(characterId, userId) {
+    if (!characterId) throw new Error("Choose a character first.");
+    const folders = await loadOutputFolders(userId);
+    const existing = folders.find((candidate)=>candidate.binding?.characterId === characterId);
+    if (existing?.binding) return existing;
+    if (!spindle.permissions.has("characters")) throw new Error("Grant Characters permission to create a visual canon.");
+    const character = await spindle.characters.get(characterId, userId);
+    if (!character?.id) throw new Error("That character no longer exists.");
+    const tags = asString((await characterBaseTagState(characterId, userId)).tags).trim();
+    const folder = {
+        id: `character:${characterId}`,
+        name: asString(character.name).trim().slice(0, 80) || "Character visuals",
+        imageIds: existing?.imageIds || [],
+        binding: {
+            type: "character",
+            characterId,
+            positivePrompt: tags,
+            negativePrompt: "",
+            checkpoint: "",
+            stackPresetId: "",
+            stackSnapshot: [],
+            sourcePresetId: "",
+            enabled: true,
+            activeLookId: "default",
+            looks: [
+                defaultCharacterLook()
+            ]
+        },
+        updatedAt: Date.now()
+    };
+    const next = folders.filter((candidate)=>candidate.id !== folder.id);
+    next.unshift(folder);
+    await persistOutputFolders(next, userId);
+    return folder;
+}
+async function visualLoreState(bookId, entryId, userId) {
+    if (!spindle.permissions.has("world_books")) {
+        return {
+            available: false,
+            books: [],
+            entries: [],
+            selected: null
+        };
+    }
+    const listedBooks = await spindle.world_books.list({
+        limit: 200,
+        offset: 0
+    }, userId);
+    const books = Array.isArray(listedBooks?.data) ? listedBooks.data : [];
+    const selectedBookId = bookId || asString(books[0]?.id);
+    const listedEntries = selectedBookId ? await spindle.world_books.entries.list(selectedBookId, {
+        limit: 200,
+        offset: 0
+    }, userId) : {
+        data: []
+    };
+    const entries = Array.isArray(listedEntries?.data) ? listedEntries.data : [];
+    const selectedEntryId = entryId || asString(entries[0]?.id);
+    const selectedEntry = entries.find((entry)=>asString(entry?.id) === selectedEntryId) || null;
+    const identity = selectedEntry ? cleanVisualLoreIdentity(asRecord(selectedEntry.extensions)[VISUAL_LORE_NAMESPACE]) : null;
+    const activatedEntryIds = new Set();
+    if (spindle.permissions.has("chats")) {
+        try {
+            const activeChat = await spindle.chats.getActive(userId);
+            if (activeChat?.id) {
+                const activated = await spindle.world_books.getActivated(activeChat.id, userId);
+                for (const entry of Array.isArray(activated) ? activated : []){
+                    const id = asString(entry?.id || entry?.entry_id).trim();
+                    if (id) activatedEntryIds.add(id);
+                }
+            }
+        } catch  {}
+    }
+    const stackPresets = await loadStackPresets(userId);
+    let models = [];
+    if (spindle.permissions.has("image_gen")) {
+        try {
+            const profile = await loadStudioGenerationProfile(userId);
+            const connection = await connectionForTaggedProfile(profile, userId);
+            models = (await spindle.imageGen.getModels(connection.id, userId)).map((model)=>({
+                    id: asString(model?.id),
+                    label: asString(model?.label) || asString(model?.id)
+                })).filter((model)=>model.id);
+        } catch  {
+            models = [];
+        }
+    }
+    return {
+        available: true,
+        books: books.map((book)=>({
+                id: asString(book?.id),
+                name: asString(book?.name)
+            })),
+        bookId: selectedBookId,
+        entries: entries.map((entry)=>({
+                id: asString(entry?.id),
+                comment: asString(entry?.comment),
+                keys: stringList(entry?.key, 64),
+                hasVisualIdentity: Boolean(cleanVisualLoreIdentity(asRecord(entry?.extensions)[VISUAL_LORE_NAMESPACE])),
+                activated: activatedEntryIds.has(asString(entry?.id))
+            })),
+        entryId: selectedEntryId,
+        stackPresets,
+        models,
+        selected: selectedEntry ? {
+            id: asString(selectedEntry.id),
+            comment: asString(selectedEntry.comment),
+            keys: stringList(selectedEntry.key, 64),
+            identity
+        } : null
+    };
+}
+async function saveVisualLoreIdentity(bookId, entryId, value, userId) {
+    if (!spindle.permissions.has("world_books")) throw new Error("Grant World Books permission to edit Visual Lorebook identities.");
+    const entry = await spindle.world_books.entries.get(entryId, userId);
+    if (!entry || asString(entry.world_book_id) !== bookId) throw new Error("That lorebook entry no longer exists.");
+    const identity = cleanVisualLoreIdentity({
+        ...asRecord(value),
+        enabled: asRecord(value).enabled !== false,
+        updatedAt: Date.now()
+    });
+    const extensions = {
+        ...asRecord(entry.extensions)
+    };
+    if (identity) extensions[VISUAL_LORE_NAMESPACE] = identity;
+    else delete extensions[VISUAL_LORE_NAMESPACE];
+    await spindle.world_books.entries.update(entryId, {
+        extensions
+    }, userId);
+    return visualLoreState(bookId, entryId, userId);
 }
 async function deleteOutputFolder(folderId, userId) {
     if (folderId === FAVORITES_FOLDER_ID) throw new Error("Favorites is a permanent Studio folder.");
@@ -1558,6 +1897,100 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
         spindle.log.warn(`Could not read SwarmUI generation metadata: ${error instanceof Error ? error.message : String(error)}`);
         return fallback;
     }
+}
+async function loadSwarmPathGenerationMetadata(connection, token, swarmPath, userId) {
+    if (!spindle.permissions.has("cors_proxy")) throw new Error("Grant the CORS Proxy permission to read original SwarmUI metadata.");
+    const normalized = swarmPath.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!normalized || normalized.split("/").some((segment)=>!segment || segment === "." || segment === "..")) {
+        throw new Error("This output does not have a safe SwarmUI metadata path.");
+    }
+    const slash = normalized.lastIndexOf("/");
+    const directory = slash >= 0 ? normalized.slice(0, slash) : "";
+    const baseUrl = normalizeBaseUrl(connection.api_url);
+    const sessionId = await getSession(connection, token, userId);
+    const listing = await corsJson(`${baseUrl}/API/ListImages`, {
+        session_id: sessionId,
+        path: directory,
+        depth: 1,
+        sortBy: "Date",
+        sortReverse: false
+    }, token, "exact output metadata request");
+    const files = Array.isArray(listing.files) ? listing.files : [];
+    const matched = files.map(asRecord).find((file)=>{
+        const src = asString(file.src).replace(/\\/g, "/").replace(/^\/+/, "");
+        return src === normalized || src.endsWith(`/${normalized}`) || normalized.endsWith(`/${src}`);
+    });
+    if (!matched) throw new Error("SwarmUI no longer lists the exact saved output path.");
+    const metadata = parseSwarmImageMetadata(matched.metadata);
+    if (!metadata) throw new Error("The original SwarmUI output has no readable generation metadata.");
+    const params = asRecord(metadata.sui_image_params);
+    const extra = asRecord(metadata.sui_extra_data);
+    const read = (...keys)=>metadataString(params, ...keys) || metadataString(extra, ...keys);
+    const number = (...keys)=>metadataNumber(params, ...keys) ?? metadataNumber(extra, ...keys);
+    const parameters = {};
+    const parameterValues = [
+        [
+            "width",
+            number("width")
+        ],
+        [
+            "height",
+            number("height")
+        ],
+        [
+            "steps",
+            number("steps")
+        ],
+        [
+            "cfgScale",
+            number("cfgscale", "cfg_scale", "cfg")
+        ],
+        [
+            "seed",
+            number("seed")
+        ],
+        [
+            "sampler",
+            read("sampler")
+        ],
+        [
+            "scheduler",
+            read("scheduler")
+        ],
+        [
+            "vae",
+            read("vae")
+        ]
+    ];
+    for (const [key, value] of parameterValues)if (value !== null && value !== "") parameters[key] = value;
+    const metadataList = (value, limit)=>Array.isArray(value) ? stringList(value, limit) : asString(value).split(/[,|]+/).map((item)=>item.trim()).filter(Boolean).slice(0, limit);
+    const loraNames = metadataList(params.loras, 128);
+    const loraWeights = Array.isArray(params.loraweights) ? params.loraweights.map(Number) : metadataList(params.loraweights, 128).map(Number);
+    if (loraNames.length) {
+        parameters.loras = loraNames;
+        parameters.loraWeights = loraNames.map((_name, index)=>Number.isFinite(loraWeights[index]) ? loraWeights[index] : 1);
+    }
+    const presetValue = extra.presets_used ?? extra.presetsused;
+    const presets = Array.isArray(presetValue) ? stringList(presetValue, 20) : asString(presetValue).split(/[,|]+/).map((item)=>item.trim()).filter(Boolean).slice(0, 20);
+    return {
+        metadataSource: "swarm-path",
+        resolvedPrompt: read("prompt", "original_prompt", "originalprompt"),
+        resolvedNegativePrompt: read("negativeprompt", "negative_prompt", "original_negativeprompt", "original_negative_prompt"),
+        model: read("model", "modelname") || asString(connection.model),
+        parameters,
+        loras: loraNames.map((name, index)=>({
+                name,
+                weight: Number.isFinite(loraWeights[index]) ? loraWeights[index] : 1
+            })),
+        presets,
+        timing: {
+            prep: metadataString(extra, "prep_time", "preptime"),
+            generation: metadataString(extra, "generation_time", "generationtime"),
+            source: "swarm"
+        },
+        swarmPath: asString(matched.src) || normalized,
+        swarmPathVerified: true
+    };
 }
 function generationKey(userId, clientJobId) {
     return `${userId || "scoped"}\0${clientJobId}`;
@@ -2009,10 +2442,13 @@ function buildSwarmImageProtocol(profile, context = null, automation = cleanTagA
     const presetTokens = studioPresetTokens(profile);
     const presetGuidance = presetTokens.length ? `The active Studio preset stack is force-applied once as ${presetTokens.join(", ")}. Do not repeat those directives in the tag. The {{swarm_preset}} macro expands to that exact directive list for authored prompts and templates. You may add another <preset:exact saved preset name> only when the scene specifically needs a different saved preset.` : `No Studio presets are currently active. The {{swarm_preset}} macro is therefore empty. You may use <preset:exact saved preset name> only when you know the exact saved SwarmUI preset needed by the scene; do not invent placeholder preset names.`;
     const characterTags = asString(context?.characterTags).trim().slice(0, 8_000);
+    const characterLooks = Array.isArray(context?.characterLooks) ? context.characterLooks : [];
     const personaTags = asString(context?.personaTags).trim().slice(0, 8_000);
+    const lookGuidance = characterLooks.length ? `CHARACTER LOOKS — select with look="name" when the current prose clearly calls for one; otherwise omit look to inherit the active look:\n${characterLooks.map((look)=>`- ${look.name}${look.active ? " (active)" : ""}${look.aliases.length ? ` — aliases: ${look.aliases.join(", ")}` : ""}${look.notes ? ` — ${look.notes.slice(0, 240)}` : ""}`).join("\n")}` : "CHARACTER LOOKS — no named looks have been saved; omit the look attribute.";
     const identityGuidance = [
         characterTags ? automation.autoPrintCharacterPositive ? `CHARACTER 1 IDENTITY — automatically prepended for character="active"; do not repeat it:\n${characterTags}` : `CHARACTER 1 IDENTITY — available for character="active", but not automatically prepended. Select only the concrete appearance tags needed for the visible subject(s) and include those tags in the request body; this block may contain multiple NPC definitions:\n${characterTags}` : `CHARACTER 1 IDENTITY — no active character visual block is configured. Use concrete appearance descriptors from context, never the display name alone.`,
-        personaTags ? `CHARACTER 2 / PERSONA IDENTITY — injected only for persona="active"; do not repeat it:\n${personaTags}` : `CHARACTER 2 / PERSONA IDENTITY — no active persona visual profile is bound. Leave persona="none" unless concrete appearance descriptors are available in context.`
+        personaTags ? `CHARACTER 2 / PERSONA IDENTITY — injected only for persona="active"; do not repeat it:\n${personaTags}` : `CHARACTER 2 / PERSONA IDENTITY — no active persona visual profile is bound. Leave persona="none" unless concrete appearance descriptors are available in context.`,
+        lookGuidance
     ].join("\n\n");
     const userOnlyStackGuidance = automation.stripUserOnlyLoraStack ? `USER-ONLY LORA BEHAVIOR\nWhen character="none" and persona="active", Swarm Studio removes matching character-bound LoRAs from the inherited stack.` : `USER-ONLY LORA BEHAVIOR\nThe current Studio LoRA stack remains active when character="none" and persona="active". Choose request tags with that inherited stack in mind.`;
     const model = asString(asRecord(profile?.input).model);
@@ -2125,6 +2561,13 @@ async function refreshContextMacros(userId) {
     const protocolContext = {
         characterId,
         characterTags,
+        characterLooks: (visualFolder?.binding?.looks || []).map((look)=>({
+                id: look.id,
+                name: look.name,
+                aliases: look.aliases,
+                active: look.id === visualFolder?.binding?.activeLookId,
+                notes: look.notes
+            })),
         personaId: asString(persona?.id),
         personaName: asString(persona?.name),
         personaTags
@@ -2183,7 +2626,7 @@ function parseSwarmImageTagsByRequest(content, request) {
 function parserCompletionInstruction(profile, context, automation) {
     return `You are Swarm Studio's local image-request parser. Convert every request="parse" tag in the user message into exactly one complete request="generate" tag.
 
-Return only the completed tags, in the same order, with no prose or Markdown fences. Preserve each tag's slot, aspect, character, persona, and alt attributes exactly. Expand only the body into a compact, checkpoint-appropriate diffusion prompt. Do not copy biographies, personality, backstory, or conversational display names. Do not invent additional images or omit an input request.
+Return only the completed tags, in the same order, with no prose or Markdown fences. Preserve each tag's slot, aspect, character, look, persona, and alt attributes exactly. Expand only the body into a compact, checkpoint-appropriate diffusion prompt. Do not copy biographies, personality, backstory, or conversational display names. Do not invent additional images or omit an input request.
 
 The completed tags must follow this Studio protocol and its live identity/preset guidance:
 
@@ -2244,6 +2687,7 @@ async function completeParserImageRequests(payload, userId) {
             completed.attrs.slot = asString(request.attrs.slot);
             completed.attrs.aspect = asString(request.attrs.aspect);
             completed.attrs.character = asString(request.attrs.character);
+            completed.attrs.look = asString(request.attrs.look);
             completed.attrs.persona = asString(request.attrs.persona);
             completed.attrs.alt = asString(request.attrs.alt);
             const replacement = `<swarm-image
@@ -2251,6 +2695,7 @@ async function completeParserImageRequests(payload, userId) {
   slot="${completed.attrs.slot.replace(/"/g, "&quot;")}"
   aspect="${(cleanAspect(completed.attrs.aspect) || "4:3").replace(/"/g, "")}"
   character="${completed.attrs.character === "none" ? "none" : "active"}"
+  ${completed.attrs.look ? `look="${completed.attrs.look.replace(/"/g, "&quot;")}"` : ""}
   persona="${completed.attrs.persona === "active" ? "active" : "none"}"
   alt="${completed.attrs.alt.replace(/"/g, "&quot;")}"
 >
@@ -2353,13 +2798,68 @@ function applyStudioPresetLayer(scenePrompt, profile) {
     if (missing.length) prompt = `${missing.join(", ")}, ${prompt}`;
     return prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
 }
-async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, includePersona = false, automation = cleanTagAutomationConfig(null), userId) {
+async function resolveVisualReferenceImage(referenceImageId, referenceImageUrl, userId) {
+    let source = "";
+    if (referenceImageId && spindle.permissions.has("images")) {
+        const image = await spindle.images.get(referenceImageId, {
+            onlyOwned: true,
+            specificity: "sm",
+            userId
+        });
+        source = asString(image?.url).trim();
+    }
+    if (!source) source = asString(referenceImageUrl).trim();
+    const embedded = source.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,([a-z0-9+/=]+)$/i);
+    if (embedded) {
+        return embedded[2].length <= 7_500_000 ? {
+            data: embedded[2],
+            mimeType: embedded[1].toLowerCase().replace("image/jpg", "image/jpeg")
+        } : null;
+    }
+    if (!source || !spindle.permissions.has("cors_proxy")) return null;
+    if (!/^https?:\/\//i.test(source) && !source.startsWith("/api/")) return null;
+    const response = await spindle.cors(source, {
+        method: "GET",
+        headers: {
+            "Accept": "image/jpeg,image/png,image/webp,image/*"
+        },
+        responseType: "arraybuffer",
+        mediaType: "image"
+    });
+    if (Number(response?.status) < 200 || Number(response?.status) >= 300 || response?.encoding !== "base64") return null;
+    const mimeType = headerValue(response.headers, "content-type").split(";")[0].trim().toLowerCase().replace("image/jpg", "image/jpeg");
+    if (!new Set([
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    ]).has(mimeType)) return null;
+    const data = String(response.body || "");
+    return data && data.length <= 7_500_000 ? {
+        data,
+        mimeType
+    } : null;
+}
+async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, includePersona = false, automation = cleanTagAutomationConfig(null), requestedLook = "", userId) {
     const chat = spindle.permissions.has("chats") ? await spindle.chats.get(chatId, userId) : null;
     const characterId = asString(chat?.character_id);
     const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.type === "character" && folder.binding.characterId === characterId && folder.binding.enabled);
     const stackPresets = await loadStackPresets(userId);
     const savedStack = visualFolder?.binding?.stackPresetId ? stackPresets.find((preset)=>preset.id === visualFolder.binding?.stackPresetId)?.items || [] : [];
     const visualStack = savedStack.length ? savedStack : visualFolder?.binding?.stackSnapshot || [];
+    const looks = visualFolder?.binding?.looks || [];
+    const lookQuery = requestedLook.trim().toLowerCase();
+    const sceneLower = scenePrompt.toLowerCase();
+    const matchesLook = (look)=>{
+        const signals = [
+            look.id,
+            look.name,
+            ...look.aliases
+        ].map((value)=>value.trim().toLowerCase()).filter(Boolean);
+        return lookQuery ? signals.includes(lookQuery) : signals.some((signal)=>signal !== "default" && new RegExp(`(?:^|[^a-z0-9])${signal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^a-z0-9])`, "i").test(sceneLower));
+    };
+    const activeLook = includeCharacter ? looks.find(matchesLook) || looks.find((look)=>look.id === visualFolder?.binding?.activeLookId) || looks.find((look)=>look.id === "default") || null : null;
+    const activeLookStackPreset = activeLook?.stackPresetId ? stackPresets.find((preset)=>preset.id === activeLook.stackPresetId)?.items || [] : [];
+    const lookStack = activeLookStackPreset.length ? activeLookStackPreset : activeLook?.stackSnapshot || [];
     const character = characterId && spindle.permissions.has("characters") ? await spindle.characters.get(characterId, userId) : null;
     const portable = asRecord(asRecord(character?.extensions).lumiverse_image_gen_lora);
     const characterBase = includeCharacter ? (visualFolder?.binding?.positivePrompt || await extensionCharacterBaseTags(characterId, userId) || asString(portable.base_tags)).trim() : "";
@@ -2367,6 +2867,27 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     const personaPresets = persona ? await loadPersonaVisualPresets(userId) : [];
     const personaPreset = activePersonaVisualPreset(persona, personaPresets);
     const personaBase = includePersona ? (personaPreset?.positivePrompt || "").trim() : "";
+    const visualLore = [];
+    if (spindle.permissions.has("world_books") && chatId) {
+        try {
+            const activated = await spindle.world_books.getActivated(chatId, userId);
+            for (const activation of Array.isArray(activated) ? activated.slice(0, 24) : []){
+                const entryId = asString(activation?.id);
+                if (!entryId) continue;
+                const entry = await spindle.world_books.entries.get(entryId, userId);
+                const identity = cleanVisualLoreIdentity(asRecord(entry?.extensions)[VISUAL_LORE_NAMESPACE]);
+                if (identity?.enabled) visualLore.push({
+                    entryId,
+                    identity
+                });
+            }
+        } catch (error) {
+            spindle.log.warn(`Could not resolve Visual Lorebook identities: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    const lorePositive = visualLore.map((item)=>item.identity.positivePrompt).filter(Boolean);
+    const lookPositive = activeLook?.outfitPrompt.trim() || "";
+    const lookTriggers = activeLook?.triggerWords.filter((word)=>!sceneLower.includes(word.toLowerCase())) || [];
     let prompt = scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, characterBase).replace(/\{\{\s*persona_base\s*\}\}/gi, personaBase).trim();
     const contains = (value)=>Boolean(value && prompt.toLowerCase().includes(value.toLowerCase()));
     if (characterBase && personaBase) {
@@ -2389,15 +2910,52 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
             prompt
         ].filter(Boolean).join(", ");
     }
+    for (const layer of [
+        lookPositive,
+        ...lookTriggers,
+        ...lorePositive
+    ]){
+        if (layer && !contains(layer)) prompt = [
+            layer,
+            prompt
+        ].filter(Boolean).join(", ");
+    }
     prompt = prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
+    const loreNegative = visualLore.map((item)=>item.identity.negativePrompt).filter(Boolean);
+    const negativeLayers = [
+        includeCharacter ? visualFolder?.binding?.negativePrompt || "" : includePersona ? "" : NO_CHARACTER_NEGATIVE,
+        activeLook?.negativePrompt || "",
+        ...loreNegative
+    ].filter(Boolean);
+    const mergedStack = new Map();
+    for (const item of [
+        ...visualStack,
+        ...lookStack
+    ])mergedStack.set(item.name.toLowerCase(), item);
+    for (const item of visualLore){
+        const presetItems = item.identity.stackPresetId ? stackPresets.find((preset)=>preset.id === item.identity.stackPresetId)?.items || [] : [];
+        for (const stackItem of presetItems.length ? presetItems : item.identity.stackSnapshot){
+            mergedStack.set(stackItem.name.toLowerCase(), stackItem);
+        }
+    }
     return {
         prompt,
-        negativePrompt: includeCharacter ? visualFolder?.binding?.negativePrompt || "" : includePersona ? "" : NO_CHARACTER_NEGATIVE,
-        checkpoint: includeCharacter ? visualFolder?.binding?.checkpoint || "" : "",
-        stack: includeCharacter ? visualStack : [],
+        negativePrompt: [
+            ...new Set(negativeLayers)
+        ].join(", "),
+        checkpoint: includeCharacter ? activeLook?.checkpoint || visualFolder?.binding?.checkpoint || visualLore.find((item)=>item.identity.checkpoint)?.identity.checkpoint || "" : visualLore.find((item)=>item.identity.checkpoint)?.identity.checkpoint || "",
+        preferredAspect: visualLore.find((item)=>item.identity.preferredAspect)?.identity.preferredAspect || "",
+        stack: includeCharacter || visualLore.length ? [
+            ...mergedStack.values()
+        ] : [],
         excludedLoras: includeCharacter || !automation.stripUserOnlyLoraStack ? [] : visualStack.map((item)=>item.name),
         characterId: includeCharacter ? characterId : "",
-        characterName: includeCharacter ? asString(character?.name).trim() || visualFolder?.name || "" : ""
+        characterName: includeCharacter ? asString(character?.name).trim() || visualFolder?.name || "" : "",
+        lookId: activeLook?.id || "",
+        lookName: activeLook?.name || "",
+        visualLoreEntryIds: visualLore.map((item)=>item.entryId),
+        referenceImageId: activeLook?.referenceImageId || visualLore.find((item)=>item.identity.referenceImageId)?.identity.referenceImageId || "",
+        referenceImageUrl: activeLook?.referenceImageUrl || visualLore.find((item)=>item.identity.referenceImageUrl)?.identity.referenceImageUrl || ""
     };
 }
 async function ensureCharacterOutputFolder(characterId, characterName, imageId, userId) {
@@ -2422,7 +2980,11 @@ async function ensureCharacterOutputFolder(characterId, characterName, imageId, 
                 stackPresetId: "",
                 stackSnapshot: [],
                 sourcePresetId: "",
-                enabled: true
+                enabled: true,
+                activeLookId: "default",
+                looks: [
+                    defaultCharacterLook()
+                ]
             },
             updatedAt: Date.now()
         };
@@ -2438,7 +3000,11 @@ async function ensureCharacterOutputFolder(characterId, characterName, imageId, 
             stackPresetId: "",
             stackSnapshot: [],
             sourcePresetId: "",
-            enabled: true
+            enabled: true,
+            activeLookId: "default",
+            looks: [
+                defaultCharacterLook()
+            ]
         };
     }
     if (folder.id === folderId && folder.name === characterName.slice(0, 80)) {
@@ -2766,8 +3332,27 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
             "1"
         ].includes(personaMode);
         const automation = await loadTagAutomationConfig(userId);
-        const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, includePersona, automation, userId);
+        const characterLayer = await applyCharacterLayer(job.chatId, presetPrompt, includeCharacter, includePersona, automation, asString(originalTag?.attrs.look), userId);
+        if (!asString(originalTag?.attrs.aspect).trim() && characterLayer.preferredAspect) {
+            job.aspect = characterLayer.preferredAspect;
+            applyAspectToParameters(parameters, characterLayer.preferredAspect);
+        }
         if (characterLayer.checkpoint) input.model = characterLayer.checkpoint;
+        if (characterLayer.referenceImageId || characterLayer.referenceImageUrl) {
+            try {
+                const reference = await resolveVisualReferenceImage(characterLayer.referenceImageId, characterLayer.referenceImageUrl, userId);
+                if (reference) {
+                    parameters.referenceImages = [
+                        reference
+                    ];
+                    if (!Number.isFinite(Number(parameters.denoise))) parameters.denoise = .6;
+                } else {
+                    spindle.log.warn("A Character Look or Visual Lore reference image could not be resolved; continuing without reference conditioning.");
+                }
+            } catch (error) {
+                spindle.log.warn(`Could not prepare visual reference conditioning: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
         input.prompt = characterLayer.prompt;
         const profileNegative = overrides.negativePrompt !== undefined ? asString(overrides.negativePrompt).trim() : asString(profileInput.negativePrompt).trim();
         const visualNegative = characterLayer.negativePrompt.trim();
@@ -3341,6 +3926,69 @@ async function handleMessage(payload, userId) {
                     }, userId);
                     return;
                 }
+            case "get_character_visual_canon":
+                {
+                    spindle.sendToFrontend({
+                        type: "character_visual_canon_result",
+                        requestId,
+                        data: await characterVisualCanonState(asString(payload?.characterId).trim(), userId)
+                    }, userId);
+                    return;
+                }
+            case "save_character_look":
+                {
+                    const characterId = asString(payload?.characterId).trim();
+                    const folder = await ensureCharacterVisualFolderForId(characterId, userId);
+                    await saveCharacterLook(folder.id, payload?.look, payload?.activate !== false, userId);
+                    spindle.sendToFrontend({
+                        type: "character_visual_canon_result",
+                        requestId,
+                        data: await characterVisualCanonState(characterId, userId)
+                    }, userId);
+                    return;
+                }
+            case "select_character_look":
+                {
+                    const characterId = asString(payload?.characterId).trim();
+                    const folder = await ensureCharacterVisualFolderForId(characterId, userId);
+                    await selectCharacterLook(folder.id, asString(payload?.lookId).trim(), userId);
+                    spindle.sendToFrontend({
+                        type: "character_visual_canon_result",
+                        requestId,
+                        data: await characterVisualCanonState(characterId, userId)
+                    }, userId);
+                    return;
+                }
+            case "delete_character_look":
+                {
+                    const characterId = asString(payload?.characterId).trim();
+                    const folder = await ensureCharacterVisualFolderForId(characterId, userId);
+                    await deleteCharacterLook(folder.id, asString(payload?.lookId).trim(), userId);
+                    spindle.sendToFrontend({
+                        type: "character_visual_canon_result",
+                        requestId,
+                        data: await characterVisualCanonState(characterId, userId)
+                    }, userId);
+                    return;
+                }
+            case "get_visual_lore":
+                {
+                    spindle.sendToFrontend({
+                        type: "visual_lore_result",
+                        requestId,
+                        data: await visualLoreState(asString(payload?.bookId), asString(payload?.entryId), userId)
+                    }, userId);
+                    return;
+                }
+            case "save_visual_lore":
+                {
+                    spindle.sendToFrontend({
+                        type: "visual_lore_result",
+                        requestId,
+                        data: await saveVisualLoreIdentity(asString(payload?.bookId), asString(payload?.entryId), payload?.identity, userId)
+                    }, userId);
+                    return;
+                }
             case "save_persona_visual_preset":
                 {
                     const presets = await savePersonaVisualPreset(payload?.preset, userId);
@@ -3579,6 +4227,39 @@ async function handleMessage(payload, userId) {
                         type: "swarm_output_download",
                         requestId,
                         data: await fetchSwarmOutput(connection, asString(payload?.swarmPath), await getMetadataToken(connectionId, userId))
+                    }, userId);
+                    return;
+                }
+            case "resolve_output_metadata":
+                {
+                    const imageId = asString(payload?.imageId).trim();
+                    const record = (await loadGenerationRecords(userId)).find((candidate)=>candidate.imageId === imageId);
+                    if (!record?.swarmPathVerified || !record.swarmPath) {
+                        throw new Error("This output has no verified SwarmUI path metadata.");
+                    }
+                    const connectionId = asString(payload?.connectionId);
+                    const connection = await getConnection(connectionId, userId);
+                    const exact = await loadSwarmPathGenerationMetadata(connection, await getMetadataToken(connectionId, userId), record.swarmPath, userId);
+                    spindle.sendToFrontend({
+                        type: "output_metadata_result",
+                        requestId,
+                        data: {
+                            imageId,
+                            details: {
+                                ...record,
+                                ...exact,
+                                parameters: {
+                                    ...record.parameters,
+                                    ...asRecord(exact.parameters)
+                                },
+                                timing: {
+                                    ...record.timing,
+                                    ...asRecord(exact.timing)
+                                },
+                                resolvedPrompt: asString(exact.resolvedPrompt) || record.resolvedPrompt,
+                                resolvedNegativePrompt: asString(exact.resolvedNegativePrompt) || record.resolvedNegativePrompt
+                            }
+                        }
                     }, userId);
                     return;
                 }

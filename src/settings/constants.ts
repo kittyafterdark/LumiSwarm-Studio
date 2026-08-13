@@ -1,0 +1,6 @@
+const THEME_STORAGE_KEY = "swarm-studio-theme-v1"
+const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1"
+const MINIPLAYER_STORAGE_KEY = "swarm-studio-miniplayer-v1"
+const MINIPLAYER_POSITION_STORAGE_KEY = "swarm-studio-miniplayer-position-v1"
+const BEHAVIOR_STORAGE_KEY = "swarm-studio-behavior-v3"
+const WORKSPACE_STORAGE_KEY = "swarm-studio-workspace-v1"

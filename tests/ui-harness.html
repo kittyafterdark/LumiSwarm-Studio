@@ -25,7 +25,7 @@
     .host-header button { border: 0; background: transparent; color: var(--lumiverse-text-muted); font-size: 22px; }
     .host-body { padding: 13px; overflow: hidden; }
     .host-widget { position: fixed; right: 18px; bottom: 18px; z-index: 80; }
-    #drawer { display: none; }
+    #drawer { display: block; position: fixed; inset: 0; padding: 16px; overflow: auto; }
   </style>
 </head>
 <body>
@@ -98,9 +98,23 @@
       }
     })
     let outputFolders = [{
+      id: "character:char-1",
+      name: "Lior",
+      imageIds: ["image-32", "image-31", "image-30", "image-29", "image-28", "image-27", "image-26", "image-25"],
+      binding: {
+        type: "character", characterId: "char-1", positivePrompt: "1girl, long white hair, magenta eyes", negativePrompt: "brown hair",
+        checkpoint: "anima-semi-v10.safetensors", stackPresetId: "portrait-stack", stackSnapshot: [], sourcePresetId: "", enabled: true,
+        activeLookId: "default", looks: [
+          { id: "default", name: "Default", aliases: [], outfitPrompt: "black sleeveless dress", negativePrompt: "", checkpoint: "", stackPresetId: "", stackSnapshot: [], referenceImageId: "", referenceImageUrl: "", thumbnailImageId: "", thumbnailUrl: "", triggerWords: [], notes: "Identity baseline", updatedAt: Date.now() },
+          { id: "formal", name: "Formal", aliases: ["gala", "formalwear"], outfitPrompt: "black tailored suit, silver tie", negativePrompt: "casual clothes", checkpoint: "", stackPresetId: "ink-stack", stackSnapshot: [], referenceImageId: "", referenceImageUrl: "", thumbnailImageId: "", thumbnailUrl: "", triggerWords: ["formal outfit"], notes: "Evening events", updatedAt: Date.now() },
+        ],
+      },
+      updatedAt: Date.now(),
+    }, {
       id: "favorites",
       name: "Favorites",
       imageIds: ["image-32", "image-29", "image-24"],
+      binding: null,
       updatedAt: Date.now(),
     }]
 
@@ -297,6 +311,35 @@
             outputs: historyOutputs,
             total: historyOutputs.length,
             folders: outputFolders,
+          }})
+        } else if (message.type === "get_chat_visuals") {
+          later({ type: "chat_visuals_result", requestId: message.requestId, data: {
+            activeChat: { id: "chat-1", name: "Lior chat", characterId: "char-1", characterName: "Lior" },
+            activePersona: { id: "persona-1", name: "User", description: "" },
+            personaPresets: [], personaBinding: { presetId: "", enabled: true }, activePersonaPreset: null,
+            characterFolder: outputFolders.find((folder) => folder.id === "character:char-1"),
+            characterBasePrompt: "1girl, long white hair, magenta eyes",
+            models: [{ id: "anima-semi-v10.safetensors", label: "Anima Semi v1.0" }],
+            studioConnectionId: "swarm-1", studioModel: "anima-semi-v10.safetensors",
+            stackPresets: [{ id: "portrait-stack", name: "Anima portrait", items: [{ name: "anima/soft-portrait.safetensors", title: "Soft Portrait", weight: .65, enabled: true, useTrigger: false }] }],
+            studioStack: [], studioStackPresetId: "", studioStackCustom: false,
+          }})
+        } else if (message.type === "get_visual_lore" || message.type === "save_visual_lore") {
+          const entryId = message.entryId || "manor"
+          const identities = {
+            manor: { enabled: true, entityType: "location", aliases: ["Victoria manor"], positivePrompt: "victorian gothic manor, blue hour", negativePrompt: "modern furniture", checkpointFamily: "", checkpoint: "", stackPresetId: "ink-stack", stackSnapshot: [], referenceImageId: "", referenceImageUrl: "", preferredAspect: "16:9", recipe: {}, notes: "Recurring exterior", updatedAt: Date.now() },
+            uniform: { enabled: true, entityType: "outfit", aliases: ["winter uniform"], positivePrompt: "navy winter uniform, wool coat", negativePrompt: "summer clothes", checkpointFamily: "", checkpoint: "", stackPresetId: "", stackSnapshot: [], referenceImageId: "", referenceImageUrl: "", preferredAspect: "", recipe: {}, notes: "", updatedAt: Date.now() },
+          }
+          if (message.type === "save_visual_lore") identities[entryId] = message.identity
+          const entries = [
+            { id: "manor", comment: "Victoria Manor", keys: ["victoria manor", "the estate"], hasVisualIdentity: true, activated: true },
+            { id: "uniform", comment: "Winter Uniform", keys: ["winter uniform"], hasVisualIdentity: true, activated: true },
+            { id: "wyrm", comment: "Glass Wyrm", keys: ["glass wyrm"], hasVisualIdentity: false, activated: false },
+          ]
+          later({ type: "visual_lore_result", requestId: message.requestId, data: {
+            available: true, books: [{ id: "book-1", name: "Main lore" }], bookId: "book-1", entries, entryId,
+            stackPresets: [{ id: "ink-stack", name: "Ink + rim light", items: [] }], models: [{ id: "anima-semi-v10.safetensors", label: "Anima Semi v1.0" }],
+            selected: { ...entries.find((entry) => entry.id === entryId), identity: identities[entryId] || null },
           }})
         } else if (message.type === "create_output_folder") {
           outputFolders = [{

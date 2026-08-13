@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Named Character Looks inherit the existing visual identity and add outfit,
+  negative, checkpoint, LoRA, reference, thumbnail, trigger, and note layers.
+  Inline requests can select a Look explicitly or infer it from saved aliases.
+- A native Character editor Visuals tab integrates with Lumiverse's PR #268
+  character surface; Visual Lore now shares the main Visuals page instead of
+  claiming a second drawer tab.
+- Activated lore entries can persist visual identities for characters,
+  locations, objects, creatures, outfits, and styles and merge those layers
+  into tagged generation.
+- Output Library now opens on folder preview cards and exposes character canon
+  through a focused Prompts & visuals modal inside each bound folder.
+- Output Library landing cards and opened-folder contents now use isolated,
+  mutually exclusive surfaces, with folder controls above the image grid and a
+  responsive sibling modal for base prompts and named Looks.
+- The Library visual modal can create and fully edit character Looks in place,
+  and its folder-toolbar icons share a consistent horizontal baseline.
+- Visuals now has Character, Persona, and Lore tabs. Lore loads lazily after the
+  backend listener exists, renders loading/permission/error shells, and puts
+  entries activated in the current chat first.
+- Character Look and Visual Lore reference images now resolve into the same
+  bounded reference-conditioning payload used by Studio img2img, with a 0.60
+  creativity default and graceful text-to-image fallback when resolution fails.
+
+### Changed
+
+- Inspector reuse and init-image actions resolve exact embedded generation
+  metadata using the verified Swarm output path before applying parameters.
+
 ## 1.0.15
 
 ### Added

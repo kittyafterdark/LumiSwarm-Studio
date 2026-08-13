@@ -1,0 +1,27 @@
+// These files intentionally share one top-level scope and are concatenated in order.
+// Keep feature implementation out of src/frontend.ts; it is only the public export surface.
+export const frontendSources = [
+  "src/state/types.ts",
+  "src/state/runtime.ts",
+  "src/visuals/icons.ts",
+  "src/inline/protocol.ts",
+  "src/settings/constants.ts",
+  "src/workflows/constants.ts",
+  "src/settings/options.ts",
+  "src/studio/styles.ts",
+  "src/host/dom.ts",
+  "src/miniplayer/surface.ts",
+  "src/settings/preferences.ts",
+  "src/state/utils.ts",
+  "src/workflows/helpers.ts",
+  "src/library/paging.ts",
+  "src/studio/generation.ts",
+  "src/library/loras.ts",
+  "src/miniplayer/controller.ts",
+  "src/studio/controller.ts",
+  "src/inline/controller.ts",
+  "src/visuals/controller.ts",
+  "src/host/continuity-surfaces.ts",
+  "src/host/setup.ts",
+  "src/frontend.ts",
+]

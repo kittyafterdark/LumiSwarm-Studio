@@ -14,6 +14,11 @@ assert.match(source, /reportBackendError\(`Backend request/)
 assert.match(source, /case "list_parser_models"/)
 assert.match(source, /case "set_output_favorite"/)
 assert.match(source, /case "bulk_set_output_favorite"/)
+assert.match(source, /const activatedEntryIds = new Set<string>\(\)/)
+assert.match(source, /activated: activatedEntryIds\.has\(asString\(entry\?\.id\)\)/)
+assert.match(source, /async function resolveVisualReferenceImage/)
+assert.match(source, /parameters\.referenceImages = \[reference\]/)
+assert.match(source, /parameters\.denoise = \.6/)
 
 let frontendHandler
 const sent = []
@@ -1131,6 +1136,47 @@ assert.equal(customCharacterVisuals.data.characterFolder.binding.stackSnapshot[0
 assert.equal(customCharacterVisuals.data.characterFolder.binding.negativePrompt, "wrong eye color")
 assert.equal(customCharacterVisuals.data.characterFolder.binding.checkpoint, "base.safetensors")
 assert.equal(customCharacterVisuals.data.characterFolder.binding.sourcePresetId, "lumi-character-preset-1")
+
+const savedFormalLook = await request("save_character_look", {
+  characterId: "char-1",
+  activate: true,
+  look: {
+    name: "Formal",
+    aliases: ["evening wear", "black tie"],
+    outfitPrompt: "tailored black tuxedo, white dress shirt",
+    negativePrompt: "casual clothes",
+    checkpoint: "formal-portrait.safetensors",
+    stackSnapshot: [{
+      name: "wardrobe/formal.safetensors",
+      title: "Formal wardrobe",
+      weight: 0.72,
+      enabled: true,
+      useTrigger: false,
+    }],
+    triggerWords: ["formalwear"],
+    referenceImageId: "formal-reference",
+    thumbnailImageId: "formal-thumbnail",
+    notes: "Canonical evening look",
+  },
+})
+const formalLook = savedFormalLook.data.looks.find((look) => look.name === "Formal")
+assert.ok(formalLook)
+assert.equal(savedFormalLook.data.activeLookId, formalLook.id)
+assert.deepEqual(formalLook.aliases, ["evening wear", "black tie"])
+assert.equal(formalLook.stackSnapshot[0].weight, 0.72)
+assert.match(savedFormalLook.data.badge, /2 looks/)
+
+const selectedDefaultLook = await request("select_character_look", {
+  characterId: "char-1",
+  lookId: "default",
+})
+assert.equal(selectedDefaultLook.data.activeLookId, "default")
+const deletedFormalLook = await request("delete_character_look", {
+  characterId: "char-1",
+  lookId: formalLook.id,
+})
+assert.equal(deletedFormalLook.data.looks.some((look) => look.id === formalLook.id), false)
+assert.equal(deletedFormalLook.data.looks[0].id, "default")
 
 const visualFolders = await request("update_output_folder_profile", {
   folderId: storedCharacterFolderAfterTag.id,
