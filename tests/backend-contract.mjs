@@ -713,7 +713,7 @@ train platform, waving, <preset:composition></swarm-image>`,
   log: { info() {}, warn() {} },
 }
 
-await import("../dist/backend.js")
+const backendModule = await import("../dist/backend.js")
 assert.equal(typeof frontendHandler, "function")
 assert.equal(macroDefinitions.get("last_genned").handler, "")
 assert.equal(macroDefinitions.has("swarm_image_protocol"), true)
@@ -726,6 +726,54 @@ assert.equal(macroDefinitions.has("user_profile"), true)
 assert.match(macroValues.get("swarm_image_protocol"), /<swarm-image/)
 assert.equal(typeof interceptorHandler, "function")
 assert.equal(eventHandlers.has("GENERATION_ENDED"), true)
+
+const collisionPlan = backendModule.parseImageScenePlan(`quality/meta: masterpiece, best quality, safe
+visible count: solo, 2 men
+scene: Two men eat together at a low restaurant table.
+camera: medium two-shot, seated eye level
+left man: brown eyes, black shirt, eating rice
+right man: blue eyes, gray cable-knit sweater, holding chopsticks
+shared interaction: eating together at the same low table
+spatial relation: opposite sides of the table
+environment: small Japanese restaurant, dishes and rice bowls`)
+assert.ok(collisionPlan)
+assert.equal(collisionPlan.subjects.length, 2)
+const animaCollisionPrompt = backendModule.serializeScenePlan(
+  collisionPlan,
+  "anima",
+  ["1boy, short black hair, brown eyes", "1boy, blond hair, blue eyes"],
+)
+assert.match(animaCollisionPrompt, /^masterpiece, best quality, safe\n2 men/m)
+assert.match(animaCollisionPrompt, /The man on the left: short black hair, brown eyes; brown eyes, black shirt, eating rice/)
+assert.match(animaCollisionPrompt, /The man on the right: blond hair, blue eyes; blue eyes, gray cable-knit sweater, holding chopsticks/)
+assert.equal((animaCollisionPrompt.match(/eating together at the same low table/g) || []).length, 1)
+assert.doesNotMatch(animaCollisionPrompt, /\bsolo\b|character 1|character 2/)
+const illustriousCollisionPrompt = backendModule.serializeScenePlan(
+  collisionPlan,
+  "illustrious",
+  ["1boy, short black hair, brown eyes", "1boy, blond hair, blue eyes"],
+)
+assert.notEqual(illustriousCollisionPrompt, animaCollisionPrompt)
+assert.match(illustriousCollisionPrompt, /2 men\nmedium two-shot, seated eye level/)
+assert.match(illustriousCollisionPrompt, /left man, short black hair, brown eyes, brown eyes, black shirt, eating rice/)
+assert.match(illustriousCollisionPrompt, /right man, blond hair, blue eyes, blue eyes, gray cable-knit sweater, holding chopsticks/)
+
+const povPlan = backendModule.parseImageScenePlan(`quality/meta: masterpiece, safe
+visible count: 2 people
+scene: POV in a kitchen.
+camera: pov, close shot
+center woman: smiling, looking at the user, reaching toward the persona
+environment: kitchen counter, morning light`)
+assert.ok(povPlan)
+const povPrompt = backendModule.serializeScenePlan(
+  povPlan,
+  "anima",
+  ["1girl, silver hair, green eyes"],
+  true,
+)
+assert.match(povPrompt, /\n1 person\n/)
+assert.match(povPrompt, /looking at viewer, reaching toward viewer/)
+assert.doesNotMatch(povPrompt, /2 people|looking at the user|toward the persona/)
 
 async function request(type, extra = {}) {
   const requestId = `${type}-${sent.length}`
@@ -987,6 +1035,7 @@ const tagConfig = await request("set_tag_automation", {
     requiredImageMin: 2,
     requiredImageMax: 4,
     promptMode: "pov",
+    promptFamily: "anima",
   },
 })
 assert.equal(tagConfig.data.autoGenerate, true)
@@ -997,13 +1046,23 @@ assert.equal(tagConfig.data.autoPrintCharacterPositive, true)
 assert.equal(tagConfig.data.requiredImageMin, 2)
 assert.equal(tagConfig.data.requiredImageMax, 4)
 assert.equal(tagConfig.data.promptMode, "pov")
+assert.equal(tagConfig.data.promptFamily, "anima")
 assert.match(tagConfig.data.protocolPrompt, /SWARM STUDIO IMAGE REQUEST PROTOCOL/)
 assert.match(tagConfig.data.protocolPrompt, /\{\{swarm_dynamic_guidance\}\}/)
 assert.match(macroValues.get("swarm_image_protocol"), /between 2 and 4 complete <swarm-image> requests/)
 assert.match(macroValues.get("swarm_image_protocol"), /CHARACTER-ONLY \/ POV/)
 assert.doesNotMatch(macroValues.get("swarm_image_protocol"), /\{\{swarm_dynamic_guidance\}\}/)
-assert.match(macroValues.get("swarm_image_protocol"), /automatically prepended/)
+assert.match(macroValues.get("swarm_image_protocol"), /automatically bound/)
 assert.match(macroValues.get("swarm_image_protocol"), /current Studio LoRA stack remains active/)
+assert.match(macroValues.get("swarm_image_protocol"), /ANIMA SUBJECT SERIALIZER/)
+assert.match(macroValues.get("swarm_image_protocol"), /viewer\/camera is a reference point, not a character slot/)
+const illustriousTagConfig = await request("set_tag_automation", {
+  config: { ...tagConfig.data, promptFamily: "illustrious" },
+})
+assert.equal(illustriousTagConfig.data.promptFamily, "illustrious")
+assert.match(macroValues.get("swarm_image_protocol"), /ILLUSTRIOUS SUBJECT SERIALIZER/)
+assert.doesNotMatch(macroValues.get("swarm_image_protocol"), /ANIMA SUBJECT SERIALIZER/)
+await request("set_tag_automation", { config: tagConfig.data })
 const characterBaseTags = await request("set_character_base_tags", {
   characterId: "char-1",
   tags: "1boy, black hair, red eyes",
@@ -1059,7 +1118,7 @@ assert.match(intercepted.messages[0].content, /configured local SwarmUI installa
 assert.match(intercepted.messages[0].content, /IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY/)
 assert.match(intercepted.messages[0].content, /Emit at least 2 and no more than 4/)
 assert.match(intercepted.messages[0].content, /no scene is important enough/)
-assert.match(intercepted.messages[0].content, /CHARACTER 1 IDENTITY/)
+assert.match(intercepted.messages[0].content, /ACTIVE CHARACTER IDENTITY/)
 assert.match(intercepted.messages[0].content, /1boy, black hair, red eyes/)
 assert.match(intercepted.messages[0].content, /ILLUSTRATION MODE — CHARACTER-ONLY \/ POV/)
 assert.match(intercepted.messages[0].content, /current outfit, clothing removal, damage, wetness, or disarray/)
@@ -1378,7 +1437,7 @@ assert.match(source, /Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3/)
 assert.match(source, /Default inline prose illustrations to 4:3/)
 assert.match(source, /aspect: cleanAspect\(attrs\.aspect\) \|\| "4:3"/)
 assert.match(source, /character="active"/)
-assert.match(source, /Use character="none" when the active chat character should not appear/)
+assert.match(source, /character="none" means the active chat character must not be visible/)
 assert.match(source, /const NO_CHARACTER_NEGATIVE = "people, person, character/)
 assert.match(source, /const includeCharacter = !\["none", "off", "false", "no", "0"\]\.includes\(characterMode\)/)
 assert.match(source, /excludedLoras: includeCharacter \|\| !automation\.stripUserOnlyLoraStack[\s\S]*?\? \[\][\s\S]*?: visualStack\.map\(\(item\) => item\.name\)/)
@@ -1386,7 +1445,8 @@ assert.match(source, /if \(excluded\.has\(name\.toLowerCase\(\)\)\) return/)
 assert.match(source, /LOCAL GENERATION/)
 assert.match(source, /configured local SwarmUI installation and local hardware/)
 assert.match(source, /Never use a chat character's or persona's display name as a diffusion token/)
-assert.match(source, /ANIMA PROMPT SHAPE/)
+assert.match(source, /ANIMA SUBJECT SERIALIZER/)
+assert.match(source, /ILLUSTRIOUS SUBJECT SERIALIZER/)
 assert.match(source, /MULTI-CHARACTER \/ ENSEMBLE/)
 assert.match(source, /CHARACTER-ONLY \/ POV/)
 assert.match(source, /safe, sensitive, nsfw, or explicit/)

@@ -123,14 +123,19 @@ Example output:
   request="generate"
   slot="instagram-photo"
   aspect="4:3"
-  character="active"
+character="active"
   persona="active"
   alt="Two people sharing food at a city stall"
 >
-character 1: smiling, holding a paper tray
-character 2: amused expression, leaning closer
-interaction: character 1 offers character 2 a bite, standing side by side
-medium shot, city street, food stall, evening lights</swarm-image>`;
+quality/meta: masterpiece, best quality, safe
+visible count: 2 people
+scene: Two people share food at a city stall.
+camera: medium two-shot, eye level
+left person: distinct appearance, smiling, holding a paper tray, extending a bite toward the person on the right
+right person: distinct appearance, amused expression, leaning closer
+shared interaction: sharing food
+spatial relation: standing side by side
+environment: city street, food stall, evening lights</swarm-image>`;
 const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `SWARM STUDIO IMAGE REQUEST PROTOCOL
 Place this exact XML-like request wherever an illustration selected under the image-count instructions should appear. Attributes may be written on one line or separate lines:
 <swarm-image
@@ -150,9 +155,15 @@ The tag is executed by the user's configured local SwarmUI installation and loca
 IDENTITY AND SUBJECT RULES
 Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the bound character identity; persona="active" selects the bound persona identity. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
 
-Write compact Danbooru-style scene tags and follow the active composition mode below. Use short natural-language clauses only when tags cannot disambiguate an interaction, unusual viewpoint, or spatial relationship. Do not restate display names or write a literary summary.
+Treat the tag body as a small visual scene plan. Establish the exact visible-person count first, then camera, visually anchored subject sections, shared interaction, spatial relation, and environment. Each subject section owns its spatial anchor, identity/distinguishing appearance, attire, expression, pose, individual action, and gaze. Prefer image-space anchors such as left, right, foreground, background, nearest the camera, or farther from the camera; planner labels such as character 1 are not useful final diffusion phrasing.
 
-Use character="none" when the active chat character should not appear. Use persona="active" only when the active persona should appear; otherwise use persona="none". When both are none, Swarm Studio adds a no-character negative guard. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.
+Every visible fact has exactly one owner. Subject-specific appearance, clothing, expression, pose, action, and gaze belong only to that subject. Physical contact or an action jointly performed by multiple visible subjects belongs only to shared interaction. Camera/framing facts belong only to camera. Lighting, location, furniture, weather, and background facts belong only to environment. Do not repeat one fact across sections. Keep a one-actor action on its actor and identify the recipient spatially; put a jointly performed action once in shared interaction.
+
+persona="none" means the active persona is not visibly rendered or identity-conditioned. It does not prohibit an implied first-person observer/camera. When character="active" and persona="none", a POV scene normally contains one visible focal character; the viewer/camera is a reference point, not a second character slot. Express a focal subject's relation as looking at viewer, eye contact, leaning toward viewer, or reaching toward viewer. Do not render the viewer's face or full body unless explicitly requested; a scene-required first-person hand or arm does not add a second visible person.
+
+character="none" means the active chat character must not be visible. Do not use character="none" merely because the scene is first-person or POV. To show the active character from the user's POV, use character="active" persona="none". When both are none, Swarm Studio keeps its scenery/no-character negative guard. Use persona="active" only when the active persona is visibly rendered. Normalize an unseen third party to looking off-screen or a direction-specific gaze instead of asking the checkpoint to render another character.
+
+Do not emit contradictory counts such as solo with 2girls. Do not use BREAK, XML-like pseudo-scoping, or bracketed character identifiers as semantic separators. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.
 
 {{swarm_dynamic_guidance}}`;
 const THEME_STORAGE_KEY = "swarm-studio-theme-v1";
@@ -1300,6 +1311,45 @@ const STYLES = `
   .ss-parser-field > span small { color: var(--lumiverse-text-muted); font-weight: 400; }
   .ss-parser-field .ss-select,
   .ss-parser-field .ss-input { min-width: 0; height: 32px; font-size: 9px; }
+  .ss-prompt-family-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 10px;
+    border: 1px solid color-mix(in srgb, var(--ss-outline, var(--lumiverse-border)) 82%, transparent);
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--ss-header-bg, #13141a) 52%, transparent);
+  }
+  .ss-prompt-family-row > span { min-width: 0; display: grid; gap: 3px; }
+  .ss-prompt-family-row strong { font-size: 9.5px; }
+  .ss-prompt-family-row small { color: var(--lumiverse-text-muted); font-size: 8.5px; line-height: 1.35; }
+  .ss-prompt-family-switch {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(76px, 1fr));
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    border-radius: calc(var(--ss-control-radius, 8px) + 2px);
+    background: color-mix(in srgb, var(--ss-canvas, #090a0d) 78%, transparent);
+  }
+  .ss-prompt-family-switch button {
+    min-height: 28px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: var(--ss-control-radius, 8px);
+    background: transparent;
+    color: var(--lumiverse-text-muted);
+    font: 650 9px/1 system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .ss-prompt-family-switch button:hover { color: var(--ss-text, var(--lumiverse-text)); }
+  .ss-prompt-family-switch button[data-active="true"] {
+    color: var(--ss-text, var(--lumiverse-text));
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 58%, transparent);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 14%, var(--ss-button-bg, #171820));
+  }
   .ss-protocol-editor { min-height: 290px; resize: vertical; font: 9px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
   .ss-protocol-actions { display: flex; justify-content: flex-end; gap: 7px; }
   .ss-image-scale-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -3008,6 +3058,8 @@ const STUDIO_V3_STYLES = `
     .ss-settings-toggle { padding: 9px; }
     .ss-request-mode-grid { grid-template-columns: minmax(0, 1fr); }
     .ss-parser-field { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+    .ss-prompt-family-row { align-items: stretch; flex-direction: column; }
+    .ss-prompt-family-switch { width: 100%; }
     .ss-protocol-editor { min-height: 250px; font-size: 8.5px; }
     .ss-image-scale-grid { grid-template-columns: repeat(3, minmax(84px, 1fr)); overflow-x: auto; }
     .ss-image-scale-button { min-height: 80px; }
@@ -3789,7 +3841,8 @@ function defaultStudioBehavior() {
         inlineImageScale: 100,
         requiredImageMin: 0,
         requiredImageMax: 0,
-        tagPromptMode: "multi"
+        tagPromptMode: "multi",
+        tagPromptFamily: "anima"
     };
 }
 function normalizeRequiredImageRange(minValue, maxValue) {
@@ -3825,7 +3878,8 @@ function storedStudioBehavior() {
             inlineImageScale: parsed?.inlineImageScale === 75 || parsed?.inlineImageScale === 50 ? parsed.inlineImageScale : 100,
             requiredImageMin: imageRange.min,
             requiredImageMax: imageRange.max,
-            tagPromptMode: parsed?.tagPromptMode === "pov" ? "pov" : "multi"
+            tagPromptMode: parsed?.tagPromptMode === "pov" ? "pov" : "multi",
+            tagPromptFamily: parsed?.tagPromptFamily === "illustrious" ? "illustrious" : "anima"
         };
     } catch  {
         return defaultStudioBehavior();
@@ -5397,6 +5451,10 @@ class StudioController {
         if (requiredImageMax) requiredImageMax.value = String(this.behavior.requiredImageMax);
         const tagPromptMode = this.root.querySelector('[data-role="tag-prompt-mode"]');
         if (tagPromptMode) tagPromptMode.value = this.behavior.tagPromptMode;
+        for (const button of this.root.querySelectorAll('[data-action="set-prompt-family"]')){
+            button.dataset.active = String(button.dataset.promptFamily === this.behavior.tagPromptFamily);
+            button.setAttribute("aria-checked", String(button.dataset.promptFamily === this.behavior.tagPromptFamily));
+        }
     }
     renderParserConnections() {
         const select = this.root.querySelector('[data-role="parser-connection"]');
@@ -5932,6 +5990,13 @@ class StudioController {
                       </section>
                       <section class="ss-config-section">
                         <div class="ss-config-section-head"><strong>Protocol prompt</strong><span>Inline-mode system instruction</span></div>
+                        <div class="ss-prompt-family-row">
+                          <span><strong>Prompt family</strong><small>Controls subject serialization and model-specific ownership guidance.</small></span>
+                          <div class="ss-prompt-family-switch" role="radiogroup" aria-label="Protocol prompt family">
+                            <button type="button" data-action="set-prompt-family" data-prompt-family="anima" data-active="${this.behavior.tagPromptFamily === "anima"}" role="radio" aria-checked="${this.behavior.tagPromptFamily === "anima"}">Anima</button>
+                            <button type="button" data-action="set-prompt-family" data-prompt-family="illustrious" data-active="${this.behavior.tagPromptFamily === "illustrious"}" role="radio" aria-checked="${this.behavior.tagPromptFamily === "illustrious"}">Illustrious</button>
+                          </div>
+                        </div>
                         <textarea class="ss-textarea ss-protocol-editor" data-role="tag-protocol-prompt" spellcheck="false"></textarea>
                         <p class="ss-muted ss-tiny"><code>{{swarm_dynamic_guidance}}</code> is replaced at runtime with the active image count, identities, composition mode, checkpoint guidance, and Swarm preset stack. Remove it only when your custom protocol deliberately replaces all dynamic guidance.</p>
                         <p class="ss-muted ss-tiny">Parser mode injects its own compact placement protocol and uses this fully resolved protocol privately when completing each request.</p>
@@ -6903,6 +6968,13 @@ are removed when CSS is applied.</pre>
             if (action === "copy-tag-protocol") void this.copyTagProtocol();
             if (action === "reset-tag-protocol") this.resetTagProtocol();
             if (action === "save-tag-protocol") this.saveTagProtocol();
+            if (action === "set-prompt-family") {
+                const tagPromptFamily = button.dataset.promptFamily === "illustrious" ? "illustrious" : "anima";
+                this.onBehaviorChange({
+                    ...this.behavior,
+                    tagPromptFamily
+                });
+            }
             if (action === "set-inline-image-scale") {
                 const scale = Number(button.dataset.scale);
                 if (scale === 100 || scale === 75 || scale === 50) {
@@ -11712,10 +11784,6 @@ class TaggedImageController {
             if (this.reconciliationQueues.get(key) === task) this.reconciliationQueues.delete(key);
         }).catch(()=>{});
     }
-    requestedAspect(job) {
-        const aspect = String(job.aspect || "").trim();
-        return /^(?:1:1|2:3|3:2|3:4|4:3|4:5|5:4|9:16|16:9)$/.test(aspect) ? aspect.replace(":", " / ") : "4 / 3";
-    }
     render(job) {
         if (!this.shouldRenderPlaceholder(job)) {
             this.remove(job);
@@ -11731,32 +11799,32 @@ class TaggedImageController {
             failed: "Illustration unavailable",
             cancelled: "Illustration stopped"
         };
-        const action = job.status === "requested" ? `<button data-action="generate">Generate image</button>` : job.status === "ready" && !job.inserted ? `<button data-action="attach">Attach image</button>` : job.status === "failed" || job.status === "cancelled" ? `<button data-action="retry">Retry</button>` : "";
+        const action = job.status === "requested" ? `<button class="primary" data-action="generate">Generate image</button>` : job.status === "ready" && !job.inserted ? `<button class="primary" data-action="attach">Attach image</button>` : job.status === "failed" || job.status === "cancelled" ? `<button class="primary" data-action="retry">Retry</button>` : "";
         const error = job.error ? `<p class="error">${widgetEscape(job.error)}</p>` : "";
         const html = `
       <style>
         :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
         * { box-sizing: border-box; }
-        body { margin: 0; color: var(--lumiverse-text, #f5f5f7); background: transparent; }
-        .card { position: relative; display: grid; place-items: center; width: 100%; min-height: 150px; aspect-ratio: ${this.requestedAspect(job)}; max-height: min(70vh, 680px); padding: 22px; border: 1px dashed color-mix(in srgb, var(--lumiverse-accent, #b994ff) 34%, var(--lumiverse-border, #35313f)); border-radius: var(--lumiverse-radius, 12px); background: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 5%, var(--lumiverse-fill, #111116)); overflow: hidden; }
-        .center { display: grid; justify-items: center; gap: 10px; max-width: 430px; text-align: center; }
-        .emblem { display: grid; place-items: center; width: 48px; height: 48px; color: var(--lumiverse-accent, #b994ff); border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .72); background: var(--lumiverse-fill-subtle, #191820); }
-        .emblem svg { width: 25px; height: 25px; fill: currentColor; }
+        body { margin: 0; min-width: 0; color: var(--lumiverse-text, #f5f5f7); background: transparent; }
+        .card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 13px; width: 100%; min-height: 104px; padding: 13px 14px; border: 1px dashed color-mix(in srgb, var(--lumiverse-accent, #b994ff) 34%, var(--lumiverse-border, #35313f)); border-radius: var(--lumiverse-radius, 12px); background: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 5%, var(--lumiverse-fill, #111116)); }
+        .emblem { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 auto; color: var(--lumiverse-accent, #b994ff); border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .72); background: var(--lumiverse-fill-subtle, #191820); }
+        .emblem svg { width: 22px; height: 22px; fill: currentColor; }
+        .copy { min-width: 0; display: grid; gap: 4px; text-align: left; }
         strong { display: block; font: 600 14px/1.2 Georgia, ui-serif, serif; letter-spacing: .01em; }
-        p { margin: 0; color: var(--lumiverse-text-muted, #aaa6b1); font-size: 11px; line-height: 1.45; }
+        p { margin: 0; color: var(--lumiverse-text-muted, #aaa6b1); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+        .description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
         .error { color: #ff9caa; }
-        .actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; }
-        button { min-height: 30px; padding: 0 10px; border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .65); background: var(--lumiverse-fill-subtle, #191820); color: var(--lumiverse-text, #f5f5f7); font: 600 10px/1 system-ui, sans-serif; cursor: pointer; }
+        .actions { display: flex; flex: 0 0 auto; justify-content: flex-end; align-items: center; gap: 6px; }
+        button { min-height: 32px; padding: 0 11px; border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .65); background: var(--lumiverse-fill-subtle, #191820); color: var(--lumiverse-text, #f5f5f7); font: 650 10px/1 system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
         button:hover { border-color: var(--lumiverse-accent, #b994ff); }
-        .menu { width: 30px; padding: 0; font-size: 16px; }
-        @media (max-width: 480px) { .card { min-height: 132px; padding: 15px; } .center { gap: 8px; } .emblem { width: 42px; height: 42px; } }
+        button.primary { border-color: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 54%, var(--lumiverse-border, #35313f)); background: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 16%, var(--lumiverse-fill-subtle, #191820)); }
+        .menu { width: 32px; padding: 0; font-size: 16px; }
+        @media (max-width: 520px) { .card { grid-template-columns: auto minmax(0, 1fr); gap: 9px 11px; min-height: 112px; padding: 11px; } .emblem { width: 38px; height: 38px; grid-row: 1 / span 2; } .actions { grid-column: 2; justify-content: flex-start; } button { min-height: 29px; } }
       </style>
       <div class="card" id="card">
-        <div class="center">
-          <div class="emblem">${FRAME_WALL_ICON}</div>
-          <div><strong>${widgetEscape(labels[job.status])}</strong><p>${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}</div>
-          <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions">⋯</button></div>
-        </div>
+        <div class="emblem">${FRAME_WALL_ICON}</div>
+        <div class="copy"><strong>${widgetEscape(labels[job.status])}</strong><p class="description">${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}</div>
+        <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions">⋯</button></div>
       </div>
       <script>
         const send = (type) => window.spindleSandbox.postMessage({ type })
@@ -13243,7 +13311,8 @@ function setup(ctx) {
             autoPrintCharacterPositive: value?.autoPrintCharacterPositive === true,
             requiredImageMin: range.min,
             requiredImageMax: range.max,
-            tagPromptMode: value?.promptMode === "pov" ? "pov" : "multi"
+            tagPromptMode: value?.promptMode === "pov" ? "pov" : "multi",
+            tagPromptFamily: value?.promptFamily === "illustrious" ? "illustrious" : "anima"
         };
     };
     const updateBehavior = (next)=>{
@@ -13263,7 +13332,8 @@ function setup(ctx) {
                 autoPrintCharacterPositive: behavior.autoPrintCharacterPositive,
                 requiredImageMin: behavior.requiredImageMin,
                 requiredImageMax: behavior.requiredImageMax,
-                promptMode: behavior.tagPromptMode
+                promptMode: behavior.tagPromptMode,
+                promptFamily: behavior.tagPromptFamily
             }
         });
     };

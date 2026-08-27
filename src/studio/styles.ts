@@ -1065,6 +1065,45 @@ const STYLES = `
   .ss-parser-field > span small { color: var(--lumiverse-text-muted); font-weight: 400; }
   .ss-parser-field .ss-select,
   .ss-parser-field .ss-input { min-width: 0; height: 32px; font-size: 9px; }
+  .ss-prompt-family-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 10px;
+    border: 1px solid color-mix(in srgb, var(--ss-outline, var(--lumiverse-border)) 82%, transparent);
+    border-radius: var(--ss-control-radius, 8px);
+    background: color-mix(in srgb, var(--ss-header-bg, #13141a) 52%, transparent);
+  }
+  .ss-prompt-family-row > span { min-width: 0; display: grid; gap: 3px; }
+  .ss-prompt-family-row strong { font-size: 9.5px; }
+  .ss-prompt-family-row small { color: var(--lumiverse-text-muted); font-size: 8.5px; line-height: 1.35; }
+  .ss-prompt-family-switch {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(76px, 1fr));
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--ss-outline, var(--lumiverse-border));
+    border-radius: calc(var(--ss-control-radius, 8px) + 2px);
+    background: color-mix(in srgb, var(--ss-canvas, #090a0d) 78%, transparent);
+  }
+  .ss-prompt-family-switch button {
+    min-height: 28px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: var(--ss-control-radius, 8px);
+    background: transparent;
+    color: var(--lumiverse-text-muted);
+    font: 650 9px/1 system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .ss-prompt-family-switch button:hover { color: var(--ss-text, var(--lumiverse-text)); }
+  .ss-prompt-family-switch button[data-active="true"] {
+    color: var(--ss-text, var(--lumiverse-text));
+    border-color: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 58%, transparent);
+    background: color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 14%, var(--ss-button-bg, #171820));
+  }
   .ss-protocol-editor { min-height: 290px; resize: vertical; font: 9px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
   .ss-protocol-actions { display: flex; justify-content: flex-end; gap: 7px; }
   .ss-image-scale-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -2774,6 +2813,8 @@ const STUDIO_V3_STYLES = `
     .ss-settings-toggle { padding: 9px; }
     .ss-request-mode-grid { grid-template-columns: minmax(0, 1fr); }
     .ss-parser-field { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+    .ss-prompt-family-row { align-items: stretch; flex-direction: column; }
+    .ss-prompt-family-switch { width: 100%; }
     .ss-protocol-editor { min-height: 250px; font-size: 8.5px; }
     .ss-image-scale-grid { grid-template-columns: repeat(3, minmax(84px, 1fr)); overflow-x: auto; }
     .ss-image-scale-button { min-height: 80px; }

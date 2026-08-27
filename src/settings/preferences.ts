@@ -43,6 +43,7 @@ function defaultStudioBehavior(): StudioBehavior {
     requiredImageMin: 0,
     requiredImageMax: 0,
     tagPromptMode: "multi",
+    tagPromptFamily: "anima",
   }
 }
 
@@ -82,6 +83,7 @@ function storedStudioBehavior(): StudioBehavior {
       requiredImageMin: imageRange.min,
       requiredImageMax: imageRange.max,
       tagPromptMode: parsed?.tagPromptMode === "pov" ? "pov" : "multi",
+      tagPromptFamily: parsed?.tagPromptFamily === "illustrious" ? "illustrious" : "anima",
     }
   } catch {
     return defaultStudioBehavior()
