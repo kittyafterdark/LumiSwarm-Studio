@@ -5,14 +5,19 @@ Example output:
   request="generate"
   slot="instagram-photo"
   aspect="4:3"
-  character="active"
+character="active"
   persona="active"
   alt="Two people sharing food at a city stall"
 >
-character 1: smiling, holding a paper tray
-character 2: amused expression, leaning closer
-interaction: character 1 offers character 2 a bite, standing side by side
-medium shot, city street, food stall, evening lights</swarm-image>`
+quality/meta: masterpiece, best quality, safe
+visible count: 2 people
+scene: Two people share food at a city stall.
+camera: medium two-shot, eye level
+left person: distinct appearance, smiling, holding a paper tray, extending a bite toward the person on the right
+right person: distinct appearance, amused expression, leaning closer
+shared interaction: sharing food
+spatial relation: standing side by side
+environment: city street, food stall, evening lights</swarm-image>`
 
 const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `SWARM STUDIO IMAGE REQUEST PROTOCOL
 Place this exact XML-like request wherever an illustration selected under the image-count instructions should appear. Attributes may be written on one line or separate lines:
@@ -33,8 +38,14 @@ The tag is executed by the user's configured local SwarmUI installation and loca
 IDENTITY AND SUBJECT RULES
 Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the bound character identity; persona="active" selects the bound persona identity. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
 
-Write compact Danbooru-style scene tags and follow the active composition mode below. Use short natural-language clauses only when tags cannot disambiguate an interaction, unusual viewpoint, or spatial relationship. Do not restate display names or write a literary summary.
+Treat the tag body as a small visual scene plan. Establish the exact visible-person count first, then camera, visually anchored subject sections, shared interaction, spatial relation, and environment. Each subject section owns its spatial anchor, identity/distinguishing appearance, attire, expression, pose, individual action, and gaze. Prefer image-space anchors such as left, right, foreground, background, nearest the camera, or farther from the camera; planner labels such as character 1 are not useful final diffusion phrasing.
 
-Use character="none" when the active chat character should not appear. Use persona="active" only when the active persona should appear; otherwise use persona="none". When both are none, Swarm Studio adds a no-character negative guard. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.
+Every visible fact has exactly one owner. Subject-specific appearance, clothing, expression, pose, action, and gaze belong only to that subject. Physical contact or an action jointly performed by multiple visible subjects belongs only to shared interaction. Camera/framing facts belong only to camera. Lighting, location, furniture, weather, and background facts belong only to environment. Do not repeat one fact across sections. Keep a one-actor action on its actor and identify the recipient spatially; put a jointly performed action once in shared interaction.
+
+persona="none" means the active persona is not visibly rendered or identity-conditioned. It does not prohibit an implied first-person observer/camera. When character="active" and persona="none", a POV scene normally contains one visible focal character; the viewer/camera is a reference point, not a second character slot. Express a focal subject's relation as looking at viewer, eye contact, leaning toward viewer, or reaching toward viewer. Do not render the viewer's face or full body unless explicitly requested; a scene-required first-person hand or arm does not add a second visible person.
+
+character="none" means the active chat character must not be visible. Do not use character="none" merely because the scene is first-person or POV. To show the active character from the user's POV, use character="active" persona="none". When both are none, Swarm Studio keeps its scenery/no-character negative guard. Use persona="active" only when the active persona is visibly rendered. Normalize an unseen third party to looking off-screen or a direction-specific gaze instead of asking the checkpoint to render another character.
+
+Do not emit contradictory counts such as solo with 2girls. Do not use BREAK, XML-like pseudo-scoping, or bracketed character identifiers as semantic separators. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.
 
 {{swarm_dynamic_guidance}}`

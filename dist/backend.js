@@ -65,9 +65,15 @@ The tag is executed by the user's configured local SwarmUI installation and loca
 IDENTITY AND SUBJECT RULES
 Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the bound character identity; look="formal" selects a named canonical look (omit it to use the active/default look); persona="active" selects the bound persona identity. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
 
-Write compact Danbooru-style scene tags and follow the active composition mode below. Use short natural-language clauses only when tags cannot disambiguate an interaction, unusual viewpoint, or spatial relationship. Do not restate display names or write a literary summary.
+Treat the tag body as a small visual scene plan. Establish the exact visible-person count first, then camera, visually anchored subject sections, shared interaction, spatial relation, and environment. Each subject section owns its spatial anchor, identity/distinguishing appearance, attire, expression, pose, individual action, and gaze. Prefer image-space anchors such as left, right, foreground, background, nearest the camera, or farther from the camera; planner labels such as character 1 are not useful final diffusion phrasing.
 
-Use character="none" when the active chat character should not appear. Use persona="active" only when the active persona should appear; otherwise use persona="none". When both are none, Swarm Studio adds a no-character negative guard. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.`;
+Every visible fact has exactly one owner. Subject-specific appearance, clothing, expression, pose, action, and gaze belong only to that subject. Physical contact or an action jointly performed by multiple visible subjects belongs only to shared interaction. Camera/framing facts belong only to camera. Lighting, location, furniture, weather, and background facts belong only to environment. Do not repeat one fact across sections. Keep a one-actor action on its actor and identify the recipient spatially; put a jointly performed action once in shared interaction.
+
+persona="none" means the active persona is not visibly rendered or identity-conditioned. It does not prohibit an implied first-person observer/camera. When character="active" and persona="none", a POV scene normally contains one visible focal character; the viewer/camera is a reference point, not a second character slot. Express a focal subject's relation as looking at viewer, eye contact, leaning toward viewer, or reaching toward viewer. Do not render the viewer's face or full body unless explicitly requested; a scene-required first-person hand or arm does not add a second visible person.
+
+character="none" means the active chat character must not be visible. Do not use character="none" merely because the scene is first-person or POV. To show the active character from the user's POV, use character="active" persona="none". When both are none, Swarm Studio keeps its scenery/no-character negative guard. Use persona="active" only when the active persona is visibly rendered. Normalize an unseen third party to looking off-screen or a direction-specific gaze instead of asking the checkpoint to render another character.
+
+Do not emit contradictory counts such as solo with 2girls. Do not use BREAK, XML-like pseudo-scoping, or bracketed character identifiers as semantic separators. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.`;
 const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `${SWARM_IMAGE_PROTOCOL_BASE}
 
 {{swarm_dynamic_guidance}}`;
@@ -2171,7 +2177,8 @@ function cleanTagAutomationConfig(value) {
         autoPrintCharacterPositive: record.autoPrintCharacterPositive === true,
         requiredImageMin,
         requiredImageMax,
-        promptMode: record.promptMode === "pov" ? "pov" : "multi"
+        promptMode: record.promptMode === "pov" ? "pov" : "multi",
+        promptFamily: record.promptFamily === "illustrious" ? "illustrious" : "anima"
     };
 }
 async function loadTagAutomationConfig(userId) {
@@ -2188,7 +2195,8 @@ async function loadTagAutomationConfig(userId) {
             autoPrintCharacterPositive: false,
             requiredImageMin: 0,
             requiredImageMax: 0,
-            promptMode: "multi"
+            promptMode: "multi",
+            promptFamily: "anima"
         },
         userId
     }));
@@ -2448,35 +2456,43 @@ function buildSwarmImageProtocol(profile, context = null, automation = cleanTagA
     const personaTags = asString(context?.personaTags).trim().slice(0, 8_000);
     const lookGuidance = characterLooks.length ? `CHARACTER LOOKS — select with look="name" when the current prose clearly calls for one; otherwise omit look to inherit the active look:\n${characterLooks.map((look)=>`- ${look.name}${look.active ? " (active)" : ""}${look.aliases.length ? ` — aliases: ${look.aliases.join(", ")}` : ""}${look.notes ? ` — ${look.notes.slice(0, 240)}` : ""}`).join("\n")}` : "CHARACTER LOOKS — no named looks have been saved; omit the look attribute.";
     const identityGuidance = [
-        characterTags ? automation.autoPrintCharacterPositive ? `CHARACTER 1 IDENTITY — automatically prepended for character="active"; do not repeat it:\n${characterTags}` : `CHARACTER 1 IDENTITY — available for character="active", but not automatically prepended. Select only the concrete appearance tags needed for the visible subject(s) and include those tags in the request body; this block may contain multiple NPC definitions:\n${characterTags}` : `CHARACTER 1 IDENTITY — no active character visual block is configured. Use concrete appearance descriptors from context, never the display name alone.`,
-        personaTags ? `CHARACTER 2 / PERSONA IDENTITY — injected only for persona="active"; do not repeat it:\n${personaTags}` : `CHARACTER 2 / PERSONA IDENTITY — no active persona visual profile is bound. Leave persona="none" unless concrete appearance descriptors are available in context.`,
+        characterTags ? automation.autoPrintCharacterPositive ? `ACTIVE CHARACTER IDENTITY — automatically bound to the active character's subject section for character="active"; do not repeat it:\n${characterTags}` : `ACTIVE CHARACTER IDENTITY — available for character="active", but not automatically printed. Select only the concrete appearance tags needed for the active character's visually anchored subject section; this block may contain multiple NPC definitions:\n${characterTags}` : `ACTIVE CHARACTER IDENTITY — no active character visual block is configured. Use concrete appearance descriptors from context, never the display name alone.`,
+        personaTags ? `ACTIVE PERSONA IDENTITY — bound to the persona's own subject section only for persona="active"; do not repeat it:\n${personaTags}` : `ACTIVE PERSONA IDENTITY — no active persona visual profile is bound. Leave persona="none" unless a visible persona has concrete appearance descriptors in context.`,
         lookGuidance
     ].join("\n\n");
     const userOnlyStackGuidance = automation.stripUserOnlyLoraStack ? `USER-ONLY LORA BEHAVIOR\nWhen character="none" and persona="active", Swarm Studio removes matching character-bound LoRAs from the inherited stack.` : `USER-ONLY LORA BEHAVIOR\nThe current Studio LoRA stack remains active when character="none" and persona="active". Choose request tags with that inherited stack in mind.`;
-    const model = asString(asRecord(profile?.input).model);
     const imageCountGuidance = automation.requiredImageMin > 0 ? automation.requiredImageMin === automation.requiredImageMax ? `IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY
 The user explicitly requires exactly ${automation.requiredImageMin} complete <swarm-image> request${automation.requiredImageMin === 1 ? "" : "s"} in this reply. This overrides the default discretion about whether a moment needs visualization. Do not omit the requests by claiming that no scene is important enough, not specifically required, or better left unillustrated. Choose the strongest ${automation.requiredImageMin === 1 ? "moment" : "moments"}, emit exactly the required count, and make every request complete and distinct.` : `IMAGE COUNT REQUIREMENT — USER-SELECTED AND MANDATORY
 The user explicitly requires between ${automation.requiredImageMin} and ${automation.requiredImageMax} complete <swarm-image> requests in this reply. This overrides the default discretion about whether a moment needs visualization. Emit at least ${automation.requiredImageMin} and no more than ${automation.requiredImageMax}. Do not omit the requests by claiming that no scene is important enough, not specifically required, or better left unillustrated. Choose the strongest moments and make every request complete and distinct.` : `IMAGE COUNT
 No explicit image count is active. Decide whether an illustration materially improves the reply; do not emit a request merely to fill a quota.`;
     const modeGuidance = automation.promptMode === "pov" ? `ILLUSTRATION MODE — CHARACTER-ONLY / POV
-Favor one visible focal character. Use compact Danbooru-style tags in this order: quality/rating and exactly one safety tag; person count; subject; visible facial expression; current outfit changes; action/pose/hands/legs; setting; camera/framing; lighting/style/effects; LoRA or preset triggers.
+When character="active" and persona="none", compile one visible focal active character and an invisible viewer/camera. persona="none" means the persona is not visibly rendered or identity-conditioned; it does not prohibit an implied observer. The viewer/camera is a reference point, not a character slot, and does not increment visible count.
 
-For interaction with the User, use POV framing and show only scene-required partial body parts such as a hand, arm, legs, or an edge of the body. Avoid the User's face and do not invent a second complete identity. If physical contact or the crop hides the focal character's face, omit face tags instead of inventing a visible expression.
+Use this owned plan order: quality/meta; visible count; scene; camera; the focal subject's anchor, identity/appearance, attire, expression, pose, individual action, and gaze; environment. For interaction with the viewer, use pov, looking at viewer, eye contact, leaning toward viewer, or reaching toward viewer. Do not render the viewer's face or full body unless explicitly requested. Scene-required partial POV body parts such as a hand or arm do not add a second visible person.
+
+character="none" still means the active chat character must not be visible. Never select character="none" merely because the camera is first-person. To show the active character from the user's POV, use character="active" persona="none". Normalize a gaze toward an unseen third party to looking off-screen, looking to the side, or a direction-specific gaze instead of inventing another person. If physical contact or the crop hides the focal character's face, omit face tags instead of inventing a visible expression.
 
 The current message is authoritative for current outfit, clothing removal, damage, wetness, or disarray. Add those visible changes; otherwise rely on the injected identity's base outfit. When a face is visible, always use concrete expression tags including the relevant eyes, mouth, and brows—such as smiling, open mouth, blush, glaring, furrowed brows, or clenched teeth—rather than a vague mood.
 
 Use specific view tags such as front view, from behind, from above, from below, and pov; combine them when useful. Fit framing to the action. Do not put negative prompts in the tag body.` : `ILLUSTRATION MODE — MULTI-CHARACTER / ENSEMBLE
-Use no more than five visually necessary subjects. Keep every visible subject isolated on a compact line:
-character 1: [visible expression], [position], [pose/action], [current outfit changes]
-character 2: [visible expression], [position], [pose/action], [current outfit changes]
-Then write interaction: [shared contact/action and spatial relation], followed by shared camera/framing, environment, lighting, depth, effects, and finish.
+Use no more than five visually necessary subjects. Emit a small owned scene plan in this order:
+quality/meta: [quality, rating, and safety metadata]
+visible count: [one exact, non-contradictory count]
+scene: [one short overall scene statement]
+camera: [framing, angle, perspective, focus]
+left/right/foreground/background subject: [identity and distinguishing appearance], [attire], [expression], [pose], [individual action], [gaze]
+shared interaction: [physical contact or action jointly performed by visible subjects, once]
+spatial relation: [shared placement or distance, once]
+environment: [location, furniture, weather, background, lighting, finish]
 
-Character 1 is the active chat character and character 2 is the active persona when enabled. Use left, right, foreground, background, and viewer-relative positions instead of display names. Attribute each action once so poses and traits do not bleed between subjects. Extra incidental subjects need concrete visible descriptors and must not rely on an unknown name.
+List the active chat character's visually anchored subject section first and the active persona's section second when both are visible, but never write application-level character 1 or character 2 as final diffusion phrasing. Every visible subject needs a concrete image-space or depth-space anchor wherever composition permits one: left, right, center, foreground, midground, background, nearest the camera, farther from the camera, or seated opposite the other subject.
 
-The current message is authoritative for expressions, clothing changes, and current outfit state; otherwise rely on injected identities. Use concrete facial tags—such as smiling, open mouth, blush, glaring, furrowed brows, or clenched teeth—not a vague mood. Use short natural-language clauses only when tags cannot clearly express an interaction, unusual viewpoint, or spatial relationship. Do not include negative prompts in the tag body.`;
-    const checkpointGuidance = /anima/i.test(model) ? `ANIMA PROMPT SHAPE
-Begin with quality/rating tags such as masterpiece, best quality, score_9, newest, and highres; then use exactly one of safe, sensitive, nsfw, or explicit plus a person count. Prefer atomic, independently visual tags. Keep composition separate from identity: subject lines own expression, pose, action, and outfit changes; shared lines own interaction, camera, setting, light, depth, and effects.` : `CHECKPOINT GUIDANCE
-Use concise model-recognizable visual descriptors. Identity blocks cover stable appearance; focus the request on visible scene state, expression, action, staging, camera, environment, and light.`;
+Every visible fact has exactly one owner. Appearance, attire, expression, pose, individual action, and gaze stay inside that subject's section. A one-actor action stays on its actor and names the recipient spatially. Joint contact/action appears once in shared interaction. Camera facts appear only under camera; setting and lighting appear only under environment. Do not repeat a fact across sections. Extra incidental subjects need concrete visible descriptors and must not rely on an unknown name.
+
+The current message is authoritative for expressions, clothing changes, and current outfit state; otherwise rely on injected identities. Use concrete facial tags—such as smiling, open mouth, blush, glaring, furrowed brows, or clenched teeth—not a vague mood. Do not include negative prompts in the tag body. Do not use BREAK, bracketed pseudo-scoping, or XML-like character wrappers.`;
+    const checkpointGuidance = automation.promptFamily === "illustrious" ? `ILLUSTRIOUS SUBJECT SERIALIZER
+The user selected Illustrious prompt shaping. Keep the representation comparatively tag-dense: quality/meta first, exact subject count early, camera/composition, then one compact visually anchored token bundle per subject. Keep each subject's identity, distinguishing appearance, attire, pose, action, and gaze adjacent. Use a short natural-language clause only where tags cannot preserve spatial, action, or relationship ownership. Never flatten distinct hair, eyes, clothes, and actions into global lists. Text ownership improves conditioning but cannot spatially isolate globally loaded LoRAs.` : `ANIMA SUBJECT SERIALIZER
+The user selected Anima prompt shaping. Begin with quality/rating metadata such as masterpiece, best quality, score_9, newest, and highres; use exactly one of safe, sensitive, nsfw, or explicit; then put the visible-person count early. Mix useful tags with short readable natural-language spatial subject clauses. Give each visible subject enough basic distinguishing appearance and attire to bind its identity, and keep its pose, action, and gaze in that same clause. Order: overall scene, camera, each anchored subject, shared interaction, spatial relation, environment/lighting. Do not force predominantly Danbooru fragments, BREAK, or pseudo-structured character wrappers.`;
     const dynamicGuidance = `${imageCountGuidance}\n\n${identityGuidance}\n\n${userOnlyStackGuidance}\n\n${modeGuidance}\n\n${checkpointGuidance}\n\n${presetGuidance}`;
     const template = automation.protocolPrompt.trim() || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT;
     return template.includes("{{swarm_dynamic_guidance}}") ? template.replace(/\{\{\s*swarm_dynamic_guidance\s*\}\}/gi, dynamicGuidance) : template;
@@ -2841,6 +2857,145 @@ async function resolveVisualReferenceImage(referenceImageId, referenceImageUrl, 
         mimeType
     } : null;
 }
+export function normalizePovLanguage(value) {
+    return value.replace(/\blooking\s+at\s+(?:the\s+)?(?:user|persona|viewer character)\b/gi, "looking at viewer").replace(/\b(?:gaze\s+directed\s+at|gazing\s+at)\s+(?:the\s+)?(?:user|persona)\b/gi, "gaze directed at viewer").replace(/\b(?:reaching|leaning)\s+(?:for|toward|towards)\s+(?:the\s+)?(?:user|persona)\b/gi, (match)=>/^leaning/i.test(match) ? "leaning toward viewer" : "reaching toward viewer").replace(/\blooking\s+at\s+(?:another|an unseen|a hidden)\s+(?:character|person)\b/gi, "looking off-screen");
+}
+function isVisualSubjectAnchor(value) {
+    const label = value.trim().toLowerCase();
+    if (!label || label.length > 100) return false;
+    return /\b(?:left|right|center|foreground|midground|background|nearest\s+(?:to\s+)?(?:the\s+)?camera|farther\s+from\s+(?:the\s+)?camera|opposite)\b/.test(label);
+}
+export function parseImageScenePlan(value) {
+    const plan = {
+        metadata: "",
+        visibleCount: "",
+        scene: "",
+        camera: "",
+        subjects: [],
+        sharedInteraction: "",
+        spatialRelation: "",
+        environment: "",
+        remainder: []
+    };
+    let recognized = 0;
+    for (const rawLine of value.split(/\r?\n/)){
+        const line = rawLine.trim();
+        if (!line) continue;
+        const field = line.match(/^(quality\s*\/\s*meta|quality|metadata|visible\s+count|scene|camera|shared\s+interaction|spatial\s+relation|environment)\s*:\s*(.*)$/i);
+        if (field) {
+            const key = field[1].toLowerCase().replace(/\s+/g, "");
+            const content = field[2].trim();
+            if (/^(?:quality\/?meta|quality|metadata)$/.test(key)) plan.metadata = content;
+            else if (key === "visiblecount") plan.visibleCount = content;
+            else if (key === "scene") plan.scene = content;
+            else if (key === "camera") plan.camera = content;
+            else if (key === "sharedinteraction") plan.sharedInteraction = content;
+            else if (key === "spatialrelation") plan.spatialRelation = content;
+            else if (key === "environment") plan.environment = content;
+            recognized += 1;
+            continue;
+        }
+        const plannedSubject = line.match(/^(?:subject|character)\s+\d+\s*\[([^\]]+)\]\s*:\s*(.*)$/i);
+        if (plannedSubject && isVisualSubjectAnchor(plannedSubject[1])) {
+            plan.subjects.push({
+                anchor: plannedSubject[1].trim(),
+                details: plannedSubject[2].trim()
+            });
+            recognized += 1;
+            continue;
+        }
+        const anchoredSubject = line.match(/^([^:]{1,100})\s*:\s*(.*)$/);
+        if (anchoredSubject && isVisualSubjectAnchor(anchoredSubject[1])) {
+            plan.subjects.push({
+                anchor: anchoredSubject[1].trim(),
+                details: anchoredSubject[2].trim()
+            });
+            recognized += 1;
+            continue;
+        }
+        plan.remainder.push(line);
+    }
+    return plan.subjects.length > 0 && recognized >= 2 ? plan : null;
+}
+function visibleCountNumber(value) {
+    const explicitPeople = [
+        ...value.matchAll(/\b(\d+)\s*(?:girls?|boys?|women|woman|men|man|persons?|people)\b/gi)
+    ];
+    if (explicitPeople.length) return explicitPeople.reduce((sum, match)=>sum + Number(match[1] || 0), 0);
+    const word = value.toLowerCase().match(/\b(one|two|three|four|five)\b/);
+    return word ? ({
+        one: 1,
+        two: 2,
+        three: 3,
+        four: 4,
+        five: 5
+    })[word[1]] : 0;
+}
+function normalizedVisibleCount(value, subjectCount, forceSingle) {
+    const target = forceSingle ? 1 : subjectCount;
+    const cleaned = value.replace(target > 1 ? /(?:^|,\s*)solo(?:\s*,|$)/gi : /$^/, "").replace(/\s*,\s*,+/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
+    if (target <= 0) return cleaned;
+    const declared = visibleCountNumber(cleaned);
+    if (!cleaned || declared > 0 && declared !== target) return `${target} ${target === 1 ? "person" : "people"}`;
+    return cleaned;
+}
+function identityPromptForSubject(value, ensemble) {
+    if (!value) return "";
+    const parts = value.split(/\s*,\s*|\r?\n/).map((part)=>part.trim()).filter(Boolean).filter((part)=>!ensemble || !/^(?:solo|1\s*(?:girl|boy|woman|man|person))$/i.test(part));
+    return [
+        ...new Set(parts.map((part)=>part.toLowerCase()))
+    ].map((key)=>parts.find((part)=>part.toLowerCase() === key) || "").filter(Boolean).join(", ");
+}
+function animaSubjectAnchor(value) {
+    const anchor = value.trim().replace(/^(?:the\s+)/i, "");
+    const side = anchor.match(/^(left|right)\s+(.+)$/i);
+    if (side) return `The ${side[2]} on the ${side[1].toLowerCase()}`;
+    const depth = anchor.match(/^(foreground|midground|background)\s+(.+)$/i);
+    if (depth) return `The ${depth[2]} in the ${depth[1].toLowerCase()}`;
+    return `The ${anchor}`;
+}
+export function serializeScenePlan(plan, family, identityPrompts, forceSingleVisibleSubject = false) {
+    const ensemble = plan.subjects.length > 1;
+    const subjects = plan.subjects.map((subject, index)=>{
+        const identity = identityPromptForSubject(identityPrompts[index] || "", ensemble);
+        const details = normalizePovLanguage(subject.details);
+        return {
+            ...subject,
+            details: [
+                identity,
+                details
+            ].filter(Boolean).join(family === "anima" ? "; " : ", ")
+        };
+    });
+    const visibleCount = normalizedVisibleCount(plan.visibleCount, subjects.length, forceSingleVisibleSubject);
+    if (family === "illustrious") {
+        return [
+            plan.metadata,
+            visibleCount,
+            plan.camera,
+            plan.scene,
+            ...plan.remainder,
+            ...subjects.map((subject)=>[
+                    subject.anchor,
+                    subject.details
+                ].filter(Boolean).join(", ")),
+            normalizePovLanguage(plan.sharedInteraction),
+            plan.spatialRelation,
+            plan.environment
+        ].filter(Boolean).join("\n");
+    }
+    return [
+        plan.metadata,
+        visibleCount,
+        plan.scene,
+        plan.camera ? `Camera: ${plan.camera}` : "",
+        ...plan.remainder,
+        ...subjects.map((subject)=>`${animaSubjectAnchor(subject.anchor)}: ${subject.details}`),
+        plan.sharedInteraction ? `Together: ${normalizePovLanguage(plan.sharedInteraction)}` : "",
+        plan.spatialRelation ? `Spatial relation: ${plan.spatialRelation}` : "",
+        plan.environment
+    ].filter(Boolean).join("\n");
+}
 async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, includePersona = false, automation = cleanTagAutomationConfig(null), requestedLook = "", userId) {
     const chat = spindle.permissions.has("chats") ? await spindle.chats.get(chatId, userId) : null;
     const characterId = asString(chat?.character_id);
@@ -2892,31 +3047,71 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     const lookTriggers = activeLook?.triggerWords.filter((word)=>!sceneLower.includes(word.toLowerCase())) || [];
     let prompt = scenePrompt.replace(/\{\{\s*char_base\s*\}\}/gi, characterBase).replace(/\{\{\s*persona_base\s*\}\}/gi, personaBase).trim();
     const contains = (value)=>Boolean(value && prompt.toLowerCase().includes(value.toLowerCase()));
-    if (characterBase && personaBase) {
-        const identityLines = [
-            automation.autoPrintCharacterPositive && !contains(characterBase) ? `character 1 identity: ${characterBase}` : "",
-            !contains(personaBase) ? `character 2 identity: ${personaBase}` : ""
-        ].filter(Boolean);
-        prompt = [
-            ...identityLines,
-            prompt
-        ].filter(Boolean).join("\n");
-    } else if (characterBase && automation.autoPrintCharacterPositive && !contains(characterBase)) {
-        prompt = [
-            characterBase,
-            prompt
-        ].filter(Boolean).join(", ");
-    } else if (personaBase && !contains(personaBase)) {
-        prompt = [
-            personaBase,
-            prompt
-        ].filter(Boolean).join(", ");
-    }
-    for (const layer of [
+    const characterLayers = [
+        automation.autoPrintCharacterPositive ? characterBase : "",
         lookPositive,
-        ...lookTriggers,
-        ...lorePositive
-    ]){
+        ...lookTriggers
+    ].filter((layer)=>layer && !contains(layer));
+    const personaLayers = [
+        personaBase
+    ].filter((layer)=>layer && !contains(layer));
+    const identityPrompts = [
+        ...includeCharacter ? [
+            characterLayers.join(", ")
+        ] : [],
+        ...includePersona ? [
+            personaLayers.join(", ")
+        ] : []
+    ];
+    const scenePlan = parseImageScenePlan(prompt);
+    if (scenePlan) {
+        const forceSingleVisibleSubject = includeCharacter && !includePersona && (automation.promptMode === "pov" || /\b(?:pov|first[- ]person)\b/i.test([
+            scenePlan.scene,
+            scenePlan.camera,
+            ...scenePlan.remainder
+        ].join(" ")));
+        prompt = serializeScenePlan(scenePlan, automation.promptFamily, identityPrompts, forceSingleVisibleSubject);
+        for (const unboundIdentity of identityPrompts.slice(scenePlan.subjects.length).filter(Boolean)){
+            prompt = [
+                unboundIdentity,
+                prompt
+            ].filter(Boolean).join(", ");
+        }
+    } else {
+        if (characterBase && personaBase) {
+            const identityLines = [
+                automation.autoPrintCharacterPositive && !contains(characterBase) ? `active character identity: ${characterBase}` : "",
+                !contains(personaBase) ? `active persona identity: ${personaBase}` : ""
+            ].filter(Boolean);
+            prompt = [
+                ...identityLines,
+                prompt
+            ].filter(Boolean).join("\n");
+        } else if (characterBase && automation.autoPrintCharacterPositive && !contains(characterBase)) {
+            prompt = [
+                characterBase,
+                prompt
+            ].filter(Boolean).join(", ");
+        } else if (personaBase && !contains(personaBase)) {
+            prompt = [
+                personaBase,
+                prompt
+            ].filter(Boolean).join(", ");
+        }
+        for (const layer of [
+            lookPositive,
+            ...lookTriggers
+        ]){
+            if (layer && !contains(layer)) prompt = [
+                layer,
+                prompt
+            ].filter(Boolean).join(", ");
+        }
+        if (includeCharacter && !includePersona && (automation.promptMode === "pov" || /\b(?:pov|first[- ]person)\b/i.test(prompt))) {
+            prompt = normalizePovLanguage(prompt);
+        }
+    }
+    for (const layer of lorePositive){
         if (layer && !contains(layer)) prompt = [
             layer,
             prompt

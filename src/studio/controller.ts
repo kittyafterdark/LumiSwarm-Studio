@@ -296,6 +296,10 @@ class StudioController {
     if (requiredImageMax) requiredImageMax.value = String(this.behavior.requiredImageMax)
     const tagPromptMode = this.root.querySelector<HTMLSelectElement>('[data-role="tag-prompt-mode"]')
     if (tagPromptMode) tagPromptMode.value = this.behavior.tagPromptMode
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="set-prompt-family"]')) {
+      button.dataset.active = String(button.dataset.promptFamily === this.behavior.tagPromptFamily)
+      button.setAttribute("aria-checked", String(button.dataset.promptFamily === this.behavior.tagPromptFamily))
+    }
   }
 
   private renderParserConnections(): void {
@@ -851,6 +855,13 @@ class StudioController {
                       </section>
                       <section class="ss-config-section">
                         <div class="ss-config-section-head"><strong>Protocol prompt</strong><span>Inline-mode system instruction</span></div>
+                        <div class="ss-prompt-family-row">
+                          <span><strong>Prompt family</strong><small>Controls subject serialization and model-specific ownership guidance.</small></span>
+                          <div class="ss-prompt-family-switch" role="radiogroup" aria-label="Protocol prompt family">
+                            <button type="button" data-action="set-prompt-family" data-prompt-family="anima" data-active="${this.behavior.tagPromptFamily === "anima"}" role="radio" aria-checked="${this.behavior.tagPromptFamily === "anima"}">Anima</button>
+                            <button type="button" data-action="set-prompt-family" data-prompt-family="illustrious" data-active="${this.behavior.tagPromptFamily === "illustrious"}" role="radio" aria-checked="${this.behavior.tagPromptFamily === "illustrious"}">Illustrious</button>
+                          </div>
+                        </div>
                         <textarea class="ss-textarea ss-protocol-editor" data-role="tag-protocol-prompt" spellcheck="false"></textarea>
                         <p class="ss-muted ss-tiny"><code>{{swarm_dynamic_guidance}}</code> is replaced at runtime with the active image count, identities, composition mode, checkpoint guidance, and Swarm preset stack. Remove it only when your custom protocol deliberately replaces all dynamic guidance.</p>
                         <p class="ss-muted ss-tiny">Parser mode injects its own compact placement protocol and uses this fully resolved protocol privately when completing each request.</p>
@@ -1834,6 +1845,10 @@ are removed when CSS is applied.</pre>
       if (action === "copy-tag-protocol") void this.copyTagProtocol()
       if (action === "reset-tag-protocol") this.resetTagProtocol()
       if (action === "save-tag-protocol") this.saveTagProtocol()
+      if (action === "set-prompt-family") {
+        const tagPromptFamily = button.dataset.promptFamily === "illustrious" ? "illustrious" : "anima"
+        this.onBehaviorChange({ ...this.behavior, tagPromptFamily })
+      }
       if (action === "set-inline-image-scale") {
         const scale = Number(button.dataset.scale)
         if (scale === 100 || scale === 75 || scale === 50) {

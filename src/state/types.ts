@@ -26,6 +26,7 @@ interface StudioBehavior {
   requiredImageMin: number
   requiredImageMax: number
   tagPromptMode: "multi" | "pov"
+  tagPromptFamily: "anima" | "illustrious"
 }
 
 interface LoraMetadata {

@@ -416,13 +416,6 @@ class TaggedImageController {
     }).catch(() => {})
   }
 
-  private requestedAspect(job: TaggedImageJobView): string {
-    const aspect = String(job.aspect || "").trim()
-    return /^(?:1:1|2:3|3:2|3:4|4:3|4:5|5:4|9:16|16:9)$/.test(aspect)
-      ? aspect.replace(":", " / ")
-      : "4 / 3"
-  }
-
   private render(job: TaggedImageJobView): void {
     if (!this.shouldRenderPlaceholder(job)) {
       this.remove(job)
@@ -439,37 +432,37 @@ class TaggedImageController {
       cancelled: "Illustration stopped",
     }
     const action = job.status === "requested"
-      ? `<button data-action="generate">Generate image</button>`
+      ? `<button class="primary" data-action="generate">Generate image</button>`
       : job.status === "ready" && !job.inserted
-        ? `<button data-action="attach">Attach image</button>`
+        ? `<button class="primary" data-action="attach">Attach image</button>`
       : job.status === "failed" || job.status === "cancelled"
-        ? `<button data-action="retry">Retry</button>`
+        ? `<button class="primary" data-action="retry">Retry</button>`
         : ""
     const error = job.error ? `<p class="error">${widgetEscape(job.error)}</p>` : ""
     const html = `
       <style>
         :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
         * { box-sizing: border-box; }
-        body { margin: 0; color: var(--lumiverse-text, #f5f5f7); background: transparent; }
-        .card { position: relative; display: grid; place-items: center; width: 100%; min-height: 150px; aspect-ratio: ${this.requestedAspect(job)}; max-height: min(70vh, 680px); padding: 22px; border: 1px dashed color-mix(in srgb, var(--lumiverse-accent, #b994ff) 34%, var(--lumiverse-border, #35313f)); border-radius: var(--lumiverse-radius, 12px); background: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 5%, var(--lumiverse-fill, #111116)); overflow: hidden; }
-        .center { display: grid; justify-items: center; gap: 10px; max-width: 430px; text-align: center; }
-        .emblem { display: grid; place-items: center; width: 48px; height: 48px; color: var(--lumiverse-accent, #b994ff); border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .72); background: var(--lumiverse-fill-subtle, #191820); }
-        .emblem svg { width: 25px; height: 25px; fill: currentColor; }
+        body { margin: 0; min-width: 0; color: var(--lumiverse-text, #f5f5f7); background: transparent; }
+        .card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 13px; width: 100%; min-height: 104px; padding: 13px 14px; border: 1px dashed color-mix(in srgb, var(--lumiverse-accent, #b994ff) 34%, var(--lumiverse-border, #35313f)); border-radius: var(--lumiverse-radius, 12px); background: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 5%, var(--lumiverse-fill, #111116)); }
+        .emblem { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 auto; color: var(--lumiverse-accent, #b994ff); border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .72); background: var(--lumiverse-fill-subtle, #191820); }
+        .emblem svg { width: 22px; height: 22px; fill: currentColor; }
+        .copy { min-width: 0; display: grid; gap: 4px; text-align: left; }
         strong { display: block; font: 600 14px/1.2 Georgia, ui-serif, serif; letter-spacing: .01em; }
-        p { margin: 0; color: var(--lumiverse-text-muted, #aaa6b1); font-size: 11px; line-height: 1.45; }
+        p { margin: 0; color: var(--lumiverse-text-muted, #aaa6b1); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+        .description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
         .error { color: #ff9caa; }
-        .actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; }
-        button { min-height: 30px; padding: 0 10px; border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .65); background: var(--lumiverse-fill-subtle, #191820); color: var(--lumiverse-text, #f5f5f7); font: 600 10px/1 system-ui, sans-serif; cursor: pointer; }
+        .actions { display: flex; flex: 0 0 auto; justify-content: flex-end; align-items: center; gap: 6px; }
+        button { min-height: 32px; padding: 0 11px; border: 1px solid var(--lumiverse-border, #35313f); border-radius: calc(var(--lumiverse-radius, 12px) * .65); background: var(--lumiverse-fill-subtle, #191820); color: var(--lumiverse-text, #f5f5f7); font: 650 10px/1 system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
         button:hover { border-color: var(--lumiverse-accent, #b994ff); }
-        .menu { width: 30px; padding: 0; font-size: 16px; }
-        @media (max-width: 480px) { .card { min-height: 132px; padding: 15px; } .center { gap: 8px; } .emblem { width: 42px; height: 42px; } }
+        button.primary { border-color: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 54%, var(--lumiverse-border, #35313f)); background: color-mix(in srgb, var(--lumiverse-accent, #b994ff) 16%, var(--lumiverse-fill-subtle, #191820)); }
+        .menu { width: 32px; padding: 0; font-size: 16px; }
+        @media (max-width: 520px) { .card { grid-template-columns: auto minmax(0, 1fr); gap: 9px 11px; min-height: 112px; padding: 11px; } .emblem { width: 38px; height: 38px; grid-row: 1 / span 2; } .actions { grid-column: 2; justify-content: flex-start; } button { min-height: 29px; } }
       </style>
       <div class="card" id="card">
-        <div class="center">
-          <div class="emblem">${FRAME_WALL_ICON}</div>
-          <div><strong>${widgetEscape(labels[job.status])}</strong><p>${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}</div>
-          <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions">⋯</button></div>
-        </div>
+        <div class="emblem">${FRAME_WALL_ICON}</div>
+        <div class="copy"><strong>${widgetEscape(labels[job.status])}</strong><p class="description">${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}</div>
+        <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions">⋯</button></div>
       </div>
       <script>
         const send = (type) => window.spindleSandbox.postMessage({ type })

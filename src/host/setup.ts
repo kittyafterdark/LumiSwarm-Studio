@@ -71,6 +71,7 @@ function setup(ctx: FrontendContext): () => void {
       requiredImageMin: range.min,
       requiredImageMax: range.max,
       tagPromptMode: value?.promptMode === "pov" ? "pov" : "multi",
+      tagPromptFamily: value?.promptFamily === "illustrious" ? "illustrious" : "anima",
     }
   }
 
@@ -92,6 +93,7 @@ function setup(ctx: FrontendContext): () => void {
         requiredImageMin: behavior.requiredImageMin,
         requiredImageMax: behavior.requiredImageMax,
         promptMode: behavior.tagPromptMode,
+        promptFamily: behavior.tagPromptFamily,
       },
     })
   }
