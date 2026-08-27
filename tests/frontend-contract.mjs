@@ -23,6 +23,7 @@ const {
   reportStudioError,
   sanitizeCustomCss,
   serializeSwarmPresetList,
+  swarmImageProtocolExample,
 } = await import("../dist/frontend.js")
 
 const capturedConsoleErrors = []
@@ -50,6 +51,15 @@ assert.equal(
   "00000000-0000-4000-8000-000000000000",
 )
 assert.match(createRequestId(null), /^swarm-studio-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+$/)
+const animaProtocolExample = swarmImageProtocolExample("anima")
+const illustriousProtocolExample = swarmImageProtocolExample("illustrious")
+assert.notEqual(animaProtocolExample, illustriousProtocolExample)
+assert.match(animaProtocolExample, /Example Anima output/)
+assert.match(animaProtocolExample, /The man on the left has short black hair/)
+assert.match(animaProtocolExample, /The woman on the right leans closer/)
+assert.match(illustriousProtocolExample, /Example Illustrious output/)
+assert.match(illustriousProtocolExample, /left boy: short black hair, brown eyes, dark jacket/)
+assert.doesNotMatch(illustriousProtocolExample, /The man on the left has/)
 assert.deepEqual(dimensionsForAspect("1:1", 1024), { width: 1024, height: 1024 })
 assert.deepEqual(dimensionsForAspect("4:3", 1024), { width: 1152, height: 896 })
 assert.deepEqual(dimensionsForAspect("3:4", 1024), { width: 896, height: 1152 })
@@ -463,9 +473,14 @@ assert.match(source, /character="active"/)
 assert.match(source, /persona="active"/)
 assert.match(source, /character="none" means the active chat character must not be visible/)
 assert.match(source, /persona="none" means the active persona is not visibly rendered or identity-conditioned/)
-assert.match(source, /visible count: 2 people/)
-assert.match(source, /left person: distinct appearance/)
+assert.match(source, /character="active" selects the active character card as an available visual identity source/)
+assert.match(source, /Visible-subject count equals the number of resolved people/)
+assert.match(source, /visible count: 1boy, 1girl/)
+assert.match(source, /left boy: short black hair/)
 assert.match(source, /shared interaction: sharing food/)
+assert.match(source, /Copy \$\{this\.behavior\.tagPromptFamily === "illustrious" \? "Illustrious" : "Anima"\} example/)
+assert.match(source, /compiles eligible multi-subject scene plans into native SwarmUI <region:x,y,width,height,strength>/)
+assert.match(source, /Do not invent coordinates or write <region:\.\.\.> directives yourself/)
 assert.match(source, /Macro reference/)
 assert.match(source, /ss-macro-guide-grid/)
 assert.match(source, /\{\{char_base\}\}/)

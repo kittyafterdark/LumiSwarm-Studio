@@ -5,9 +5,15 @@
 ### Added
 
 - Generation protocol settings now include an explicit Anima/Illustrious
-  prompt-family switch with family-specific subject serialization.
+  prompt-family switch with family-specific subject serialization and matching
+  copyable examples.
 - Tagged prompts can use an internal scene-plan shape that binds character and
   persona identity text to visually anchored subject sections.
+- Multi-subject scene plans now compile to deterministic, overlapping native
+  SwarmUI regions with subject-local conditioning and a background region.
+  Illustrious uses full regional strength; Anima uses a conservative
+  experimental strength. Single-subject and ordinary POV scenes remain on the
+  standard serializer.
 - Named Character Looks inherit the existing visual identity and add outfit,
   negative, checkpoint, LoRA, reference, thumbnail, trigger, and note layers.
   Inline requests can select a Look explicitly or infer it from saved aliases.
@@ -35,8 +41,10 @@
 
 - Multi-character guidance now enforces exact visible counts, spatial subject
   anchors, one-fact/one-owner rules, and separate shared interaction, camera,
-  and environment layers. POV guidance now distinguishes an invisible
-  persona/viewer from `character="none"` scenery semantics.
+  and environment layers. A character card is treated as an identity source
+  that can resolve to multiple visible NPC subjects rather than a fixed count
+  of one. POV guidance now distinguishes an invisible persona/viewer from
+  `character="none"` scenery semantics.
 - Illustration fallback cards use a compact horizontal strip so Generate,
   Retry, and Attach actions remain visible in narrow chat placeholders.
 - Inspector reuse and init-image actions resolve exact embedded generation

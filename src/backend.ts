@@ -381,9 +381,13 @@ LOCAL GENERATION
 The tag is executed by the user's configured local SwarmUI installation and local hardware. You are not claiming to render the image yourself, calling a remote image service, or embedding a pre-existing web image. Follow the conversation's actually applicable instructions, but do not invent or quote a remote image provider's policy, capability restriction, quota, moderation rule, or refusal: no remote image provider is being invoked by this tag. When an illustration is appropriate, emit the request tag and continue the reply naturally; do not apologize that you cannot generate images, ask the user to open another tool, warn that an external image model may refuse, or replace the request with image-search instructions.
 
 IDENTITY AND SUBJECT RULES
-Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the bound character identity; look="formal" selects a named canonical look (omit it to use the active/default look); persona="active" selects the bound persona identity. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
+Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the active character card as an available visual identity source; it does not force that source to resolve to exactly one image subject. A multi-NPC card may contribute multiple distinct visible subjects when the scene calls for them. look="formal" selects a named canonical look (omit it to use the active/default look); persona="active" independently selects the bound persona identity as a visible subject source. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
+
+Resolve visible subjects from the current scene before compiling the prompt. Visible-subject count equals the number of resolved people the image must render, not the number of character cards, the persona state, or the POV state. When one card contains multiple NPC definitions, copy each selected NPC's concrete appearance and attire into that NPC's own visually anchored subject section; never flatten the card's combined identity text into one global subject. Keep automatic character-prompt printing off for multi-NPC cards so the relevant identity fragments can be selected per subject.
 
 Treat the tag body as a small visual scene plan. Establish the exact visible-person count first, then camera, visually anchored subject sections, shared interaction, spatial relation, and environment. Each subject section owns its spatial anchor, identity/distinguishing appearance, attire, expression, pose, individual action, and gaze. Prefer image-space anchors such as left, right, foreground, background, nearest the camera, or farther from the camera; planner labels such as character 1 are not useful final diffusion phrasing.
+
+Swarm Studio compiles eligible multi-subject scene plans into native SwarmUI <region:x,y,width,height,strength> conditioning with generous overlapping subject regions and a <region:background> environment. Do not invent coordinates or write <region:...> directives yourself. Keep shared interaction, camera, and spatial relationships in their dedicated global fields; subject-local appearance and action stay in each anchored subject field. Single-subject and ordinary POV plans remain unregionalized.
 
 Every visible fact has exactly one owner. Subject-specific appearance, clothing, expression, pose, action, and gaze belong only to that subject. Physical contact or an action jointly performed by multiple visible subjects belongs only to shared interaction. Camera/framing facts belong only to camera. Lighting, location, furniture, weather, and background facts belong only to environment. Do not repeat one fact across sections. Keep a one-actor action on its actor and identify the recipient spatially; put a jointly performed action once in shared interaction.
 
@@ -3057,6 +3061,8 @@ When character="active" and persona="none", compile one visible focal active cha
 
 Use this owned plan order: quality/meta; visible count; scene; camera; the focal subject's anchor, identity/appearance, attire, expression, pose, individual action, and gaze; environment. For interaction with the viewer, use pov, looking at viewer, eye contact, leaning toward viewer, or reaching toward viewer. Do not render the viewer's face or full body unless explicitly requested. Scene-required partial POV body parts such as a hand or arm do not add a second visible person.
 
+If the scene explicitly requires two or more visible characters from the active card, keep every resolved visible subject and the exact count even in a first-person composition; the invisible observer still contributes no subject slot. Give each visible character a spatially anchored subject section so the regional compiler can condition them independently.
+
 character="none" still means the active chat character must not be visible. Never select character="none" merely because the camera is first-person. To show the active character from the user's POV, use character="active" persona="none". Normalize a gaze toward an unseen third party to looking off-screen, looking to the side, or a direction-specific gaze instead of inventing another person. If physical contact or the crop hides the focal character's face, omit face tags instead of inventing a visible expression.
 
 The current message is authoritative for current outfit, clothing removal, damage, wetness, or disarray. Add those visible changes; otherwise rely on the injected identity's base outfit. When a face is visible, always use concrete expression tags including the relevant eyes, mouth, and brows—such as smiling, open mouth, blush, glaring, furrowed brows, or clenched teeth—rather than a vague mood.
@@ -3073,16 +3079,16 @@ shared interaction: [physical contact or action jointly performed by visible sub
 spatial relation: [shared placement or distance, once]
 environment: [location, furniture, weather, background, lighting, finish]
 
-List the active chat character's visually anchored subject section first and the active persona's section second when both are visible, but never write application-level character 1 or character 2 as final diffusion phrasing. Every visible subject needs a concrete image-space or depth-space anchor wherever composition permits one: left, right, center, foreground, midground, background, nearest the camera, farther from the camera, or seated opposite the other subject.
+List all visually necessary subject sections resolved from the active character card first, then the active persona's section when it is visible. One active card may resolve to multiple distinct NPC subjects; character-card count does not determine visible-subject count. Never write application-level character 1 or character 2 as final diffusion phrasing. Every visible subject needs a concrete image-space or depth-space anchor wherever composition permits one: left, right, center, foreground, midground, background, nearest the camera, farther from the camera, or seated opposite the other subject.
 
 Every visible fact has exactly one owner. Appearance, attire, expression, pose, individual action, and gaze stay inside that subject's section. A one-actor action stays on its actor and names the recipient spatially. Joint contact/action appears once in shared interaction. Camera facts appear only under camera; setting and lighting appear only under environment. Do not repeat a fact across sections. Extra incidental subjects need concrete visible descriptors and must not rely on an unknown name.
 
 The current message is authoritative for expressions, clothing changes, and current outfit state; otherwise rely on injected identities. Use concrete facial tags—such as smiling, open mouth, blush, glaring, furrowed brows, or clenched teeth—not a vague mood. Do not include negative prompts in the tag body. Do not use BREAK, bracketed pseudo-scoping, or XML-like character wrappers.`
   const checkpointGuidance = automation.promptFamily === "illustrious"
     ? `ILLUSTRIOUS SUBJECT SERIALIZER
-The user selected Illustrious prompt shaping. Keep the representation comparatively tag-dense: quality/meta first, exact subject count early, camera/composition, then one compact visually anchored token bundle per subject. Keep each subject's identity, distinguishing appearance, attire, pose, action, and gaze adjacent. Use a short natural-language clause only where tags cannot preserve spatial, action, or relationship ownership. Never flatten distinct hair, eyes, clothes, and actions into global lists. Text ownership improves conditioning but cannot spatially isolate globally loaded LoRAs.`
+The user selected Illustrious prompt shaping. Keep the representation comparatively tag-dense: quality/meta first, exact subject count early, camera/composition, then one compact visually anchored token bundle per subject. Keep each subject's identity, distinguishing appearance, attire, pose, action, and gaze adjacent. Use a short natural-language clause only where tags cannot preserve spatial, action, or relationship ownership. Never flatten distinct hair, eyes, clothes, and actions into global lists. For two or more resolved subjects, the backend strongly reinforces this ownership with native overlapping SwarmUI regions; emit semantic anchors only and let the compiler choose coordinates.`
     : `ANIMA SUBJECT SERIALIZER
-The user selected Anima prompt shaping. Begin with quality/rating metadata such as masterpiece, best quality, score_9, newest, and highres; use exactly one of safe, sensitive, nsfw, or explicit; then put the visible-person count early. Mix useful tags with short readable natural-language spatial subject clauses. Give each visible subject enough basic distinguishing appearance and attire to bind its identity, and keep its pose, action, and gaze in that same clause. Order: overall scene, camera, each anchored subject, shared interaction, spatial relation, environment/lighting. Do not force predominantly Danbooru fragments, BREAK, or pseudo-structured character wrappers.`
+The user selected Anima prompt shaping. Begin with quality/rating metadata such as masterpiece, best quality, score_9, newest, and highres; use exactly one of safe, sensitive, nsfw, or explicit; then put the visible-person count early. Mix useful tags with short readable natural-language spatial subject clauses. Give each visible subject enough basic distinguishing appearance and attire to bind its identity, and keep its pose, action, and gaze in that same clause. Repeat the spatial subject label instead of relying on he, she, or they when assigning an ambiguous action or trait. Order: overall scene, camera, each anchored subject, shared interaction, spatial relation, environment/lighting. Do not force predominantly Danbooru fragments, BREAK, or pseudo-structured character wrappers. For two or more resolved subjects, the backend experimentally reinforces this ownership with native overlapping SwarmUI regions; emit semantic anchors only and let the compiler choose coordinates.`
   const dynamicGuidance = `${imageCountGuidance}\n\n${identityGuidance}\n\n${userOnlyStackGuidance}\n\n${modeGuidance}\n\n${checkpointGuidance}\n\n${presetGuidance}`
   const template = automation.protocolPrompt.trim() || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT
   return template.includes("{{swarm_dynamic_guidance}}")
@@ -3470,9 +3476,23 @@ async function resolveVisualReferenceImage(
 
 type ScenePromptFamily = "anima" | "illustrious"
 
+export interface SubjectRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+  strength: number
+}
+
+export interface PromptCompilerCapabilities {
+  regionalConditioning: boolean
+  regionalConditioningStrength: "strong" | "experimental"
+}
+
 interface ImageSceneSubject {
   anchor: string
   details: string
+  region?: SubjectRegion
 }
 
 interface ImageScenePlan {
@@ -3592,6 +3612,55 @@ function animaSubjectAnchor(value: string): string {
   return `The ${anchor}`
 }
 
+function promptCompilerCapabilities(family: ScenePromptFamily): PromptCompilerCapabilities {
+  return family === "illustrious"
+    ? { regionalConditioning: true, regionalConditioningStrength: "strong" }
+    : { regionalConditioning: true, regionalConditioningStrength: "experimental" }
+}
+
+function clampRegionValue(value: number): number {
+  return Math.max(0, Math.min(1, Number(value.toFixed(2))))
+}
+
+function anchorSide(value: string): "left" | "center" | "right" | "" {
+  const anchor = value.toLowerCase()
+  if (/\bleft\b/.test(anchor)) return "left"
+  if (/\bright\b/.test(anchor)) return "right"
+  if (/\bcenter\b|\bmiddle\b/.test(anchor)) return "center"
+  return ""
+}
+
+export function resolveSubjectRegions(subjects: ImageSceneSubject[], family: ScenePromptFamily): SubjectRegion[] {
+  const count = subjects.length
+  if (count < 2) return []
+  const capabilities = promptCompilerCapabilities(family)
+  if (!capabilities.regionalConditioning) return []
+  const width = count === 2 ? 0.58 : count === 3 ? 0.46 : count === 4 ? 0.38 : 0.32
+  const strength = capabilities.regionalConditioningStrength === "strong" ? 1 : 0.85
+  const fallbackX = (index: number) => count === 1 ? 0 : index * (1 - width) / (count - 1)
+  const occupiedSides = new Set(subjects.map((subject) => anchorSide(subject.anchor)).filter(Boolean))
+  return subjects.map((subject, index) => {
+    const side = anchorSide(subject.anchor)
+    let x = fallbackX(index)
+    if (side === "left") x = 0
+    else if (side === "right") x = 1 - width
+    else if (side === "center") x = (1 - width) / 2
+    else if (count === 2 && occupiedSides.has("left")) x = 1 - width
+    else if (count === 2 && occupiedSides.has("right")) x = 0
+    return {
+      x: clampRegionValue(x),
+      y: 0,
+      width: clampRegionValue(width),
+      height: 1,
+      strength,
+    }
+  })
+}
+
+function regionDirective(region: SubjectRegion): string {
+  return `<region:${region.x},${region.y},${region.width},${region.height},${region.strength}>`
+}
+
 export function serializeScenePlan(
   plan: ImageScenePlan,
   family: ScenePromptFamily,
@@ -3605,6 +3674,34 @@ export function serializeScenePlan(
     return { ...subject, details: [identity, details].filter(Boolean).join(family === "anima" ? "; " : ", ") }
   })
   const visibleCount = normalizedVisibleCount(plan.visibleCount, subjects.length, forceSingleVisibleSubject)
+  const regions = forceSingleVisibleSubject ? [] : resolveSubjectRegions(subjects, family)
+  if (regions.length === subjects.length) {
+    const globalPrompt = family === "illustrious"
+      ? [
+          plan.metadata,
+          visibleCount,
+          plan.camera,
+          plan.scene,
+          ...plan.remainder,
+          normalizePovLanguage(plan.sharedInteraction),
+          plan.spatialRelation,
+        ]
+      : [
+          plan.metadata,
+          visibleCount,
+          plan.scene,
+          plan.camera ? `Camera: ${plan.camera}` : "",
+          ...plan.remainder,
+          plan.sharedInteraction ? `Together: ${normalizePovLanguage(plan.sharedInteraction)}` : "",
+          plan.spatialRelation ? `Spatial relation: ${plan.spatialRelation}` : "",
+        ]
+    const regionalSubjects = subjects.map((subject, index) => {
+      const anchor = family === "anima" ? animaSubjectAnchor(subject.anchor) : subject.anchor
+      return `${regionDirective(regions[index])} ${anchor}: ${subject.details}`
+    })
+    const background = plan.environment ? `<region:background> ${plan.environment}` : ""
+    return [...globalPrompt, ...regionalSubjects, background].filter(Boolean).join("\n")
+  }
   if (family === "illustrious") {
     return [
       plan.metadata,
@@ -3727,7 +3824,7 @@ async function applyCharacterLayer(
   ]
   const scenePlan = parseImageScenePlan(prompt)
   if (scenePlan) {
-    const forceSingleVisibleSubject = includeCharacter && !includePersona && (
+    const forceSingleVisibleSubject = scenePlan.subjects.length === 1 && includeCharacter && !includePersona && (
       automation.promptMode === "pov"
       || /\b(?:pov|first[- ]person)\b/i.test([scenePlan.scene, scenePlan.camera, ...scenePlan.remainder].join(" "))
     )

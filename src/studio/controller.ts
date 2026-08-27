@@ -300,6 +300,8 @@ class StudioController {
       button.dataset.active = String(button.dataset.promptFamily === this.behavior.tagPromptFamily)
       button.setAttribute("aria-checked", String(button.dataset.promptFamily === this.behavior.tagPromptFamily))
     }
+    const copyProtocolExample = this.root.querySelector<HTMLButtonElement>('[data-action="copy-tag-protocol"]')
+    if (copyProtocolExample) copyProtocolExample.textContent = `Copy ${this.behavior.tagPromptFamily === "illustrious" ? "Illustrious" : "Anima"} example`
   }
 
   private renderParserConnections(): void {
@@ -866,7 +868,7 @@ class StudioController {
                         <p class="ss-muted ss-tiny"><code>{{swarm_dynamic_guidance}}</code> is replaced at runtime with the active image count, identities, composition mode, checkpoint guidance, and Swarm preset stack. Remove it only when your custom protocol deliberately replaces all dynamic guidance.</p>
                         <p class="ss-muted ss-tiny">Parser mode injects its own compact placement protocol and uses this fully resolved protocol privately when completing each request.</p>
                         <div class="ss-protocol-actions">
-                          <button class="ss-button" data-action="copy-tag-protocol">Copy example</button>
+                          <button class="ss-button" data-action="copy-tag-protocol">Copy ${this.behavior.tagPromptFamily === "illustrious" ? "Illustrious" : "Anima"} example</button>
                           <button class="ss-button" data-action="reset-tag-protocol">Reset</button>
                           <button class="ss-button ss-button-primary" data-action="save-tag-protocol">Save current</button>
                         </div>
@@ -3665,8 +3667,9 @@ are removed when CSS is applied.</pre>
 
   private async copyTagProtocol(): Promise<void> {
     try {
-      await navigator.clipboard.writeText(SWARM_IMAGE_PROTOCOL_EXAMPLE)
-      this.setRunStatus("Swarm image-tag protocol copied.")
+      const family = this.behavior.tagPromptFamily === "illustrious" ? "illustrious" : "anima"
+      await navigator.clipboard.writeText(swarmImageProtocolExample(family))
+      this.setRunStatus(`${family === "illustrious" ? "Illustrious" : "Anima"} image-tag protocol example copied.`)
     } catch {
       this.setRunStatus("The browser blocked clipboard access.", true)
     }

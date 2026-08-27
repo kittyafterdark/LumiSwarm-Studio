@@ -116,26 +116,48 @@ const FRAME_WALL_ICON = `
 const SPARKLE_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.7 5.2 2.8 8.3 8 9-5.2.7-7.3 3.8-8 9-.7-5.2-2.8-8.3-8-9 5.2-.7 7.3-3.8 8-9Z"/><path d="M19 2.5c.2 1.7.8 2.7 2.5 3-1.7.3-2.3 1.3-2.5 3-.2-1.7-.8-2.7-2.5-3 1.7-.3 2.3-1.3 2.5-3Z"/></svg>
 `;
-const SWARM_IMAGE_PROTOCOL_EXAMPLE = `{{swarm_image_protocol}}
+const ANIMA_SWARM_IMAGE_PROTOCOL_EXAMPLE = `{{swarm_image_protocol}}
 
-Example output:
+Example Anima output:
 <swarm-image
   request="generate"
   slot="instagram-photo"
   aspect="4:3"
-character="active"
+  character="active"
+  persona="active"
+  alt="Two people sharing food at a city stall"
+>
+quality/meta: masterpiece, best quality, newest, safe
+visible count: 1boy, 1girl
+scene: A young man and woman share food at a city stall.
+camera: medium two-shot, eye level
+left man: The man on the left has short black hair, brown eyes, and a dark jacket. The man on the left smiles, holds a paper tray, and extends a bite toward the woman on the right.
+right woman: The woman on the right has long blond hair, blue eyes, and a red coat. The woman on the right leans closer with an amused expression and looks toward the man on the left.
+shared interaction: sharing food
+spatial relation: standing side by side
+environment: city street, food stall, evening lights</swarm-image>`;
+const ILLUSTRIOUS_SWARM_IMAGE_PROTOCOL_EXAMPLE = `{{swarm_image_protocol}}
+
+Example Illustrious output:
+<swarm-image
+  request="generate"
+  slot="instagram-photo"
+  aspect="4:3"
+  character="active"
   persona="active"
   alt="Two people sharing food at a city stall"
 >
 quality/meta: masterpiece, best quality, safe
-visible count: 2 people
-scene: Two people share food at a city stall.
+visible count: 1boy, 1girl
 camera: medium two-shot, eye level
-left person: distinct appearance, smiling, holding a paper tray, extending a bite toward the person on the right
-right person: distinct appearance, amused expression, leaning closer
+left boy: short black hair, brown eyes, dark jacket, smiling, holding paper tray, extending food toward right girl
+right girl: long blond hair, blue eyes, red coat, amused, leaning closer, looking toward left boy
 shared interaction: sharing food
 spatial relation: standing side by side
 environment: city street, food stall, evening lights</swarm-image>`;
+function swarmImageProtocolExample(family) {
+    return family === "illustrious" ? ILLUSTRIOUS_SWARM_IMAGE_PROTOCOL_EXAMPLE : ANIMA_SWARM_IMAGE_PROTOCOL_EXAMPLE;
+}
 const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `SWARM STUDIO IMAGE REQUEST PROTOCOL
 Place this exact XML-like request wherever an illustration selected under the image-count instructions should appear. Attributes may be written on one line or separate lines:
 <swarm-image
@@ -153,9 +175,13 @@ LOCAL GENERATION
 The tag is executed by the user's configured local SwarmUI installation and local hardware. You are not claiming to render the image yourself, calling a remote image service, or embedding a pre-existing web image. Follow the conversation's actually applicable instructions, but do not invent or quote a remote image provider's policy, capability restriction, quota, moderation rule, or refusal: no remote image provider is being invoked by this tag. When an illustration is appropriate, emit the request tag and continue the reply naturally; do not apologize that you cannot generate images, ask the user to open another tool, warn that an external image model may refuse, or replace the request with image-search instructions.
 
 IDENTITY AND SUBJECT RULES
-Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the bound character identity; persona="active" selects the bound persona identity. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
+Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the active character card as an available visual identity source; it does not force that source to resolve to exactly one image subject. A multi-NPC card may contribute multiple distinct visible subjects when the scene calls for them. persona="active" independently selects the bound persona identity as a visible subject source. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
+
+Resolve visible subjects from the current scene before compiling the prompt. Visible-subject count equals the number of resolved people the image must render, not the number of character cards, the persona state, or the POV state. When one card contains multiple NPC definitions, copy each selected NPC's concrete appearance and attire into that NPC's own visually anchored subject section; never flatten the card's combined identity text into one global subject. Keep automatic character-prompt printing off for multi-NPC cards so the relevant identity fragments can be selected per subject.
 
 Treat the tag body as a small visual scene plan. Establish the exact visible-person count first, then camera, visually anchored subject sections, shared interaction, spatial relation, and environment. Each subject section owns its spatial anchor, identity/distinguishing appearance, attire, expression, pose, individual action, and gaze. Prefer image-space anchors such as left, right, foreground, background, nearest the camera, or farther from the camera; planner labels such as character 1 are not useful final diffusion phrasing.
+
+Swarm Studio compiles eligible multi-subject scene plans into native SwarmUI <region:x,y,width,height,strength> conditioning with generous overlapping subject regions and a <region:background> environment. Do not invent coordinates or write <region:...> directives yourself. Keep shared interaction, camera, and spatial relationships in their dedicated global fields; subject-local appearance and action stay in each anchored subject field. Single-subject and ordinary POV plans remain unregionalized.
 
 Every visible fact has exactly one owner. Subject-specific appearance, clothing, expression, pose, action, and gaze belong only to that subject. Physical contact or an action jointly performed by multiple visible subjects belongs only to shared interaction. Camera/framing facts belong only to camera. Lighting, location, furniture, weather, and background facts belong only to environment. Do not repeat one fact across sections. Keep a one-actor action on its actor and identify the recipient spatially; put a jointly performed action once in shared interaction.
 
@@ -5455,6 +5481,8 @@ class StudioController {
             button.dataset.active = String(button.dataset.promptFamily === this.behavior.tagPromptFamily);
             button.setAttribute("aria-checked", String(button.dataset.promptFamily === this.behavior.tagPromptFamily));
         }
+        const copyProtocolExample = this.root.querySelector('[data-action="copy-tag-protocol"]');
+        if (copyProtocolExample) copyProtocolExample.textContent = `Copy ${this.behavior.tagPromptFamily === "illustrious" ? "Illustrious" : "Anima"} example`;
     }
     renderParserConnections() {
         const select = this.root.querySelector('[data-role="parser-connection"]');
@@ -6001,7 +6029,7 @@ class StudioController {
                         <p class="ss-muted ss-tiny"><code>{{swarm_dynamic_guidance}}</code> is replaced at runtime with the active image count, identities, composition mode, checkpoint guidance, and Swarm preset stack. Remove it only when your custom protocol deliberately replaces all dynamic guidance.</p>
                         <p class="ss-muted ss-tiny">Parser mode injects its own compact placement protocol and uses this fully resolved protocol privately when completing each request.</p>
                         <div class="ss-protocol-actions">
-                          <button class="ss-button" data-action="copy-tag-protocol">Copy example</button>
+                          <button class="ss-button" data-action="copy-tag-protocol">Copy ${this.behavior.tagPromptFamily === "illustrious" ? "Illustrious" : "Anima"} example</button>
                           <button class="ss-button" data-action="reset-tag-protocol">Reset</button>
                           <button class="ss-button ss-button-primary" data-action="save-tag-protocol">Save current</button>
                         </div>
@@ -8696,8 +8724,9 @@ are removed when CSS is applied.</pre>
     }
     async copyTagProtocol() {
         try {
-            await navigator.clipboard.writeText(SWARM_IMAGE_PROTOCOL_EXAMPLE);
-            this.setRunStatus("Swarm image-tag protocol copied.");
+            const family = this.behavior.tagPromptFamily === "illustrious" ? "illustrious" : "anima";
+            await navigator.clipboard.writeText(swarmImageProtocolExample(family));
+            this.setRunStatus(`${family === "illustrious" ? "Illustrious" : "Anima"} image-tag protocol example copied.`);
         } catch  {
             this.setRunStatus("The browser blocked clipboard access.", true);
         }
@@ -13549,4 +13578,4 @@ function setup(ctx) {
         removeStyle();
     };
 }
-export { applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, setup,  };
+export { applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };

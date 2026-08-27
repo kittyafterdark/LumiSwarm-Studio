@@ -21,5 +21,6 @@ export {
   reportStudioError,
   sanitizeCustomCss,
   serializeSwarmPresetList,
+  swarmImageProtocolExample,
   setup,
 }

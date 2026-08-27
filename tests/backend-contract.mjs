@@ -748,6 +748,9 @@ assert.match(animaCollisionPrompt, /The man on the left: short black hair, brown
 assert.match(animaCollisionPrompt, /The man on the right: blond hair, blue eyes; blue eyes, gray cable-knit sweater, holding chopsticks/)
 assert.equal((animaCollisionPrompt.match(/eating together at the same low table/g) || []).length, 1)
 assert.doesNotMatch(animaCollisionPrompt, /\bsolo\b|character 1|character 2/)
+assert.match(animaCollisionPrompt, /<region:0,0,0\.58,1,0\.85> The man on the left:/)
+assert.match(animaCollisionPrompt, /<region:0\.42,0,0\.58,1,0\.85> The man on the right:/)
+assert.match(animaCollisionPrompt, /<region:background> small Japanese restaurant, dishes and rice bowls/)
 const illustriousCollisionPrompt = backendModule.serializeScenePlan(
   collisionPlan,
   "illustrious",
@@ -755,8 +758,22 @@ const illustriousCollisionPrompt = backendModule.serializeScenePlan(
 )
 assert.notEqual(illustriousCollisionPrompt, animaCollisionPrompt)
 assert.match(illustriousCollisionPrompt, /2 men\nmedium two-shot, seated eye level/)
-assert.match(illustriousCollisionPrompt, /left man, short black hair, brown eyes, brown eyes, black shirt, eating rice/)
-assert.match(illustriousCollisionPrompt, /right man, blond hair, blue eyes, blue eyes, gray cable-knit sweater, holding chopsticks/)
+assert.match(illustriousCollisionPrompt, /left man: short black hair, brown eyes, brown eyes, black shirt, eating rice/)
+assert.match(illustriousCollisionPrompt, /right man: blond hair, blue eyes, blue eyes, gray cable-knit sweater, holding chopsticks/)
+assert.match(illustriousCollisionPrompt, /<region:0,0,0\.58,1,1> left man:/)
+assert.match(illustriousCollisionPrompt, /<region:0\.42,0,0\.58,1,1> right man:/)
+assert.match(illustriousCollisionPrompt, /<region:background> small Japanese restaurant, dishes and rice bowls/)
+
+const threeSubjectRegions = backendModule.resolveSubjectRegions([
+  { anchor: "left woman", details: "" },
+  { anchor: "center man", details: "" },
+  { anchor: "right woman", details: "" },
+], "illustrious")
+assert.deepEqual(threeSubjectRegions, [
+  { x: 0, y: 0, width: 0.46, height: 1, strength: 1 },
+  { x: 0.27, y: 0, width: 0.46, height: 1, strength: 1 },
+  { x: 0.54, y: 0, width: 0.46, height: 1, strength: 1 },
+])
 
 const povPlan = backendModule.parseImageScenePlan(`quality/meta: masterpiece, safe
 visible count: 2 people
@@ -774,6 +791,7 @@ const povPrompt = backendModule.serializeScenePlan(
 assert.match(povPrompt, /\n1 person\n/)
 assert.match(povPrompt, /looking at viewer, reaching toward viewer/)
 assert.doesNotMatch(povPrompt, /2 people|looking at the user|toward the persona/)
+assert.doesNotMatch(povPrompt, /<region:/)
 
 async function request(type, extra = {}) {
   const requestId = `${type}-${sent.length}`
@@ -1438,6 +1456,8 @@ assert.match(source, /Default inline prose illustrations to 4:3/)
 assert.match(source, /aspect: cleanAspect\(attrs\.aspect\) \|\| "4:3"/)
 assert.match(source, /character="active"/)
 assert.match(source, /character="none" means the active chat character must not be visible/)
+assert.match(source, /character="active" selects the active character card as an available visual identity source/)
+assert.match(source, /One active card may resolve to multiple distinct NPC subjects/)
 assert.match(source, /const NO_CHARACTER_NEGATIVE = "people, person, character/)
 assert.match(source, /const includeCharacter = !\["none", "off", "false", "no", "0"\]\.includes\(characterMode\)/)
 assert.match(source, /excludedLoras: includeCharacter \|\| !automation\.stripUserOnlyLoraStack[\s\S]*?\? \[\][\s\S]*?: visualStack\.map\(\(item\) => item\.name\)/)
@@ -1447,6 +1467,11 @@ assert.match(source, /configured local SwarmUI installation and local hardware/)
 assert.match(source, /Never use a chat character's or persona's display name as a diffusion token/)
 assert.match(source, /ANIMA SUBJECT SERIALIZER/)
 assert.match(source, /ILLUSTRIOUS SUBJECT SERIALIZER/)
+assert.match(source, /<region:x,y,width,height,strength>/)
+assert.match(source, /resolveSubjectRegions/)
+assert.match(source, /<region:background>/)
+assert.match(source, /scenePlan\.subjects\.length === 1 && includeCharacter && !includePersona/)
+assert.match(source, /invisible observer still contributes no subject slot/)
 assert.match(source, /MULTI-CHARACTER \/ ENSEMBLE/)
 assert.match(source, /CHARACTER-ONLY \/ POV/)
 assert.match(source, /safe, sensitive, nsfw, or explicit/)
