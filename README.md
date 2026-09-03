@@ -200,6 +200,7 @@ Profile macros resolve to raw values so authored HTML and display regexes remain
 - `{{persona_base}}` — the visual identity prompt selected for the active persona in Chat Visuals
 - `{{swarm_negative}}` — current literal Studio negative prompt
 - `{{swarm_preset}}` — enabled Studio presets as comma-separated native `<preset:exact saved name>` tokens
+- `{{swarm_loras}}` — enabled Studio LoRAs as comma-separated native `<lora:filename:weight>` tokens
 - `{{swarm_checkpoint}}` / `{{swarm_aspect}}` — current profile details
 - `{{last_genned}}` — latest successful Studio output URL
 

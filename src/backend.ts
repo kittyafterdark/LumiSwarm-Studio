@@ -3018,6 +3018,16 @@ function studioPresetTokens(profile: StudioGenerationProfile | null): string[] {
     .map((name) => `<preset:${name}>`)
 }
 
+function studioLoraTokens(profile: StudioGenerationProfile | null): string[] {
+  return profileStack(profile).flatMap((item) => {
+    if (item.enabled === false) return []
+    const name = item.name.replace(/[<>\r\n]+/g, "").replace(/\\/g, "/").trim()
+    if (!name) return []
+    const weight = Math.round(item.weight * 1000) / 1000
+    return [`<lora:${name}:${weight}>`]
+  })
+}
+
 function buildSwarmImageProtocol(
   profile: StudioGenerationProfile | null,
   context: SwarmProtocolContext | null = null,
@@ -3132,8 +3142,10 @@ async function pushStudioProfileMacros(profile: StudioGenerationProfile | null, 
   const input = asRecord(profile?.input)
   const parameters = asRecord(input.parameters)
   const presetTokens = studioPresetTokens(profile).join(", ")
+  const loraTokens = studioLoraTokens(profile).join(", ")
   spindle.updateMacroValue("swarm_negative", asString(input.negativePrompt))
   spindle.updateMacroValue("swarm_preset", presetTokens)
+  spindle.updateMacroValue("swarm_loras", loraTokens)
   spindle.updateMacroValue("swarm_checkpoint", asString(input.model))
   spindle.updateMacroValue("swarm_aspect", aspectFromParameters(parameters))
   spindle.updateMacroValue(
@@ -5785,6 +5797,10 @@ for (const macro of [
   {
     name: "swarm_preset",
     description: "The current Studio preset stack rendered as native SwarmUI <preset:name> tokens.",
+  },
+  {
+    name: "swarm_loras",
+    description: "The enabled Studio LoRA stack rendered as native SwarmUI <lora:filename:weight> tokens.",
   },
   {
     name: "swarm_checkpoint",

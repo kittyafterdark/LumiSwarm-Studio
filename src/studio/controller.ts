@@ -878,6 +878,7 @@ class StudioController {
                             <code>{{swarm_dynamic_guidance}}</code><span>Insertion point inside the editable protocol for live identity, composition, checkpoint, image-count, and preset guidance.</span>
                             <code>{{swarm_image_protocol}}</code><span>The fully resolved local-generation protocol used by prompt injection.</span>
                             <code>{{swarm_preset}}</code><span>Active preset titles as exact native directives: &lt;preset:name one&gt;, &lt;preset:name two&gt;.</span>
+                            <code>{{swarm_loras}}</code><span>Enabled Studio LoRAs as exact native directives: &lt;lora:filename:weight&gt;.</span>
                             <code>{{swarm_negative}}</code><span>Current Studio negative prompt.</span>
                             <code>{{char_base}}</code><span>Active character visual tags. Include this explicitly when automatic character printing is off.</span>
                             <code>{{persona_base}}</code><span>Visual identity bound to the active persona in Chat Visuals.</span>

@@ -2452,6 +2452,17 @@ function studioPresetTokens(profile) {
     const hints = asRecord(profile?.recordHints);
     return stringList(hints.presets, 20).map((name)=>name.replace(/[<>\r\n]+/g, "").trim()).filter(Boolean).map((name)=>`<preset:${name}>`);
 }
+function studioLoraTokens(profile) {
+    return profileStack(profile).flatMap((item)=>{
+        if (item.enabled === false) return [];
+        const name = item.name.replace(/[<>\r\n]+/g, "").replace(/\\/g, "/").trim();
+        if (!name) return [];
+        const weight = Math.round(item.weight * 1000) / 1000;
+        return [
+            `<lora:${name}:${weight}>`
+        ];
+    });
+}
 function buildSwarmImageProtocol(profile, context = null, automation = cleanTagAutomationConfig(null)) {
     const presetTokens = studioPresetTokens(profile);
     const presetGuidance = presetTokens.length ? `The active Studio preset stack is force-applied once as ${presetTokens.join(", ")}. Do not repeat those directives in the tag. The {{swarm_preset}} macro expands to that exact directive list for authored prompts and templates. You may add another <preset:exact saved preset name> only when the scene specifically needs a different saved preset.` : `No Studio presets are currently active. The {{swarm_preset}} macro is therefore empty. You may use <preset:exact saved preset name> only when you know the exact saved SwarmUI preset needed by the scene; do not invent placeholder preset names.`;
@@ -2524,8 +2535,10 @@ async function pushStudioProfileMacros(profile, userId) {
     const input = asRecord(profile?.input);
     const parameters = asRecord(input.parameters);
     const presetTokens = studioPresetTokens(profile).join(", ");
+    const loraTokens = studioLoraTokens(profile).join(", ");
     spindle.updateMacroValue("swarm_negative", asString(input.negativePrompt));
     spindle.updateMacroValue("swarm_preset", presetTokens);
+    spindle.updateMacroValue("swarm_loras", loraTokens);
     spindle.updateMacroValue("swarm_checkpoint", asString(input.model));
     spindle.updateMacroValue("swarm_aspect", aspectFromParameters(parameters));
     spindle.updateMacroValue("swarm_image_protocol", buildInjectedSwarmProtocol(profile, swarmProtocolContexts.get(protocolContextKey(userId)) || null, await loadTagAutomationConfig(userId)));
@@ -5014,6 +5027,10 @@ for (const macro of [
     {
         name: "swarm_preset",
         description: "The current Studio preset stack rendered as native SwarmUI <preset:name> tokens."
+    },
+    {
+        name: "swarm_loras",
+        description: "The enabled Studio LoRA stack rendered as native SwarmUI <lora:filename:weight> tokens."
     },
     {
         name: "swarm_checkpoint",
