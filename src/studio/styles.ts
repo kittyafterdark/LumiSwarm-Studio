@@ -2288,7 +2288,7 @@ const STUDIO_V3_STYLES = `
     position: fixed !important;
     inset: 0 !important;
     width: auto !important;
-    height: 100dvh !important;
+    height: auto !important;
     min-height: 0 !important;
     z-index: 2147483001;
     padding: 12px;
@@ -2754,7 +2754,7 @@ const STUDIO_V3_STYLES = `
       inset: 0 !important;
       z-index: 2147483001;
       width: auto !important;
-      height: 100dvh !important;
+      height: auto !important;
       min-height: 0 !important;
       padding: max(8px, env(safe-area-inset-top)) 8px max(7px, env(safe-area-inset-bottom));
       gap: 7px;
