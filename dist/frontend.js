@@ -3290,13 +3290,6 @@ const STUDIO_V3_STYLES = `
       flex: 1 1 0;
       border-radius: 10px;
     }
-    .ss-shell[data-mobile-tab="loras"] .ss-workspace,
-    .ss-shell[data-mobile-tab="stack"] .ss-workspace { display: none !important; }
-    .ss-shell[data-mobile-tab="loras"] .ss-lora-dock,
-    .ss-shell[data-mobile-tab="stack"] .ss-lora-dock {
-      display: block;
-      flex-basis: auto;
-    }
     .ss-lora-dock .ss-dock-head { display: none; }
     .ss-lora-dock-content {
       height: 100%;
@@ -3312,10 +3305,6 @@ const STUDIO_V3_STYLES = `
     .ss-lora-titlebar { min-height: 27px; gap: 5px; }
     .ss-lora-titlebar .ss-pane-toggle { display: none; }
     .ss-lora-titlebar .ss-family-chip { max-width: 42vw; }
-    .ss-shell[data-mobile-tab="loras"] .ss-lora-library { display: flex; height: 100%; padding: 0; border: 0; }
-    .ss-shell[data-mobile-tab="loras"] .ss-stack-pane { display: none; }
-    .ss-shell[data-mobile-tab="stack"] .ss-lora-library { display: none; }
-    .ss-shell[data-mobile-tab="stack"] .ss-stack-pane { display: flex; height: 100%; }
     .ss-library-tools { grid-template-columns: minmax(0, 1fr) auto 120px auto auto; }
     .ss-lora-browser,
     .ss-lora-browser[data-folders-open="false"] { grid-template-columns: minmax(0, 1fr); }
@@ -3860,6 +3849,43 @@ const STUDIO_V3_STYLES = `
   @media (max-width: 720px) {
     .ss-style-editor { grid-template-columns: minmax(0, 1fr); }
     .ss-style-page > .ss-lora-library, .ss-style-page > .ss-stack-pane { display: flex; height: 100%; }
+  }
+  .ss-styles-workspace { padding: 12px; border: 1px solid var(--ss-outline); border-radius: var(--ss-panel-radius); background: var(--ss-panel-bg); }
+  .ss-styles-header { justify-content: space-between; }
+  .ss-style-tabs { padding-bottom: 10px; border-bottom: 1px solid var(--ss-outline); }
+  .ss-style-tabs .ss-button { padding: 9px 16px; }
+  .ss-style-tabs [aria-selected="true"] { background: color-mix(in srgb, var(--lumiverse-accent) 16%, var(--ss-panel-bg)); }
+  .ss-saved-style-editor { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; gap: 14px; }
+  .ss-style-selection { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; flex: 0 0 auto; }
+  .ss-style-selection > label { width: min(100%, 320px); }
+  .ss-style-selection p { flex: 1; min-width: 200px; margin: 0; }
+  .ss-style-columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; overflow: auto; min-height: 0; flex: 1; align-content: start; }
+  .ss-style-columns > section { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .ss-saved-style-editor label { display: grid; gap: 6px; font-size: 12px; }
+  .ss-style-columns h3 { margin: 0; font-size: 14px; }
+  .ss-style-columns .ss-textarea { min-height: 100px; resize: vertical; }
+  .ss-style-recipe > p { margin: 0; }
+  .ss-recipe-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .ss-style-footer, .ss-library-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 0 0 auto; padding-top: 10px; border-top: 1px solid var(--ss-outline); }
+  .ss-style-footer [data-action="style-clear"], .ss-library-pagination [data-action="style-section"] { margin-left: auto; }
+  .ss-style-page > .ss-stack-pane { width: 100%; max-width: 1100px; margin-inline: auto; gap: 14px; }
+  .ss-style-page > .ss-lora-library { gap: 12px; }
+  .ss-style-page .ss-lora-grid { height: auto; align-content: start; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); overflow-y: auto; scrollbar-gutter: stable; }
+  .ss-style-page .ss-lora-browser { grid-template-columns: 230px minmax(0, 1fr); gap: 14px; }
+  .ss-style-page .ss-lora-browser[data-folders-open="false"] { grid-template-columns: minmax(0, 1fr); }
+  .ss-style-page .ss-lora-folder-sidebar { border-radius: 10px; }
+  .ss-style-page .ss-lora-folder-head { padding: 10px; }
+  .ss-style-page .ss-lora-folder-head strong { font-size: 12px; }
+  .ss-style-page .ss-lora-folder-row { min-height: 36px; font-size: 12px; }
+  .ss-style-page [data-role="lora-folder-toggle"] { width: auto; padding-inline: 10px; gap: 6px; }
+  @media (max-width: 860px) {
+    .ss-style-columns { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 720px) {
+    .ss-styles-workspace { padding: 8px; }
+    .ss-style-page .ss-lora-browser { grid-template-columns: minmax(0, 1fr); }
+    .ss-style-page .ss-lora-folder-sidebar { position: absolute; inset: 0 auto 0 0; width: min(78vw, 290px); z-index: 22; }
+    .ss-style-page .ss-lora-grid { grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); }
   }
 `;
 function element(tag, className, text) {
@@ -5440,6 +5466,13 @@ class StudioController {
     behavior;
     appearanceControlsInitialized = false;
     state;
+    loraPage = 0;
+    loraFilterKey = "";
+    lorasDirty = true;
+    loraSearchTimer = null;
+    loraCards = new Map();
+    folderTreeKey = "";
+    previewRequests = new Map();
     previewObserver = null;
     previewCache = new Map();
     requestedPreviews = new Set();
@@ -5663,6 +5696,9 @@ class StudioController {
         this.disposed = true;
         if (this.profileSyncTimer) clearTimeout(this.profileSyncTimer);
         this.profileSyncTimer = null;
+        if (this.loraSearchTimer) clearTimeout(this.loraSearchTimer);
+        this.loraCards.clear();
+        this.previewRequests.clear();
         this.previewObserver?.disconnect();
         this.previewObserver = null;
         this.outputResizeObserver?.disconnect();
@@ -6693,35 +6729,39 @@ are removed when CSS is applied.</pre>
             <button class="ss-button" id="ss-tab-library" role="tab" aria-controls="ss-page-library" data-action="style-section" data-section="library" aria-selected="false" tabindex="-1">LoRA Library</button>
           </nav>
           <section class="ss-style-page" id="ss-page-saved" data-style-page="saved" role="tabpanel" aria-labelledby="ss-tab-saved">
-          <div class="ss-style-editor" data-role="style-editor">
-            <label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label>
-            <label>Name<input class="ss-input" data-role="style-name" placeholder="Soft painterly render"></label>
-            <label>LoRA stack<select class="ss-select" data-role="style-stack"><option value="">No stack</option></select></label>
-            <label>Checkpoint<input class="ss-input" data-role="style-checkpoint" placeholder="Inherit"></label>
-            <label>Positive addition<textarea class="ss-textarea" data-role="style-positive"></textarea></label>
-            <label>Negative addition<textarea class="ss-textarea" data-role="style-negative"></textarea></label>
-            ${[
+          <div class="ss-saved-style-editor" data-role="style-editor">
+            <header class="ss-style-selection"><label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label><p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p></header>
+            <div class="ss-style-columns">
+              <section class="ss-style-composition"><h3>Identity &amp; prompts</h3>
+                <label>Name<input class="ss-input" data-role="style-name" placeholder="Soft painterly render"></label>
+                <label>LoRA stack<select class="ss-select" data-role="style-stack"><option value="">No stack</option></select></label>
+                <label>Positive addition<textarea class="ss-textarea" data-role="style-positive" placeholder="Lighting, medium, mood…"></textarea></label>
+                <label>Negative addition<textarea class="ss-textarea" data-role="style-negative" placeholder="Things to avoid…"></textarea></label>
+              </section>
+              <section class="ss-style-recipe"><h3>Render recipe</h3><p class="ss-muted ss-tiny">Leave a field empty to inherit the current settings.</p>
+                <label>Checkpoint<input class="ss-input" data-role="style-checkpoint" placeholder="Inherit"></label>
+                <div class="ss-recipe-fields">${[
             "width",
             "height",
             "steps",
             "cfg",
             "sampler",
             "scheduler"
-        ].map((key)=>`<label>${key}<input class="ss-input" data-role="style-render-${key}" placeholder="Inherit" ${[
+        ].map((key)=>`<label>${key === "cfg" ? "CFG" : key[0].toUpperCase() + key.slice(1)}<input class="ss-input" data-role="style-render-${key}" placeholder="Inherit" ${[
                 "sampler",
                 "scheduler"
-            ].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}
-            <div class="ss-view-nav">
-              <button class="ss-button" data-action="style-capture">Use current render settings</button>
-              <button class="ss-button" data-action="style-apply">Apply</button>
-              <button class="ss-button" data-action="style-save">Save / Rename</button>
-              <button class="ss-button" data-action="style-duplicate">Duplicate / Save as</button>
-              <button class="ss-button" data-action="style-delete">Delete</button>
-              <button class="ss-button" data-action="style-clear">Clear active Style</button>
+            ].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>
+                <button class="ss-button" data-action="style-capture">Use current render settings</button>
+              </section>
             </div>
-            <p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p>
+            <footer class="ss-style-footer">
+              <button class="ss-button ss-button-primary" data-action="style-apply">Apply Style</button>
+              <button class="ss-button" data-action="style-save">Save changes</button>
+              <button class="ss-button" data-action="style-duplicate">Duplicate</button>
+              <button class="ss-button ss-button-danger" data-action="style-delete">Delete</button>
+              <button class="ss-button" data-action="style-clear">Clear active Style</button>
+            </footer>
           </div>
-
           </section>
           <section class="ss-style-page" id="ss-page-stacks" data-style-page="stacks" role="tabpanel" aria-labelledby="ss-tab-stacks" hidden>
 <section class="ss-stack-pane">
@@ -6783,11 +6823,11 @@ are removed when CSS is applied.</pre>
                     <option value="newest">Newest</option>
                   </select>
                 </div>
-                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}</button>
+                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" aria-controls="ss-lora-folders" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}<span>Folders</span></button>
               </div>
               <div class="ss-library-status" data-role="metadata-error" hidden></div>
               <div class="ss-lora-browser" data-role="lora-browser" data-folders-open="false">
-                <aside class="ss-lora-folder-sidebar" data-role="lora-folder-sidebar" aria-label="LoRA folders" hidden>
+                <aside class="ss-lora-folder-sidebar" data-role="lora-folder-sidebar" id="ss-lora-folders" aria-label="LoRA folders" hidden>
                   <div class="ss-lora-folder-head">
                     <strong>LoRA folders</strong>
                     <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" title="Close folder browser" aria-label="Close folder browser">${FOLDER_TREE_ICON}</button>
@@ -6798,6 +6838,12 @@ are removed when CSS is applied.</pre>
                   <div class="ss-empty">Choose a SwarmUI connection to load its LoRA library.</div>
                 </div>
               </div>
+              <footer class="ss-library-pagination">
+                <button class="ss-button" data-action="lora-page-prev" aria-label="Previous LoRA page">Previous</button>
+                <span class="ss-muted" data-role="lora-page-status" aria-live="polite">0 models</span>
+                <button class="ss-button" data-action="lora-page-next" aria-label="Next LoRA page">Next</button>
+                <button class="ss-button" data-action="style-section" data-section="stacks">Edit active stack</button>
+              </footer>
             </section>
           </section>
         </section>
@@ -7079,7 +7125,30 @@ are removed when CSS is applied.</pre>
             const connectionId = event.currentTarget.value;
             if (connectionId) this.loadConnection(connectionId);
         });
-        this.get('[data-role="lora-search"]').addEventListener("input", ()=>this.renderLoras());
+        this.get('[data-role="lora-search"]').addEventListener("input", ()=>{
+            if (this.loraSearchTimer) clearTimeout(this.loraSearchTimer);
+            this.loraSearchTimer = setTimeout(()=>{
+                this.loraSearchTimer = null;
+                this.renderLoras();
+            }, 120);
+        });
+        this.get(".ss-style-tabs").addEventListener("keydown", (event)=>{
+            if (![
+                "ArrowLeft",
+                "ArrowRight",
+                "Home",
+                "End"
+            ].includes(event.key)) return;
+            const tabs = [
+                ...this.root.querySelectorAll('.ss-style-tabs [role="tab"]')
+            ];
+            const current = tabs.indexOf(event.target);
+            if (current < 0) return;
+            event.preventDefault();
+            const index = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+            this.setStylesSection(tabs[index].dataset.section);
+            tabs[index].focus();
+        });
         const downloadUrl = this.get('[data-role="lora-download-url"]');
         downloadUrl.addEventListener("keydown", (event)=>{
             if (event.key === "Enter") {
@@ -7301,6 +7370,12 @@ are removed when CSS is applied.</pre>
             const button = target.closest("[data-action]");
             if (!button) return;
             const action = button.dataset.action;
+            if (action === "lora-page-prev" || action === "lora-page-next") {
+                this.loraPage += action === "lora-page-next" ? 1 : -1;
+                this.renderLoras();
+                this.get('[data-role="lora-grid"]').scrollTop = 0;
+                return;
+            }
             if (action === "save-native-main" || action === "save-native-character") {
                 void this.saveNativePrompts(action === "save-native-character");
                 return;
@@ -7507,6 +7582,10 @@ are removed when CSS is applied.</pre>
     }
     send(type, data = {}) {
         const requestId = createRequestId();
+        if (type === "preview") this.previewRequests.set(requestId, {
+            connectionId: String(data.connectionId || ""),
+            name: String(data.name || "")
+        });
         this.ctx.sendToBackend({
             type,
             requestId,
@@ -7712,11 +7791,15 @@ are removed when CSS is applied.</pre>
                 }
                 break;
             case "preview_result":
-                if (payload?.name && payload?.dataUrl) {
-                    this.previewCache.set(payload.name, payload.dataUrl);
-                    this.updatePreviewImages(payload.name, payload.dataUrl);
+                {
+                    const request = this.previewRequests.get(payload.requestId);
+                    this.previewRequests.delete(payload.requestId);
+                    if (request?.connectionId === this.state.connection?.id && request?.name === payload.name && payload.dataUrl) {
+                        this.previewCache.set(payload.name, payload.dataUrl);
+                        this.updatePreviewImages(payload.name, payload.dataUrl);
+                    }
+                    break;
                 }
-                break;
             case "text_editor_result":
                 {
                     const editorId = String(data.editorId || "");
@@ -8192,6 +8275,7 @@ are removed when CSS is applied.</pre>
         this.previewObserver?.disconnect();
         this.requestedPreviews.clear();
         this.previewCache.clear();
+        this.previewRequests.clear();
         this.setConnectionStatus("loading");
         this.setRunStatus(`Loading ${connection?.name || "SwarmUI"} models and LoRA metadata…`);
         for (const button of this.root.querySelectorAll('[data-action="generate"]')){
@@ -9026,6 +9110,7 @@ are removed when CSS is applied.</pre>
         this.previewObserver?.disconnect();
         this.requestedPreviews.clear();
         this.previewCache.clear();
+        this.previewRequests.clear();
         this.renderLoras();
         this.setConnectionStatus("loading");
         this.setRunStatus("Refreshing SwarmUI LoRA metadata…");
@@ -9268,6 +9353,23 @@ are removed when CSS is applied.</pre>
             }
         }
         if (this.selectedLoraFolder !== null && this.selectedLoraFolder !== "" && !counts.has(this.selectedLoraFolder)) this.selectedLoraFolder = null;
+        const treeKey = JSON.stringify([
+            this.state.connection?.id,
+            rootCount,
+            [
+                ...counts
+            ],
+            this.state.loras.length
+        ]);
+        if (this.folderTreeKey === treeKey) {
+            for (const button of tree.querySelectorAll("[data-folder-path]")){
+                const selected = button.dataset.folderPath === (this.selectedLoraFolder === null ? "__all__" : this.selectedLoraFolder || "__root__");
+                button.dataset.selected = String(selected);
+                button.setAttribute("aria-selected", String(selected));
+            }
+            return;
+        }
+        this.folderTreeKey = treeKey;
         tree.replaceChildren();
         const addRow = (label, path, count, depth, kind)=>{
             const button = element("button", "ss-lora-folder-row");
@@ -9339,43 +9441,93 @@ are removed when CSS is applied.</pre>
         });
     }
     renderLoras() {
+        if (this.studioView !== "styles" || this.stylesSection !== "library") {
+            this.lorasDirty = true;
+            return;
+        }
+        this.lorasDirty = false;
         const grid = this.get('[data-role="lora-grid"]');
-        this.previewObserver?.disconnect();
-        grid.replaceChildren();
         this.renderLoraFolders();
-        const items = this.filteredLoras();
-        this.get('[data-role="lora-count"]').textContent = `${items.length}${items.length !== this.state.loras.length ? ` of ${this.state.loras.length}` : ""} model${items.length === 1 ? "" : "s"}`;
+        const filterKey = JSON.stringify([
+            this.state.connection?.id,
+            this.selectedLoraFolder,
+            this.get('[data-role="lora-search"]').value,
+            this.get('[data-role="lora-sort"]').value,
+            this.get('[data-role="lora-filter"]').value,
+            this.selectedModelFamily()
+        ]);
+        if (filterKey !== this.loraFilterKey) {
+            this.loraPage = 0;
+            grid.scrollTop = 0;
+            this.loraFilterKey = filterKey;
+        }
+        const items = this.state.connection ? this.filteredLoras() : [];
+        const pageCount = Math.max(1, Math.ceil(items.length / 60));
+        this.loraPage = clamp(this.loraPage, 0, pageCount - 1);
+        const visible = items.slice(this.loraPage * 60, (this.loraPage + 1) * 60);
+        this.get('[data-role="lora-count"]').textContent = `${items.length} of ${this.state.loras.length} models`;
+        this.get('[data-role="lora-page-status"]').textContent = items.length ? `${this.loraPage * 60 + 1}–${this.loraPage * 60 + visible.length} of ${items.length}` : "0 models";
+        this.get('[data-action="lora-page-prev"]').disabled = this.loraPage === 0;
+        this.get('[data-action="lora-page-next"]').disabled = this.loraPage >= pageCount - 1;
         this.updateDockSummary();
-        if (!this.state.connection) {
-            grid.appendChild(element("div", "ss-empty", "Choose a SwarmUI connection to load its LoRA library."));
-            return;
+        if (!this.previewObserver && typeof IntersectionObserver !== "undefined") {
+            this.previewObserver = new IntersectionObserver((entries)=>{
+                for (const entry of entries){
+                    if (!entry.isIntersecting || this.studioView !== "styles" || this.stylesSection !== "library") continue;
+                    const image = entry.target;
+                    const name = image.dataset.name || "";
+                    const previewRef = image.dataset.previewRef || "";
+                    this.previewObserver?.unobserve(image);
+                    if (!name || !previewRef || this.requestedPreviews.has(name)) continue;
+                    this.requestedPreviews.add(name);
+                    this.send("preview", {
+                        connectionId: this.state.connection?.id,
+                        name,
+                        previewRef
+                    });
+                }
+            }, {
+                root: grid,
+                rootMargin: "120px"
+            });
         }
-        if (!items.length) {
-            const compatibleOnly = this.get('[data-role="lora-filter"]').value === "compatible";
-            const text = this.state.loras.length ? compatibleOnly ? `No compatible LoRAs match ${familyLabel(this.selectedModelFamily())}. Switch to “All model families” to inspect everything.` : "No LoRAs match this search." : "No LoRA metadata was returned. You can still add a model by filename.";
-            grid.appendChild(element("div", "ss-empty", text));
-            return;
+        const wanted = new Set(visible.map((lora)=>lora.name));
+        for (const [name, cached] of this.loraCards){
+            if (wanted.has(name)) continue;
+            const image = cached.node.querySelector("[data-preview-ref]");
+            if (image) this.previewObserver?.unobserve(image);
+            cached.node.remove();
+            this.loraCards.delete(name);
         }
-        this.previewObserver = new IntersectionObserver((entries)=>{
-            for (const entry of entries){
-                if (!entry.isIntersecting) continue;
-                const image = entry.target;
-                this.previewObserver?.unobserve(image);
-                const name = image.dataset.name || "";
-                const previewRef = image.dataset.previewRef || "";
-                if (!name || !previewRef || this.requestedPreviews.has(name)) continue;
-                this.requestedPreviews.add(name);
-                this.send("preview", {
-                    connectionId: this.state.connection?.id,
-                    name,
-                    previewRef
-                });
+        for (const empty of grid.querySelectorAll(".ss-empty"))empty.remove();
+        visible.forEach((lora, index)=>{
+            const signature = JSON.stringify([
+                this.state.connection?.id,
+                lora,
+                this.isLoraCompatible(lora)
+            ]);
+            let cached = this.loraCards.get(lora.name);
+            if (cached?.signature !== signature) {
+                const image = cached?.node.querySelector("[data-preview-ref]");
+                if (image) this.previewObserver?.unobserve(image);
+                cached?.node.remove();
+                cached = {
+                    signature,
+                    node: this.makeLoraCard(lora)
+                };
+                this.loraCards.set(lora.name, cached);
             }
-        }, {
-            root: grid,
-            rootMargin: "120px"
+            const node = cached.node;
+            const pendingPreview = node.querySelector("img[data-preview-ref]");
+            if (pendingPreview && !pendingPreview.getAttribute("src") && !this.requestedPreviews.has(lora.name)) this.previewObserver?.observe(pendingPreview);
+            const add = node.querySelector(".ss-add-button");
+            const inStack = this.state.stack.some((item)=>item.lora.name === lora.name);
+            add.disabled = inStack;
+            add.textContent = inStack ? "Stacked" : "Add";
+            add.classList.toggle("ss-button-primary", !inStack);
+            if (grid.children[index] !== node) grid.insertBefore(node, grid.children[index] || null);
         });
-        for (const lora of items)grid.appendChild(this.makeLoraCard(lora));
+        if (!visible.length) grid.appendChild(element("div", "ss-empty", !this.state.connection ? "Choose a SwarmUI connection in Generate to load its LoRA library." : this.state.loras.length ? "No LoRAs match this folder and search. Try All model families or clear the search." : "No LoRA metadata was returned."));
     }
     makeLoraCard(lora) {
         const card = element("article", "ss-lora-card");
@@ -10302,6 +10454,7 @@ are removed when CSS is applied.</pre>
             tab.setAttribute("aria-selected", String(selected));
             tab.tabIndex = selected ? 0 : -1;
         }
+        if (this.studioView === "styles" && this.stylesSection === "library" && this.lorasDirty) this.renderLoras();
     }
     setStudioView(view) {
         this.studioView = view === "styles" ? "styles" : "generate";
@@ -10331,7 +10484,7 @@ are removed when CSS is applied.</pre>
         if (advanced) advanced.open = state?.details?.advanced === true;
         const savedLoraFolder = state?.loraBrowser?.folder;
         this.selectedLoraFolder = savedLoraFolder === null || typeof savedLoraFolder === "string" ? savedLoraFolder : null;
-        this.loraFoldersOpen = state?.loraBrowser?.open === true && !window.matchMedia("(max-width: 720px)").matches;
+        this.loraFoldersOpen = state?.loraBrowser?.open !== false && !window.matchMedia("(max-width: 720px)").matches;
         const loraBrowser = this.get('[data-role="lora-browser"]');
         const loraFolderSidebar = this.get('[data-role="lora-folder-sidebar"]');
         const loraFolderToggle = this.get('[data-role="lora-folder-toggle"]');

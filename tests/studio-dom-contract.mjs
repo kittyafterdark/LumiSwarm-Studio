@@ -7,7 +7,8 @@ window.matchMedia = () => ({matches:false, addEventListener(){}, removeEventList
 globalThis.requestAnimationFrame = () => 0
 window.requestAnimationFrame = globalThis.requestAnimationFrame
 globalThis.fetch = async () => { throw Error('Standalone') }
-globalThis.IntersectionObserver = class { observe(){} disconnect(){} unobserve(){} }
+let observersCreated = 0
+globalThis.IntersectionObserver = class { constructor(){ observersCreated++ } observe(){} disconnect(){} unobserve(){} }
 const messages=[]
 const root = document.getElementById('root')
 window.localStorage.setItem('swarm-studio-workspace-v1',JSON.stringify({sizes:{generationWidth:180,historyWidth:500,dockHeight:400}}))
@@ -69,6 +70,75 @@ assert.equal(field('positive').value,'unsaved portrait')
 assert.match(field('style-summary').textContent,/missing/)
 await Promise.resolve()
 assert.equal(root.querySelector('[data-action="save-native-main"]').disabled,true)
+// Full-page library regression: bounded cards, stable nodes and no observer churn.
+controller.state.connection={id:'swarm'}
+field('lora-filter').value='all'
+controller.state.loras=Array.from({length:1200},(_,i)=>({name:`folder${i%12}/model-${String(i).padStart(4,'0')}`,title:`Model ${String(i).padStart(4,'0')}`,author:'Artist',description:'LoRA',previewRef:'preview.png',architecture:'sdxl',className:'',compatClass:'',resolution:'',usageHint:'',triggerPhrase:'',tags:[],defaultWeight:1,local:true}))
+let createdCards=0
+const makeCard=controller.makeLoraCard.bind(controller)
+controller.makeLoraCard=lora=>{createdCards++;return makeCard(lora)}
+controller.setStudioView('generate')
+controller.renderLoras()
+assert.equal(createdCards,0)
+controller.setStudioView('styles')
+controller.setStylesSection('library')
+assert.equal(field('lora-grid').children.length,60)
+assert.equal(createdCards,60)
+const libraryCard=field('lora-grid').firstElementChild
+const previewNode=libraryCard.querySelector('img')
+const folderNode=field('lora-folder-tree').firstElementChild
+field('lora-grid').scrollTop=300
+const observerCount=observersCreated
+libraryCard.querySelector('.ss-add-button').click()
+assert.equal(field('lora-grid').firstElementChild,libraryCard)
+assert.equal(libraryCard.querySelector('img'),previewNode)
+assert.equal(libraryCard.querySelector('.ss-add-button').disabled,true)
+assert.equal(field('lora-grid').scrollTop,300)
+for(let i=0;i<20;i++) {
+  controller.setStylesSection('stacks')
+  controller.setStylesSection('library')
+  controller.toggleLoraFolders(false)
+  assert.equal(field('lora-folder-sidebar').hidden,true)
+  controller.toggleLoraFolders(true)
+}
+assert.equal(createdCards,60)
+assert.equal(observersCreated,observerCount)
+assert.equal(field('lora-folder-tree').firstElementChild,folderNode)
+assert.equal(field('lora-grid').firstElementChild,libraryCard)
+assert.equal(field('lora-folder-toggle').getAttribute('aria-expanded'),'true')
+controller.selectLoraFolder('folder1')
+assert.equal(controller.filteredLoras().length,100)
+assert.equal(field('lora-grid').children.length,60)
+assert.match(field('lora-page-status').textContent,/1–60 of 100/)
+click('lora-page-next')
+assert.equal(field('lora-grid').children.length,40)
+assert.match(field('lora-page-status').textContent,/61–100 of 100/)
+assert.equal(controller.loraCards.size,40)
+controller.toggleLoraFolders(false)
+const workspace=JSON.parse(window.localStorage.getItem('swarm-studio-workspace-v2'))
+assert.equal(workspace.loraBrowser.folder,'folder1')
+assert.equal(workspace.loraBrowser.open,false)
+field('lora-search').value='no such model'
+controller.renderLoras()
+assert.equal(field('lora-grid').querySelectorAll('.ss-lora-card').length,0)
+assert.equal(controller.loraPage,0)
+// Deleted selected folder recovers to All instead of leaving an empty stale path.
+controller.state.loras=controller.state.loras.filter(lora=>!lora.name.startsWith('folder1/'))
+field('lora-search').value=''
+controller.renderLoras()
+assert.equal(controller.selectedLoraFolder,null)
+assert.equal(field('lora-grid').children.length,60)
+assert.equal(controller.loraCards.size,60)
+// Tabs implement roving keyboard selection and never detach the Studio root.
+const libraryTab=root.querySelector('#ss-tab-library')
+libraryTab.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Home',bubbles:true}))
+assert.equal(controller.stylesSection,'saved')
+assert.equal(document.activeElement.id,'ss-tab-saved')
+assert.equal(root.querySelector('.ss-shell'),shell)
+assert.equal(root.querySelector('.ss-style-columns').children.length,2)
+assert.ok(field('style-positive').closest('.ss-style-composition'))
+assert.ok(field('style-render-steps').closest('.ss-style-recipe'))
+console.log('large library and exclusive Styles pages: ok')
 controller.disposed=true
 if(controller.profileSyncTimer)clearTimeout(controller.profileSyncTimer)
 dom.window.close()

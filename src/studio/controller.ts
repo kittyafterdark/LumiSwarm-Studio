@@ -10,6 +10,13 @@ class StudioController {
   private behavior: StudioBehavior
   private appearanceControlsInitialized = false
   private readonly state: StudioState
+  private loraPage = 0
+  private loraFilterKey = ""
+  private lorasDirty = true
+  private loraSearchTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly loraCards = new Map<string, { signature: string; node: HTMLElement }>()
+  private folderTreeKey = ""
+  private readonly previewRequests = new Map<string, { connectionId: string; name: string }>()
   private previewObserver: IntersectionObserver | null = null
   private readonly previewCache = new Map<string, string>()
   private readonly requestedPreviews = new Set<string>()
@@ -236,6 +243,9 @@ class StudioController {
     this.disposed = true
     if (this.profileSyncTimer) clearTimeout(this.profileSyncTimer)
     this.profileSyncTimer = null
+    if (this.loraSearchTimer) clearTimeout(this.loraSearchTimer)
+    this.loraCards.clear()
+    this.previewRequests.clear()
     this.previewObserver?.disconnect()
     this.previewObserver = null
     this.outputResizeObserver?.disconnect()
@@ -1283,25 +1293,29 @@ are removed when CSS is applied.</pre>
             <button class="ss-button" id="ss-tab-library" role="tab" aria-controls="ss-page-library" data-action="style-section" data-section="library" aria-selected="false" tabindex="-1">LoRA Library</button>
           </nav>
           <section class="ss-style-page" id="ss-page-saved" data-style-page="saved" role="tabpanel" aria-labelledby="ss-tab-saved">
-          <div class="ss-style-editor" data-role="style-editor">
-            <label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label>
-            <label>Name<input class="ss-input" data-role="style-name" placeholder="Soft painterly render"></label>
-            <label>LoRA stack<select class="ss-select" data-role="style-stack"><option value="">No stack</option></select></label>
-            <label>Checkpoint<input class="ss-input" data-role="style-checkpoint" placeholder="Inherit"></label>
-            <label>Positive addition<textarea class="ss-textarea" data-role="style-positive"></textarea></label>
-            <label>Negative addition<textarea class="ss-textarea" data-role="style-negative"></textarea></label>
-            ${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key}<input class="ss-input" data-role="style-render-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}
-            <div class="ss-view-nav">
-              <button class="ss-button" data-action="style-capture">Use current render settings</button>
-              <button class="ss-button" data-action="style-apply">Apply</button>
-              <button class="ss-button" data-action="style-save">Save / Rename</button>
-              <button class="ss-button" data-action="style-duplicate">Duplicate / Save as</button>
-              <button class="ss-button" data-action="style-delete">Delete</button>
-              <button class="ss-button" data-action="style-clear">Clear active Style</button>
+          <div class="ss-saved-style-editor" data-role="style-editor">
+            <header class="ss-style-selection"><label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label><p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p></header>
+            <div class="ss-style-columns">
+              <section class="ss-style-composition"><h3>Identity &amp; prompts</h3>
+                <label>Name<input class="ss-input" data-role="style-name" placeholder="Soft painterly render"></label>
+                <label>LoRA stack<select class="ss-select" data-role="style-stack"><option value="">No stack</option></select></label>
+                <label>Positive addition<textarea class="ss-textarea" data-role="style-positive" placeholder="Lighting, medium, mood…"></textarea></label>
+                <label>Negative addition<textarea class="ss-textarea" data-role="style-negative" placeholder="Things to avoid…"></textarea></label>
+              </section>
+              <section class="ss-style-recipe"><h3>Render recipe</h3><p class="ss-muted ss-tiny">Leave a field empty to inherit the current settings.</p>
+                <label>Checkpoint<input class="ss-input" data-role="style-checkpoint" placeholder="Inherit"></label>
+                <div class="ss-recipe-fields">${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key === "cfg" ? "CFG" : key[0].toUpperCase() + key.slice(1)}<input class="ss-input" data-role="style-render-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>
+                <button class="ss-button" data-action="style-capture">Use current render settings</button>
+              </section>
             </div>
-            <p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p>
+            <footer class="ss-style-footer">
+              <button class="ss-button ss-button-primary" data-action="style-apply">Apply Style</button>
+              <button class="ss-button" data-action="style-save">Save changes</button>
+              <button class="ss-button" data-action="style-duplicate">Duplicate</button>
+              <button class="ss-button ss-button-danger" data-action="style-delete">Delete</button>
+              <button class="ss-button" data-action="style-clear">Clear active Style</button>
+            </footer>
           </div>
-
           </section>
           <section class="ss-style-page" id="ss-page-stacks" data-style-page="stacks" role="tabpanel" aria-labelledby="ss-tab-stacks" hidden>
 <section class="ss-stack-pane">
@@ -1363,11 +1377,11 @@ are removed when CSS is applied.</pre>
                     <option value="newest">Newest</option>
                   </select>
                 </div>
-                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}</button>
+                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" aria-controls="ss-lora-folders" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}<span>Folders</span></button>
               </div>
               <div class="ss-library-status" data-role="metadata-error" hidden></div>
               <div class="ss-lora-browser" data-role="lora-browser" data-folders-open="false">
-                <aside class="ss-lora-folder-sidebar" data-role="lora-folder-sidebar" aria-label="LoRA folders" hidden>
+                <aside class="ss-lora-folder-sidebar" data-role="lora-folder-sidebar" id="ss-lora-folders" aria-label="LoRA folders" hidden>
                   <div class="ss-lora-folder-head">
                     <strong>LoRA folders</strong>
                     <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" title="Close folder browser" aria-label="Close folder browser">${FOLDER_TREE_ICON}</button>
@@ -1378,6 +1392,12 @@ are removed when CSS is applied.</pre>
                   <div class="ss-empty">Choose a SwarmUI connection to load its LoRA library.</div>
                 </div>
               </div>
+              <footer class="ss-library-pagination">
+                <button class="ss-button" data-action="lora-page-prev" aria-label="Previous LoRA page">Previous</button>
+                <span class="ss-muted" data-role="lora-page-status" aria-live="polite">0 models</span>
+                <button class="ss-button" data-action="lora-page-next" aria-label="Next LoRA page">Next</button>
+                <button class="ss-button" data-action="style-section" data-section="stacks">Edit active stack</button>
+              </footer>
             </section>
           </section>
         </section>
@@ -1660,7 +1680,20 @@ are removed when CSS is applied.</pre>
       const connectionId = (event.currentTarget as HTMLSelectElement).value
       if (connectionId) this.loadConnection(connectionId)
     })
-    this.get<HTMLInputElement>('[data-role="lora-search"]').addEventListener("input", () => this.renderLoras())
+    this.get<HTMLInputElement>('[data-role="lora-search"]').addEventListener("input", () => {
+      if (this.loraSearchTimer) clearTimeout(this.loraSearchTimer)
+      this.loraSearchTimer = setTimeout(() => { this.loraSearchTimer = null; this.renderLoras() }, 120)
+    })
+    this.get<HTMLElement>(".ss-style-tabs").addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
+      const tabs = [...this.root.querySelectorAll<HTMLButtonElement>('.ss-style-tabs [role="tab"]')]
+      const current = tabs.indexOf(event.target as HTMLButtonElement)
+      if (current < 0) return
+      event.preventDefault()
+      const index = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length
+      this.setStylesSection(tabs[index].dataset.section)
+      tabs[index].focus()
+    })
     const downloadUrl = this.get<HTMLInputElement>('[data-role="lora-download-url"]')
     downloadUrl.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -1900,6 +1933,12 @@ are removed when CSS is applied.</pre>
       const button = target.closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
+      if (action === "lora-page-prev" || action === "lora-page-next") {
+        this.loraPage += action === "lora-page-next" ? 1 : -1
+        this.renderLoras()
+        this.get<HTMLElement>('[data-role="lora-grid"]').scrollTop = 0
+        return
+      }
       if (action === "save-native-main" || action === "save-native-character") { void this.saveNativePrompts(action === "save-native-character"); return }
       if (action && (action.startsWith("style-") || ["save-defaults", "restore-defaults", "clear-defaults", "save-base-recipe", "save-look-recipe"].includes(action))) {
         try { this.handleRenderAction(action, button.dataset.section) }
@@ -2081,6 +2120,7 @@ are removed when CSS is applied.</pre>
 
   private send(type: string, data: Record<string, unknown> = {}): string {
     const requestId = createRequestId()
+    if (type === "preview") this.previewRequests.set(requestId, { connectionId: String(data.connectionId || ""), name: String(data.name || "") })
     this.ctx.sendToBackend({ type, requestId, ...data })
     return requestId
   }
@@ -2313,12 +2353,15 @@ are removed when CSS is applied.</pre>
         break
       }
         break
-      case "preview_result":
-        if (payload?.name && payload?.dataUrl) {
+      case "preview_result": {
+        const request = this.previewRequests.get(payload.requestId)
+        this.previewRequests.delete(payload.requestId)
+        if (request?.connectionId === this.state.connection?.id && request?.name === payload.name && payload.dataUrl) {
           this.previewCache.set(payload.name, payload.dataUrl)
           this.updatePreviewImages(payload.name, payload.dataUrl)
         }
         break
+      }
       case "text_editor_result": {
         const editorId = String(data.editorId || "")
         if (!editorId.startsWith("studio-") || data.cancelled === true) break
@@ -2822,6 +2865,7 @@ are removed when CSS is applied.</pre>
     this.previewObserver?.disconnect()
     this.requestedPreviews.clear()
     this.previewCache.clear()
+    this.previewRequests.clear()
     this.setConnectionStatus("loading")
     this.setRunStatus(`Loading ${connection?.name || "SwarmUI"} models and LoRA metadata…`)
     for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="generate"]')) {
@@ -3699,6 +3743,7 @@ are removed when CSS is applied.</pre>
     this.previewObserver?.disconnect()
     this.requestedPreviews.clear()
     this.previewCache.clear()
+    this.previewRequests.clear()
     this.renderLoras()
     this.setConnectionStatus("loading")
     this.setRunStatus("Refreshing SwarmUI LoRA metadata…")
@@ -3981,6 +4026,16 @@ are removed when CSS is applied.</pre>
       && !counts.has(this.selectedLoraFolder)
     ) this.selectedLoraFolder = null
 
+    const treeKey = JSON.stringify([this.state.connection?.id, rootCount, [...counts], this.state.loras.length])
+    if (this.folderTreeKey === treeKey) {
+      for (const button of tree.querySelectorAll<HTMLElement>("[data-folder-path]")) {
+        const selected = button.dataset.folderPath === (this.selectedLoraFolder === null ? "__all__" : this.selectedLoraFolder || "__root__")
+        button.dataset.selected = String(selected)
+        button.setAttribute("aria-selected", String(selected))
+      }
+      return
+    }
+    this.folderTreeKey = treeKey
     tree.replaceChildren()
     const addRow = (
       label: string,
@@ -4057,48 +4112,72 @@ are removed when CSS is applied.</pre>
   }
 
   private renderLoras(): void {
+    // Data may arrive while Generate or another Styles page is visible. Defer
+    // library DOM work until it has a real viewport; never remount on navigation.
+    if (this.studioView !== "styles" || this.stylesSection !== "library") { this.lorasDirty = true; return }
+    this.lorasDirty = false
     const grid = this.get<HTMLElement>('[data-role="lora-grid"]')
-    this.previewObserver?.disconnect()
-    grid.replaceChildren()
     this.renderLoraFolders()
-    const items = this.filteredLoras()
-    this.get<HTMLElement>('[data-role="lora-count"]').textContent =
-      `${items.length}${items.length !== this.state.loras.length ? ` of ${this.state.loras.length}` : ""} model${items.length === 1 ? "" : "s"}`
+    const filterKey = JSON.stringify([this.state.connection?.id, this.selectedLoraFolder,
+      this.get<HTMLInputElement>('[data-role="lora-search"]').value,
+      this.get<HTMLSelectElement>('[data-role="lora-sort"]').value,
+      this.get<HTMLSelectElement>('[data-role="lora-filter"]').value, this.selectedModelFamily()])
+    if (filterKey !== this.loraFilterKey) { this.loraPage = 0; grid.scrollTop = 0; this.loraFilterKey = filterKey }
+    const items = this.state.connection ? this.filteredLoras() : []
+    const pageCount = Math.max(1, Math.ceil(items.length / 60))
+    this.loraPage = clamp(this.loraPage, 0, pageCount - 1)
+    const visible = items.slice(this.loraPage * 60, (this.loraPage + 1) * 60)
+    this.get<HTMLElement>('[data-role="lora-count"]').textContent = `${items.length} of ${this.state.loras.length} models`
+    this.get<HTMLElement>('[data-role="lora-page-status"]').textContent = items.length ? `${this.loraPage * 60 + 1}–${this.loraPage * 60 + visible.length} of ${items.length}` : "0 models"
+    this.get<HTMLButtonElement>('[data-action="lora-page-prev"]').disabled = this.loraPage === 0
+    this.get<HTMLButtonElement>('[data-action="lora-page-next"]').disabled = this.loraPage >= pageCount - 1
     this.updateDockSummary()
-
-    if (!this.state.connection) {
-      grid.appendChild(element("div", "ss-empty", "Choose a SwarmUI connection to load its LoRA library."))
-      return
+    if (!this.previewObserver && typeof IntersectionObserver !== "undefined") {
+      this.previewObserver = new IntersectionObserver(entries => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting || this.studioView !== "styles" || this.stylesSection !== "library") continue
+          const image = entry.target as HTMLImageElement
+          const name = image.dataset.name || ""
+          const previewRef = image.dataset.previewRef || ""
+          this.previewObserver?.unobserve(image)
+          if (!name || !previewRef || this.requestedPreviews.has(name)) continue
+          this.requestedPreviews.add(name)
+          this.send("preview", { connectionId: this.state.connection?.id, name, previewRef })
+        }
+      }, { root: grid, rootMargin: "120px" })
     }
-    if (!items.length) {
-      const compatibleOnly = this.get<HTMLSelectElement>('[data-role="lora-filter"]').value === "compatible"
-      const text = this.state.loras.length
-        ? compatibleOnly
-          ? `No compatible LoRAs match ${familyLabel(this.selectedModelFamily())}. Switch to “All model families” to inspect everything.`
-          : "No LoRAs match this search."
-        : "No LoRA metadata was returned. You can still add a model by filename."
-      grid.appendChild(element("div", "ss-empty", text))
-      return
+    const wanted = new Set(visible.map(lora => lora.name))
+    for (const [name, cached] of this.loraCards) {
+      if (wanted.has(name)) continue
+      const image = cached.node.querySelector<HTMLImageElement>("[data-preview-ref]")
+      if (image) this.previewObserver?.unobserve(image)
+      cached.node.remove()
+      this.loraCards.delete(name)
     }
-
-    this.previewObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue
-        const image = entry.target as HTMLImageElement
-        this.previewObserver?.unobserve(image)
-        const name = image.dataset.name || ""
-        const previewRef = image.dataset.previewRef || ""
-        if (!name || !previewRef || this.requestedPreviews.has(name)) continue
-        this.requestedPreviews.add(name)
-        this.send("preview", {
-          connectionId: this.state.connection?.id,
-          name,
-          previewRef,
-        })
+    for (const empty of grid.querySelectorAll(".ss-empty")) empty.remove()
+    visible.forEach((lora, index) => {
+      const signature = JSON.stringify([this.state.connection?.id, lora, this.isLoraCompatible(lora)])
+      let cached = this.loraCards.get(lora.name)
+      if (cached?.signature !== signature) {
+        const image = cached?.node.querySelector<HTMLImageElement>("[data-preview-ref]")
+        if (image) this.previewObserver?.unobserve(image)
+        cached?.node.remove()
+        cached = { signature, node: this.makeLoraCard(lora) }
+        this.loraCards.set(lora.name, cached)
       }
-    }, { root: grid, rootMargin: "120px" })
-
-    for (const lora of items) grid.appendChild(this.makeLoraCard(lora))
+      const node = cached!.node
+      const pendingPreview = node.querySelector<HTMLImageElement>("img[data-preview-ref]")
+      if (pendingPreview && !pendingPreview.getAttribute("src") && !this.requestedPreviews.has(lora.name)) this.previewObserver?.observe(pendingPreview)
+      const add = node.querySelector<HTMLButtonElement>(".ss-add-button")!
+      const inStack = this.state.stack.some(item => item.lora.name === lora.name)
+      add.disabled = inStack
+      add.textContent = inStack ? "Stacked" : "Add"
+      add.classList.toggle("ss-button-primary", !inStack)
+      if (grid.children[index] !== node) grid.insertBefore(node, grid.children[index] || null)
+    })
+    if (!visible.length) grid.appendChild(element("div", "ss-empty", !this.state.connection
+      ? "Choose a SwarmUI connection in Generate to load its LoRA library."
+      : this.state.loras.length ? "No LoRAs match this folder and search. Try All model families or clear the search." : "No LoRA metadata was returned."))
   }
 
   private makeLoraCard(lora: LoraMetadata): HTMLElement {
@@ -4911,6 +4990,7 @@ are removed when CSS is applied.</pre>
       tab.setAttribute("aria-selected", String(selected))
       tab.tabIndex = selected ? 0 : -1
     }
+    if (this.studioView === "styles" && this.stylesSection === "library" && this.lorasDirty) this.renderLoras()
   }
 
   private setStudioView(view?: string): void {
@@ -4939,7 +5019,7 @@ are removed when CSS is applied.</pre>
     this.selectedLoraFolder = savedLoraFolder === null || typeof savedLoraFolder === "string"
       ? savedLoraFolder
       : null
-    this.loraFoldersOpen = state?.loraBrowser?.open === true
+    this.loraFoldersOpen = state?.loraBrowser?.open !== false
       && !window.matchMedia("(max-width: 720px)").matches
     const loraBrowser = this.get<HTMLElement>('[data-role="lora-browser"]')
     const loraFolderSidebar = this.get<HTMLElement>('[data-role="lora-folder-sidebar"]')
