@@ -62,6 +62,8 @@ class StudioController {
   private inspectorResizeObserver: ResizeObserver | null = null
   private stopActiveResize: (() => void) | null = null
   private profileSyncTimer: ReturnType<typeof setTimeout> | null = null
+  private studioView: "generate" | "styles" = "generate"
+  private stylesSection: "saved" | "stacks" | "library" = "saved"
   private renderStyles: StudioRenderStyle[] = []
   private studioDefaults: StudioGenerationDefaults | null = null
   private activeRenderStyleId = ""
@@ -1021,19 +1023,10 @@ are removed when CSS is applied.</pre>
         <nav class="ss-view-nav" aria-label="Studio workspaces">
           <button class="ss-button" data-action="studio-view" data-view="generate" aria-current="page">Generate</button>
           <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
-          <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
         </nav>
-        <div class="ss-default-actions">
-          <button class="ss-button" data-action="save-defaults">Save current as Studio default</button>
-          <button class="ss-button" data-action="restore-defaults">Restore Studio defaults</button>
-          <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
-          <button class="ss-button" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">Save prompts to Lumiverse Image Gen</button>
-          <button class="ss-button" data-action="save-native-character" hidden>Mirror active character prompts to Lumiverse</button>
-          <button class="ss-button" data-action="save-base-recipe" hidden>Save to active character base</button>
-          <button class="ss-button" data-action="save-look-recipe" hidden>Save to active look</button>
-        </div>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
+        <section class="ss-generate-page" data-studio-page="generate" aria-label="Generate">
         <nav class="ss-mobile-tabs" aria-label="Studio sections">
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="create" data-active="true">Create</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="generation" data-active="false">Tune</button>
@@ -1050,6 +1043,17 @@ are removed when CSS is applied.</pre>
             </div>
             <div class="ss-pane-body">
               <div class="ss-generation-controls">
+        <details class="ss-defaults-menu"><summary>Defaults &amp; save settings</summary><div class="ss-context-actions">
+          <button class="ss-button" data-action="save-defaults">Save current as Studio default</button>
+          <button class="ss-button" data-action="restore-defaults">Restore Studio defaults</button>
+          <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
+          <button class="ss-button" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">Save prompts to Lumiverse Image Gen</button>
+          <button class="ss-button" data-action="save-native-character" hidden>Mirror active character prompts to Lumiverse</button>
+          <button class="ss-button" data-action="save-base-recipe" hidden>Save to active character base</button>
+          <button class="ss-button" data-action="save-look-recipe" hidden>Save to active look</button>
+        </div></details>
+          <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
+
                 <section class="ss-workflow-panel">
                   <div class="ss-workflow-picker">
                     <div class="ss-field">
@@ -1270,12 +1274,15 @@ are removed when CSS is applied.</pre>
           </aside>
         </div>
 
-        <section class="ss-style-manager" hidden>
-          <nav class="ss-view-nav" aria-label="Style tools">
-            <button class="ss-button" data-action="style-section" data-section="saved">Saved Styles</button>
-            <button class="ss-button" data-action="style-section" data-section="stacks">LoRA Stacks</button>
-            <button class="ss-button" data-action="style-section" data-section="library">LoRA Library</button>
+        </section>
+        <section class="ss-styles-workspace" data-studio-page="styles" aria-label="Styles" hidden>
+          <header class="ss-styles-header"><strong>Styles</strong><span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span></header>
+          <nav class="ss-style-tabs" role="tablist" aria-label="Style tools">
+            <button class="ss-button" id="ss-tab-saved" role="tab" aria-controls="ss-page-saved" data-action="style-section" data-section="saved" aria-selected="true">Saved Styles</button>
+            <button class="ss-button" id="ss-tab-stacks" role="tab" aria-controls="ss-page-stacks" data-action="style-section" data-section="stacks" aria-selected="false" tabindex="-1">LoRA Stacks</button>
+            <button class="ss-button" id="ss-tab-library" role="tab" aria-controls="ss-page-library" data-action="style-section" data-section="library" aria-selected="false" tabindex="-1">LoRA Library</button>
           </nav>
+          <section class="ss-style-page" id="ss-page-saved" data-style-page="saved" role="tabpanel" aria-labelledby="ss-tab-saved">
           <div class="ss-style-editor" data-role="style-editor">
             <label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label>
             <label>Name<input class="ss-input" data-role="style-name" placeholder="Soft painterly render"></label>
@@ -1294,15 +1301,35 @@ are removed when CSS is applied.</pre>
             </div>
             <p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p>
           </div>
-        </section>
-        <section class="ss-lora-dock">
-          <div class="ss-dock-resizer" data-resize="dock" role="separator" aria-orientation="horizontal" title="Drag to resize LoRA workspace"></div>
-          <div class="ss-dock-head">
-            <div class="ss-section-title"><strong>LoRA workspace</strong><span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span></div>
-            <button class="ss-icon-button ss-pane-toggle" data-action="toggle-loras" title="Collapse LoRA workspace" aria-label="Collapse LoRA workspace" aria-expanded="true">⌄</button>
-          </div>
-          <div class="ss-lora-dock-content">
-            <section class="ss-lora-library">
+
+          </section>
+          <section class="ss-style-page" id="ss-page-stacks" data-style-page="stacks" role="tabpanel" aria-labelledby="ss-tab-stacks" hidden>
+<section class="ss-stack-pane">
+              <div class="ss-section-head">
+                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
+              </div>
+              <div class="ss-stack-head-tools">
+                <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
+                  <option value="">Saved stacks…</option>
+                </select>
+                <button class="ss-button" data-action="load-stack" disabled>Load</button>
+                <button class="ss-button ss-button-primary" data-action="save-stack">Save</button>
+                <button class="ss-button ss-button-danger" data-action="delete-stack" disabled>Delete</button>
+              </div>
+              <div class="ss-stack-list" data-role="stack-list">
+                <div class="ss-empty">Add LoRAs from the library. Metadata triggers stay off until you enable them.</div>
+              </div>
+              <div class="ss-stack-share-tools">
+                <button class="ss-button" data-action="import-stack" title="Import a shared LoRA stack JSON file">${IMPORT_ICON}<span>Import</span></button>
+                <button class="ss-button" data-action="export-stack" title="Export the current LoRA stack as shareable JSON">${EXPORT_ICON}<span>Export</span></button>
+                <button class="ss-button" data-action="apply-lumi-stack" title="Merge this stack into Lumiverse Image Gen and activate it">${EXPORT_ICON}<span>Apply to Lumi</span></button>
+                <button class="ss-button ss-button-danger ss-clear-stack" data-action="clear-stack" disabled>Clear</button>
+                <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
+              </div>
+            </section>
+          </section>
+          <section class="ss-style-page" id="ss-page-library" data-style-page="library" role="tabpanel" aria-labelledby="ss-tab-library" hidden>
+<section class="ss-lora-library">
               <div class="ss-lora-titlebar">
                 <div class="ss-section-title"><strong>Select LoRAs</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
                 <span class="ss-family-chip" data-role="family-chip">Waiting for checkpoint</span>
@@ -1352,33 +1379,7 @@ are removed when CSS is applied.</pre>
                 </div>
               </div>
             </section>
-
-            <div class="ss-lora-divider" data-resize="lora-split" role="separator" aria-orientation="vertical" title="Drag to resize LoRA library and stack"></div>
-
-            <section class="ss-stack-pane">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
-              </div>
-              <div class="ss-stack-head-tools">
-                <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
-                  <option value="">Saved stacks…</option>
-                </select>
-                <button class="ss-button" data-action="load-stack" disabled>Load</button>
-                <button class="ss-button ss-button-primary" data-action="save-stack">Save</button>
-                <button class="ss-button ss-button-danger" data-action="delete-stack" disabled>Delete</button>
-              </div>
-              <div class="ss-stack-list" data-role="stack-list">
-                <div class="ss-empty">Add LoRAs from the library. Metadata triggers stay off until you enable them.</div>
-              </div>
-              <div class="ss-stack-share-tools">
-                <button class="ss-button" data-action="import-stack" title="Import a shared LoRA stack JSON file">${IMPORT_ICON}<span>Import</span></button>
-                <button class="ss-button" data-action="export-stack" title="Export the current LoRA stack as shareable JSON">${EXPORT_ICON}<span>Export</span></button>
-                <button class="ss-button" data-action="apply-lumi-stack" title="Merge this stack into Lumiverse Image Gen and activate it">${EXPORT_ICON}<span>Apply to Lumi</span></button>
-                <button class="ss-button ss-button-danger ss-clear-stack" data-action="clear-stack" disabled>Clear</button>
-                <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
-              </div>
-            </section>
-          </div>
+          </section>
         </section>
 
         <div class="ss-commandbar">
@@ -4875,11 +4876,7 @@ are removed when CSS is applied.</pre>
       this.scheduleStudioProfileSync()
     }
     if (action === "save-base-recipe" || action === "save-look-recipe") this.send("save_active_render_recipe", { destination: action === "save-look-recipe" ? "look" : "base", recipe: settings, checkpoint: settings.checkpoint, styleId: this.selectedRenderStyle()?.id || "" })
-    if (action === "style-section") {
-      this.get<HTMLElement>('[data-role="style-editor"]').hidden = section !== "saved"
-      this.get<HTMLElement>(".ss-shell").dataset.styleSection = section || "saved"
-      if (section === "stacks") this.get<HTMLElement>('[data-role="stack-preset"]').focus()
-    }
+    if (action === "style-section") this.setStylesSection(section)
     if (action === "style-capture") {
       this.fillStyleRecipe(settings)
       this.get<HTMLInputElement>('[data-role="style-checkpoint"]').value = settings.checkpoint || ""
@@ -4905,19 +4902,26 @@ are removed when CSS is applied.</pre>
     }
   }
 
-  private setStudioView(view?: string): void {
-    const selected = view === "styles" ? "styles" : "generate"
-    const shell = this.get<HTMLElement>(".ss-shell")
-    shell.dataset.studioView = selected
-    if (selected === "generate" && ["loras", "stack"].includes(shell.dataset.mobileTab || "")) shell.dataset.mobileTab = "create"
-    const manager = this.root.querySelector<HTMLElement>(".ss-style-manager")
-    if (manager) manager.hidden = selected !== "styles"
-    if (selected === "styles") this.renderStyleOptions()
-    shell.classList.remove("ss-loras-collapsed")
-    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="studio-view"]')) {
-      button.setAttribute("aria-current", button.dataset.view === selected ? "page" : "false")
+  private setStylesSection(section?: string): void {
+    this.stylesSection = section === "stacks" || section === "library" ? section : "saved"
+    this.get<HTMLElement>(".ss-shell").dataset.styleSection = this.stylesSection
+    for (const page of this.root.querySelectorAll<HTMLElement>("[data-style-page]")) page.hidden = page.dataset.stylePage !== this.stylesSection
+    for (const tab of this.root.querySelectorAll<HTMLButtonElement>('[data-action="style-section"][role="tab"]')) {
+      const selected = tab.dataset.section === this.stylesSection
+      tab.setAttribute("aria-selected", String(selected))
+      tab.tabIndex = selected ? 0 : -1
     }
-    requestAnimationFrame(() => this.fitPreviewToAspect())
+  }
+
+  private setStudioView(view?: string): void {
+    this.studioView = view === "styles" ? "styles" : "generate"
+    const shell = this.get<HTMLElement>(".ss-shell")
+    shell.dataset.studioView = this.studioView
+    if (this.studioView === "generate" && ["loras", "stack"].includes(shell.dataset.mobileTab || "")) shell.dataset.mobileTab = "create"
+    for (const page of this.root.querySelectorAll<HTMLElement>("[data-studio-page]")) page.hidden = page.dataset.studioPage !== this.studioView
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="studio-view"]')) button.setAttribute("aria-current", button.dataset.view === this.studioView ? "page" : "false")
+    this.setStylesSection(this.stylesSection)
+    if (this.studioView === "generate") requestAnimationFrame(() => this.fitPreviewToAspect())
   }
 
   private restoreWorkspaceState(): void {
@@ -4928,7 +4932,6 @@ are removed when CSS is applied.</pre>
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.classList.toggle("ss-generation-collapsed", state?.collapsed?.generation === true)
     shell.classList.toggle("ss-history-collapsed", state?.collapsed?.history === true)
-    shell.classList.toggle("ss-loras-collapsed", state?.collapsed?.loras === true)
     shell.classList.toggle("ss-fullscreen-layer", state?.fullscreen === true)
     const advanced = this.root.querySelector<HTMLDetailsElement>("details.ss-advanced")
     if (advanced) advanced.open = state?.details?.advanced === true
@@ -4986,7 +4989,6 @@ are removed when CSS is applied.</pre>
         collapsed: {
           generation: shell.classList.contains("ss-generation-collapsed"),
           history: shell.classList.contains("ss-history-collapsed"),
-          loras: shell.classList.contains("ss-loras-collapsed"),
         },
         details: {
           advanced: this.root.querySelector<HTMLDetailsElement>("details.ss-advanced")?.open === true,
@@ -5122,8 +5124,7 @@ are removed when CSS is applied.</pre>
     shell.dataset.mobileTab = selected
     this.setStudioView(["loras", "stack"].includes(selected) ? "styles" : "generate")
     if (["loras", "stack"].includes(selected)) {
-      shell.dataset.styleSection = selected === "stack" ? "stacks" : "library"
-      this.get<HTMLElement>('[data-role="style-editor"]').hidden = true
+      this.setStylesSection(selected === "stack" ? "stacks" : "library")
     }
     for (const button of this.root.querySelectorAll<HTMLButtonElement>(".ss-mobile-tab")) {
       const active = button.dataset.tab === selected
@@ -6529,7 +6530,7 @@ are removed when CSS is applied.</pre>
   }
 
   private fitPreviewToAspect(): void {
-    if (this.disposed) return
+    if (this.disposed || this.studioView !== "generate") return
     const stage = this.root.querySelector<HTMLElement>('[data-role="output-stage"]')
     const preview = this.root.querySelector<HTMLElement>('[data-role="current-preview"]')
     if (!stage || !preview || stage.clientWidth <= 0) return
@@ -6548,8 +6549,10 @@ are removed when CSS is applied.</pre>
     }
 
     const fitted = fitAspectWithin(this.previewAspect, availableWidth, maximumHeight)
-    preview.style.width = `${Math.round(fitted.width)}px`
-    preview.style.height = `${Math.round(fitted.height)}px`
+    const width = `${Math.round(fitted.width)}px`
+    const height = `${Math.round(fitted.height)}px`
+    if (preview.style.width !== width) preview.style.width = width
+    if (preview.style.height !== height) preview.style.height = height
   }
 
   private setGenerating(value: boolean): void {

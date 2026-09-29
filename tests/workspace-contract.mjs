@@ -5,7 +5,7 @@ assert.deepEqual(normalizeWorkspaceState({ sizes: { generationWidth: 180, histor
 const shell = { dataset: {}, classList: { remove() {} } }
 const controls = [{ dataset: { view: 'generate' }, setAttribute() {} }, { dataset: { view: 'styles' }, setAttribute() {} }]
 const state = { prompt: 'unsaved', negative: 'blur', stack: [{ weight: 0.7 }], currentImage: { id: 'image' }, seed: 42 }
-const controller = { state, get: () => shell, renderStyleOptions() {}, root: { querySelector: () => null, querySelectorAll: () => controls }, fitPreviewToAspect() {} }
+const controller = { state, get: () => shell, setStylesSection() {}, renderStyleOptions() {}, root: { querySelector: () => null, querySelectorAll: selector => selector.includes("studio-view") ? controls : [] }, fitPreviewToAspect() {} }
 globalThis.requestAnimationFrame = fn => fn()
 for (const view of [undefined, 'styles', 'generate']) {
   StudioController.prototype.setStudioView.call(controller, view)

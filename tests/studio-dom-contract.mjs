@@ -25,6 +25,18 @@ controller.state.currentImage={src:'image',label:'test'}
 const image=controller.state.currentImage
 const stack=controller.state.stack
 const promptNode=field('positive')
+assert.equal(root.querySelector('.ss-lora-dock'),null)
+assert.equal(root.querySelector('.ss-default-actions'),null)
+assert.equal(root.querySelectorAll('[data-style-page]').length,3)
+for (const section of ['saved','stacks','library','saved']) {
+  controller.setStylesSection(section)
+  assert.deepEqual([...root.querySelectorAll('[data-style-page]')].filter(page=>!page.hidden).map(page=>page.dataset.stylePage),[section])
+  assert.equal(root.querySelector(`[data-section="${section}"]`).getAttribute('aria-selected'),'true')
+}
+assert.ok(field('lora-grid').closest('[data-style-page="library"]'))
+assert.ok(field('stack-list').closest('[data-style-page="stacks"]'))
+assert.ok(field('style-name').closest('[data-style-page="saved"]'))
+assert.ok(root.querySelector('[data-action="save-defaults"]').closest('[data-studio-page="generate"]'))
 const bootstrapCount=messages.filter(message=>message.type==='bootstrap').length
 click('manage-stack')
 assert.equal(shell.dataset.studioView,'styles')

@@ -3464,29 +3464,28 @@ const STUDIO_V3_STYLES = `
     .ss-stack-row .ss-trigger-toggle { grid-column: 3 / -1; }
   }
 
-  :root { --studio-safe-top: var(--app-interactive-safe-top, env(safe-area-inset-top, 0px)); }
+  .ss-shell, .ss-miniplayer-app-surface, .ss-mini-context-menu {
+    --studio-safe-top: var(--app-interactive-safe-top, env(safe-area-inset-top, 0px));
+  }
   .ss-view-nav { display: flex; flex-wrap: wrap; gap: 8px; flex: 0 0 auto; }
-  .ss-view-nav [aria-current="page"] { border-color: var(--lumiverse-accent); }
-  .ss-shell:not([data-studio-view="styles"]) > .ss-lora-dock,
-  .ss-shell[data-studio-view="styles"] > .ss-workspace { display: none !important; }
-  .ss-shell[data-studio-view="styles"] > .ss-lora-dock { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; height: auto; overflow: auto; }
-  .ss-dock-resizer, .ss-dock-head [data-action="toggle-loras"] { display: none; }
+  .ss-view-nav [aria-current="page"], .ss-style-tabs [aria-selected="true"] { border-color: var(--lumiverse-accent); }
+  .ss-generate-page, .ss-styles-workspace { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; gap: 10px; }
+  .ss-shell [data-studio-page][hidden], .ss-shell [data-style-page][hidden] { display: none !important; }
+  .ss-styles-header, .ss-style-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; flex: 0 0 auto; }
+  .ss-style-page { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; overflow: auto; }
+  .ss-style-page > .ss-lora-library, .ss-style-page > .ss-stack-pane { flex: 1 1 0; min-height: 0; padding: 0; }
+  .ss-style-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; }
+  .ss-style-editor label { display: grid; gap: 6px; min-width: 0; }
+  .ss-defaults-menu { grid-column: 1 / -1; }
+  .ss-defaults-menu summary { cursor: pointer; padding: 8px; }
+  .ss-context-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; }
   .ss-history-grid { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); }
   .ss-shell .ss-workspace { grid-template-columns: minmax(0, var(--ss-generation-width)) minmax(0, 1fr) minmax(0, var(--ss-history-width)); }
   @media (min-width: 721px) and (max-width: 1000px) {
     .ss-shell { --ss-generation-width: 260px; --ss-history-width: 180px; }
   }
   @media (max-width: 720px) {
-    .ss-shell[data-studio-view="styles"] .ss-lora-dock-content { display: flex; flex-direction: column; overflow: auto; }
-    .ss-shell[data-studio-view="styles"] :is(.ss-lora-library, .ss-stack-pane) { display: flex !important; min-height: 260px; }
+    .ss-style-editor { grid-template-columns: minmax(0, 1fr); }
+    .ss-style-page > .ss-lora-library, .ss-style-page > .ss-stack-pane { display: flex; height: 100%; }
   }
-
-  .ss-default-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-  .ss-style-manager { flex: 0 1 auto; min-height: 0; overflow: auto; }
-  .ss-style-manager[hidden], .ss-style-editor[hidden] { display: none; }
-  .ss-style-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; padding: 12px; }
-  .ss-style-editor label { display: grid; gap: 6px; min-width: 0; }
-  .ss-shell[data-studio-view="styles"]:not([data-style-section="stacks"]):not([data-style-section="library"]) .ss-lora-dock { display: none !important; }
-  .ss-shell[data-studio-view="styles"] .ss-style-manager { flex: 1 1 auto; }
-  .ss-shell[data-style-section="stacks"] .ss-style-manager, .ss-shell[data-style-section="library"] .ss-style-manager { flex: 0 0 auto; }
 `
