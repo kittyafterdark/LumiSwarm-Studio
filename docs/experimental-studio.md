@@ -63,3 +63,9 @@ Visual testing and live Swarm/Lumiverse integration are intentionally left to th
 6. Save native main prompts twice and verify a single preset updates. Explicitly mirror character prompts and verify the binding, unrelated presets and active main selection. Test host-unavailable and failed-save feedback.
 
 Do not merge into main until these visual and live integration checks are accepted.
+
+## Thumbnail hydration diagnostic
+
+Folder overlays now composite theme layers over an opaque backing, including transparent themes. Preview-backed cards keep the same placeholder as cards without previews. Thumbnail sources are preloaded and decoded before an instantaneous reveal; failed decodes retain the placeholder. Superseded requests, connection changes, removed cards and disposal cannot reveal a late bitmap. Preview responses patch images without invoking the library renderer.
+
+Run `npx playwright install chromium` once, then `npm run test:browser` after building. This standalone Chromium diagnostic hydrates 60 mock LoRAs with delayed responses, holds decoded images behind a test barrier, and verifies placeholder visibility, opaque folder backing, zero library renders, zero card disconnections, retained identity and unchanged card geometry. It uses no live host or SwarmUI connection. The DOM suite separately covers failed and stale decode races.

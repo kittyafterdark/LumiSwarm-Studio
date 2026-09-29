@@ -1024,7 +1024,9 @@ const STYLES = `
       linear-gradient(135deg, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 12%, transparent), transparent),
       var(--lumiverse-fill-subtle);
   }
-  .ss-lora-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ss-lora-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; }
+  .ss-lora-preview img[data-loaded="true"] { opacity: 1; }
+  .ss-lora-preview:has(img[data-loaded="true"]) .ss-lora-placeholder { visibility: hidden; }
   .ss-lora-placeholder { width: 100%; height: 100%; display: grid; place-items: center; color: var(--lumiverse-text-dim, var(--lumiverse-text-muted)); font-size: 18px; }
   .ss-lora-body { min-width: 0; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
   .ss-lora-title { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2449,7 +2451,8 @@ const STUDIO_V3_STYLES = `
     border-radius: var(--ss-radius);
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--lumiverse-accent, #7dd3fc) 7%, transparent), transparent 32%),
-      color-mix(in srgb, var(--ss-panel-bg) 95%, black);
+      linear-gradient(var(--ss-panel-bg), var(--ss-panel-bg)),
+      #14151a;
   }
   .ss-lora-folder-sidebar[hidden] { display: none; }
   .ss-lora-folder-head {
@@ -5491,6 +5494,8 @@ class StudioController {
     folderTreeKey = "";
     previewRequests = new Map();
     previewObserver = null;
+    previewEpoch = 0;
+    previewLoads = new WeakMap();
     previewCache = new Map();
     requestedPreviews = new Set();
     connectionRequestId = "";
@@ -8064,6 +8069,7 @@ are removed when CSS is applied.</pre>
         this.state.schedulers = [];
         this.previewObserver?.disconnect();
         this.requestedPreviews.clear();
+        this.previewEpoch++;
         this.previewCache.clear();
         this.previewRequests.clear();
         this.renderStack();
@@ -8899,6 +8905,7 @@ are removed when CSS is applied.</pre>
         this.state.checkpoints = [];
         this.previewObserver?.disconnect();
         this.requestedPreviews.clear();
+        this.previewEpoch++;
         this.previewCache.clear();
         this.previewRequests.clear();
         this.renderLoras();
@@ -9331,23 +9338,17 @@ are removed when CSS is applied.</pre>
             lora.usageHint
         ].filter(Boolean).join("\n");
         const preview = element("div", "ss-lora-preview");
+        preview.appendChild(element("div", "ss-lora-placeholder", "◇"));
         const cached = this.previewCache.get(lora.name);
-        if (cached) {
+        if (cached || lora.previewRef) {
             const image = element("img");
-            image.src = cached;
-            image.alt = `${lora.title} preview`;
-            image.dataset.loraImage = lora.name;
-            preview.appendChild(image);
-        } else if (lora.previewRef) {
-            const image = element("img");
-            image.alt = "";
+            image.alt = `${lora.title || labelFromName(lora.name)} preview`;
             image.dataset.name = lora.name;
-            image.dataset.previewRef = lora.previewRef;
             image.dataset.loraImage = lora.name;
+            if (lora.previewRef) image.dataset.previewRef = lora.previewRef;
             preview.appendChild(image);
-            this.previewObserver?.observe(image);
-        } else {
-            preview.appendChild(element("div", "ss-lora-placeholder", "◇"));
+            if (cached) this.revealDecodedPreview(image, cached);
+            else this.previewObserver?.observe(image);
         }
         const body = element("div", "ss-lora-body");
         body.appendChild(element("div", "ss-lora-title", lora.title || labelFromName(lora.name)));
@@ -9375,12 +9376,28 @@ are removed when CSS is applied.</pre>
         card.append(preview, body);
         return card;
     }
+    revealDecodedPreview(image, dataUrl) {
+        const pending = this.previewLoads.get(image);
+        if (pending?.url === dataUrl && pending.epoch === this.previewEpoch) return;
+        const load = {
+            url: dataUrl,
+            epoch: this.previewEpoch
+        };
+        this.previewLoads.set(image, load);
+        const preload = document.createElement("img");
+        preload.src = dataUrl;
+        void preload.decode().then(()=>{
+            if (this.disposed || !image.isConnected || load.epoch !== this.previewEpoch || this.previewLoads.get(image) !== load) return;
+            if (image.getAttribute("src") !== dataUrl) image.src = dataUrl;
+            image.hidden = false;
+            image.dataset.loaded = "true";
+        }).catch(()=>{
+            if (this.previewLoads.get(image) === load) this.previewLoads.delete(image);
+        });
+    }
     updatePreviewImages(name, dataUrl) {
         for (const image of this.root.querySelectorAll("[data-lora-image]")){
-            if (image.dataset.loraImage === name) {
-                if (image.getAttribute("src") !== dataUrl) image.src = dataUrl;
-                image.hidden = false;
-            }
+            if (image.dataset.loraImage === name) this.revealDecodedPreview(image, dataUrl);
         }
     }
     addLora(lora) {
@@ -9498,10 +9515,11 @@ are removed when CSS is applied.</pre>
                 const image = row.querySelector('.ss-stack-preview img');
                 const cached = this.previewCache.get(item.lora.name);
                 if (cached) {
-                    if (image.getAttribute("src") !== cached) image.src = cached;
-                    image.hidden = false;
+                    this.revealDecodedPreview(image, cached);
                     image.alt = `${item.lora.title || labelFromName(item.lora.name)} preview`;
                 } else {
+                    this.previewLoads.delete(image);
+                    delete image.dataset.loaded;
                     if (image.hasAttribute("src")) image.removeAttribute("src");
                     image.hidden = true;
                     if (installed && item.lora.previewRef && !this.requestedPreviews.has(item.lora.name)) {

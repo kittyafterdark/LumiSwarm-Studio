@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
+import { runInNewContext } from 'node:vm'
 import { StudioController, defaultStudioBehavior } from '../dist/frontend.js'
 const dom = new JSDOM('<div id="root"></div>', { url:'https://studio.test' })
 for (const key of ['window','document','HTMLElement','HTMLInputElement','HTMLSelectElement','HTMLTextAreaElement','HTMLButtonElement','HTMLDetailsElement']) globalThis[key] = dom.window[key]
+dom.window.HTMLImageElement.prototype.decode = () => Promise.resolve()
 window.matchMedia = () => ({matches:false, addEventListener(){}, removeEventListener(){}})
 globalThis.requestAnimationFrame = () => 0
 window.requestAnimationFrame = globalThis.requestAnimationFrame
@@ -14,7 +16,7 @@ let observersCreated = 0
 globalThis.IntersectionObserver = class { constructor(){ observersCreated++ } observe(){} disconnect(){} unobserve(){} }
 const styleSource = await readFile(new URL('../src/studio/styles.ts',import.meta.url),'utf8')
 const styleNode = document.createElement('style')
-styleNode.textContent=styleSource.slice(styleSource.indexOf('`')+1,styleSource.lastIndexOf('`'))
+styleNode.textContent=runInNewContext(styleSource + '; STYLES + STUDIO_V3_STYLES')
 document.head.appendChild(styleNode)
 const messages=[]
 const root = document.getElementById('root')
@@ -144,7 +146,11 @@ assert.equal(libraryCard.querySelector('img'),previewNode)
 const mutationObserver=new window.MutationObserver(()=>{})
 mutationObserver.observe(previewNode,{attributes:true,attributeFilter:['src']})
 controller.updatePreviewImages(controller.state.stack[0].lora.name,'data:image/png;base64,test')
-assert.equal(mutationObserver.takeRecords().length,1)
+assert.equal(mutationObserver.takeRecords().length,0)
+await Promise.resolve()
+assert.equal(previewNode.dataset.loaded,'true')
+assert.equal(previewNode.getAttribute('src'),'data:image/png;base64,test')
+mutationObserver.takeRecords()
 controller.updatePreviewImages(controller.state.stack[0].lora.name,'data:image/png;base64,test')
 assert.equal(mutationObserver.takeRecords().length,0)
 mutationObserver.disconnect()
@@ -264,6 +270,47 @@ assert.equal(window.getComputedStyle(root.querySelector('.ss-lora-library')).dis
 controller.setStudioView('generate')
 assert.equal(shell.dataset.mobileTab,'create')
 assert.equal(root.querySelector('[data-tab="create"]').getAttribute('aria-current'),'page')
+// Decode races must not reveal removed, stale or failed thumbnails.
+await Promise.resolve()
+const pendingDecodes=[]
+dom.window.HTMLImageElement.prototype.decode = function () {
+  return new Promise((resolve,reject)=>pendingDecodes.push({resolve,reject}))
+}
+const delayedImage=document.createElement('img')
+root.appendChild(delayedImage)
+controller.revealDecodedPreview(delayedImage,'older')
+controller.revealDecodedPreview(delayedImage,'newer')
+pendingDecodes.shift().resolve()
+await Promise.resolve()
+assert.equal(delayedImage.hasAttribute('src'),false)
+pendingDecodes.shift().resolve()
+await Promise.resolve()
+assert.equal(delayedImage.getAttribute('src'),'newer')
+assert.equal(delayedImage.dataset.loaded,'true')
+controller.revealDecodedPreview(delayedImage,'old-connection')
+controller.previewEpoch++
+pendingDecodes.shift().resolve()
+await Promise.resolve()
+assert.equal(delayedImage.getAttribute('src'),'newer')
+controller.revealDecodedPreview(delayedImage,'detached')
+delayedImage.remove()
+pendingDecodes.shift().resolve()
+await Promise.resolve()
+assert.equal(delayedImage.getAttribute('src'),'newer')
+const failedImage=document.createElement('img')
+root.appendChild(failedImage)
+controller.revealDecodedPreview(failedImage,'invalid-bitmap')
+pendingDecodes.shift().reject(new Error('Decode failed'))
+await Promise.resolve()
+await Promise.resolve()
+assert.equal(failedImage.hasAttribute('src'),false)
+assert.equal(failedImage.dataset.loaded,undefined)
+controller.revealDecodedPreview(failedImage,'disposed')
+controller.disposed=true
+pendingDecodes.shift().resolve()
+await Promise.resolve()
+assert.equal(failedImage.hasAttribute('src'),false)
+failedImage.remove()
 console.log('large library and persistent Styles columns: ok')
 controller.disposed=true
 if(controller.profileSyncTimer)clearTimeout(controller.profileSyncTimer)

@@ -18,6 +18,8 @@ class StudioController {
   private folderTreeKey = ""
   private readonly previewRequests = new Map<string, { connectionId: string; name: string }>()
   private previewObserver: IntersectionObserver | null = null
+  private previewEpoch = 0
+  private readonly previewLoads = new WeakMap<HTMLImageElement, { url: string; epoch: number }>()
   private readonly previewCache = new Map<string, string>()
   private readonly requestedPreviews = new Set<string>()
   private connectionRequestId = ""
@@ -2646,6 +2648,7 @@ are removed when CSS is applied.</pre>
     this.state.schedulers = []
     this.previewObserver?.disconnect()
     this.requestedPreviews.clear()
+    this.previewEpoch++
     this.previewCache.clear()
     this.previewRequests.clear()
     this.renderStack()
@@ -3524,6 +3527,7 @@ are removed when CSS is applied.</pre>
     this.state.checkpoints = []
     this.previewObserver?.disconnect()
     this.requestedPreviews.clear()
+    this.previewEpoch++
     this.previewCache.clear()
     this.previewRequests.clear()
     this.renderLoras()
@@ -3975,23 +3979,17 @@ are removed when CSS is applied.</pre>
     ].filter(Boolean).join("\n")
 
     const preview = element("div", "ss-lora-preview")
+    preview.appendChild(element("div", "ss-lora-placeholder", "◇"))
     const cached = this.previewCache.get(lora.name)
-    if (cached) {
+    if (cached || lora.previewRef) {
       const image = element("img")
-      image.src = cached
-      image.alt = `${lora.title} preview`
-      image.dataset.loraImage = lora.name
-      preview.appendChild(image)
-    } else if (lora.previewRef) {
-      const image = element("img")
-      image.alt = ""
+      image.alt = `${lora.title || labelFromName(lora.name)} preview`
       image.dataset.name = lora.name
-      image.dataset.previewRef = lora.previewRef
       image.dataset.loraImage = lora.name
+      if (lora.previewRef) image.dataset.previewRef = lora.previewRef
       preview.appendChild(image)
-      this.previewObserver?.observe(image)
-    } else {
-      preview.appendChild(element("div", "ss-lora-placeholder", "◇"))
+      if (cached) this.revealDecodedPreview(image, cached)
+      else this.previewObserver?.observe(image)
     }
 
     const body = element("div", "ss-lora-body")
@@ -4024,12 +4022,28 @@ are removed when CSS is applied.</pre>
     return card
   }
 
+  private revealDecodedPreview(image: HTMLImageElement, dataUrl: string): void {
+    const pending = this.previewLoads.get(image)
+    if (pending?.url === dataUrl && pending.epoch === this.previewEpoch) return
+    const load = { url: dataUrl, epoch: this.previewEpoch }
+    this.previewLoads.set(image, load)
+    const preload = document.createElement("img")
+    preload.src = dataUrl
+    void preload.decode().then(() => {
+      // A connection change, newer response, removed card or disposal invalidates this decode.
+      if (this.disposed || !image.isConnected || load.epoch !== this.previewEpoch || this.previewLoads.get(image) !== load) return
+      if (image.getAttribute("src") !== dataUrl) image.src = dataUrl
+      image.hidden = false
+      image.dataset.loaded = "true"
+    }).catch(() => {
+      // Keep the placeholder (or previous decoded bitmap) instead of revealing a broken image.
+      if (this.previewLoads.get(image) === load) this.previewLoads.delete(image)
+    })
+  }
+
   private updatePreviewImages(name: string, dataUrl: string): void {
     for (const image of this.root.querySelectorAll<HTMLImageElement>("[data-lora-image]")) {
-      if (image.dataset.loraImage === name) {
-        if (image.getAttribute("src") !== dataUrl) image.src = dataUrl
-        image.hidden = false
-      }
+      if (image.dataset.loraImage === name) this.revealDecodedPreview(image, dataUrl)
     }
   }
 
@@ -4137,10 +4151,11 @@ are removed when CSS is applied.</pre>
         const image = row.querySelector<HTMLImageElement>('.ss-stack-preview img')!
         const cached = this.previewCache.get(item.lora.name)
         if (cached) {
-          if (image.getAttribute("src") !== cached) image.src = cached
-          image.hidden = false
+          this.revealDecodedPreview(image, cached)
           image.alt = `${item.lora.title || labelFromName(item.lora.name)} preview`
         } else {
+          this.previewLoads.delete(image)
+          delete image.dataset.loaded
           if (image.hasAttribute("src")) image.removeAttribute("src")
           image.hidden = true
           if (installed && item.lora.previewRef && !this.requestedPreviews.has(item.lora.name)) {
