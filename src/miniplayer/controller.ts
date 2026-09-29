@@ -781,7 +781,7 @@ class MiniPlayerController {
     const left = clamp(clientX, 8, Math.max(8, viewport.clientWidth - bounds.width - 8))
     const top = clamp(clientY, 8, Math.max(8, viewport.clientHeight - bounds.height - 8))
     menu.style.left = `${Math.round(left)}px`
-    menu.style.top = `${Math.round(top)}px`
+    menu.style.top = `max(${Math.round(top)}px, calc(var(--studio-safe-top) + 8px))`
     menu.querySelector<HTMLButtonElement>("button:not([hidden]):not(:disabled)")?.focus()
   }
 

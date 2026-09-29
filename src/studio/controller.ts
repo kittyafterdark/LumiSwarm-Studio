@@ -566,6 +566,11 @@ class StudioController {
           </div>
         </div>
 
+        <nav class="ss-view-nav" aria-label="Studio workspaces">
+          <button class="ss-button" data-action="studio-view" data-view="generate" aria-current="page">Generate</button>
+          <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
+          <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
+        </nav>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
         <div class="ss-workspace">
@@ -997,6 +1002,11 @@ are removed when CSS is applied.</pre>
           </div>
         </div>
 
+        <nav class="ss-view-nav" aria-label="Studio workspaces">
+          <button class="ss-button" data-action="studio-view" data-view="generate" aria-current="page">Generate</button>
+          <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
+          <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
+        </nav>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
         <nav class="ss-mobile-tabs" aria-label="Studio sections">
@@ -1837,6 +1847,10 @@ are removed when CSS is applied.</pre>
       const button = target.closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
+      if (action === "studio-view" || action === "manage-stack") {
+        this.setStudioView(action === "manage-stack" ? "styles" : button.dataset.view)
+        return
+      }
       if (action === "refresh-metadata") this.refreshMetadata()
       if (action === "toggle-config") this.toggleConfigPopover(button)
       if (action === "close-settings") this.closeConfigPopover()
@@ -4180,6 +4194,8 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="command-stack-summary"]').textContent = enabled
       ? `${enabled} LoRA${enabled === 1 ? "" : "s"} enabled`
       : "No LoRAs enabled"
+    const manage = this.root.querySelector<HTMLElement>('[data-action="manage-stack"]')
+    if (manage) manage.textContent = `LoRA stack · ${enabled} enabled · Manage`
     this.updateDockSummary()
     this.updateTriggerSummary()
   }
@@ -4638,9 +4654,22 @@ are removed when CSS is applied.</pre>
     this.setRunStatus(`Deleting LoRA stack “${preset.name}”…`)
   }
 
+  private setStudioView(view?: string): void {
+    const selected = view === "styles" ? "styles" : "generate"
+    const shell = this.get<HTMLElement>(".ss-shell")
+    shell.dataset.studioView = selected
+    shell.classList.remove("ss-loras-collapsed")
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="studio-view"]')) {
+      button.setAttribute("aria-current", button.dataset.view === selected ? "page" : "false")
+    }
+    requestAnimationFrame(() => this.fitPreviewToAspect())
+  }
+
   private restoreWorkspaceState(): void {
     let state: any = {}
-    try { state = JSON.parse(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || "{}") } catch {}
+    try { state = JSON.parse(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || window.localStorage.getItem("swarm-studio-workspace-v1") || "{}") } catch {}
+    state = normalizeWorkspaceState(state)
+    this.setStudioView("generate")
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.classList.toggle("ss-generation-collapsed", state?.collapsed?.generation === true)
     shell.classList.toggle("ss-history-collapsed", state?.collapsed?.history === true)
@@ -4676,7 +4705,6 @@ are removed when CSS is applied.</pre>
     const sizes: Record<string, string> = {
       generationWidth: "--ss-generation-width",
       historyWidth: "--ss-history-width",
-      dockHeight: "--ss-dock-height",
       libraryWidth: "--ss-library-width",
       promptHeight: "--ss-prompt-height",
     }
@@ -4697,6 +4725,7 @@ are removed when CSS is applied.</pre>
     }
     try {
       window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
+        version: 2,
         fullscreen: shell.classList.contains("ss-fullscreen-layer"),
         mobileTab: shell.dataset.mobileTab || "create",
         collapsed: {
@@ -4715,7 +4744,6 @@ are removed when CSS is applied.</pre>
         sizes: {
           generationWidth: size("--ss-generation-width"),
           historyWidth: size("--ss-history-width"),
-          dockHeight: size("--ss-dock-height"),
           libraryWidth: size("--ss-library-width"),
           promptHeight: size("--ss-prompt-height"),
         },
@@ -4837,6 +4865,7 @@ are removed when CSS is applied.</pre>
     const selected = allowed.has(tab) ? tab : "create"
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.mobileTab = selected
+    this.setStudioView(["loras", "stack"].includes(selected) ? "styles" : "generate")
     for (const button of this.root.querySelectorAll<HTMLButtonElement>(".ss-mobile-tab")) {
       const active = button.dataset.tab === selected
       button.dataset.active = String(active)

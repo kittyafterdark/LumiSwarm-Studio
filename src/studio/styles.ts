@@ -1352,10 +1352,10 @@ const STUDIO_V3_STYLES = `
   }
   .ss-shell {
     --ss-gap: 10px;
-    --ss-generation-width: 284px;
+    --ss-generation-width: clamp(310px, 20vw, 360px);
     --ss-history-width: 244px;
     --ss-dock-height: 282px;
-    --ss-prompt-height: 150px;
+    --ss-prompt-height: 240px;
     --ss-library-width: 60%;
     --ss-control-radius: var(--lumiverse-radius, 8px);
     --ss-panel-radius: calc(var(--lumiverse-radius, 8px) * 1.1);
@@ -2192,7 +2192,7 @@ const STUDIO_V3_STYLES = `
   .ss-stack-share-tools svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .ss-missing-lora-modal {
     position: fixed;
-    inset: 0;
+    inset: var(--studio-safe-top) 0 0 0;
     z-index: 2147483006;
     display: grid;
     place-items: center;
@@ -2286,7 +2286,7 @@ const STUDIO_V3_STYLES = `
   .ss-stack-summary { color: var(--lumiverse-text-dim, var(--lumiverse-text-muted)); font-size: 9px; white-space: nowrap; }
   .ss-fullscreen-layer {
     position: fixed !important;
-    inset: 0 !important;
+    inset: var(--studio-safe-top) 0 0 0 !important;
     width: auto !important;
     height: auto !important;
     min-height: 0 !important;
@@ -2297,7 +2297,7 @@ const STUDIO_V3_STYLES = `
   .ss-fullscreen-layer .ss-close-studio { display: inline-flex; }
   .ss-inspector {
     position: fixed;
-    inset: 0;
+    inset: var(--studio-safe-top) 0 0 0;
     z-index: 2147483010;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
@@ -2386,7 +2386,7 @@ const STUDIO_V3_STYLES = `
   .ss-inspector-close { position: static; z-index: 2; }
   .ss-output-library {
     position: fixed;
-    inset: 0;
+    inset: var(--studio-safe-top) 0 0 0;
     box-sizing: border-box;
     width: auto;
     height: auto;
@@ -2751,12 +2751,12 @@ const STUDIO_V3_STYLES = `
     .ss-shell,
     .ss-shell.ss-fullscreen-layer {
       position: fixed !important;
-      inset: 0 !important;
+      inset: var(--studio-safe-top) 0 0 0 !important;
       z-index: 2147483001;
       width: auto !important;
       height: auto !important;
       min-height: 0 !important;
-      padding: max(8px, env(safe-area-inset-top)) 8px max(7px, env(safe-area-inset-bottom));
+      padding: 8px 8px max(7px, env(safe-area-inset-bottom));
       gap: 7px;
       background-color: var(--lumiverse-bg, var(--lumiverse-fill, #0d0d11));
     }
@@ -3102,7 +3102,7 @@ const STUDIO_V3_STYLES = `
   }
   .ss-workflow-modal {
     position: fixed;
-    inset: 0;
+    inset: var(--studio-safe-top) 0 0 0;
     z-index: 2147483004;
     display: grid;
     place-items: center;
@@ -3462,5 +3462,22 @@ const STUDIO_V3_STYLES = `
       grid-template-columns: auto 34px minmax(90px, 1fr) 67px auto;
     }
     .ss-stack-row .ss-trigger-toggle { grid-column: 3 / -1; }
+  }
+
+  :root { --studio-safe-top: var(--app-interactive-safe-top, env(safe-area-inset-top, 0px)); }
+  .ss-view-nav { display: flex; flex-wrap: wrap; gap: 8px; flex: 0 0 auto; }
+  .ss-view-nav [aria-current="page"] { border-color: var(--lumiverse-accent); }
+  .ss-shell:not([data-studio-view="styles"]) > .ss-lora-dock,
+  .ss-shell[data-studio-view="styles"] > .ss-workspace { display: none !important; }
+  .ss-shell[data-studio-view="styles"] > .ss-lora-dock { display: flex; flex: 1 1 0; min-height: 0; height: auto; overflow: auto; }
+  .ss-dock-resizer, .ss-dock-head [data-action="toggle-loras"] { display: none; }
+  .ss-history-grid { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); }
+  .ss-shell .ss-workspace { grid-template-columns: minmax(0, var(--ss-generation-width)) minmax(0, 1fr) minmax(0, var(--ss-history-width)); }
+  @media (min-width: 721px) and (max-width: 1000px) {
+    .ss-shell { --ss-generation-width: 260px; --ss-history-width: 180px; }
+  }
+  @media (max-width: 720px) {
+    .ss-shell[data-studio-view="styles"] .ss-lora-dock-content { display: flex; flex-direction: column; overflow: auto; }
+    .ss-shell[data-studio-view="styles"] :is(.ss-lora-library, .ss-stack-panel) { display: flex !important; min-height: 260px; }
   }
 `

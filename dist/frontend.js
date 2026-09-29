@@ -197,7 +197,7 @@ const APPEARANCE_STORAGE_KEY = "swarm-studio-appearance-v1";
 const MINIPLAYER_STORAGE_KEY = "swarm-studio-miniplayer-v1";
 const MINIPLAYER_POSITION_STORAGE_KEY = "swarm-studio-miniplayer-position-v1";
 const BEHAVIOR_STORAGE_KEY = "swarm-studio-behavior-v3";
-const WORKSPACE_STORAGE_KEY = "swarm-studio-workspace-v1";
+const WORKSPACE_STORAGE_KEY = "swarm-studio-workspace-v2";
 const WORKFLOW_CORE_PARAMETERS = new Set([
     "prompt",
     "negativeprompt",
@@ -1623,10 +1623,10 @@ const STUDIO_V3_STYLES = `
   }
   .ss-shell {
     --ss-gap: 10px;
-    --ss-generation-width: 284px;
+    --ss-generation-width: clamp(310px, 20vw, 360px);
     --ss-history-width: 244px;
     --ss-dock-height: 282px;
-    --ss-prompt-height: 150px;
+    --ss-prompt-height: 240px;
     --ss-library-width: 60%;
     --ss-control-radius: var(--lumiverse-radius, 8px);
     --ss-panel-radius: calc(var(--lumiverse-radius, 8px) * 1.1);
@@ -2463,7 +2463,7 @@ const STUDIO_V3_STYLES = `
   .ss-stack-share-tools svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .ss-missing-lora-modal {
     position: fixed;
-    inset: 0;
+    inset: var(--studio-safe-top) 0 0 0;
     z-index: 2147483006;
     display: grid;
     place-items: center;
@@ -2557,7 +2557,7 @@ const STUDIO_V3_STYLES = `
   .ss-stack-summary { color: var(--lumiverse-text-dim, var(--lumiverse-text-muted)); font-size: 9px; white-space: nowrap; }
   .ss-fullscreen-layer {
     position: fixed !important;
-    inset: 0 !important;
+    inset: var(--studio-safe-top) 0 0 0 !important;
     width: auto !important;
     height: auto !important;
     min-height: 0 !important;
@@ -2568,7 +2568,7 @@ const STUDIO_V3_STYLES = `
   .ss-fullscreen-layer .ss-close-studio { display: inline-flex; }
   .ss-inspector {
     position: fixed;
-    inset: 0;
+    inset: var(--studio-safe-top) 0 0 0;
     z-index: 2147483010;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
@@ -2657,7 +2657,7 @@ const STUDIO_V3_STYLES = `
   .ss-inspector-close { position: static; z-index: 2; }
   .ss-output-library {
     position: fixed;
-    inset: 0;
+    inset: var(--studio-safe-top) 0 0 0;
     box-sizing: border-box;
     width: auto;
     height: auto;
@@ -3022,12 +3022,12 @@ const STUDIO_V3_STYLES = `
     .ss-shell,
     .ss-shell.ss-fullscreen-layer {
       position: fixed !important;
-      inset: 0 !important;
+      inset: var(--studio-safe-top) 0 0 0 !important;
       z-index: 2147483001;
       width: auto !important;
       height: auto !important;
       min-height: 0 !important;
-      padding: max(8px, env(safe-area-inset-top)) 8px max(7px, env(safe-area-inset-bottom));
+      padding: 8px 8px max(7px, env(safe-area-inset-bottom));
       gap: 7px;
       background-color: var(--lumiverse-bg, var(--lumiverse-fill, #0d0d11));
     }
@@ -3373,7 +3373,7 @@ const STUDIO_V3_STYLES = `
   }
   .ss-workflow-modal {
     position: fixed;
-    inset: 0;
+    inset: var(--studio-safe-top) 0 0 0;
     z-index: 2147483004;
     display: grid;
     place-items: center;
@@ -3734,6 +3734,23 @@ const STUDIO_V3_STYLES = `
     }
     .ss-stack-row .ss-trigger-toggle { grid-column: 3 / -1; }
   }
+
+  :root { --studio-safe-top: var(--app-interactive-safe-top, env(safe-area-inset-top, 0px)); }
+  .ss-view-nav { display: flex; flex-wrap: wrap; gap: 8px; flex: 0 0 auto; }
+  .ss-view-nav [aria-current="page"] { border-color: var(--lumiverse-accent); }
+  .ss-shell:not([data-studio-view="styles"]) > .ss-lora-dock,
+  .ss-shell[data-studio-view="styles"] > .ss-workspace { display: none !important; }
+  .ss-shell[data-studio-view="styles"] > .ss-lora-dock { display: flex; flex: 1 1 0; min-height: 0; height: auto; overflow: auto; }
+  .ss-dock-resizer, .ss-dock-head [data-action="toggle-loras"] { display: none; }
+  .ss-history-grid { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); }
+  .ss-shell .ss-workspace { grid-template-columns: minmax(0, var(--ss-generation-width)) minmax(0, 1fr) minmax(0, var(--ss-history-width)); }
+  @media (min-width: 721px) and (max-width: 1000px) {
+    .ss-shell { --ss-generation-width: 260px; --ss-history-width: 180px; }
+  }
+  @media (max-width: 720px) {
+    .ss-shell[data-studio-view="styles"] .ss-lora-dock-content { display: flex; flex-direction: column; overflow: auto; }
+    .ss-shell[data-studio-view="styles"] :is(.ss-lora-library, .ss-stack-panel) { display: flex !important; min-height: 260px; }
+  }
 `;
 function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -3758,7 +3775,7 @@ function createOverlayMiniplayerWidget() {
         x = clamp(x, 8, Math.max(8, window.innerWidth - width - 8));
         y = clamp(y, 8, Math.max(8, window.innerHeight - height - 8));
         surface.style.left = `${Math.round(x)}px`;
-        surface.style.top = `${Math.round(y)}px`;
+        surface.style.top = `max(${Math.round(y)}px, calc(var(--studio-safe-top) + 8px))`;
         if (persist) {
             try {
                 window.localStorage.setItem(MINIPLAYER_POSITION_STORAGE_KEY, JSON.stringify({
@@ -4174,6 +4191,44 @@ function applySwarmPresetTokens(prompt, titles) {
         resolved
     ].filter(Boolean).join(", ");
     return resolved.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim();
+}
+function normalizeWorkspaceState(value) {
+    const old = value && typeof value === "object" ? value : {};
+    const sizes = {};
+    for (const [key, min, max] of [
+        [
+            "generationWidth",
+            310,
+            360
+        ],
+        [
+            "historyWidth",
+            240,
+            300
+        ],
+        [
+            "libraryWidth",
+            220,
+            900
+        ],
+        [
+            "promptHeight",
+            220,
+            480
+        ]
+    ]){
+        const value = old.sizes?.[key];
+        if (typeof value === "number" && Number.isFinite(value)) sizes[key] = clamp(value, min, max);
+    }
+    return {
+        ...old,
+        version: 2,
+        sizes,
+        collapsed: {
+            generation: old.collapsed?.generation === true,
+            history: old.collapsed?.history === true
+        }
+    };
 }
 function presetListValue(value) {
     if (Array.isArray(value)) return value.map(String).map((item)=>item.trim()).filter(Boolean);
@@ -4947,7 +5002,7 @@ class MiniPlayerController {
         const left = clamp(clientX, 8, Math.max(8, viewport.clientWidth - bounds.width - 8));
         const top = clamp(clientY, 8, Math.max(8, viewport.clientHeight - bounds.height - 8));
         menu.style.left = `${Math.round(left)}px`;
-        menu.style.top = `${Math.round(top)}px`;
+        menu.style.top = `max(${Math.round(top)}px, calc(var(--studio-safe-top) + 8px))`;
         menu.querySelector("button:not([hidden]):not(:disabled)")?.focus();
     }
     closeContextMenu() {
@@ -5728,6 +5783,11 @@ class StudioController {
           </div>
         </div>
 
+        <nav class="ss-view-nav" aria-label="Studio workspaces">
+          <button class="ss-button" data-action="studio-view" data-view="generate" aria-current="page">Generate</button>
+          <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
+          <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
+        </nav>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
         <div class="ss-workspace">
@@ -6162,6 +6222,11 @@ are removed when CSS is applied.</pre>
           </div>
         </div>
 
+        <nav class="ss-view-nav" aria-label="Studio workspaces">
+          <button class="ss-button" data-action="studio-view" data-view="generate" aria-current="page">Generate</button>
+          <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
+          <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
+        </nav>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
         <nav class="ss-mobile-tabs" aria-label="Studio sections">
@@ -6983,6 +7048,10 @@ are removed when CSS is applied.</pre>
             const button = target.closest("[data-action]");
             if (!button) return;
             const action = button.dataset.action;
+            if (action === "studio-view" || action === "manage-stack") {
+                this.setStudioView(action === "manage-stack" ? "styles" : button.dataset.view);
+                return;
+            }
             if (action === "refresh-metadata") this.refreshMetadata();
             if (action === "toggle-config") this.toggleConfigPopover(button);
             if (action === "close-settings") this.closeConfigPopover();
@@ -9181,6 +9250,8 @@ are removed when CSS is applied.</pre>
         this.get('[data-role="stack-count"]').textContent = `${enabled} enabled · ${this.state.stack.length} stacked`;
         this.get('[data-action="clear-stack"]').disabled = this.state.stack.length === 0;
         this.get('[data-role="command-stack-summary"]').textContent = enabled ? `${enabled} LoRA${enabled === 1 ? "" : "s"} enabled` : "No LoRAs enabled";
+        const manage = this.root.querySelector('[data-action="manage-stack"]');
+        if (manage) manage.textContent = `LoRA stack · ${enabled} enabled · Manage`;
         this.updateDockSummary();
         this.updateTriggerSummary();
     }
@@ -9615,11 +9686,23 @@ are removed when CSS is applied.</pre>
         });
         this.setRunStatus(`Deleting LoRA stack “${preset.name}”…`);
     }
+    setStudioView(view) {
+        const selected = view === "styles" ? "styles" : "generate";
+        const shell = this.get(".ss-shell");
+        shell.dataset.studioView = selected;
+        shell.classList.remove("ss-loras-collapsed");
+        for (const button of this.root.querySelectorAll('[data-action="studio-view"]')){
+            button.setAttribute("aria-current", button.dataset.view === selected ? "page" : "false");
+        }
+        requestAnimationFrame(()=>this.fitPreviewToAspect());
+    }
     restoreWorkspaceState() {
         let state = {};
         try {
-            state = JSON.parse(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || "{}");
+            state = JSON.parse(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || window.localStorage.getItem("swarm-studio-workspace-v1") || "{}");
         } catch  {}
+        state = normalizeWorkspaceState(state);
+        this.setStudioView("generate");
         const shell = this.get(".ss-shell");
         shell.classList.toggle("ss-generation-collapsed", state?.collapsed?.generation === true);
         shell.classList.toggle("ss-history-collapsed", state?.collapsed?.history === true);
@@ -9654,7 +9737,6 @@ are removed when CSS is applied.</pre>
         const sizes = {
             generationWidth: "--ss-generation-width",
             historyWidth: "--ss-history-width",
-            dockHeight: "--ss-dock-height",
             libraryWidth: "--ss-library-width",
             promptHeight: "--ss-prompt-height"
         };
@@ -9674,6 +9756,7 @@ are removed when CSS is applied.</pre>
         };
         try {
             window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
+                version: 2,
                 fullscreen: shell.classList.contains("ss-fullscreen-layer"),
                 mobileTab: shell.dataset.mobileTab || "create",
                 collapsed: {
@@ -9692,7 +9775,6 @@ are removed when CSS is applied.</pre>
                 sizes: {
                     generationWidth: size("--ss-generation-width"),
                     historyWidth: size("--ss-history-width"),
-                    dockHeight: size("--ss-dock-height"),
                     libraryWidth: size("--ss-library-width"),
                     promptHeight: size("--ss-prompt-height")
                 }
@@ -9825,6 +9907,10 @@ are removed when CSS is applied.</pre>
         const selected = allowed.has(tab) ? tab : "create";
         const shell = this.get(".ss-shell");
         shell.dataset.mobileTab = selected;
+        this.setStudioView([
+            "loras",
+            "stack"
+        ].includes(selected) ? "styles" : "generate");
         for (const button of this.root.querySelectorAll(".ss-mobile-tab")){
             const active = button.dataset.tab === selected;
             button.dataset.active = String(active);
@@ -13579,4 +13665,4 @@ function setup(ctx) {
         removeStyle();
     };
 }
-export { applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };
+export { normalizeWorkspaceState, StudioController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };

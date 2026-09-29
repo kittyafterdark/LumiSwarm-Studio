@@ -21,7 +21,7 @@ function createOverlayMiniplayerWidget(): any | null {
     x = clamp(x, 8, Math.max(8, window.innerWidth - width - 8))
     y = clamp(y, 8, Math.max(8, window.innerHeight - height - 8))
     surface.style.left = `${Math.round(x)}px`
-    surface.style.top = `${Math.round(y)}px`
+    surface.style.top = `max(${Math.round(y)}px, calc(var(--studio-safe-top) + 8px))`
     if (persist) {
       try {
         window.localStorage.setItem(MINIPLAYER_POSITION_STORAGE_KEY, JSON.stringify({ x, y }))
