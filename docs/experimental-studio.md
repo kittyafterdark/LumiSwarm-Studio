@@ -4,7 +4,7 @@ Branch: `experimental/studio-styles-defaults`. Main remains the pre-change backu
 
 ## Source map
 
-- Shell, controls, LoRA library and stacks: `src/studio/controller.ts` (`buildV3`). Both views keep their DOM and controller alive. Generate and Styles have separate page roots; Saved Styles, LoRA Stacks and LoRA Library are exclusive sibling panels with keyboard-accessible tabs.
+- Shell, controls, LoRA library and stacks: `src/studio/controller.ts` (`buildV3`). Both views keep their DOM and controller alive. Generate and Styles have separate page roots; Styles is one persistent three-column screen: collapsible Style editor, LoRA Library, and LoRA Stack. Narrow screens stack the same columns vertically.
 - Styles and fixed surfaces: `src/studio/styles.ts`. Fullscreen, inspector, output library, missing-LoRA and shared workflow/dialog backdrops consume `--studio-safe-top`, derived from the host's `--app-interactive-safe-top`. Floating player/menu positions also respect it. The alias is scoped to Studio-owned surfaces, not the host root.
 - Workspace geometry: local preference `swarm-studio-workspace-v2`, with lazy fallback from v1; obsolete dock height is discarded, side rails and prompts are clamped. In-flow Studio does not receive another safe-top offset.
 - LoRA stacks: backend user storage `lora-stack-presets.json`; unchanged mechanical stack format.
@@ -41,22 +41,22 @@ Typecheck assembles the same compilation units as the build. The tests cover leg
 
 ## Workspace repair
 
-The Styles page no longer mounts the old bottom dock. The saved-style form has two grouped columns (identity/prompts and renderer settings), with independent content scrolling and a contextual footer. Stacks and Library occupy their own full-size pages.
+The Styles page no longer mounts the old bottom dock. The Style editor is compact, with a New action and collapsible Render Recipe summary. The Library occupies the largest column. Generate has its own persistent working-stack list, with History vertically collapsed below it by default. Both stack lists share the same state, with weight/enable/trigger controls, drag reorder and arrow controls.
 
 Studio defaults are collapsed beside generation controls. Active character/look saves have their own contextual group, and native Image Gen prompt export is grouped separately. No global save-action strip is rendered on Styles.
 
-The Library folder sidebar opens by default on desktop; **Folders** retracts/reopens it. The current folder and open state persist, nested folders include their descendants, and the sidebar scrolls independently. On narrow screens it overlays the library and closes after folder selection.
+The Library folder sidebar opens by default on desktop; the folder icon retracts/reopens it. The current folder and open state persist, nested folders include their descendants, and the sidebar scrolls independently. The folder picker overlays the library without resizing the card grid; on narrow screens it closes after selection.
 
 Library pages contain at most 60 cards. Unchanged cards and image elements are retained during stack edits and view changes; hidden-library updates are deferred until the page is shown. Search is debounced. One preview observer is retained, and responses from a previous connection are ignored. Changing search/folder resets pagination; changing pages bounds the card cache to that page.
 
-Regression checks now include 1,200 mock LoRAs, repeated tab/sidebar round trips, card/image identity, folder selection and paging, computed CSS visibility of exclusive pages, keyboard navigation, unsaved Style edits and stale preview responses. These are automated DOM/CSS checks, not a live host visual acceptance test.
+Regression checks now include 1,200 mock LoRAs, repeated workspace/sidebar round trips, mirrored stack edits and reordered row identity, history/image identity, folder selection and paging, computed CSS visibility, unsaved Style edits and stale preview responses. Generate preview dimensions now come from CSS containment and object-fit; the output-stage ResizeObserver feedback loop and grid-column transition are removed. Live-frame tests assert that preview geometry is not rewritten. These are automated DOM/CSS checks, not a live host visual acceptance test.
 
 ## User visual acceptance
 
 Visual testing and live Swarm/Lumiverse integration are intentionally left to the user because this repository is not connected to production. No live generation or host E2E diagnostics were run.
 
-1. Test Generate → Styles → Generate with unsaved prompts, selected output/history, render controls, init image and a stack. Check both Manage and the narrow-layout navigation.
-2. Check normal and narrow desktop layouts, collapsed rails, and safe-top values of zero and a nonzero titlebar height. Open fullscreen, inspector, output library and dialogs; drag the floating player near the top edge.
+1. Test Generate → Styles → Generate with unsaved prompts, selected output/history, render controls, init image and a stack. Edit the working stack in both views and check narrow-layout navigation.
+2. Check normal and narrow desktop layouts, the collapsed Style editor and History, and safe-top values of zero and a nonzero titlebar height. Open fullscreen, inspector, output library and dialogs; drag the floating player near the top edge.
 3. Save a raw stack; create, rename, duplicate, apply and delete a Style that references it. Test deleted stack/model references. Check prompts are not repeatedly appended.
 4. Save defaults, close/reopen Studio, restore and reset them. Confirm temporary prompts, seed and init image were not captured as defaults.
 5. Bind a Style through character visuals, override a single recipe field on a look, and compare Studio and tagged generation. Clear the override to inherit again.

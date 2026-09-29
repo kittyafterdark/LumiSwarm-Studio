@@ -8,6 +8,8 @@ window.matchMedia = () => ({matches:false, addEventListener(){}, removeEventList
 globalThis.requestAnimationFrame = () => 0
 window.requestAnimationFrame = globalThis.requestAnimationFrame
 globalThis.fetch = async () => { throw Error('Standalone') }
+const resizeTargets=[]
+globalThis.ResizeObserver=class { observe(target){resizeTargets.push(target)} disconnect(){} }
 let observersCreated = 0
 globalThis.IntersectionObserver = class { constructor(){ observersCreated++ } observe(){} disconnect(){} unobserve(){} }
 const styleSource = await readFile(new URL('../src/studio/styles.ts',import.meta.url),'utf8')
@@ -33,21 +35,22 @@ const stack=controller.state.stack
 const promptNode=field('positive')
 assert.equal(root.querySelector('.ss-lora-dock'),null)
 assert.equal(root.querySelector('.ss-default-actions'),null)
-assert.equal(root.querySelectorAll('[data-style-page]').length,3)
-for (const section of ['saved','stacks','library','saved']) {
-  controller.setStylesSection(section)
-  assert.deepEqual([...root.querySelectorAll('[data-style-page]')].filter(page=>!page.hidden).map(page=>page.dataset.stylePage),[section])
-  assert.equal(root.querySelector(`[data-section="${section}"]`).getAttribute('aria-selected'),'true')
-  for(const page of root.querySelectorAll('[data-style-page]')) assert.equal(window.getComputedStyle(page).display === 'none',page.dataset.stylePage !== section)
-}
-assert.ok(field('lora-grid').closest('[data-style-page="library"]'))
-assert.ok(field('stack-list').closest('[data-style-page="stacks"]'))
-assert.ok(field('style-name').closest('[data-style-page="saved"]'))
+assert.equal(root.querySelectorAll('[data-style-column]').length,3)
+assert.equal(root.querySelectorAll('[role="tablist"]').length,0)
+assert.equal(root.querySelector('.ss-generate-page'),null)
+assert.equal(root.querySelector('.ss-workspace').dataset.studioPage,'generate')
+for (const column of root.querySelectorAll('[data-style-column]')) assert.equal(column.hidden,false)
+assert.ok(field('lora-grid').closest('[data-style-column="library"]'))
+assert.ok(field('stack-list').closest('[data-style-column="stacks"]'))
+assert.ok(field('generate-stack-list').closest('[data-studio-page="generate"]'))
+assert.ok(field('style-name').closest('[data-style-column="saved"]'))
+assert.equal(field('rail-history').open,false)
+assert.equal(resizeTargets.some(node=>node.dataset.role==='output-stage'),false)
+assert.equal(field('lora-folder-toggle').textContent.trim(),'')
 assert.ok(root.querySelector('[data-action="save-defaults"]').closest('[data-studio-page="generate"]'))
 const bootstrapCount=messages.filter(message=>message.type==='bootstrap').length
-click('manage-stack')
+root.querySelector('[data-view="styles"]').click()
 assert.equal(shell.dataset.studioView,'styles')
-assert.equal(shell.dataset.styleSection,'stacks')
 root.querySelector('[data-view="generate"]').click()
 assert.equal(field('positive'),promptNode)
 assert.equal(field('positive').value,'unsaved portrait')
@@ -87,7 +90,7 @@ controller.setStudioView('generate')
 controller.renderLoras()
 assert.equal(createdCards,0)
 controller.setStudioView('styles')
-controller.setStylesSection('library')
+controller.focusStyleColumn('library')
 assert.equal(field('lora-grid').children.length,60)
 assert.equal(createdCards,60)
 const libraryCard=field('lora-grid').firstElementChild
@@ -101,8 +104,8 @@ assert.equal(libraryCard.querySelector('img'),previewNode)
 assert.equal(libraryCard.querySelector('.ss-add-button').disabled,true)
 assert.equal(field('lora-grid').scrollTop,300)
 for(let i=0;i<20;i++) {
-  controller.setStylesSection('stacks')
-  controller.setStylesSection('library')
+  controller.focusStyleColumn('stacks')
+  controller.focusStyleColumn('library')
   controller.toggleLoraFolders(false)
   assert.equal(field('lora-folder-sidebar').hidden,true)
   controller.toggleLoraFolders(true)
@@ -112,6 +115,96 @@ assert.equal(observersCreated,observerCount)
 assert.equal(field('lora-folder-tree').firstElementChild,folderNode)
 assert.equal(field('lora-grid').firstElementChild,libraryCard)
 assert.equal(field('lora-folder-toggle').getAttribute('aria-expanded'),'true')
+// Shared stack updates preserve both presentations, focused inputs and library previews.
+const fullRow=field('stack-list').firstElementChild
+const compactRow=field('generate-stack-list').firstElementChild
+const fullWeight=fullRow.querySelector('.ss-stack-weight')
+const compactWeight=compactRow.querySelector('.ss-stack-weight')
+fullWeight.focus()
+fullWeight.value='0.65'
+fullWeight.dispatchEvent(new window.Event('change',{bubbles:true}))
+assert.equal(compactWeight.value,'0.65')
+assert.equal(document.activeElement,fullWeight)
+controller.state.stack=controller.state.stack.map(item=>({...item,weight:0.8}))
+controller.renderStack()
+compactWeight.value='0.45'
+compactWeight.dispatchEvent(new window.Event('change',{bubbles:true}))
+assert.equal(controller.state.stack[0].weight,0.45)
+assert.equal(fullWeight.value,'0.45')
+assert.equal(field('stack-list').firstElementChild,fullRow)
+assert.equal(field('generate-stack-list').firstElementChild,compactRow)
+controller.addLora(controller.state.loras[1])
+fullRow.querySelectorAll('.ss-stack-actions button')[1].click()
+assert.equal(field('stack-list').lastElementChild,fullRow)
+assert.equal(field('generate-stack-list').lastElementChild,compactRow)
+fullRow.querySelectorAll('.ss-stack-actions button')[0].click()
+assert.equal(field('stack-list').firstElementChild,fullRow)
+assert.equal(field('lora-grid').firstElementChild,libraryCard)
+assert.equal(libraryCard.querySelector('img'),previewNode)
+const mutationObserver=new window.MutationObserver(()=>{})
+mutationObserver.observe(previewNode,{attributes:true,attributeFilter:['src']})
+controller.updatePreviewImages(controller.state.stack[0].lora.name,'data:image/png;base64,test')
+assert.equal(mutationObserver.takeRecords().length,1)
+controller.updatePreviewImages(controller.state.stack[0].lora.name,'data:image/png;base64,test')
+assert.equal(mutationObserver.takeRecords().length,0)
+mutationObserver.disconnect()
+// Dragging and deleting use current keys, including after saved-stack replacement.
+const drop=new window.Event('drop',{bubbles:true,cancelable:true})
+Object.defineProperty(drop,'dataTransfer',{value:{getData:()=>controller.state.stack[0].lora.name}})
+field('stack-list').lastElementChild.dispatchEvent(drop)
+assert.equal(field('stack-list').lastElementChild,fullRow)
+assert.equal(field('generate-stack-list').lastElementChild,compactRow)
+fullRow.querySelectorAll('.ss-stack-actions button')[0].click()
+field('stack-list').lastElementChild.querySelectorAll('.ss-stack-actions button')[2].click()
+assert.equal(field('stack-list').children.length,1)
+assert.equal(field('generate-stack-list').children.length,1)
+const renderLibrary=controller.renderLoras.bind(controller)
+let unrelatedLibraryRenders=0
+controller.renderLoras=()=>{unrelatedLibraryRenders++;renderLibrary()}
+field('style-name').value='Identity test'
+field('style-positive').value='soft lighting'
+click('style-save')
+controller.renderStyleOptions()
+assert.equal(unrelatedLibraryRenders,0)
+assert.equal(field('lora-grid').firstElementChild,libraryCard)
+controller.renderLoras=renderLibrary
+// Live frames change image content without writing preview geometry or replacing prompts.
+const previewFrame=field('current-preview')
+const outputImage=field('preview-image')
+const previewMutations=new window.MutationObserver(()=>{})
+previewMutations.observe(previewFrame,{attributes:true,attributeFilter:['style']})
+for(let i=0;i<12;i++) {
+  controller.showLivePreview(`data:image/png;base64,frame${i}`,i,12)
+  controller.updatePreviewAspect(i%2 ? 1536:768,1024)
+}
+assert.equal(previewMutations.takeRecords().length,0)
+assert.equal(field('preview-image'),outputImage)
+assert.equal(field('positive'),promptNode)
+previewMutations.disconnect()
+// History cards survive refreshed metadata and open/close without replacing image nodes.
+controller.state.outputs=[{id:'one',url:'https://studio.test/one.png',original_filename:'one.png'}]
+controller.state.outputTotal=1
+controller.renderOutputs()
+const historyCard=field('history-grid').firstElementChild
+const historyImage=historyCard.querySelector('img')
+for(let i=0;i<20;i++) {
+  field('rail-history').open=i%2===0
+  controller.setStudioView('generate')
+  controller.setStudioView('styles')
+  controller.renderStack()
+  controller.renderOutputs()
+}
+assert.equal(field('history-grid').firstElementChild,historyCard)
+assert.equal(historyCard.querySelector('img'),historyImage)
+assert.equal(field('stack-list').firstElementChild,fullRow)
+assert.equal(field('lora-grid').firstElementChild,libraryCard)
+controller.state.outputs=[{...controller.state.outputs[0],original_filename:'renamed.png'}]
+controller.renderOutputs()
+assert.equal(historyImage.alt,'renamed.png')
+assert.equal(field('history-grid').firstElementChild,historyCard)
+controller.state.outputs=[]
+controller.renderOutputs()
+assert.equal(historyCard.isConnected,false)
 controller.selectLoraFolder('folder1')
 assert.equal(controller.filteredLoras().length,100)
 assert.equal(field('lora-grid').children.length,60)
@@ -135,15 +228,13 @@ controller.renderLoras()
 assert.equal(controller.selectedLoraFolder,null)
 assert.equal(field('lora-grid').children.length,60)
 assert.equal(controller.loraCards.size,60)
-// Tabs implement roving keyboard selection and never detach the Studio root.
-const libraryTab=root.querySelector('#ss-tab-library')
-libraryTab.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Home',bubbles:true}))
-assert.equal(controller.stylesSection,'saved')
-assert.equal(document.activeElement.id,'ss-tab-saved')
 assert.equal(root.querySelector('.ss-shell'),shell)
-assert.equal(root.querySelector('.ss-style-columns').children.length,2)
 assert.ok(field('style-positive').closest('.ss-style-composition'))
-assert.ok(field('style-render-steps').closest('.ss-style-recipe'))
+assert.ok(field('style-render-steps').closest('details.ss-style-recipe'))
+click('style-collapse')
+assert.equal(field('styles-columns').dataset.collapsed,'true')
+click('style-collapse')
+assert.equal(field('styles-columns').dataset.collapsed,'false')
 // Unsaved editor fields and library search survive cross-screen navigation.
 field('style-name').value='Unsaved Style name'
 field('style-positive').value='unsaved lighting'
@@ -168,12 +259,12 @@ controller.onMessage({type:'studio_error',operation:'preview',requestId:'expired
 assert.equal(field('run-status').textContent,statusBefore)
 // Styles navigation supersedes a stale mobile LoRA/Stack tab.
 controller.setMobileTab('stack')
-controller.setStylesSection('library')
+controller.focusStyleColumn('library')
 assert.equal(window.getComputedStyle(root.querySelector('.ss-lora-library')).display,'flex')
 controller.setStudioView('generate')
 assert.equal(shell.dataset.mobileTab,'create')
 assert.equal(root.querySelector('[data-tab="create"]').getAttribute('aria-current'),'page')
-console.log('large library and exclusive Styles pages: ok')
+console.log('large library and persistent Styles columns: ok')
 controller.disposed=true
 if(controller.profileSyncTimer)clearTimeout(controller.profileSyncTimer)
 dom.window.close()

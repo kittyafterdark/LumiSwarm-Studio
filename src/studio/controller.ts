@@ -65,12 +65,10 @@ class StudioController {
   private pendingMoveImageIds: string[] = []
   private outputMetadataRequestId = ""
   private pendingMetadataAction: "reuse" | "init" | "" = ""
-  private outputResizeObserver: ResizeObserver | null = null
   private inspectorResizeObserver: ResizeObserver | null = null
   private stopActiveResize: (() => void) | null = null
   private profileSyncTimer: ReturnType<typeof setTimeout> | null = null
   private studioView: "generate" | "styles" = "generate"
-  private stylesSection: "saved" | "stacks" | "library" = "saved"
   private renderStyles: StudioRenderStyle[] = []
   private studioDefaults: StudioGenerationDefaults | null = null
   private activeRenderStyleId = ""
@@ -211,8 +209,6 @@ class StudioController {
     this.restoreWorkspaceState()
     this.bind()
     if (typeof ResizeObserver !== "undefined") {
-      this.outputResizeObserver = new ResizeObserver(() => this.fitPreviewToAspect())
-      this.outputResizeObserver.observe(this.get<HTMLElement>('[data-role="output-stage"]'))
       this.inspectorResizeObserver = new ResizeObserver(() => this.fitInspectorToSpace())
       this.inspectorResizeObserver.observe(this.get<HTMLElement>('[data-role="inspector-stage"]'))
     }
@@ -248,8 +244,6 @@ class StudioController {
     this.previewRequests.clear()
     this.previewObserver?.disconnect()
     this.previewObserver = null
-    this.outputResizeObserver?.disconnect()
-    this.outputResizeObserver = null
     this.inspectorResizeObserver?.disconnect()
     this.inspectorResizeObserver = null
     this.stopActiveResize?.()
@@ -824,7 +818,7 @@ are removed when CSS is applied.</pre>
         </nav>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
-        <section class="ss-generate-page" data-studio-page="generate" aria-label="Generate">
+
         <nav class="ss-mobile-tabs" aria-label="Studio sections">
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="create" data-active="true">Create</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="generation" data-active="false">Tune</button>
@@ -833,7 +827,7 @@ are removed when CSS is applied.</pre>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="history" data-active="false">History</button>
         </nav>
 
-        <div class="ss-workspace">
+        <div class="ss-workspace" data-studio-page="generate" aria-label="Generate">
           <aside class="ss-generation-pane" data-mobile-panel="generation">
             <div class="ss-pane-head">
               <div class="ss-pane-title"><strong>Generation</strong><div class="ss-muted ss-tiny">Model and render controls</div></div>
@@ -848,7 +842,6 @@ are removed when CSS is applied.</pre>
                     <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
                   </div>
                 </details>
-                <div class="ss-active-render"><button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button></div>
                 <details class="ss-character-actions" data-role="active-character-actions" hidden>
                   <summary data-role="active-character-actions-label">Active character</summary>
                   <div class="ss-context-actions">
@@ -1062,14 +1055,16 @@ are removed when CSS is applied.</pre>
             </section>
           </main>
 
-          <div class="ss-resize-handle ss-resize-history" data-resize="history" role="separator" aria-orientation="vertical" title="Drag to resize history"></div>
+          <div class="ss-resize-handle ss-resize-history" data-resize="history" role="separator" aria-orientation="vertical" title="Drag to resize stack and history"></div>
 
-          <aside class="ss-history-pane" data-mobile-panel="history">
+          <aside class="ss-history-pane ss-utility-rail" data-mobile-panel="history">
+            <section class="ss-working-stack"><header class="ss-section-head"><strong>LoRA Stack</strong><span data-role="generate-stack-count" class="ss-muted"></span></header><div class="ss-stack-list" data-role="generate-stack-list"></div></section>
+            <details class="ss-rail-history" data-role="rail-history"><summary>History · <span data-role="output-count">0</span> outputs</summary>
             <div class="ss-pane-head">
-              <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny"><span data-role="output-count">0</span> saved outputs</div></div>
+              <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny">Saved outputs</div></div>
               <div>
                 <button class="ss-icon-button ss-pane-toggle" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
-                <button class="ss-icon-button ss-pane-toggle" data-action="toggle-history" title="Collapse history sidebar" aria-label="Collapse history sidebar">›</button>
+
               </div>
             </div>
             <div class="ss-pane-body ss-history-grid" data-role="history-grid">
@@ -1080,20 +1075,17 @@ are removed when CSS is applied.</pre>
               <span class="ss-history-page-label" data-role="history-page">1 / 1</span>
               <button class="ss-button" data-action="history-next" disabled>›</button>
             </div>
+            </details>
           </aside>
         </div>
 
-        </section>
         <section class="ss-styles-workspace" data-studio-page="styles" aria-label="Styles" hidden>
           <header class="ss-styles-header"><strong>Styles</strong><span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span></header>
-          <nav class="ss-style-tabs" role="tablist" aria-label="Style tools">
-            <button class="ss-button" id="ss-tab-saved" role="tab" aria-controls="ss-page-saved" data-action="style-section" data-section="saved" aria-selected="true">Saved Styles</button>
-            <button class="ss-button" id="ss-tab-stacks" role="tab" aria-controls="ss-page-stacks" data-action="style-section" data-section="stacks" aria-selected="false" tabindex="-1">LoRA Stacks</button>
-            <button class="ss-button" id="ss-tab-library" role="tab" aria-controls="ss-page-library" data-action="style-section" data-section="library" aria-selected="false" tabindex="-1">LoRA Library</button>
-          </nav>
-          <section class="ss-style-page" id="ss-page-saved" data-style-page="saved" role="tabpanel" aria-labelledby="ss-tab-saved">
+          <div class="ss-styles-columns" data-role="styles-columns" data-collapsed="false">
+          <section class="ss-style-column ss-style-editor-column" data-style-column="saved">
+          <button class="ss-button ss-style-collapse" data-action="style-collapse" aria-expanded="true" aria-label="Collapse Styles editor">Styles ‹</button>
           <div class="ss-saved-style-editor" data-role="style-editor">
-            <header class="ss-style-selection"><label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label><p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p></header>
+            <header class="ss-style-selection"><button class="ss-button" data-action="style-new" aria-label="New Style">+</button><label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label><p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p></header>
             <div class="ss-style-columns">
               <section class="ss-style-composition"><h3>Identity &amp; prompts</h3>
                 <label>Name<input class="ss-input" data-role="style-name" placeholder="Soft painterly render"></label>
@@ -1101,11 +1093,11 @@ are removed when CSS is applied.</pre>
                 <label>Positive addition<textarea class="ss-textarea" data-role="style-positive" placeholder="Lighting, medium, mood…"></textarea></label>
                 <label>Negative addition<textarea class="ss-textarea" data-role="style-negative" placeholder="Things to avoid…"></textarea></label>
               </section>
-              <section class="ss-style-recipe"><h3>Render recipe</h3><p class="ss-muted ss-tiny">Leave a field empty to inherit the current settings.</p>
+              <details class="ss-style-recipe"><summary>Render recipe <span data-role="recipe-summary">Inherits current settings</span></summary><p class="ss-muted ss-tiny">Leave a field empty to inherit the current settings.</p>
                 <label>Checkpoint<input class="ss-input" data-role="style-checkpoint" placeholder="Inherit"></label>
                 <div class="ss-recipe-fields">${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key === "cfg" ? "CFG" : key[0].toUpperCase() + key.slice(1)}<input class="ss-input" data-role="style-render-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>
                 <button class="ss-button" data-action="style-capture">Use current render settings</button>
-              </section>
+              </details>
             </div>
             <footer class="ss-style-footer">
               <button class="ss-button ss-button-primary" data-action="style-apply">Apply Style</button>
@@ -1116,32 +1108,7 @@ are removed when CSS is applied.</pre>
             </footer>
           </div>
           </section>
-          <section class="ss-style-page" id="ss-page-stacks" data-style-page="stacks" role="tabpanel" aria-labelledby="ss-tab-stacks" hidden>
-<section class="ss-stack-pane">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
-              </div>
-              <div class="ss-stack-head-tools">
-                <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
-                  <option value="">Saved stacks…</option>
-                </select>
-                <button class="ss-button" data-action="load-stack" disabled>Load</button>
-                <button class="ss-button ss-button-primary" data-action="save-stack">Save</button>
-                <button class="ss-button ss-button-danger" data-action="delete-stack" disabled>Delete</button>
-              </div>
-              <div class="ss-stack-list" data-role="stack-list">
-                <div class="ss-empty">Add LoRAs from the library. Metadata triggers stay off until you enable them.</div>
-              </div>
-              <div class="ss-stack-share-tools">
-                <button class="ss-button" data-action="import-stack" title="Import a shared LoRA stack JSON file">${IMPORT_ICON}<span>Import</span></button>
-                <button class="ss-button" data-action="export-stack" title="Export the current LoRA stack as shareable JSON">${EXPORT_ICON}<span>Export</span></button>
-                <button class="ss-button" data-action="apply-lumi-stack" title="Merge this stack into Lumiverse Image Gen and activate it">${EXPORT_ICON}<span>Apply to Lumi</span></button>
-                <button class="ss-button ss-button-danger ss-clear-stack" data-action="clear-stack" disabled>Clear</button>
-                <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
-              </div>
-            </section>
-          </section>
-          <section class="ss-style-page" id="ss-page-library" data-style-page="library" role="tabpanel" aria-labelledby="ss-tab-library" hidden>
+          <section class="ss-style-column ss-style-library-column" data-style-column="library">
 <section class="ss-lora-library">
               <div class="ss-lora-titlebar">
                 <div class="ss-section-title"><strong>Select LoRAs</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
@@ -1176,7 +1143,7 @@ are removed when CSS is applied.</pre>
                     <option value="newest">Newest</option>
                   </select>
                 </div>
-                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" aria-controls="ss-lora-folders" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}<span>Folders</span></button>
+                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" aria-controls="ss-lora-folders" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}</button>
               </div>
               <div class="ss-library-status" data-role="metadata-error" hidden></div>
               <div class="ss-lora-browser" data-role="lora-browser" data-folders-open="false">
@@ -1195,10 +1162,35 @@ are removed when CSS is applied.</pre>
                 <button class="ss-button" data-action="lora-page-prev" aria-label="Previous LoRA page">Previous</button>
                 <span class="ss-muted" data-role="lora-page-status" aria-live="polite">0 models</span>
                 <button class="ss-button" data-action="lora-page-next" aria-label="Next LoRA page">Next</button>
-                <button class="ss-button" data-action="style-section" data-section="stacks">Edit active stack</button>
               </footer>
             </section>
           </section>
+          <section class="ss-style-column ss-style-stack-column" data-style-column="stacks">
+<section class="ss-stack-pane">
+              <div class="ss-section-head">
+                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
+              </div>
+              <div class="ss-stack-head-tools">
+                <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
+                  <option value="">Saved stacks…</option>
+                </select>
+                <button class="ss-button" data-action="load-stack" disabled>Load</button>
+                <button class="ss-button ss-button-primary" data-action="save-stack">Save</button>
+                <button class="ss-button ss-button-danger" data-action="delete-stack" disabled>Delete</button>
+              </div>
+              <div class="ss-stack-list" data-role="stack-list">
+                <div class="ss-empty">Add LoRAs from the library. Metadata triggers stay off until you enable them.</div>
+              </div>
+              <div class="ss-stack-share-tools">
+                <button class="ss-button" data-action="import-stack" title="Import a shared LoRA stack JSON file">${IMPORT_ICON}<span>Import</span></button>
+                <button class="ss-button" data-action="export-stack" title="Export the current LoRA stack as shareable JSON">${EXPORT_ICON}<span>Export</span></button>
+                <button class="ss-button" data-action="apply-lumi-stack" title="Merge this stack into Lumiverse Image Gen and activate it">${EXPORT_ICON}<span>Apply to Lumi</span></button>
+                <button class="ss-button ss-button-danger ss-clear-stack" data-action="clear-stack" disabled>Clear</button>
+                <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
+              </div>
+            </section>
+          </section>
+          </div>
         </section>
 
         <div class="ss-commandbar">
@@ -1479,19 +1471,10 @@ are removed when CSS is applied.</pre>
       const connectionId = (event.currentTarget as HTMLSelectElement).value
       if (connectionId) this.loadConnection(connectionId)
     })
+    this.get<HTMLElement>('[data-role="style-editor"]').addEventListener("input", () => this.updateRecipeSummary())
     this.get<HTMLInputElement>('[data-role="lora-search"]').addEventListener("input", () => {
       if (this.loraSearchTimer) clearTimeout(this.loraSearchTimer)
       this.loraSearchTimer = setTimeout(() => { this.loraSearchTimer = null; this.renderLoras() }, 120)
-    })
-    this.get<HTMLElement>(".ss-style-tabs").addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
-      const tabs = [...this.root.querySelectorAll<HTMLButtonElement>('.ss-style-tabs [role="tab"]')]
-      const current = tabs.indexOf(event.target as HTMLButtonElement)
-      if (current < 0) return
-      event.preventDefault()
-      const index = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length
-      this.setStylesSection(tabs[index].dataset.section)
-      tabs[index].focus()
     })
     const downloadUrl = this.get<HTMLInputElement>('[data-role="lora-download-url"]')
     downloadUrl.addEventListener("keydown", (event) => {
@@ -1740,17 +1723,12 @@ are removed when CSS is applied.</pre>
       }
       if (action === "save-native-main" || action === "save-native-character") { void this.saveNativePrompts(action === "save-native-character"); return }
       if (action && (action.startsWith("style-") || ["save-defaults", "restore-defaults", "clear-defaults", "save-base-recipe", "save-look-recipe"].includes(action))) {
-        try { this.handleRenderAction(action, button.dataset.section) }
+        try { this.handleRenderAction(action) }
         catch (error) { this.setRunStatus(error instanceof Error ? error.message : String(error), true) }
         return
       }
-      if (action === "studio-view" || action === "manage-stack") {
-        this.setStudioView(action === "manage-stack" ? "styles" : button.dataset.view)
-        if (action === "manage-stack") {
-          const style = this.selectedRenderStyle()
-          this.handleRenderAction("style-section", style ? "saved" : "stacks")
-          if (style) { this.get<HTMLSelectElement>('[data-role="render-style"]').value = style.id; this.editRenderStyle() }
-        }
+      if (action === "studio-view") {
+        this.setStudioView(button.dataset.view)
         return
       }
       if (action === "refresh-metadata") this.refreshMetadata()
@@ -1833,7 +1811,6 @@ are removed when CSS is applied.</pre>
       if (action === "clear-stack") {
         this.state.stack = []
         this.renderStack()
-        this.renderLoras()
       }
       if (action === "save-stack") this.saveStackPreset()
       if (action === "load-stack") this.loadStackPreset()
@@ -2671,6 +2648,7 @@ are removed when CSS is applied.</pre>
     this.requestedPreviews.clear()
     this.previewCache.clear()
     this.previewRequests.clear()
+    this.renderStack()
     this.setConnectionStatus("loading")
     this.setRunStatus(`Loading ${connection?.name || "SwarmUI"} models and LoRA metadata…`)
     for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="generate"]')) {
@@ -3286,7 +3264,6 @@ are removed when CSS is applied.</pre>
     this.get<HTMLSelectElement>('[data-role="aspect"]').value = "custom"
     this.renderPresetStack()
     this.renderStack()
-    this.renderLoras()
     this.updatePreviewAspect(
       numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024),
       numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024),
@@ -3919,7 +3896,7 @@ are removed when CSS is applied.</pre>
   private renderLoras(): void {
     // Data may arrive while Generate or another Styles page is visible. Defer
     // library DOM work until it has a real viewport; never remount on navigation.
-    if (this.studioView !== "styles" || this.stylesSection !== "library") { this.lorasDirty = true; return }
+    if (this.studioView !== "styles") { this.lorasDirty = true; return }
     this.lorasDirty = false
     const grid = this.get<HTMLElement>('[data-role="lora-grid"]')
     this.renderLoraFolders()
@@ -3940,7 +3917,7 @@ are removed when CSS is applied.</pre>
     if (!this.previewObserver && typeof IntersectionObserver !== "undefined") {
       this.previewObserver = new IntersectionObserver(entries => {
         for (const entry of entries) {
-          if (!entry.isIntersecting || this.studioView !== "styles" || this.stylesSection !== "library") continue
+          if (!entry.isIntersecting || this.studioView !== "styles") continue
           const image = entry.target as HTMLImageElement
           const name = image.dataset.name || ""
           const previewRef = image.dataset.previewRef || ""
@@ -4049,7 +4026,10 @@ are removed when CSS is applied.</pre>
 
   private updatePreviewImages(name: string, dataUrl: string): void {
     for (const image of this.root.querySelectorAll<HTMLImageElement>("[data-lora-image]")) {
-      if (image.dataset.loraImage === name) image.src = dataUrl
+      if (image.dataset.loraImage === name) {
+        if (image.getAttribute("src") !== dataUrl) image.src = dataUrl
+        image.hidden = false
+      }
     }
   }
 
@@ -4062,7 +4042,6 @@ are removed when CSS is applied.</pre>
       useTrigger: false,
     })
     this.renderStack()
-    this.renderLoras()
   }
 
   private toggleLoraDownloader(force?: boolean, focus = true): void {
@@ -4143,27 +4122,93 @@ are removed when CSS is applied.</pre>
   }
 
   private renderStack(): void {
-    const list = this.get<HTMLElement>('[data-role="stack-list"]')
-    list.replaceChildren()
-    if (!this.state.stack.length) {
-      list.appendChild(element("div", "ss-empty", "Add LoRAs from the library. Metadata triggers stay off until you enable them."))
-    } else {
-      this.state.stack.forEach((item, index) => list.appendChild(this.makeStackRow(item, index)))
+    for (const role of ["stack-list", "generate-stack-list"]) {
+      const list = this.get<HTMLElement>(`[data-role="${role}"]`)
+      for (const child of [...list.children] as HTMLElement[]) {
+        if (child.dataset.stackName ? !this.state.stack.some(item => item.lora.name === child.dataset.stackName) : this.state.stack.length > 0) child.remove()
+      }
+      this.state.stack.forEach((item, index) => {
+        let row = [...list.children].find(child => (child as HTMLElement).dataset.stackName === item.lora.name) as HTMLElement | undefined
+        if (!row) row = this.makeStackRow(item, index)
+        const installed = Boolean(this.installedLora(item.lora.name))
+        row.dataset.disabled = String(!item.enabled)
+        row.dataset.missing = String(!installed)
+        row.dataset.incompatible = String(installed && !this.isLoraCompatible(item.lora))
+        const image = row.querySelector<HTMLImageElement>('.ss-stack-preview img')!
+        const cached = this.previewCache.get(item.lora.name)
+        if (cached) {
+          if (image.getAttribute("src") !== cached) image.src = cached
+          image.hidden = false
+          image.alt = `${item.lora.title || labelFromName(item.lora.name)} preview`
+        } else {
+          if (image.hasAttribute("src")) image.removeAttribute("src")
+          image.hidden = true
+          if (installed && item.lora.previewRef && !this.requestedPreviews.has(item.lora.name)) {
+            this.requestedPreviews.add(item.lora.name)
+            this.send("preview", { connectionId: this.state.connection?.id, name: item.lora.name, previewRef: item.lora.previewRef })
+          }
+        }
+        row.querySelector<HTMLInputElement>('[data-stack-control="enabled"]')!.checked = item.enabled
+        const weight = row.querySelector<HTMLInputElement>('.ss-stack-weight')!
+        if (weight.value !== String(item.weight)) weight.value = String(item.weight)
+        const trigger = row.querySelector<HTMLInputElement>('.ss-trigger-toggle input')!
+        trigger.checked = item.useTrigger
+        trigger.disabled = !item.lora.triggerPhrase
+        row.querySelector<HTMLElement>('.ss-trigger-toggle')!.title = item.lora.triggerPhrase || "No trigger phrase in metadata"
+        row.querySelector<HTMLElement>('.ss-stack-name strong')!.textContent = item.lora.title || labelFromName(item.lora.name)
+        const buttons = row.querySelectorAll<HTMLButtonElement>('.ss-stack-actions button')
+        buttons[0].disabled = index === 0
+        buttons[1].disabled = index === this.state.stack.length - 1
+        if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null)
+      })
+      if (!this.state.stack.length && !list.firstElementChild) list.appendChild(element("div", "ss-empty", "Add LoRAs from the library."))
     }
+    this.patchLoraStackButtons()
     const enabled = this.state.stack.filter((item) => item.enabled).length
     this.get<HTMLElement>('[data-role="stack-count"]').textContent = `${enabled} enabled · ${this.state.stack.length} stacked`
     this.get<HTMLButtonElement>('[data-action="clear-stack"]').disabled = this.state.stack.length === 0
     this.get<HTMLElement>('[data-role="command-stack-summary"]').textContent = enabled
       ? `${enabled} LoRA${enabled === 1 ? "" : "s"} enabled`
       : "No LoRAs enabled"
-    const manage = this.root.querySelector<HTMLElement>('[data-action="manage-stack"]')
-    if (manage) manage.textContent = `LoRA stack · ${enabled} enabled · Manage`
+    this.get<HTMLElement>('[data-role="generate-stack-count"]').textContent = `${enabled} enabled`
     this.updateDockSummary()
     this.updateTriggerSummary()
   }
 
+  private patchLoraStackButtons(): void {
+    const names = new Set(this.state.stack.map(item => item.lora.name))
+    for (const [name, entry] of this.loraCards) {
+      const button = entry.node.querySelector<HTMLButtonElement>(".ss-add-button")
+      if (!button) continue
+      const inStack = names.has(name)
+      if (button.disabled !== inStack) {
+        button.disabled = inStack
+        button.textContent = inStack ? "Stacked" : "Add"
+        button.classList.toggle("ss-button-primary", !inStack)
+      }
+    }
+  }
+
   private makeStackRow(item: StackItem, index: number): HTMLElement {
+    const key = item.lora.name
+    // Events resolve the current item even after loading a saved stack with the same names.
+    const currentItem = () => this.state.stack.find(entry => entry.lora.name === key) || item
+    const currentIndex = () => this.state.stack.findIndex(entry => entry.lora.name === key)
     const row = element("div", "ss-stack-row")
+    row.dataset.stackName = key
+    const drag = element("button", "ss-icon-button ss-stack-drag", "⠿")
+    drag.type = "button"
+    drag.draggable = true
+    drag.title = "Drag to reorder LoRA"
+    drag.setAttribute("aria-label", "Drag to reorder LoRA")
+    drag.addEventListener("dragstart", event => { event.dataTransfer?.setData("application/x-studio-lora", key) })
+    row.addEventListener("dragover", event => { if (event.dataTransfer?.types.includes("application/x-studio-lora")) event.preventDefault() })
+    row.addEventListener("drop", event => {
+      const source = this.state.stack.findIndex(entry => entry.lora.name === event.dataTransfer?.getData("application/x-studio-lora"))
+      if (source < 0) return
+      event.preventDefault()
+      this.moveStack(source, currentIndex() - source)
+    })
     const installed = Boolean(this.installedLora(item.lora.name))
     row.dataset.disabled = String(!item.enabled)
     row.dataset.missing = String(!installed)
@@ -4173,35 +4218,18 @@ are removed when CSS is applied.</pre>
     enabled.type = "checkbox"
     enabled.checked = item.enabled
     enabled.title = "Enable LoRA"
+    enabled.dataset.stackControl = "enabled"
     enabled.addEventListener("change", () => {
-      item.enabled = enabled.checked
+      currentItem().enabled = enabled.checked
       this.renderStack()
     })
 
     const preview = element("div", "ss-stack-preview")
-    const cachedPreview = this.previewCache.get(item.lora.name)
-    if (cachedPreview || item.lora.previewRef) {
-      const image = element("img")
-      image.alt = cachedPreview ? `${item.lora.title || labelFromName(item.lora.name)} preview` : ""
-      image.dataset.loraImage = item.lora.name
-      if (cachedPreview) {
-        image.src = cachedPreview
-      } else if (item.lora.previewRef) {
-        image.dataset.name = item.lora.name
-        image.dataset.previewRef = item.lora.previewRef
-        if (!this.requestedPreviews.has(item.lora.name)) {
-          this.requestedPreviews.add(item.lora.name)
-          this.send("preview", {
-            connectionId: this.state.connection?.id,
-            name: item.lora.name,
-            previewRef: item.lora.previewRef,
-          })
-        }
-      }
-      preview.appendChild(image)
-    } else {
-      preview.textContent = "◇"
-    }
+    const image = element("img")
+    image.dataset.loraImage = item.lora.name
+    image.alt = ""
+    image.hidden = true
+    preview.appendChild(image)
 
     const name = element("div", "ss-stack-name")
     name.appendChild(element("strong", "", item.lora.title || labelFromName(item.lora.name)))
@@ -4215,8 +4243,9 @@ are removed when CSS is applied.</pre>
     weight.value = String(item.weight)
     weight.title = "LoRA weight"
     weight.addEventListener("change", () => {
-      item.weight = clamp(numberValue(weight, item.weight), -10, 10)
-      weight.value = String(item.weight)
+      currentItem().weight = clamp(numberValue(weight, currentItem().weight), -10, 10)
+      weight.value = String(currentItem().weight)
+      this.renderStack()
     })
 
     const trigger = element("label", "ss-trigger-toggle")
@@ -4225,8 +4254,8 @@ are removed when CSS is applied.</pre>
     triggerCheckbox.checked = item.useTrigger
     triggerCheckbox.disabled = !item.lora.triggerPhrase
     triggerCheckbox.addEventListener("change", () => {
-      item.useTrigger = triggerCheckbox.checked
-      this.updateTriggerSummary()
+      currentItem().useTrigger = triggerCheckbox.checked
+      this.renderStack()
     })
     trigger.append(triggerCheckbox, document.createTextNode("trigger"))
     trigger.title = item.lora.triggerPhrase || "No trigger phrase in metadata"
@@ -4235,20 +4264,19 @@ are removed when CSS is applied.</pre>
     const up = element("button", "ss-icon-button", "↑")
     up.disabled = index === 0
     up.title = "Move up"
-    up.addEventListener("click", () => this.moveStack(index, -1))
+    up.addEventListener("click", () => this.moveStack(currentIndex(), -1))
     const down = element("button", "ss-icon-button", "↓")
     down.disabled = index === this.state.stack.length - 1
     down.title = "Move down"
-    down.addEventListener("click", () => this.moveStack(index, 1))
+    down.addEventListener("click", () => this.moveStack(currentIndex(), 1))
     const remove = element("button", "ss-icon-button ss-button-danger", "×")
     remove.title = "Remove"
     remove.addEventListener("click", () => {
-      this.state.stack.splice(index, 1)
+      this.state.stack.splice(currentIndex(), 1)
       this.renderStack()
-      this.renderLoras()
     })
     actions.append(up, down, remove)
-    row.append(enabled, preview, name, weight, trigger, actions)
+    row.append(drag, enabled, preview, name, weight, trigger, actions)
     return row
   }
 
@@ -4344,7 +4372,6 @@ are removed when CSS is applied.</pre>
     })
     this.setStackPresetSelection(preset.id)
     this.renderStack()
-    this.renderLoras()
     if (announce) this.setRunStatus(`Loaded LoRA stack “${preset.name}”.`)
   }
 
@@ -4505,7 +4532,6 @@ are removed when CSS is applied.</pre>
       })
       this.missingLoras = imported.items.filter((item) => !this.installedLora(item.name))
       this.renderStack()
-      this.renderLoras()
       this.setRunStatus(`Imported “${imported.name}” with ${imported.items.length} LoRA${imported.items.length === 1 ? "" : "s"}.`)
       if (this.missingLoras.length) this.showMissingLoras()
     } catch (error) {
@@ -4649,6 +4675,7 @@ are removed when CSS is applied.</pre>
     select.value = target?.styleId || ""
     const recipe = sanitizeGenerationRecipe(target?.generationRecipe) as Record<string, unknown>
     for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"]) this.get<HTMLInputElement>(`[data-role="${prefix}-recipe-${key}"]`).value = String(recipe[key] ?? "")
+    this.updateRecipeSummary()
   }
 
   private readRecipeEditor(prefix: string): { generationRecipe: GenerationRecipe; styleId: string } {
@@ -4750,11 +4777,19 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="style-summary"]').textContent = style ? `${style.name} · ${stack?.items.length || 0} LoRAs · ${style.recipe?.width || "inherit"} × ${style.recipe?.height || "inherit"} · ${style.recipe?.steps ?? "inherit"} steps · CFG ${style.recipe?.cfg ?? "inherit"}${style.loraStackId && !stack ? " · Stack reference missing" : ""}` : "Create a reusable Style; raw LoRA stacks remain separate."
   }
 
+  private updateRecipeSummary(): void {
+    const parts = ["checkpoint", "width", "height", "steps", "cfg", "sampler", "scheduler"].flatMap(key => {
+      const value = this.get<HTMLInputElement>(`[data-role="style-${key === "checkpoint" ? key : `render-${key}`}"]`).value
+      return value ? [`${key === "cfg" ? "CFG" : key}: ${value}`] : []
+    })
+    this.get<HTMLElement>('[data-role="recipe-summary"]').textContent = parts.join(" · ") || "Inherits current settings"
+  }
+
   private fillStyleRecipe(recipe: GenerationRecipe): void {
     for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"] as const) this.get<HTMLInputElement>(`[data-role="style-render-${key}"]`).value = String(recipe[key] ?? "")
   }
 
-  private handleRenderAction(action: string, section?: string): void {
+  private handleRenderAction(action: string): void {
     const settings = this.captureStableSettings()
     const value = (role: string) => this.get<HTMLInputElement>(`[data-role="${role}"]`).value
     if (action === "save-defaults") this.send("save_studio_defaults", { defaults: settings })
@@ -4767,10 +4802,20 @@ are removed when CSS is applied.</pre>
       this.scheduleStudioProfileSync()
     }
     if (action === "save-base-recipe" || action === "save-look-recipe") this.send("save_active_render_recipe", { destination: action === "save-look-recipe" ? "look" : "base", recipe: settings, checkpoint: settings.checkpoint, styleId: this.selectedRenderStyle()?.id || "" })
-    if (action === "style-section") this.setStylesSection(section)
+    if (action === "style-new") { this.get<HTMLSelectElement>('[data-role="render-style"]').value = ""; this.editRenderStyle() }
+    if (action === "style-collapse") {
+      const columns = this.get<HTMLElement>('[data-role="styles-columns"]')
+      const collapsed = columns.dataset.collapsed !== "true"
+      columns.dataset.collapsed = String(collapsed)
+      const button = this.get<HTMLButtonElement>('[data-action="style-collapse"]')
+      button.setAttribute("aria-expanded", String(!collapsed))
+      button.setAttribute("aria-label", collapsed ? "Expand Styles editor" : "Collapse Styles editor")
+      button.textContent = collapsed ? "›" : "Styles ‹"
+    }
     if (action === "style-capture") {
       this.fillStyleRecipe(settings)
       this.get<HTMLInputElement>('[data-role="style-checkpoint"]').value = settings.checkpoint || ""
+      this.updateRecipeSummary()
     }
     if (action === "style-save" || action === "style-duplicate") {
       if (!value("style-name").trim()) throw new Error("Give the Style a name.")
@@ -4793,16 +4838,8 @@ are removed when CSS is applied.</pre>
     }
   }
 
-  private setStylesSection(section?: string): void {
-    this.stylesSection = section === "stacks" || section === "library" ? section : "saved"
-    this.get<HTMLElement>(".ss-shell").dataset.styleSection = this.stylesSection
-    for (const page of this.root.querySelectorAll<HTMLElement>("[data-style-page]")) page.hidden = page.dataset.stylePage !== this.stylesSection
-    for (const tab of this.root.querySelectorAll<HTMLButtonElement>('[data-action="style-section"][role="tab"]')) {
-      const selected = tab.dataset.section === this.stylesSection
-      tab.setAttribute("aria-selected", String(selected))
-      tab.tabIndex = selected ? 0 : -1
-    }
-    if (this.studioView === "styles" && this.stylesSection === "library" && this.lorasDirty) this.renderLoras()
+  private focusStyleColumn(section?: string): void {
+    this.root.querySelector<HTMLElement>(`[data-style-column="${section === "stacks" || section === "library" ? section : "saved"}"]`)?.scrollIntoView?.({ block: "nearest" })
   }
 
   private setStudioView(view?: string): void {
@@ -4818,8 +4855,7 @@ are removed when CSS is applied.</pre>
     }
     for (const page of this.root.querySelectorAll<HTMLElement>("[data-studio-page]")) page.hidden = page.dataset.studioPage !== this.studioView
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="studio-view"]')) button.setAttribute("aria-current", button.dataset.view === this.studioView ? "page" : "false")
-    this.setStylesSection(this.stylesSection)
-    if (this.studioView === "generate") requestAnimationFrame(() => this.fitPreviewToAspect())
+    if (this.studioView === "styles" && this.lorasDirty) this.renderLoras()
   }
 
   private restoreWorkspaceState(): void {
@@ -4829,7 +4865,7 @@ are removed when CSS is applied.</pre>
     this.setStudioView("generate")
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.classList.toggle("ss-generation-collapsed", state?.collapsed?.generation === true)
-    shell.classList.toggle("ss-history-collapsed", state?.collapsed?.history === true)
+    shell.classList.remove("ss-history-collapsed")
     shell.classList.toggle("ss-fullscreen-layer", state?.fullscreen === true)
     const advanced = this.root.querySelector<HTMLDetailsElement>("details.ss-advanced")
     if (advanced) advanced.open = state?.details?.advanced === true
@@ -4927,7 +4963,6 @@ are removed when CSS is applied.</pre>
     void collapsed
     this.updateWorkspaceButtons()
     this.persistWorkspaceState()
-    requestAnimationFrame(() => this.fitPreviewToAspect())
   }
 
   private beginResize(kind: string, event: PointerEvent): void {
@@ -4976,7 +5011,6 @@ are removed when CSS is applied.</pre>
       const max = Math.max(130, bounds.height - 180)
       shell.style.setProperty("--ss-prompt-height", `${Math.round(clamp(bounds.bottom - clientY, 105, max))}px`)
     }
-    this.fitPreviewToAspect()
   }
 
   private resetResize(kind: string): void {
@@ -4989,7 +5023,6 @@ are removed when CSS is applied.</pre>
     const property = properties[kind]
     if (property) shell.style.removeProperty(property)
     this.persistWorkspaceState()
-    this.fitPreviewToAspect()
   }
 
   private toggleFullscreen(force?: boolean): void {
@@ -4998,7 +5031,6 @@ are removed when CSS is applied.</pre>
     shell.classList.toggle("ss-fullscreen-layer", shouldEnter)
     this.updateWorkspaceButtons()
     this.persistWorkspaceState()
-    requestAnimationFrame(() => this.fitPreviewToAspect())
   }
 
   private setMobileTab(tab: string): void {
@@ -5007,8 +5039,9 @@ are removed when CSS is applied.</pre>
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.mobileTab = selected
     this.setStudioView(["loras", "stack"].includes(selected) ? "styles" : "generate")
+    if (selected === "history") this.get<HTMLDetailsElement>('[data-role="rail-history"]').open = true
     if (["loras", "stack"].includes(selected)) {
-      this.setStylesSection(selected === "stack" ? "stacks" : "library")
+      this.focusStyleColumn(selected === "stack" ? "stacks" : "library")
     }
     for (const button of this.root.querySelectorAll<HTMLButtonElement>(".ss-mobile-tab")) {
       const active = button.dataset.tab === selected
@@ -5016,7 +5049,6 @@ are removed when CSS is applied.</pre>
       button.setAttribute("aria-current", active ? "page" : "false")
     }
     this.persistWorkspaceState()
-    requestAnimationFrame(() => this.fitPreviewToAspect())
   }
 
   private openInspector(): void {
@@ -5182,7 +5214,6 @@ are removed when CSS is applied.</pre>
       this.renderInitImage()
     }
     this.renderStack()
-    this.renderLoras()
     this.renderPresetStack()
     this.updateContextControls()
     if (closeOverlays) {
@@ -5464,7 +5495,6 @@ are removed when CSS is applied.</pre>
       })
       this.setStackPresetSelection(preset?.id || "")
       this.renderStack()
-      this.renderLoras()
     }
 
     if (!checkpointLoaded) {
@@ -6406,37 +6436,7 @@ are removed when CSS is applied.</pre>
     if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
       this.previewAspect = clamp(width / height, 0.1, 10)
     }
-    this.get<HTMLElement>('[data-role="current-preview"]').style.setProperty(
-      "--ss-preview-aspect",
-      String(this.previewAspect),
-    )
-    requestAnimationFrame(() => this.fitPreviewToAspect())
-  }
 
-  private fitPreviewToAspect(): void {
-    if (this.disposed || this.studioView !== "generate") return
-    const stage = this.root.querySelector<HTMLElement>('[data-role="output-stage"]')
-    const preview = this.root.querySelector<HTMLElement>('[data-role="current-preview"]')
-    if (!stage || !preview || stage.clientWidth <= 0) return
-    const availableWidth = Math.max(120, stage.clientWidth - 18)
-    let maximumHeight: number
-
-    if (window.matchMedia("(max-width: 720px)").matches) {
-      maximumHeight = Math.max(190, window.innerHeight * 0.52)
-    } else {
-      const head = stage.querySelector<HTMLElement>(".ss-output-stage-head")
-      const meta = stage.querySelector<HTMLElement>(".ss-output-meta")
-      maximumHeight = Math.max(
-        150,
-        stage.clientHeight - (head?.offsetHeight || 0) - (meta?.offsetHeight || 0) - 34,
-      )
-    }
-
-    const fitted = fitAspectWithin(this.previewAspect, availableWidth, maximumHeight)
-    const width = `${Math.round(fitted.width)}px`
-    const height = `${Math.round(fitted.height)}px`
-    if (preview.style.width !== width) preview.style.width = width
-    if (preview.style.height !== height) preview.style.height = height
   }
 
   private setGenerating(value: boolean): void {
@@ -6506,7 +6506,7 @@ are removed when CSS is applied.</pre>
         this.updatePreviewAspect(preview.naturalWidth, preview.naturalHeight)
       }
     }
-    preview.src = src
+    if (preview.getAttribute("src") !== src) preview.src = src
     preview.hidden = false
     this.get<HTMLElement>('[data-role="preview-empty"]').hidden = true
     this.updateGenerationProgress(step, totalSteps)
@@ -6517,7 +6517,9 @@ are removed when CSS is applied.</pre>
 
   private renderOutputs(): void {
     const grid = this.get<HTMLElement>('[data-role="history-grid"]')
-    grid.replaceChildren()
+    for (const child of [...grid.children] as HTMLElement[]) {
+      if (child.dataset.outputId ? !this.state.outputs.some(output => String(output.id) === child.dataset.outputId) : this.state.outputs.length > 0) child.remove()
+    }
     this.get<HTMLElement>('[data-role="output-count"]').textContent = String(this.state.outputTotal)
     const pages = Math.max(1, Math.ceil(this.state.outputTotal / this.state.outputLimit))
     const page = Math.min(pages, Math.floor(this.state.outputOffset / this.state.outputLimit) + 1)
@@ -6526,12 +6528,29 @@ are removed when CSS is applied.</pre>
     this.get<HTMLButtonElement>('[data-action="history-next"]').disabled =
       this.state.outputOffset + this.state.outputLimit >= this.state.outputTotal
     if (!this.state.outputs.length) {
-      grid.appendChild(element("div", "ss-empty", "Outputs created in this chat will appear here."))
+      if (!grid.firstElementChild) grid.appendChild(element("div", "ss-empty", "Outputs created in this chat will appear here."))
       return
     }
-    for (const output of this.state.outputs) {
+    for (const [index, output] of this.state.outputs.entries()) {
+      const existing = [...grid.children].find(child => (child as HTMLElement).dataset.outputId === String(output.id)) as HTMLElement | undefined
+      if (existing) {
+        const image = existing.querySelector<HTMLImageElement>("img")!
+        if (image.getAttribute("src") !== output.url) image.src = output.url
+        image.alt = output.original_filename || "Generated image"
+        existing.querySelector<HTMLButtonElement>(".ss-history-item")!.title = image.alt
+        existing.querySelector(".ss-history-menu-toggle")!.setAttribute("aria-label", `Actions for ${this.outputToCurrentImage(output).label}`)
+        const actions = existing.querySelectorAll<HTMLButtonElement>(".ss-history-menu button")
+        const current = this.outputToCurrentImage(output)
+        actions[0].disabled = !current.details
+        actions[1].disabled = !current.src
+        actions[2].disabled = !current.id || !this.state.activeChat?.id || !this.state.permissions.chatMutation
+        actions[3].disabled = !current.id
+        if (grid.children[index] !== existing) grid.insertBefore(existing, grid.children[index] || null)
+        continue
+      }
       const current = this.outputToCurrentImage(output)
       const card = element("div", "ss-history-card")
+      card.dataset.outputId = String(output.id)
       const button = element("button", "ss-history-item")
       button.title = output.original_filename || "Generated image"
       const image = element("img")
@@ -6540,7 +6559,7 @@ are removed when CSS is applied.</pre>
       button.appendChild(image)
       button.addEventListener("click", () => {
         this.closeHistoryMenus()
-        this.setCurrentImage(current)
+        this.setCurrentImage(this.outputToCurrentImage(this.state.outputs.find(item => item.id === output.id) || output))
         this.openInspector()
       })
       const menuToggle = element("button", "ss-history-menu-toggle", "⋮")
@@ -6561,7 +6580,7 @@ are removed when CSS is applied.</pre>
         action.addEventListener("click", (event) => {
           event.stopPropagation()
           this.closeHistoryMenus()
-          this.setCurrentImage(current)
+          this.setCurrentImage(this.outputToCurrentImage(this.state.outputs.find(item => item.id === output.id) || output))
           handler()
         })
         menu.appendChild(action)
@@ -6583,7 +6602,7 @@ are removed when CSS is applied.</pre>
         menuToggle.setAttribute("aria-expanded", String(shouldOpen))
       })
       card.append(button, menuToggle, menu)
-      grid.appendChild(card)
+      grid.insertBefore(card, grid.children[index] || null)
     }
   }
 
@@ -6659,7 +6678,7 @@ are removed when CSS is applied.</pre>
         this.updatePreviewAspect(preview.naturalWidth, preview.naturalHeight)
       }
     }
-    preview.src = image.src
+    if (preview.getAttribute("src") !== image.src) preview.src = image.src
     preview.hidden = false
     for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="use-current-init"]')) {
       button.disabled = false

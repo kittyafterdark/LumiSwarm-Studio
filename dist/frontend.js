@@ -1844,7 +1844,6 @@ const STUDIO_V3_STYLES = `
     flex: 1 1 0;
     overflow: hidden;
     position: relative;
-    transition: grid-template-columns .2s ease;
   }
   .ss-shell.ss-generation-collapsed .ss-workspace {
     grid-template-columns: 42px minmax(300px, 1fr) var(--ss-history-width);
@@ -3222,7 +3221,7 @@ const STUDIO_V3_STYLES = `
     }
     .ss-center { display: contents; }
     .ss-workspace [data-mobile-panel] { display: none !important; }
-    .ss-shell[data-mobile-tab="create"] [data-mobile-panel="create-output"] { display: flex !important; }
+    .ss-shell[data-mobile-tab="create"] [data-mobile-panel="create-output"] { display: grid !important; }
     .ss-shell[data-mobile-tab="create"] [data-mobile-panel="create-prompt"] { display: block !important; }
     .ss-shell[data-mobile-tab="generation"] [data-mobile-panel="generation"] { display: flex !important; min-height: 100%; }
     .ss-shell[data-mobile-tab="history"] [data-mobile-panel="history"] { display: flex !important; min-height: 100%; }
@@ -3826,76 +3825,84 @@ const STUDIO_V3_STYLES = `
     .ss-stack-row .ss-trigger-toggle { grid-column: 3 / -1; }
   }
 
-  .ss-shell, .ss-miniplayer-app-surface, .ss-mini-context-menu {
-    --studio-safe-top: var(--app-interactive-safe-top, env(safe-area-inset-top, 0px));
-  }
-  .ss-view-nav { display: flex; flex-wrap: wrap; gap: 8px; flex: 0 0 auto; }
-  .ss-view-nav [aria-current="page"], .ss-style-tabs [aria-selected="true"] { border-color: var(--lumiverse-accent); }
-  .ss-generate-page, .ss-styles-workspace { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; gap: 10px; }
-  .ss-shell [data-studio-page][hidden], .ss-shell [data-style-page][hidden] { display: none !important; }
-  .ss-styles-header, .ss-style-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; flex: 0 0 auto; }
-  .ss-style-page { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; overflow: auto; }
-  .ss-style-page > .ss-lora-library, .ss-style-page > .ss-stack-pane { flex: 1 1 0; min-height: 0; padding: 0; }
-  .ss-style-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; }
-  .ss-style-editor label { display: grid; gap: 6px; min-width: 0; }
-  .ss-defaults-menu, .ss-character-actions, .ss-native-actions, .ss-active-render { grid-column: 1 / -1; min-width: 0; }
-  .ss-active-render > .ss-button { width: 100%; }
-  .ss-character-actions[hidden] { display: none; }
-  :is(.ss-defaults-menu, .ss-character-actions, .ss-native-actions) summary { cursor: pointer; padding: 8px; font-size: 12px; }
-  .ss-context-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; }
-  .ss-history-grid { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); }
+
+  .ss-shell, .ss-miniplayer-app-surface, .ss-mini-context-menu { --studio-safe-top: var(--app-interactive-safe-top, env(safe-area-inset-top, 0px)); }
+  .ss-view-nav { display: flex; gap: 8px; flex: 0 0 auto; }
+  .ss-view-nav [aria-current="page"] { border-color: var(--lumiverse-accent); }
+  .ss-shell [data-studio-page][hidden] { display: none !important; }
   .ss-shell .ss-workspace { grid-template-columns: minmax(0, var(--ss-generation-width)) minmax(0, 1fr) minmax(0, var(--ss-history-width)); }
-  @media (min-width: 721px) and (max-width: 1000px) {
-    .ss-shell { --ss-generation-width: 260px; --ss-history-width: 180px; }
-  }
-  @media (max-width: 720px) {
-    .ss-style-editor { grid-template-columns: minmax(0, 1fr); }
-    .ss-style-page > .ss-lora-library, .ss-style-page > .ss-stack-pane { display: flex; height: 100%; }
-  }
-  .ss-styles-workspace { padding: 12px; border: 1px solid var(--ss-outline); border-radius: var(--ss-panel-radius); background: var(--ss-panel-bg); }
-  .ss-styles-header { justify-content: space-between; }
-  .ss-style-tabs { padding-bottom: 10px; border-bottom: 1px solid var(--ss-outline); }
-  .ss-style-tabs .ss-button { padding: 9px 16px; }
-  .ss-style-tabs [aria-selected="true"] { background: color-mix(in srgb, var(--lumiverse-accent) 16%, var(--ss-panel-bg)); }
-  .ss-saved-style-editor { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; gap: 14px; }
-  .ss-style-selection { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; flex: 0 0 auto; }
-  .ss-style-selection > label { width: min(100%, 320px); }
-  .ss-style-selection p { flex: 1; min-width: 200px; margin: 0; }
-  .ss-style-columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; overflow: auto; min-height: 0; flex: 1; align-content: start; }
-  .ss-style-columns > section { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-  .ss-saved-style-editor label { display: grid; gap: 6px; font-size: 12px; }
-  .ss-style-columns h3 { margin: 0; font-size: 14px; }
-  .ss-style-columns .ss-textarea { min-height: 100px; resize: vertical; }
-  .ss-style-recipe > p { margin: 0; }
-  .ss-recipe-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .ss-style-footer, .ss-library-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 0 0 auto; padding-top: 10px; border-top: 1px solid var(--ss-outline); }
-  .ss-style-footer [data-action="style-clear"], .ss-library-pagination [data-action="style-section"] { margin-left: auto; }
-  .ss-style-page > .ss-stack-pane { width: 100%; max-width: 1100px; margin-inline: auto; gap: 14px; }
-  .ss-style-page > .ss-lora-library { gap: 12px; }
-  .ss-style-page .ss-lora-grid { height: auto; align-content: start; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); overflow-y: auto; scrollbar-gutter: stable; }
-  .ss-style-page .ss-lora-browser { grid-template-columns: 230px minmax(0, 1fr); gap: 14px; }
-  .ss-style-page .ss-lora-browser[data-folders-open="false"] { grid-template-columns: minmax(0, 1fr); }
-  .ss-style-page .ss-lora-folder-sidebar { border-radius: 10px; }
-  .ss-style-page .ss-lora-folder-head { padding: 10px; }
-  .ss-style-page .ss-lora-folder-head strong { font-size: 12px; }
-  .ss-style-page .ss-lora-folder-row { min-height: 36px; font-size: 12px; }
-  .ss-style-page [data-role="lora-folder-toggle"] { width: auto; padding-inline: 10px; gap: 6px; }
-  @media (max-width: 860px) {
-    .ss-style-columns { grid-template-columns: minmax(0, 1fr); }
-  }
-  @media (max-width: 720px) {
-    .ss-styles-workspace { padding: 8px; }
-    .ss-style-page .ss-lora-browser { grid-template-columns: minmax(0, 1fr); }
-    .ss-style-page .ss-lora-folder-sidebar { position: absolute; inset: 0 auto 0 0; width: min(78vw, 290px); z-index: 22; }
-    .ss-style-page .ss-lora-grid { grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); }
-  }
+  .ss-styles-workspace { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; gap: 10px; }
+  .ss-styles-header { display: flex; justify-content: space-between; gap: 12px; }
+  .ss-styles-columns { display: grid; grid-template-columns: minmax(0, 24fr) minmax(0, 46fr) minmax(0, 30fr); flex: 1; min-height: 0; gap: 10px; }
+  .ss-style-column { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px; padding: 10px; border: 1px solid var(--ss-outline); border-radius: var(--ss-panel-radius); background: var(--ss-panel-bg); }
+  .ss-style-editor-column { grid-column: 1; grid-row: 1; }
+  .ss-style-library-column { grid-column: 2; grid-row: 1; }
+  .ss-style-stack-column { grid-column: 3; grid-row: 1; }
+  .ss-styles-columns[data-collapsed="true"] { grid-template-columns: 42px minmax(0, 46fr) minmax(0, 30fr); }
+  .ss-styles-columns[data-collapsed="true"] .ss-saved-style-editor { display: none; }
+  .ss-styles-columns[data-collapsed="true"] .ss-style-editor-column { padding: 4px; }
+  .ss-style-collapse { flex: 0 0 auto; }
+  .ss-saved-style-editor { display: flex; flex-direction: column; min-height: 0; overflow: auto; gap: 12px; }
+  .ss-style-selection { display: flex; flex-wrap: wrap; align-items: end; gap: 6px; }
+  .ss-style-selection label { flex: 1; min-width: 0; }
+  .ss-style-selection p { width: 100%; margin: 0; font-size: 11px; }
+  .ss-style-columns, .ss-style-composition { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .ss-style-composition h3 { display: none; }
+  .ss-saved-style-editor label { display: grid; gap: 5px; font-size: 12px; min-width: 0; }
+  .ss-saved-style-editor :is(input,select,textarea) { width: 100%; min-width: 0; }
+  .ss-style-columns .ss-textarea { min-height: 74px; resize: vertical; }
+  .ss-style-recipe { border-top: 1px solid var(--ss-outline); padding-top: 8px; }
+  .ss-style-recipe summary { cursor: pointer; font-size: 12px; }
+  .ss-style-recipe summary span { display: block; margin-top: 4px; opacity: .7; font-size: 11px; }
+  .ss-style-recipe > :not(summary) { margin-top: 8px; }
+  .ss-recipe-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+  .ss-style-footer, .ss-library-pagination { display: flex; flex-wrap: wrap; gap: 6px; flex: 0 0 auto; padding-top: 8px; border-top: 1px solid var(--ss-outline); }
+  .ss-style-column > :is(.ss-lora-library,.ss-stack-pane) { display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; padding: 0; gap: 10px; overflow: hidden; }
+  .ss-style-column .ss-library-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ss-style-column .ss-lora-query { flex: 1 1 100%; min-width: 0; }
+  .ss-style-column .ss-lora-filter { flex: 1; min-width: 0; }
+  .ss-style-column .ss-library-tools.ss-download-open > :not(.ss-lora-query) { display: none; }
+  .ss-style-column .ss-lora-browser { position: relative; display: grid; grid-template-columns: minmax(0,1fr); flex: 1; min-height: 0; }
+  .ss-style-column .ss-lora-folder-sidebar { position: absolute; inset: 0 auto 0 0; width: min(85%,260px); z-index: 22; border-radius: 8px; box-shadow: 4px 0 16px #0004; }
+  .ss-style-column .ss-lora-folder-sidebar[hidden] { display: none; }
+  .ss-style-column .ss-lora-grid { height: auto; min-height: 0; overflow: auto; align-content: start; grid-template-columns: repeat(auto-fill,minmax(min(230px,100%),1fr)); scrollbar-gutter: stable; }
+  .ss-style-column .ss-lora-titlebar { flex-wrap: wrap; }
+  .ss-stack-head-tools, .ss-stack-share-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ss-stack-head-tools select { width: 100%; flex-basis: 100%; }
+  .ss-stack-list { overflow: auto; min-height: 0; flex: 1; scrollbar-gutter: stable; }
+  .ss-shell .ss-stack-row { display: grid; grid-template-columns: 22px 18px 32px minmax(0,1fr) 64px; gap: 6px; align-items: center; padding: 8px; }
+  .ss-stack-row .ss-stack-preview { width: 32px; height: 38px; }
+  .ss-stack-row .ss-stack-name { min-width: 0; }
+  .ss-stack-row .ss-stack-name :is(strong,span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-shell .ss-stack-row .ss-trigger-toggle { grid-column: 3 / 5; grid-row: 2; }
+  .ss-stack-row .ss-stack-actions { grid-column: 5; grid-row: 2; display: flex; }
+  .ss-stack-actions .ss-icon-button { min-width: 20px; width: 20px; padding: 0; }
+  .ss-stack-drag { cursor: grab; padding: 0; width: 22px; min-width: 0; }
+  .ss-utility-rail { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .ss-working-stack { display: flex; flex-direction: column; flex: 1 1 0; min-height: 100px; padding: 10px; gap: 10px; overflow: hidden; }
+  .ss-rail-history { flex: 0 0 auto; min-height: 0; border-top: 1px solid var(--ss-outline); overflow: auto; }
+  .ss-rail-history[open] { flex: 0 1 48%; }
+  .ss-rail-history > summary { cursor: pointer; padding: 12px; }
+  .ss-rail-history .ss-history-grid { grid-template-columns: repeat(auto-fit,minmax(min(110px,100%),1fr)); overflow: visible; }
+  .ss-defaults-menu, .ss-character-actions, .ss-native-actions { grid-column: 1 / -1; min-width: 0; }
+  .ss-character-actions[hidden] { display: none; }
+  :is(.ss-defaults-menu,.ss-character-actions,.ss-native-actions) summary { cursor: pointer; padding: 8px; font-size: 12px; }
+  .ss-context-actions { display: flex; flex-direction: column; gap: 6px; padding: 8px; }
+  .ss-shell .ss-output-stage { display: grid; grid-template-rows: auto minmax(0,1fr) auto; min-height: 0; min-width: 0; }
+  .ss-shell .ss-current-preview { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; max-width: none; max-height: none; aspect-ratio: auto; contain: layout paint; align-self: stretch; }
+  .ss-shell .ss-current-preview > img { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; object-fit: contain; }
   .ss-shell[data-studio-view="styles"] .ss-commandbar .ss-generate { display: none; }
-  .ss-style-page .ss-library-tools { grid-template-columns: minmax(160px, 1fr) auto minmax(140px, 190px) auto auto; }
+  @media (max-width: 900px) {
+    .ss-styles-workspace { overflow: auto; }
+    .ss-styles-columns, .ss-styles-columns[data-collapsed="true"] { display: flex; flex-direction: column; flex: none; }
+    .ss-style-editor-column { order: 0; }
+    .ss-style-library-column { order: 1; height: 65dvh; min-height: 350px; }
+    .ss-style-stack-column { order: 2; max-height: 65dvh; min-height: 200px; }
+  }
   @media (max-width: 720px) {
-    .ss-style-page .ss-library-tools { display: flex; flex-wrap: wrap; }
-    .ss-style-page .ss-lora-query { flex: 1 1 100%; min-width: 0; }
-    .ss-style-page .ss-library-tools.ss-download-open > :not(.ss-lora-query) { display: none; }
-    .ss-style-footer .ss-button { flex: 1 1 auto; }
+    .ss-shell .ss-workspace { grid-template-columns: minmax(0,1fr); }
+    .ss-shell .ss-output-stage { height: clamp(240px,45dvh,500px); flex: none; }
+    .ss-utility-rail { min-height: 400px; }
   }
 `;
 function element(tag, className, text) {
@@ -5531,12 +5538,10 @@ class StudioController {
     pendingMoveImageIds = [];
     outputMetadataRequestId = "";
     pendingMetadataAction = "";
-    outputResizeObserver = null;
     inspectorResizeObserver = null;
     stopActiveResize = null;
     profileSyncTimer = null;
     studioView = "generate";
-    stylesSection = "saved";
     renderStyles = [];
     studioDefaults = null;
     activeRenderStyleId = "";
@@ -5670,8 +5675,6 @@ class StudioController {
         this.restoreWorkspaceState();
         this.bind();
         if (typeof ResizeObserver !== "undefined") {
-            this.outputResizeObserver = new ResizeObserver(()=>this.fitPreviewToAspect());
-            this.outputResizeObserver.observe(this.get('[data-role="output-stage"]'));
             this.inspectorResizeObserver = new ResizeObserver(()=>this.fitInspectorToSpace());
             this.inspectorResizeObserver.observe(this.get('[data-role="inspector-stage"]'));
         }
@@ -5711,8 +5714,6 @@ class StudioController {
         this.previewRequests.clear();
         this.previewObserver?.disconnect();
         this.previewObserver = null;
-        this.outputResizeObserver?.disconnect();
-        this.outputResizeObserver = null;
         this.inspectorResizeObserver?.disconnect();
         this.inspectorResizeObserver = null;
         this.stopActiveResize?.();
@@ -6271,7 +6272,7 @@ are removed when CSS is applied.</pre>
         </nav>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
-        <section class="ss-generate-page" data-studio-page="generate" aria-label="Generate">
+
         <nav class="ss-mobile-tabs" aria-label="Studio sections">
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="create" data-active="true">Create</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="generation" data-active="false">Tune</button>
@@ -6280,7 +6281,7 @@ are removed when CSS is applied.</pre>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="history" data-active="false">History</button>
         </nav>
 
-        <div class="ss-workspace">
+        <div class="ss-workspace" data-studio-page="generate" aria-label="Generate">
           <aside class="ss-generation-pane" data-mobile-panel="generation">
             <div class="ss-pane-head">
               <div class="ss-pane-title"><strong>Generation</strong><div class="ss-muted ss-tiny">Model and render controls</div></div>
@@ -6295,7 +6296,6 @@ are removed when CSS is applied.</pre>
                     <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
                   </div>
                 </details>
-                <div class="ss-active-render"><button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button></div>
                 <details class="ss-character-actions" data-role="active-character-actions" hidden>
                   <summary data-role="active-character-actions-label">Active character</summary>
                   <div class="ss-context-actions">
@@ -6509,14 +6509,16 @@ are removed when CSS is applied.</pre>
             </section>
           </main>
 
-          <div class="ss-resize-handle ss-resize-history" data-resize="history" role="separator" aria-orientation="vertical" title="Drag to resize history"></div>
+          <div class="ss-resize-handle ss-resize-history" data-resize="history" role="separator" aria-orientation="vertical" title="Drag to resize stack and history"></div>
 
-          <aside class="ss-history-pane" data-mobile-panel="history">
+          <aside class="ss-history-pane ss-utility-rail" data-mobile-panel="history">
+            <section class="ss-working-stack"><header class="ss-section-head"><strong>LoRA Stack</strong><span data-role="generate-stack-count" class="ss-muted"></span></header><div class="ss-stack-list" data-role="generate-stack-list"></div></section>
+            <details class="ss-rail-history" data-role="rail-history"><summary>History · <span data-role="output-count">0</span> outputs</summary>
             <div class="ss-pane-head">
-              <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny"><span data-role="output-count">0</span> saved outputs</div></div>
+              <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny">Saved outputs</div></div>
               <div>
                 <button class="ss-icon-button ss-pane-toggle" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
-                <button class="ss-icon-button ss-pane-toggle" data-action="toggle-history" title="Collapse history sidebar" aria-label="Collapse history sidebar">›</button>
+
               </div>
             </div>
             <div class="ss-pane-body ss-history-grid" data-role="history-grid">
@@ -6527,20 +6529,17 @@ are removed when CSS is applied.</pre>
               <span class="ss-history-page-label" data-role="history-page">1 / 1</span>
               <button class="ss-button" data-action="history-next" disabled>›</button>
             </div>
+            </details>
           </aside>
         </div>
 
-        </section>
         <section class="ss-styles-workspace" data-studio-page="styles" aria-label="Styles" hidden>
           <header class="ss-styles-header"><strong>Styles</strong><span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span></header>
-          <nav class="ss-style-tabs" role="tablist" aria-label="Style tools">
-            <button class="ss-button" id="ss-tab-saved" role="tab" aria-controls="ss-page-saved" data-action="style-section" data-section="saved" aria-selected="true">Saved Styles</button>
-            <button class="ss-button" id="ss-tab-stacks" role="tab" aria-controls="ss-page-stacks" data-action="style-section" data-section="stacks" aria-selected="false" tabindex="-1">LoRA Stacks</button>
-            <button class="ss-button" id="ss-tab-library" role="tab" aria-controls="ss-page-library" data-action="style-section" data-section="library" aria-selected="false" tabindex="-1">LoRA Library</button>
-          </nav>
-          <section class="ss-style-page" id="ss-page-saved" data-style-page="saved" role="tabpanel" aria-labelledby="ss-tab-saved">
+          <div class="ss-styles-columns" data-role="styles-columns" data-collapsed="false">
+          <section class="ss-style-column ss-style-editor-column" data-style-column="saved">
+          <button class="ss-button ss-style-collapse" data-action="style-collapse" aria-expanded="true" aria-label="Collapse Styles editor">Styles ‹</button>
           <div class="ss-saved-style-editor" data-role="style-editor">
-            <header class="ss-style-selection"><label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label><p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p></header>
+            <header class="ss-style-selection"><button class="ss-button" data-action="style-new" aria-label="New Style">+</button><label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label><p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p></header>
             <div class="ss-style-columns">
               <section class="ss-style-composition"><h3>Identity &amp; prompts</h3>
                 <label>Name<input class="ss-input" data-role="style-name" placeholder="Soft painterly render"></label>
@@ -6548,7 +6547,7 @@ are removed when CSS is applied.</pre>
                 <label>Positive addition<textarea class="ss-textarea" data-role="style-positive" placeholder="Lighting, medium, mood…"></textarea></label>
                 <label>Negative addition<textarea class="ss-textarea" data-role="style-negative" placeholder="Things to avoid…"></textarea></label>
               </section>
-              <section class="ss-style-recipe"><h3>Render recipe</h3><p class="ss-muted ss-tiny">Leave a field empty to inherit the current settings.</p>
+              <details class="ss-style-recipe"><summary>Render recipe <span data-role="recipe-summary">Inherits current settings</span></summary><p class="ss-muted ss-tiny">Leave a field empty to inherit the current settings.</p>
                 <label>Checkpoint<input class="ss-input" data-role="style-checkpoint" placeholder="Inherit"></label>
                 <div class="ss-recipe-fields">${[
             "width",
@@ -6562,7 +6561,7 @@ are removed when CSS is applied.</pre>
                 "scheduler"
             ].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>
                 <button class="ss-button" data-action="style-capture">Use current render settings</button>
-              </section>
+              </details>
             </div>
             <footer class="ss-style-footer">
               <button class="ss-button ss-button-primary" data-action="style-apply">Apply Style</button>
@@ -6573,32 +6572,7 @@ are removed when CSS is applied.</pre>
             </footer>
           </div>
           </section>
-          <section class="ss-style-page" id="ss-page-stacks" data-style-page="stacks" role="tabpanel" aria-labelledby="ss-tab-stacks" hidden>
-<section class="ss-stack-pane">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
-              </div>
-              <div class="ss-stack-head-tools">
-                <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
-                  <option value="">Saved stacks…</option>
-                </select>
-                <button class="ss-button" data-action="load-stack" disabled>Load</button>
-                <button class="ss-button ss-button-primary" data-action="save-stack">Save</button>
-                <button class="ss-button ss-button-danger" data-action="delete-stack" disabled>Delete</button>
-              </div>
-              <div class="ss-stack-list" data-role="stack-list">
-                <div class="ss-empty">Add LoRAs from the library. Metadata triggers stay off until you enable them.</div>
-              </div>
-              <div class="ss-stack-share-tools">
-                <button class="ss-button" data-action="import-stack" title="Import a shared LoRA stack JSON file">${IMPORT_ICON}<span>Import</span></button>
-                <button class="ss-button" data-action="export-stack" title="Export the current LoRA stack as shareable JSON">${EXPORT_ICON}<span>Export</span></button>
-                <button class="ss-button" data-action="apply-lumi-stack" title="Merge this stack into Lumiverse Image Gen and activate it">${EXPORT_ICON}<span>Apply to Lumi</span></button>
-                <button class="ss-button ss-button-danger ss-clear-stack" data-action="clear-stack" disabled>Clear</button>
-                <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
-              </div>
-            </section>
-          </section>
-          <section class="ss-style-page" id="ss-page-library" data-style-page="library" role="tabpanel" aria-labelledby="ss-tab-library" hidden>
+          <section class="ss-style-column ss-style-library-column" data-style-column="library">
 <section class="ss-lora-library">
               <div class="ss-lora-titlebar">
                 <div class="ss-section-title"><strong>Select LoRAs</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
@@ -6633,7 +6607,7 @@ are removed when CSS is applied.</pre>
                     <option value="newest">Newest</option>
                   </select>
                 </div>
-                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" aria-controls="ss-lora-folders" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}<span>Folders</span></button>
+                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" aria-controls="ss-lora-folders" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}</button>
               </div>
               <div class="ss-library-status" data-role="metadata-error" hidden></div>
               <div class="ss-lora-browser" data-role="lora-browser" data-folders-open="false">
@@ -6652,10 +6626,35 @@ are removed when CSS is applied.</pre>
                 <button class="ss-button" data-action="lora-page-prev" aria-label="Previous LoRA page">Previous</button>
                 <span class="ss-muted" data-role="lora-page-status" aria-live="polite">0 models</span>
                 <button class="ss-button" data-action="lora-page-next" aria-label="Next LoRA page">Next</button>
-                <button class="ss-button" data-action="style-section" data-section="stacks">Edit active stack</button>
               </footer>
             </section>
           </section>
+          <section class="ss-style-column ss-style-stack-column" data-style-column="stacks">
+<section class="ss-stack-pane">
+              <div class="ss-section-head">
+                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
+              </div>
+              <div class="ss-stack-head-tools">
+                <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
+                  <option value="">Saved stacks…</option>
+                </select>
+                <button class="ss-button" data-action="load-stack" disabled>Load</button>
+                <button class="ss-button ss-button-primary" data-action="save-stack">Save</button>
+                <button class="ss-button ss-button-danger" data-action="delete-stack" disabled>Delete</button>
+              </div>
+              <div class="ss-stack-list" data-role="stack-list">
+                <div class="ss-empty">Add LoRAs from the library. Metadata triggers stay off until you enable them.</div>
+              </div>
+              <div class="ss-stack-share-tools">
+                <button class="ss-button" data-action="import-stack" title="Import a shared LoRA stack JSON file">${IMPORT_ICON}<span>Import</span></button>
+                <button class="ss-button" data-action="export-stack" title="Export the current LoRA stack as shareable JSON">${EXPORT_ICON}<span>Export</span></button>
+                <button class="ss-button" data-action="apply-lumi-stack" title="Merge this stack into Lumiverse Image Gen and activate it">${EXPORT_ICON}<span>Apply to Lumi</span></button>
+                <button class="ss-button ss-button-danger ss-clear-stack" data-action="clear-stack" disabled>Clear</button>
+                <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
+              </div>
+            </section>
+          </section>
+          </div>
         </section>
 
         <div class="ss-commandbar">
@@ -6935,29 +6934,13 @@ are removed when CSS is applied.</pre>
             const connectionId = event.currentTarget.value;
             if (connectionId) this.loadConnection(connectionId);
         });
+        this.get('[data-role="style-editor"]').addEventListener("input", ()=>this.updateRecipeSummary());
         this.get('[data-role="lora-search"]').addEventListener("input", ()=>{
             if (this.loraSearchTimer) clearTimeout(this.loraSearchTimer);
             this.loraSearchTimer = setTimeout(()=>{
                 this.loraSearchTimer = null;
                 this.renderLoras();
             }, 120);
-        });
-        this.get(".ss-style-tabs").addEventListener("keydown", (event)=>{
-            if (![
-                "ArrowLeft",
-                "ArrowRight",
-                "Home",
-                "End"
-            ].includes(event.key)) return;
-            const tabs = [
-                ...this.root.querySelectorAll('.ss-style-tabs [role="tab"]')
-            ];
-            const current = tabs.indexOf(event.target);
-            if (current < 0) return;
-            event.preventDefault();
-            const index = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-            this.setStylesSection(tabs[index].dataset.section);
-            tabs[index].focus();
         });
         const downloadUrl = this.get('[data-role="lora-download-url"]');
         downloadUrl.addEventListener("keydown", (event)=>{
@@ -7198,22 +7181,14 @@ are removed when CSS is applied.</pre>
                 "save-look-recipe"
             ].includes(action))) {
                 try {
-                    this.handleRenderAction(action, button.dataset.section);
+                    this.handleRenderAction(action);
                 } catch (error) {
                     this.setRunStatus(error instanceof Error ? error.message : String(error), true);
                 }
                 return;
             }
-            if (action === "studio-view" || action === "manage-stack") {
-                this.setStudioView(action === "manage-stack" ? "styles" : button.dataset.view);
-                if (action === "manage-stack") {
-                    const style = this.selectedRenderStyle();
-                    this.handleRenderAction("style-section", style ? "saved" : "stacks");
-                    if (style) {
-                        this.get('[data-role="render-style"]').value = style.id;
-                        this.editRenderStyle();
-                    }
-                }
+            if (action === "studio-view") {
+                this.setStudioView(button.dataset.view);
                 return;
             }
             if (action === "refresh-metadata") this.refreshMetadata();
@@ -7305,7 +7280,6 @@ are removed when CSS is applied.</pre>
             if (action === "clear-stack") {
                 this.state.stack = [];
                 this.renderStack();
-                this.renderLoras();
             }
             if (action === "save-stack") this.saveStackPreset();
             if (action === "load-stack") this.loadStackPreset();
@@ -8092,6 +8066,7 @@ are removed when CSS is applied.</pre>
         this.requestedPreviews.clear();
         this.previewCache.clear();
         this.previewRequests.clear();
+        this.renderStack();
         this.setConnectionStatus("loading");
         this.setRunStatus(`Loading ${connection?.name || "SwarmUI"} models and LoRA metadata…`);
         for (const button of this.root.querySelectorAll('[data-action="generate"]')){
@@ -8700,7 +8675,6 @@ are removed when CSS is applied.</pre>
         this.get('[data-role="aspect"]').value = "custom";
         this.renderPresetStack();
         this.renderStack();
-        this.renderLoras();
         this.updatePreviewAspect(numberValue(this.get('[data-role="width"]'), 1024), numberValue(this.get('[data-role="height"]'), 1024));
         this.updateContextControls();
         this.setRunStatus(`Applied “${preset.title}” to Studio and removed it from the preset stack${extracted.length ? ` · ${extracted.length} LoRA${extracted.length === 1 ? "" : "s"} moved into the LoRA stack` : ""}.`);
@@ -9257,7 +9231,7 @@ are removed when CSS is applied.</pre>
         });
     }
     renderLoras() {
-        if (this.studioView !== "styles" || this.stylesSection !== "library") {
+        if (this.studioView !== "styles") {
             this.lorasDirty = true;
             return;
         }
@@ -9289,7 +9263,7 @@ are removed when CSS is applied.</pre>
         if (!this.previewObserver && typeof IntersectionObserver !== "undefined") {
             this.previewObserver = new IntersectionObserver((entries)=>{
                 for (const entry of entries){
-                    if (!entry.isIntersecting || this.studioView !== "styles" || this.stylesSection !== "library") continue;
+                    if (!entry.isIntersecting || this.studioView !== "styles") continue;
                     const image = entry.target;
                     const name = image.dataset.name || "";
                     const previewRef = image.dataset.previewRef || "";
@@ -9403,7 +9377,10 @@ are removed when CSS is applied.</pre>
     }
     updatePreviewImages(name, dataUrl) {
         for (const image of this.root.querySelectorAll("[data-lora-image]")){
-            if (image.dataset.loraImage === name) image.src = dataUrl;
+            if (image.dataset.loraImage === name) {
+                if (image.getAttribute("src") !== dataUrl) image.src = dataUrl;
+                image.hidden = false;
+            }
         }
     }
     addLora(lora) {
@@ -9415,7 +9392,6 @@ are removed when CSS is applied.</pre>
             useTrigger: false
         });
         this.renderStack();
-        this.renderLoras();
     }
     toggleLoraDownloader(force, focus = true) {
         const search = this.get('[data-role="lora-search"]');
@@ -9500,24 +9476,103 @@ are removed when CSS is applied.</pre>
         if (message) this.setRunStatus(message, error);
     }
     renderStack() {
-        const list = this.get('[data-role="stack-list"]');
-        list.replaceChildren();
-        if (!this.state.stack.length) {
-            list.appendChild(element("div", "ss-empty", "Add LoRAs from the library. Metadata triggers stay off until you enable them."));
-        } else {
-            this.state.stack.forEach((item, index)=>list.appendChild(this.makeStackRow(item, index)));
+        for (const role of [
+            "stack-list",
+            "generate-stack-list"
+        ]){
+            const list = this.get(`[data-role="${role}"]`);
+            for (const child of [
+                ...list.children
+            ]){
+                if (child.dataset.stackName ? !this.state.stack.some((item)=>item.lora.name === child.dataset.stackName) : this.state.stack.length > 0) child.remove();
+            }
+            this.state.stack.forEach((item, index)=>{
+                let row = [
+                    ...list.children
+                ].find((child)=>child.dataset.stackName === item.lora.name);
+                if (!row) row = this.makeStackRow(item, index);
+                const installed = Boolean(this.installedLora(item.lora.name));
+                row.dataset.disabled = String(!item.enabled);
+                row.dataset.missing = String(!installed);
+                row.dataset.incompatible = String(installed && !this.isLoraCompatible(item.lora));
+                const image = row.querySelector('.ss-stack-preview img');
+                const cached = this.previewCache.get(item.lora.name);
+                if (cached) {
+                    if (image.getAttribute("src") !== cached) image.src = cached;
+                    image.hidden = false;
+                    image.alt = `${item.lora.title || labelFromName(item.lora.name)} preview`;
+                } else {
+                    if (image.hasAttribute("src")) image.removeAttribute("src");
+                    image.hidden = true;
+                    if (installed && item.lora.previewRef && !this.requestedPreviews.has(item.lora.name)) {
+                        this.requestedPreviews.add(item.lora.name);
+                        this.send("preview", {
+                            connectionId: this.state.connection?.id,
+                            name: item.lora.name,
+                            previewRef: item.lora.previewRef
+                        });
+                    }
+                }
+                row.querySelector('[data-stack-control="enabled"]').checked = item.enabled;
+                const weight = row.querySelector('.ss-stack-weight');
+                if (weight.value !== String(item.weight)) weight.value = String(item.weight);
+                const trigger = row.querySelector('.ss-trigger-toggle input');
+                trigger.checked = item.useTrigger;
+                trigger.disabled = !item.lora.triggerPhrase;
+                row.querySelector('.ss-trigger-toggle').title = item.lora.triggerPhrase || "No trigger phrase in metadata";
+                row.querySelector('.ss-stack-name strong').textContent = item.lora.title || labelFromName(item.lora.name);
+                const buttons = row.querySelectorAll('.ss-stack-actions button');
+                buttons[0].disabled = index === 0;
+                buttons[1].disabled = index === this.state.stack.length - 1;
+                if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+            });
+            if (!this.state.stack.length && !list.firstElementChild) list.appendChild(element("div", "ss-empty", "Add LoRAs from the library."));
         }
+        this.patchLoraStackButtons();
         const enabled = this.state.stack.filter((item)=>item.enabled).length;
         this.get('[data-role="stack-count"]').textContent = `${enabled} enabled · ${this.state.stack.length} stacked`;
         this.get('[data-action="clear-stack"]').disabled = this.state.stack.length === 0;
         this.get('[data-role="command-stack-summary"]').textContent = enabled ? `${enabled} LoRA${enabled === 1 ? "" : "s"} enabled` : "No LoRAs enabled";
-        const manage = this.root.querySelector('[data-action="manage-stack"]');
-        if (manage) manage.textContent = `LoRA stack · ${enabled} enabled · Manage`;
+        this.get('[data-role="generate-stack-count"]').textContent = `${enabled} enabled`;
         this.updateDockSummary();
         this.updateTriggerSummary();
     }
+    patchLoraStackButtons() {
+        const names = new Set(this.state.stack.map((item)=>item.lora.name));
+        for (const [name, entry] of this.loraCards){
+            const button = entry.node.querySelector(".ss-add-button");
+            if (!button) continue;
+            const inStack = names.has(name);
+            if (button.disabled !== inStack) {
+                button.disabled = inStack;
+                button.textContent = inStack ? "Stacked" : "Add";
+                button.classList.toggle("ss-button-primary", !inStack);
+            }
+        }
+    }
     makeStackRow(item, index) {
+        const key = item.lora.name;
+        const currentItem = ()=>this.state.stack.find((entry)=>entry.lora.name === key) || item;
+        const currentIndex = ()=>this.state.stack.findIndex((entry)=>entry.lora.name === key);
         const row = element("div", "ss-stack-row");
+        row.dataset.stackName = key;
+        const drag = element("button", "ss-icon-button ss-stack-drag", "⠿");
+        drag.type = "button";
+        drag.draggable = true;
+        drag.title = "Drag to reorder LoRA";
+        drag.setAttribute("aria-label", "Drag to reorder LoRA");
+        drag.addEventListener("dragstart", (event)=>{
+            event.dataTransfer?.setData("application/x-studio-lora", key);
+        });
+        row.addEventListener("dragover", (event)=>{
+            if (event.dataTransfer?.types.includes("application/x-studio-lora")) event.preventDefault();
+        });
+        row.addEventListener("drop", (event)=>{
+            const source = this.state.stack.findIndex((entry)=>entry.lora.name === event.dataTransfer?.getData("application/x-studio-lora"));
+            if (source < 0) return;
+            event.preventDefault();
+            this.moveStack(source, currentIndex() - source);
+        });
         const installed = Boolean(this.installedLora(item.lora.name));
         row.dataset.disabled = String(!item.enabled);
         row.dataset.missing = String(!installed);
@@ -9526,34 +9581,17 @@ are removed when CSS is applied.</pre>
         enabled.type = "checkbox";
         enabled.checked = item.enabled;
         enabled.title = "Enable LoRA";
+        enabled.dataset.stackControl = "enabled";
         enabled.addEventListener("change", ()=>{
-            item.enabled = enabled.checked;
+            currentItem().enabled = enabled.checked;
             this.renderStack();
         });
         const preview = element("div", "ss-stack-preview");
-        const cachedPreview = this.previewCache.get(item.lora.name);
-        if (cachedPreview || item.lora.previewRef) {
-            const image = element("img");
-            image.alt = cachedPreview ? `${item.lora.title || labelFromName(item.lora.name)} preview` : "";
-            image.dataset.loraImage = item.lora.name;
-            if (cachedPreview) {
-                image.src = cachedPreview;
-            } else if (item.lora.previewRef) {
-                image.dataset.name = item.lora.name;
-                image.dataset.previewRef = item.lora.previewRef;
-                if (!this.requestedPreviews.has(item.lora.name)) {
-                    this.requestedPreviews.add(item.lora.name);
-                    this.send("preview", {
-                        connectionId: this.state.connection?.id,
-                        name: item.lora.name,
-                        previewRef: item.lora.previewRef
-                    });
-                }
-            }
-            preview.appendChild(image);
-        } else {
-            preview.textContent = "◇";
-        }
+        const image = element("img");
+        image.dataset.loraImage = item.lora.name;
+        image.alt = "";
+        image.hidden = true;
+        preview.appendChild(image);
         const name = element("div", "ss-stack-name");
         name.appendChild(element("strong", "", item.lora.title || labelFromName(item.lora.name)));
         name.appendChild(element("span", "", item.lora.name));
@@ -9565,8 +9603,9 @@ are removed when CSS is applied.</pre>
         weight.value = String(item.weight);
         weight.title = "LoRA weight";
         weight.addEventListener("change", ()=>{
-            item.weight = clamp(numberValue(weight, item.weight), -10, 10);
-            weight.value = String(item.weight);
+            currentItem().weight = clamp(numberValue(weight, currentItem().weight), -10, 10);
+            weight.value = String(currentItem().weight);
+            this.renderStack();
         });
         const trigger = element("label", "ss-trigger-toggle");
         const triggerCheckbox = element("input");
@@ -9574,8 +9613,8 @@ are removed when CSS is applied.</pre>
         triggerCheckbox.checked = item.useTrigger;
         triggerCheckbox.disabled = !item.lora.triggerPhrase;
         triggerCheckbox.addEventListener("change", ()=>{
-            item.useTrigger = triggerCheckbox.checked;
-            this.updateTriggerSummary();
+            currentItem().useTrigger = triggerCheckbox.checked;
+            this.renderStack();
         });
         trigger.append(triggerCheckbox, document.createTextNode("trigger"));
         trigger.title = item.lora.triggerPhrase || "No trigger phrase in metadata";
@@ -9583,20 +9622,19 @@ are removed when CSS is applied.</pre>
         const up = element("button", "ss-icon-button", "↑");
         up.disabled = index === 0;
         up.title = "Move up";
-        up.addEventListener("click", ()=>this.moveStack(index, -1));
+        up.addEventListener("click", ()=>this.moveStack(currentIndex(), -1));
         const down = element("button", "ss-icon-button", "↓");
         down.disabled = index === this.state.stack.length - 1;
         down.title = "Move down";
-        down.addEventListener("click", ()=>this.moveStack(index, 1));
+        down.addEventListener("click", ()=>this.moveStack(currentIndex(), 1));
         const remove = element("button", "ss-icon-button ss-button-danger", "×");
         remove.title = "Remove";
         remove.addEventListener("click", ()=>{
-            this.state.stack.splice(index, 1);
+            this.state.stack.splice(currentIndex(), 1);
             this.renderStack();
-            this.renderLoras();
         });
         actions.append(up, down, remove);
-        row.append(enabled, preview, name, weight, trigger, actions);
+        row.append(drag, enabled, preview, name, weight, trigger, actions);
         return row;
     }
     moveStack(index, direction) {
@@ -9683,7 +9721,6 @@ are removed when CSS is applied.</pre>
         });
         this.setStackPresetSelection(preset.id);
         this.renderStack();
-        this.renderLoras();
         if (announce) this.setRunStatus(`Loaded LoRA stack “${preset.name}”.`);
     }
     stackName() {
@@ -9846,7 +9883,6 @@ are removed when CSS is applied.</pre>
             });
             this.missingLoras = imported.items.filter((item)=>!this.installedLora(item.name));
             this.renderStack();
-            this.renderLoras();
             this.setRunStatus(`Imported “${imported.name}” with ${imported.items.length} LoRA${imported.items.length === 1 ? "" : "s"}.`);
             if (this.missingLoras.length) this.showMissingLoras();
         } catch (error) {
@@ -10025,6 +10061,7 @@ are removed when CSS is applied.</pre>
             "sampler",
             "scheduler"
         ])this.get(`[data-role="${prefix}-recipe-${key}"]`).value = String(recipe[key] ?? "");
+        this.updateRecipeSummary();
     }
     readRecipeEditor(prefix) {
         const recipe = {};
@@ -10183,6 +10220,23 @@ are removed when CSS is applied.</pre>
         const stack = this.state.stackPresets.find((item)=>item.id === style?.loraStackId);
         this.get('[data-role="style-summary"]').textContent = style ? `${style.name} · ${stack?.items.length || 0} LoRAs · ${style.recipe?.width || "inherit"} × ${style.recipe?.height || "inherit"} · ${style.recipe?.steps ?? "inherit"} steps · CFG ${style.recipe?.cfg ?? "inherit"}${style.loraStackId && !stack ? " · Stack reference missing" : ""}` : "Create a reusable Style; raw LoRA stacks remain separate.";
     }
+    updateRecipeSummary() {
+        const parts = [
+            "checkpoint",
+            "width",
+            "height",
+            "steps",
+            "cfg",
+            "sampler",
+            "scheduler"
+        ].flatMap((key)=>{
+            const value = this.get(`[data-role="style-${key === "checkpoint" ? key : `render-${key}`}"]`).value;
+            return value ? [
+                `${key === "cfg" ? "CFG" : key}: ${value}`
+            ] : [];
+        });
+        this.get('[data-role="recipe-summary"]').textContent = parts.join(" · ") || "Inherits current settings";
+    }
     fillStyleRecipe(recipe) {
         for (const key of [
             "width",
@@ -10193,7 +10247,7 @@ are removed when CSS is applied.</pre>
             "scheduler"
         ])this.get(`[data-role="style-render-${key}"]`).value = String(recipe[key] ?? "");
     }
-    handleRenderAction(action, section) {
+    handleRenderAction(action) {
         const settings = this.captureStableSettings();
         const value = (role)=>this.get(`[data-role="${role}"]`).value;
         if (action === "save-defaults") this.send("save_studio_defaults", {
@@ -10215,10 +10269,23 @@ are removed when CSS is applied.</pre>
             checkpoint: settings.checkpoint,
             styleId: this.selectedRenderStyle()?.id || ""
         });
-        if (action === "style-section") this.setStylesSection(section);
+        if (action === "style-new") {
+            this.get('[data-role="render-style"]').value = "";
+            this.editRenderStyle();
+        }
+        if (action === "style-collapse") {
+            const columns = this.get('[data-role="styles-columns"]');
+            const collapsed = columns.dataset.collapsed !== "true";
+            columns.dataset.collapsed = String(collapsed);
+            const button = this.get('[data-action="style-collapse"]');
+            button.setAttribute("aria-expanded", String(!collapsed));
+            button.setAttribute("aria-label", collapsed ? "Expand Styles editor" : "Collapse Styles editor");
+            button.textContent = collapsed ? "›" : "Styles ‹";
+        }
         if (action === "style-capture") {
             this.fillStyleRecipe(settings);
             this.get('[data-role="style-checkpoint"]').value = settings.checkpoint || "";
+            this.updateRecipeSummary();
         }
         if (action === "style-save" || action === "style-duplicate") {
             if (!value("style-name").trim()) throw new Error("Give the Style a name.");
@@ -10268,16 +10335,10 @@ are removed when CSS is applied.</pre>
             this.setRunStatus(`Applied ${style.name}${style.loraStackId && !this.state.stackPresets.some((item)=>item.id === style.loraStackId) ? " · Stack reference missing" : ""}.`);
         }
     }
-    setStylesSection(section) {
-        this.stylesSection = section === "stacks" || section === "library" ? section : "saved";
-        this.get(".ss-shell").dataset.styleSection = this.stylesSection;
-        for (const page of this.root.querySelectorAll("[data-style-page]"))page.hidden = page.dataset.stylePage !== this.stylesSection;
-        for (const tab of this.root.querySelectorAll('[data-action="style-section"][role="tab"]')){
-            const selected = tab.dataset.section === this.stylesSection;
-            tab.setAttribute("aria-selected", String(selected));
-            tab.tabIndex = selected ? 0 : -1;
-        }
-        if (this.studioView === "styles" && this.stylesSection === "library" && this.lorasDirty) this.renderLoras();
+    focusStyleColumn(section) {
+        this.root.querySelector(`[data-style-column="${section === "stacks" || section === "library" ? section : "saved"}"]`)?.scrollIntoView?.({
+            block: "nearest"
+        });
     }
     setStudioView(view) {
         this.studioView = view === "styles" ? "styles" : "generate";
@@ -10295,8 +10356,7 @@ are removed when CSS is applied.</pre>
         }
         for (const page of this.root.querySelectorAll("[data-studio-page]"))page.hidden = page.dataset.studioPage !== this.studioView;
         for (const button of this.root.querySelectorAll('[data-action="studio-view"]'))button.setAttribute("aria-current", button.dataset.view === this.studioView ? "page" : "false");
-        this.setStylesSection(this.stylesSection);
-        if (this.studioView === "generate") requestAnimationFrame(()=>this.fitPreviewToAspect());
+        if (this.studioView === "styles" && this.lorasDirty) this.renderLoras();
     }
     restoreWorkspaceState() {
         let state = {};
@@ -10307,7 +10367,7 @@ are removed when CSS is applied.</pre>
         this.setStudioView("generate");
         const shell = this.get(".ss-shell");
         shell.classList.toggle("ss-generation-collapsed", state?.collapsed?.generation === true);
-        shell.classList.toggle("ss-history-collapsed", state?.collapsed?.history === true);
+        shell.classList.remove("ss-history-collapsed");
         shell.classList.toggle("ss-fullscreen-layer", state?.fullscreen === true);
         const advanced = this.root.querySelector("details.ss-advanced");
         if (advanced) advanced.open = state?.details?.advanced === true;
@@ -10413,7 +10473,6 @@ are removed when CSS is applied.</pre>
         void collapsed;
         this.updateWorkspaceButtons();
         this.persistWorkspaceState();
-        requestAnimationFrame(()=>this.fitPreviewToAspect());
     }
     beginResize(kind, event) {
         if (window.matchMedia("(max-width: 720px)").matches) return;
@@ -10458,7 +10517,6 @@ are removed when CSS is applied.</pre>
             const max = Math.max(130, bounds.height - 180);
             shell.style.setProperty("--ss-prompt-height", `${Math.round(clamp(bounds.bottom - clientY, 105, max))}px`);
         }
-        this.fitPreviewToAspect();
     }
     resetResize(kind) {
         const shell = this.get(".ss-shell");
@@ -10470,7 +10528,6 @@ are removed when CSS is applied.</pre>
         const property = properties[kind];
         if (property) shell.style.removeProperty(property);
         this.persistWorkspaceState();
-        this.fitPreviewToAspect();
     }
     toggleFullscreen(force) {
         const shell = this.get(".ss-shell");
@@ -10478,7 +10535,6 @@ are removed when CSS is applied.</pre>
         shell.classList.toggle("ss-fullscreen-layer", shouldEnter);
         this.updateWorkspaceButtons();
         this.persistWorkspaceState();
-        requestAnimationFrame(()=>this.fitPreviewToAspect());
     }
     setMobileTab(tab) {
         const allowed = new Set([
@@ -10495,11 +10551,12 @@ are removed when CSS is applied.</pre>
             "loras",
             "stack"
         ].includes(selected) ? "styles" : "generate");
+        if (selected === "history") this.get('[data-role="rail-history"]').open = true;
         if ([
             "loras",
             "stack"
         ].includes(selected)) {
-            this.setStylesSection(selected === "stack" ? "stacks" : "library");
+            this.focusStyleColumn(selected === "stack" ? "stacks" : "library");
         }
         for (const button of this.root.querySelectorAll(".ss-mobile-tab")){
             const active = button.dataset.tab === selected;
@@ -10507,7 +10564,6 @@ are removed when CSS is applied.</pre>
             button.setAttribute("aria-current", active ? "page" : "false");
         }
         this.persistWorkspaceState();
-        requestAnimationFrame(()=>this.fitPreviewToAspect());
     }
     openInspector() {
         const image = this.state.currentImage;
@@ -10655,7 +10711,6 @@ are removed when CSS is applied.</pre>
             this.renderInitImage();
         }
         this.renderStack();
-        this.renderLoras();
         this.renderPresetStack();
         this.updateContextControls();
         if (closeOverlays) {
@@ -10923,7 +10978,6 @@ are removed when CSS is applied.</pre>
             });
             this.setStackPresetSelection(preset?.id || "");
             this.renderStack();
-            this.renderLoras();
         }
         if (!checkpointLoaded) {
             if (this.state.models.length) {
@@ -11838,28 +11892,6 @@ are removed when CSS is applied.</pre>
         if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
             this.previewAspect = clamp(width / height, 0.1, 10);
         }
-        this.get('[data-role="current-preview"]').style.setProperty("--ss-preview-aspect", String(this.previewAspect));
-        requestAnimationFrame(()=>this.fitPreviewToAspect());
-    }
-    fitPreviewToAspect() {
-        if (this.disposed || this.studioView !== "generate") return;
-        const stage = this.root.querySelector('[data-role="output-stage"]');
-        const preview = this.root.querySelector('[data-role="current-preview"]');
-        if (!stage || !preview || stage.clientWidth <= 0) return;
-        const availableWidth = Math.max(120, stage.clientWidth - 18);
-        let maximumHeight;
-        if (window.matchMedia("(max-width: 720px)").matches) {
-            maximumHeight = Math.max(190, window.innerHeight * 0.52);
-        } else {
-            const head = stage.querySelector(".ss-output-stage-head");
-            const meta = stage.querySelector(".ss-output-meta");
-            maximumHeight = Math.max(150, stage.clientHeight - (head?.offsetHeight || 0) - (meta?.offsetHeight || 0) - 34);
-        }
-        const fitted = fitAspectWithin(this.previewAspect, availableWidth, maximumHeight);
-        const width = `${Math.round(fitted.width)}px`;
-        const height = `${Math.round(fitted.height)}px`;
-        if (preview.style.width !== width) preview.style.width = width;
-        if (preview.style.height !== height) preview.style.height = height;
     }
     setGenerating(value) {
         for (const button of this.root.querySelectorAll(".ss-generate")){
@@ -11916,7 +11948,7 @@ are removed when CSS is applied.</pre>
                 this.updatePreviewAspect(preview.naturalWidth, preview.naturalHeight);
             }
         };
-        preview.src = src;
+        if (preview.getAttribute("src") !== src) preview.src = src;
         preview.hidden = false;
         this.get('[data-role="preview-empty"]').hidden = true;
         this.updateGenerationProgress(step, totalSteps);
@@ -11926,7 +11958,11 @@ are removed when CSS is applied.</pre>
     }
     renderOutputs() {
         const grid = this.get('[data-role="history-grid"]');
-        grid.replaceChildren();
+        for (const child of [
+            ...grid.children
+        ]){
+            if (child.dataset.outputId ? !this.state.outputs.some((output)=>String(output.id) === child.dataset.outputId) : this.state.outputs.length > 0) child.remove();
+        }
         this.get('[data-role="output-count"]').textContent = String(this.state.outputTotal);
         const pages = Math.max(1, Math.ceil(this.state.outputTotal / this.state.outputLimit));
         const page = Math.min(pages, Math.floor(this.state.outputOffset / this.state.outputLimit) + 1);
@@ -11934,12 +11970,31 @@ are removed when CSS is applied.</pre>
         this.get('[data-action="history-prev"]').disabled = this.state.outputOffset <= 0;
         this.get('[data-action="history-next"]').disabled = this.state.outputOffset + this.state.outputLimit >= this.state.outputTotal;
         if (!this.state.outputs.length) {
-            grid.appendChild(element("div", "ss-empty", "Outputs created in this chat will appear here."));
+            if (!grid.firstElementChild) grid.appendChild(element("div", "ss-empty", "Outputs created in this chat will appear here."));
             return;
         }
-        for (const output of this.state.outputs){
+        for (const [index, output] of this.state.outputs.entries()){
+            const existing = [
+                ...grid.children
+            ].find((child)=>child.dataset.outputId === String(output.id));
+            if (existing) {
+                const image = existing.querySelector("img");
+                if (image.getAttribute("src") !== output.url) image.src = output.url;
+                image.alt = output.original_filename || "Generated image";
+                existing.querySelector(".ss-history-item").title = image.alt;
+                existing.querySelector(".ss-history-menu-toggle").setAttribute("aria-label", `Actions for ${this.outputToCurrentImage(output).label}`);
+                const actions = existing.querySelectorAll(".ss-history-menu button");
+                const current = this.outputToCurrentImage(output);
+                actions[0].disabled = !current.details;
+                actions[1].disabled = !current.src;
+                actions[2].disabled = !current.id || !this.state.activeChat?.id || !this.state.permissions.chatMutation;
+                actions[3].disabled = !current.id;
+                if (grid.children[index] !== existing) grid.insertBefore(existing, grid.children[index] || null);
+                continue;
+            }
             const current = this.outputToCurrentImage(output);
             const card = element("div", "ss-history-card");
+            card.dataset.outputId = String(output.id);
             const button = element("button", "ss-history-item");
             button.title = output.original_filename || "Generated image";
             const image = element("img");
@@ -11948,7 +12003,7 @@ are removed when CSS is applied.</pre>
             button.appendChild(image);
             button.addEventListener("click", ()=>{
                 this.closeHistoryMenus();
-                this.setCurrentImage(current);
+                this.setCurrentImage(this.outputToCurrentImage(this.state.outputs.find((item)=>item.id === output.id) || output));
                 this.openInspector();
             });
             const menuToggle = element("button", "ss-history-menu-toggle", "⋮");
@@ -11964,7 +12019,7 @@ are removed when CSS is applied.</pre>
                 action.addEventListener("click", (event)=>{
                     event.stopPropagation();
                     this.closeHistoryMenus();
-                    this.setCurrentImage(current);
+                    this.setCurrentImage(this.outputToCurrentImage(this.state.outputs.find((item)=>item.id === output.id) || output));
                     handler();
                 });
                 menu.appendChild(action);
@@ -11981,7 +12036,7 @@ are removed when CSS is applied.</pre>
                 menuToggle.setAttribute("aria-expanded", String(shouldOpen));
             });
             card.append(button, menuToggle, menu);
-            grid.appendChild(card);
+            grid.insertBefore(card, grid.children[index] || null);
         }
     }
     closeHistoryMenus() {
@@ -12049,7 +12104,7 @@ are removed when CSS is applied.</pre>
                 this.updatePreviewAspect(preview.naturalWidth, preview.naturalHeight);
             }
         };
-        preview.src = image.src;
+        if (preview.getAttribute("src") !== image.src) preview.src = image.src;
         preview.hidden = false;
         for (const button of this.root.querySelectorAll('[data-action="use-current-init"]')){
             button.disabled = false;
