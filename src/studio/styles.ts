@@ -3465,8 +3465,10 @@ const STUDIO_V3_STYLES = `
   .ss-style-page > .ss-lora-library, .ss-style-page > .ss-stack-pane { flex: 1 1 0; min-height: 0; padding: 0; }
   .ss-style-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; }
   .ss-style-editor label { display: grid; gap: 6px; min-width: 0; }
-  .ss-defaults-menu { grid-column: 1 / -1; }
-  .ss-defaults-menu summary { cursor: pointer; padding: 8px; }
+  .ss-defaults-menu, .ss-character-actions, .ss-native-actions, .ss-active-render { grid-column: 1 / -1; min-width: 0; }
+  .ss-active-render > .ss-button { width: 100%; }
+  .ss-character-actions[hidden] { display: none; }
+  :is(.ss-defaults-menu, .ss-character-actions, .ss-native-actions) summary { cursor: pointer; padding: 8px; font-size: 12px; }
   .ss-context-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; }
   .ss-history-grid { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); }
   .ss-shell .ss-workspace { grid-template-columns: minmax(0, var(--ss-generation-width)) minmax(0, 1fr) minmax(0, var(--ss-history-width)); }
@@ -3513,5 +3515,13 @@ const STUDIO_V3_STYLES = `
     .ss-style-page .ss-lora-browser { grid-template-columns: minmax(0, 1fr); }
     .ss-style-page .ss-lora-folder-sidebar { position: absolute; inset: 0 auto 0 0; width: min(78vw, 290px); z-index: 22; }
     .ss-style-page .ss-lora-grid { grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); }
+  }
+  .ss-shell[data-studio-view="styles"] .ss-commandbar .ss-generate { display: none; }
+  .ss-style-page .ss-library-tools { grid-template-columns: minmax(160px, 1fr) auto minmax(140px, 190px) auto auto; }
+  @media (max-width: 720px) {
+    .ss-style-page .ss-library-tools { display: flex; flex-wrap: wrap; }
+    .ss-style-page .ss-lora-query { flex: 1 1 100%; min-width: 0; }
+    .ss-style-page .ss-library-tools.ss-download-open > :not(.ss-lora-query) { display: none; }
+    .ss-style-footer .ss-button { flex: 1 1 auto; }
   }
 `

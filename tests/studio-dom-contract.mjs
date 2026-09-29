@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
 import { StudioController, defaultStudioBehavior } from '../dist/frontend.js'
 const dom = new JSDOM('<div id="root"></div>', { url:'https://studio.test' })
@@ -9,6 +10,10 @@ window.requestAnimationFrame = globalThis.requestAnimationFrame
 globalThis.fetch = async () => { throw Error('Standalone') }
 let observersCreated = 0
 globalThis.IntersectionObserver = class { constructor(){ observersCreated++ } observe(){} disconnect(){} unobserve(){} }
+const styleSource = await readFile(new URL('../src/studio/styles.ts',import.meta.url),'utf8')
+const styleNode = document.createElement('style')
+styleNode.textContent=styleSource.slice(styleSource.indexOf('`')+1,styleSource.lastIndexOf('`'))
+document.head.appendChild(styleNode)
 const messages=[]
 const root = document.getElementById('root')
 window.localStorage.setItem('swarm-studio-workspace-v1',JSON.stringify({sizes:{generationWidth:180,historyWidth:500,dockHeight:400}}))
@@ -33,6 +38,7 @@ for (const section of ['saved','stacks','library','saved']) {
   controller.setStylesSection(section)
   assert.deepEqual([...root.querySelectorAll('[data-style-page]')].filter(page=>!page.hidden).map(page=>page.dataset.stylePage),[section])
   assert.equal(root.querySelector(`[data-section="${section}"]`).getAttribute('aria-selected'),'true')
+  for(const page of root.querySelectorAll('[data-style-page]')) assert.equal(window.getComputedStyle(page).display === 'none',page.dataset.stylePage !== section)
 }
 assert.ok(field('lora-grid').closest('[data-style-page="library"]'))
 assert.ok(field('stack-list').closest('[data-style-page="stacks"]'))
@@ -138,6 +144,35 @@ assert.equal(root.querySelector('.ss-shell'),shell)
 assert.equal(root.querySelector('.ss-style-columns').children.length,2)
 assert.ok(field('style-positive').closest('.ss-style-composition'))
 assert.ok(field('style-render-steps').closest('.ss-style-recipe'))
+// Unsaved editor fields and library search survive cross-screen navigation.
+field('style-name').value='Unsaved Style name'
+field('style-positive').value='unsaved lighting'
+controller.setStudioView('generate')
+assert.equal(window.getComputedStyle(root.querySelector('[data-studio-page="styles"]')).display,'none')
+controller.setStudioView('styles')
+assert.equal(field('style-name').value,'Unsaved Style name')
+assert.equal(field('style-positive').value,'unsaved lighting')
+assert.equal(window.getComputedStyle(root.querySelector('[data-studio-page="generate"]')).display,'none')
+assert.equal(root.querySelectorAll('.ss-defaults-menu [data-action]').length,3)
+assert.ok(root.querySelector('[data-action="save-native-main"]').closest('.ss-native-actions'))
+assert.ok(root.querySelector('[data-action="save-base-recipe"]').closest('.ss-character-actions'))
+// Late responses and errors from an old connection cannot touch current previews/status.
+const oldRequest=controller.send('preview',{connectionId:'old',name:'stale',previewRef:'old.png'})
+controller.onMessage({type:'preview_result',requestId:oldRequest,name:'stale',dataUrl:'data:image/png;base64,old'})
+assert.equal(controller.previewCache.has('stale'),false)
+const validRequest=controller.send('preview',{connectionId:'swarm',name:'fresh',previewRef:'fresh.png'})
+controller.onMessage({type:'preview_result',requestId:validRequest,name:'fresh',dataUrl:'data:image/png;base64,fresh'})
+assert.equal(controller.previewCache.get('fresh'),'data:image/png;base64,fresh')
+const statusBefore=field('run-status').textContent
+controller.onMessage({type:'studio_error',operation:'preview',requestId:'expired',name:'stale',error:'Old connection failed'})
+assert.equal(field('run-status').textContent,statusBefore)
+// Styles navigation supersedes a stale mobile LoRA/Stack tab.
+controller.setMobileTab('stack')
+controller.setStylesSection('library')
+assert.equal(window.getComputedStyle(root.querySelector('.ss-lora-library')).display,'flex')
+controller.setStudioView('generate')
+assert.equal(shell.dataset.mobileTab,'create')
+assert.equal(root.querySelector('[data-tab="create"]').getAttribute('aria-current'),'page')
 console.log('large library and exclusive Styles pages: ok')
 controller.disposed=true
 if(controller.profileSyncTimer)clearTimeout(controller.profileSyncTimer)

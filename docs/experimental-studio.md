@@ -4,8 +4,8 @@ Branch: `experimental/studio-styles-defaults`. Main remains the pre-change backu
 
 ## Source map
 
-- Shell, controls, LoRA library and stacks: `src/studio/controller.ts` (`buildV3`). Both views keep their DOM and controller alive.
-- Styles and fixed surfaces: `src/studio/styles.ts`. Fullscreen, inspector, output library, missing-LoRA and shared workflow/dialog backdrops consume `--studio-safe-top`, derived from the host's `--app-interactive-safe-top`. Floating player/menu positions also respect it.
+- Shell, controls, LoRA library and stacks: `src/studio/controller.ts` (`buildV3`). Both views keep their DOM and controller alive. Generate and Styles have separate page roots; Saved Styles, LoRA Stacks and LoRA Library are exclusive sibling panels with keyboard-accessible tabs.
+- Styles and fixed surfaces: `src/studio/styles.ts`. Fullscreen, inspector, output library, missing-LoRA and shared workflow/dialog backdrops consume `--studio-safe-top`, derived from the host's `--app-interactive-safe-top`. Floating player/menu positions also respect it. The alias is scoped to Studio-owned surfaces, not the host root.
 - Workspace geometry: local preference `swarm-studio-workspace-v2`, with lazy fallback from v1; obsolete dock height is discarded, side rails and prompts are clamped. In-flow Studio does not receive another safe-top offset.
 - LoRA stacks: backend user storage `lora-stack-presets.json`; unchanged mechanical stack format.
 - Live generation profile: `studio-generation-profile.json`; remains live state, separate from explicit defaults.
@@ -38,6 +38,18 @@ npm test
 ```
 
 Typecheck assembles the same compilation units as the build. The tests cover legacy behavior, default/style persistence, sanitization, every recipe precedence layer, public native upsert/binding failures, and actual mounted DOM navigation and defaults. Native adapter tests use mocks; they do not modify a running host.
+
+## Workspace repair
+
+The Styles page no longer mounts the old bottom dock. The saved-style form has two grouped columns (identity/prompts and renderer settings), with independent content scrolling and a contextual footer. Stacks and Library occupy their own full-size pages.
+
+Studio defaults are collapsed beside generation controls. Active character/look saves have their own contextual group, and native Image Gen prompt export is grouped separately. No global save-action strip is rendered on Styles.
+
+The Library folder sidebar opens by default on desktop; **Folders** retracts/reopens it. The current folder and open state persist, nested folders include their descendants, and the sidebar scrolls independently. On narrow screens it overlays the library and closes after folder selection.
+
+Library pages contain at most 60 cards. Unchanged cards and image elements are retained during stack edits and view changes; hidden-library updates are deferred until the page is shown. Search is debounced. One preview observer is retained, and responses from a previous connection are ignored. Changing search/folder resets pagination; changing pages bounds the card cache to that page.
+
+Regression checks now include 1,200 mock LoRAs, repeated tab/sidebar round trips, card/image identity, folder selection and paging, computed CSS visibility of exclusive pages, keyboard navigation, unsaved Style edits and stale preview responses. These are automated DOM/CSS checks, not a live host visual acceptance test.
 
 ## User visual acceptance
 

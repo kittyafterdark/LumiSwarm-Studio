@@ -3838,8 +3838,10 @@ const STUDIO_V3_STYLES = `
   .ss-style-page > .ss-lora-library, .ss-style-page > .ss-stack-pane { flex: 1 1 0; min-height: 0; padding: 0; }
   .ss-style-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; }
   .ss-style-editor label { display: grid; gap: 6px; min-width: 0; }
-  .ss-defaults-menu { grid-column: 1 / -1; }
-  .ss-defaults-menu summary { cursor: pointer; padding: 8px; }
+  .ss-defaults-menu, .ss-character-actions, .ss-native-actions, .ss-active-render { grid-column: 1 / -1; min-width: 0; }
+  .ss-active-render > .ss-button { width: 100%; }
+  .ss-character-actions[hidden] { display: none; }
+  :is(.ss-defaults-menu, .ss-character-actions, .ss-native-actions) summary { cursor: pointer; padding: 8px; font-size: 12px; }
   .ss-context-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; }
   .ss-history-grid { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); }
   .ss-shell .ss-workspace { grid-template-columns: minmax(0, var(--ss-generation-width)) minmax(0, 1fr) minmax(0, var(--ss-history-width)); }
@@ -3886,6 +3888,14 @@ const STUDIO_V3_STYLES = `
     .ss-style-page .ss-lora-browser { grid-template-columns: minmax(0, 1fr); }
     .ss-style-page .ss-lora-folder-sidebar { position: absolute; inset: 0 auto 0 0; width: min(78vw, 290px); z-index: 22; }
     .ss-style-page .ss-lora-grid { grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); }
+  }
+  .ss-shell[data-studio-view="styles"] .ss-commandbar .ss-generate { display: none; }
+  .ss-style-page .ss-library-tools { grid-template-columns: minmax(160px, 1fr) auto minmax(140px, 190px) auto auto; }
+  @media (max-width: 720px) {
+    .ss-style-page .ss-library-tools { display: flex; flex-wrap: wrap; }
+    .ss-style-page .ss-lora-query { flex: 1 1 100%; min-width: 0; }
+    .ss-style-page .ss-library-tools.ss-download-open > :not(.ss-lora-query) { display: none; }
+    .ss-style-footer .ss-button { flex: 1 1 auto; }
   }
 `;
 function element(tag, className, text) {
@@ -5994,217 +6004,6 @@ class StudioController {
         if (!found) throw new Error(`Swarm Studio UI element missing: ${selector}`);
         return found;
     }
-    build() {
-        this.root.innerHTML = `
-      <div class="ss-shell">
-        <div class="ss-topbar">
-          <div class="ss-connection-wrap">
-            <select class="ss-select ss-connection" data-role="connection" aria-label="SwarmUI connection">
-              <option value="">Loading SwarmUI connections…</option>
-            </select>
-          </div>
-          <button class="ss-button" data-action="refresh-metadata" title="Rescan LoRAs and their metadata">Refresh metadata</button>
-          <div class="ss-token-wrap">
-            <button class="ss-button" data-action="toggle-token" aria-expanded="false">Metadata token</button>
-            <div class="ss-token-popover" data-role="token-popover" hidden>
-              <p>Lumiverse keeps the connection secret private from extensions. If SwarmUI authentication is enabled, save the same <code>swarm_token</code> here for metadata and preview requests only. It is stored in Lumiverse's encrypted enclave.</p>
-              <div class="ss-token-row">
-                <input class="ss-input" data-role="metadata-token" type="password" autocomplete="off" placeholder="swarm_token value" />
-                <button class="ss-button ss-button-primary" data-action="save-token">Save</button>
-                <button class="ss-button ss-button-danger" data-action="clear-token">Clear</button>
-              </div>
-              <div class="ss-field-help" data-role="token-status">No extension metadata token saved.</div>
-            </div>
-          </div>
-        </div>
-
-        <nav class="ss-view-nav" aria-label="Studio workspaces">
-          <button class="ss-button" data-action="studio-view" data-view="generate" aria-current="page">Generate</button>
-          <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
-          <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
-        </nav>
-        <div class="ss-default-actions">
-          <button class="ss-button" data-action="save-defaults">Save current as Studio default</button>
-          <button class="ss-button" data-action="restore-defaults">Restore Studio defaults</button>
-          <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
-          <button class="ss-button" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">Save prompts to Lumiverse Image Gen</button>
-          <button class="ss-button" data-action="save-native-character" hidden>Mirror active character prompts to Lumiverse</button>
-          <button class="ss-button" data-action="save-base-recipe" hidden>Save to active character base</button>
-          <button class="ss-button" data-action="save-look-recipe" hidden>Save to active look</button>
-        </div>
-        <div class="ss-permission-banner" data-role="permission-banner"></div>
-
-        <div class="ss-workspace">
-          <div class="ss-editor">
-            <section class="ss-panel">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>Prompt</strong><span class="ss-muted ss-tiny">Trigger phrases can be inherited from the LoRA stack</span></div>
-              </div>
-              <div class="ss-prompt-grid">
-                <div class="ss-field">
-                  <label for="ss-positive">Positive</label>
-                  <textarea id="ss-positive" class="ss-textarea" data-role="positive" placeholder="Describe the image…"></textarea>
-                  <div class="ss-field-help" data-role="trigger-summary">No inherited trigger phrases.</div>
-                </div>
-                <div class="ss-field">
-                  <label for="ss-negative">Negative</label>
-                  <textarea id="ss-negative" class="ss-textarea" data-role="negative" placeholder="What should not appear…"></textarea>
-                  <div class="ss-field-help">Passed through Lumiverse's SwarmUI provider.</div>
-                </div>
-              </div>
-            </section>
-
-            <section class="ss-panel">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>Generation</strong><span class="ss-muted ss-tiny">Connection defaults are loaded first</span></div>
-              </div>
-              <div class="ss-controls-grid">
-                <div class="ss-field ss-model-field">
-                  <label>Checkpoint</label>
-                  <select class="ss-select" data-role="model"><option value="">Select a connection first</option></select>
-                </div>
-                <div class="ss-field">
-                  <label>Width</label>
-                  <input class="ss-input" data-role="width" type="number" min="64" max="4096" step="64" value="1024" />
-                </div>
-                <div class="ss-field">
-                  <label>Height</label>
-                  <input class="ss-input" data-role="height" type="number" min="64" max="4096" step="64" value="1024" />
-                </div>
-                <div class="ss-field">
-                  <label>Steps</label>
-                  <input class="ss-input" data-role="steps" type="number" min="1" max="150" step="1" value="20" />
-                </div>
-                <div class="ss-field">
-                  <label>CFG</label>
-                  <input class="ss-input" data-role="cfg" type="number" min="1" max="30" step="0.5" value="7" />
-                </div>
-                <div class="ss-field">
-                  <label>Seed</label>
-                  <input class="ss-input" data-role="seed" type="number" step="1" value="-1" title="-1 uses a random seed" />
-                </div>
-                <div class="ss-field ss-sampler-field">
-                  <label>Sampler</label>
-                  <input class="ss-input" data-role="sampler" list="ss-samplers" placeholder="Connection default" />
-                  <datalist id="ss-samplers">
-                    <option value="euler"></option><option value="euler_ancestral"></option>
-                    <option value="dpmpp_2m"></option><option value="dpmpp_2m_sde"></option>
-                    <option value="dpmpp_3m_sde"></option><option value="uni_pc"></option>
-                  </datalist>
-                </div>
-                <div class="ss-field ss-scheduler-field">
-                  <label>Scheduler</label>
-                  <input class="ss-input" data-role="scheduler" list="ss-schedulers" placeholder="Connection default" />
-                  <datalist id="ss-schedulers">
-                    <option value="normal"></option><option value="karras"></option>
-                    <option value="exponential"></option><option value="sgm_uniform"></option>
-                    <option value="simple"></option><option value="ddim_uniform"></option>
-                  </datalist>
-                </div>
-                <div class="ss-inline-actions">
-                  <button class="ss-icon-button" data-action="swap-size" title="Swap width and height" aria-label="Swap width and height">↔</button>
-                  <button class="ss-icon-button" data-action="random-seed" title="Use a random seed" aria-label="Use random seed">✦</button>
-                </div>
-              </div>
-              <details class="ss-advanced">
-                <summary>Advanced Swarm controls</summary>
-                <div class="ss-advanced-grid">
-                  <div class="ss-field">
-                    <label>Swarm preset(s)</label>
-                    <input class="ss-input" data-role="presets" placeholder="portrait, cinematic" />
-                  </div>
-                  <div class="ss-field">
-                    <label>VAE override</label>
-                    <input class="ss-input" data-role="vae" placeholder="Built-in/default" />
-                  </div>
-                  <div class="ss-field">
-                    <label>UNet override</label>
-                    <input class="ss-input" data-role="unet" placeholder="Use checkpoint" />
-                  </div>
-                  <div class="ss-field">
-                    <label>CLIP-L</label>
-                    <input class="ss-input" data-role="clip-l" placeholder="Optional text encoder" />
-                  </div>
-                  <div class="ss-field">
-                    <label>CLIP-G</label>
-                    <input class="ss-input" data-role="clip-g" placeholder="Optional text encoder" />
-                  </div>
-                  <div class="ss-field">
-                    <label>T5-XXL</label>
-                    <input class="ss-input" data-role="t5" placeholder="Optional text encoder" />
-                  </div>
-                  <div class="ss-field ss-wide">
-                    <label>Raw request override (JSON)</label>
-                    <textarea class="ss-textarea" data-role="raw-override" spellcheck="false" placeholder='{"refinerupscale": 1.25, "refinermethod": "PostApply"}'></textarea>
-                    <div class="ss-field-help">Merged by Lumiverse after the controls above. Protected connection/model/auth fields remain protected.</div>
-                  </div>
-                </div>
-              </details>
-            </section>
-
-            <section class="ss-panel">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>LoRA library</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
-              </div>
-              <div class="ss-library-tools">
-                <input class="ss-input" data-role="lora-search" type="search" placeholder="Search title, author, tag, trigger, architecture…" />
-                <select class="ss-select" data-role="lora-sort" aria-label="Sort LoRAs">
-                  <option value="title">Title</option>
-                  <option value="name">Filename</option>
-                  <option value="newest">Newest</option>
-                </select>
-              </div>
-              <div class="ss-library-status" data-role="metadata-error" hidden></div>
-              <div class="ss-lora-grid" data-role="lora-grid">
-                <div class="ss-empty">Choose a SwarmUI connection to load its LoRA library.</div>
-              </div>
-            </section>
-
-            <section class="ss-panel">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
-                <button class="ss-button ss-button-danger" data-action="clear-stack" disabled>Clear</button>
-              </div>
-              <div class="ss-stack-list" data-role="stack-list">
-                <div class="ss-empty">Add LoRAs above. Their metadata default weight and trigger phrase are inherited automatically.</div>
-              </div>
-            </section>
-
-            <div class="ss-generate-bar">
-              <button class="ss-button ss-button-primary ss-generate" data-action="generate" disabled>Generate image</button>
-              <div class="ss-run-status" data-role="run-status">Waiting for a SwarmUI connection.</div>
-            </div>
-          </div>
-
-          <aside class="ss-output">
-            <div class="ss-section-title"><strong>Output</strong><span class="ss-muted ss-tiny">Saved by Lumiverse</span></div>
-            <div class="ss-current-preview" data-role="current-preview">
-              <div class="ss-preview-empty" data-role="preview-empty"><strong>No output yet</strong>Generate an image or choose one from this extension's history.</div>
-              <img data-role="preview-image" alt="Generated image preview" hidden />
-              <div class="ss-preview-loading" data-role="preview-loading">
-                <div class="ss-generation-progress" data-role="generation-progress" data-indeterminate="true">
-                  <div class="ss-progress-track"><span class="ss-progress-fill" data-role="progress-fill"></span></div>
-                  <div class="ss-progress-label" data-role="progress-label">Preparing…</div>
-                </div>
-              </div>
-            </div>
-            <div class="ss-output-label" data-role="output-label">Nothing selected</div>
-            <div class="ss-output-actions">
-              <button class="ss-button" data-action="download-output" disabled>Download</button>
-              <button class="ss-button" data-action="copy-output" disabled>Copy URL</button>
-            </div>
-            <div class="ss-history-head">
-              <div class="ss-section-title"><strong>History</strong><span class="ss-muted ss-tiny" data-role="output-count">0</span></div>
-              <button class="ss-icon-button" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
-            </div>
-            <div class="ss-history-grid" data-role="history-grid">
-              <div class="ss-empty">Outputs created in this chat will appear here.</div>
-            </div>
-          </aside>
-        </div>
-      </div>
-    `;
-    }
     buildV3() {
         this.root.innerHTML = `
       <div class="ss-shell" data-mobile-tab="create">
@@ -6417,7 +6216,7 @@ class StudioController {
 .ss-generation-pane       generation sidebar
 .ss-output-stage          current image
 .ss-prompt-panel          prompt editor
-.ss-lora-dock             LoRA workspace
+.ss-styles-workspace      Styles workspace
 .ss-stack-row             stacked LoRA
 .ss-history-card          history image
 .ss-output-library        fullscreen library
@@ -6489,17 +6288,28 @@ are removed when CSS is applied.</pre>
             </div>
             <div class="ss-pane-body">
               <div class="ss-generation-controls">
-        <details class="ss-defaults-menu"><summary>Defaults &amp; save settings</summary><div class="ss-context-actions">
-          <button class="ss-button" data-action="save-defaults">Save current as Studio default</button>
-          <button class="ss-button" data-action="restore-defaults">Restore Studio defaults</button>
-          <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
-          <button class="ss-button" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">Save prompts to Lumiverse Image Gen</button>
-          <button class="ss-button" data-action="save-native-character" hidden>Mirror active character prompts to Lumiverse</button>
-          <button class="ss-button" data-action="save-base-recipe" hidden>Save to active character base</button>
-          <button class="ss-button" data-action="save-look-recipe" hidden>Save to active look</button>
-        </div></details>
-          <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
-
+                <details class="ss-defaults-menu"><summary>Studio defaults</summary>
+                  <div class="ss-context-actions">
+                    <button class="ss-button" data-action="save-defaults">Save current as default</button>
+                    <button class="ss-button" data-action="restore-defaults">Restore defaults</button>
+                    <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
+                  </div>
+                </details>
+                <div class="ss-active-render"><button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button></div>
+                <details class="ss-character-actions" data-role="active-character-actions" hidden>
+                  <summary data-role="active-character-actions-label">Active character</summary>
+                  <div class="ss-context-actions">
+                    <button class="ss-button" data-action="save-base-recipe" hidden>Save current recipe to character base</button>
+                    <button class="ss-button" data-action="save-look-recipe" hidden>Save current recipe to active look</button>
+                    <button class="ss-button" data-action="save-native-character" hidden>Mirror character prompts to Lumiverse</button>
+                  </div>
+                </details>
+                <details class="ss-native-actions"><summary>Lumiverse Image Gen</summary>
+                  <div class="ss-context-actions">
+                    <p class="ss-muted ss-tiny">Save the current prompts as a native preset. Render settings stay in Studio.</p>
+                    <button class="ss-button" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">Save prompts to Lumiverse</button>
+                  </div>
+                </details>
                 <section class="ss-workflow-panel">
                   <div class="ss-workflow-picker">
                     <div class="ss-field">
@@ -7794,7 +7604,7 @@ are removed when CSS is applied.</pre>
                 {
                     const request = this.previewRequests.get(payload.requestId);
                     this.previewRequests.delete(payload.requestId);
-                    if (request?.connectionId === this.state.connection?.id && request?.name === payload.name && payload.dataUrl) {
+                    if (request && request.connectionId === this.state.connection?.id && request?.name === payload.name && payload.dataUrl) {
                         this.previewCache.set(payload.name, payload.dataUrl);
                         this.updatePreviewImages(payload.name, payload.dataUrl);
                     }
@@ -8124,6 +7934,12 @@ are removed when CSS is applied.</pre>
                 this.setRunStatus("Saved LoRA stacks updated.");
                 break;
             case "studio_error":
+                if (payload.operation === "preview") {
+                    const request = this.previewRequests.get(payload.requestId);
+                    this.previewRequests.delete(payload.requestId);
+                    if (request && request.connectionId === this.state.connection?.id) this.requestedPreviews.delete(request.name);
+                    break;
+                }
                 if (payload.operation === "resolve_output_metadata" && this.outputMetadataRequestId) {
                     const action = this.pendingMetadataAction;
                     this.outputMetadataRequestId = "";
@@ -9522,15 +9338,18 @@ are removed when CSS is applied.</pre>
             if (pendingPreview && !pendingPreview.getAttribute("src") && !this.requestedPreviews.has(lora.name)) this.previewObserver?.observe(pendingPreview);
             const add = node.querySelector(".ss-add-button");
             const inStack = this.state.stack.some((item)=>item.lora.name === lora.name);
-            add.disabled = inStack;
-            add.textContent = inStack ? "Stacked" : "Add";
-            add.classList.toggle("ss-button-primary", !inStack);
+            if (add.disabled !== inStack) {
+                add.disabled = inStack;
+                add.textContent = inStack ? "Stacked" : "Add";
+                add.classList.toggle("ss-button-primary", !inStack);
+            }
             if (grid.children[index] !== node) grid.insertBefore(node, grid.children[index] || null);
         });
         if (!visible.length) grid.appendChild(element("div", "ss-empty", !this.state.connection ? "Choose a SwarmUI connection in Generate to load its LoRA library." : this.state.loras.length ? "No LoRAs match this folder and search. Try All model families or clear the search." : "No LoRA metadata was returned."));
     }
     makeLoraCard(lora) {
         const card = element("article", "ss-lora-card");
+        card.dataset.loraName = lora.name;
         card.title = [
             lora.name,
             lora.triggerPhrase ? `Trigger: ${lora.triggerPhrase}` : "",
@@ -10334,6 +10153,10 @@ are removed when CSS is applied.</pre>
         native.disabled = !this.nativeImageGenReady;
         native.title = this.nativeImageGenReady ? "Save compatible prompts; leaves the active native preset unchanged" : "Lumiverse Image Gen is unavailable";
         this.get('[data-action="save-native-character"]').hidden = !this.nativeImageGenReady || !binding;
+        this.get('[data-role="active-character-actions"]').hidden = !binding;
+        this.get('[data-role="active-character-actions-label"]').textContent = this.activeVisualFolder()?.name || "Active character";
+        const look = binding?.looks.find((item)=>item.id === binding.activeLookId);
+        this.get('[data-action="save-look-recipe"]').textContent = look ? `Save current recipe to ${look.name}` : "Save current recipe to active look";
         this.get('[data-action="save-base-recipe"]').hidden = !binding;
         this.get('[data-action="save-look-recipe"]').hidden = !binding?.looks.some((item)=>item.id === binding.activeLookId);
     }
@@ -10463,7 +10286,13 @@ are removed when CSS is applied.</pre>
         if (this.studioView === "generate" && [
             "loras",
             "stack"
-        ].includes(shell.dataset.mobileTab || "")) shell.dataset.mobileTab = "create";
+        ].includes(shell.dataset.mobileTab || "")) {
+            shell.dataset.mobileTab = "create";
+            for (const button of this.root.querySelectorAll(".ss-mobile-tab")){
+                button.dataset.active = String(button.dataset.tab === "create");
+                button.setAttribute("aria-current", button.dataset.tab === "create" ? "page" : "false");
+            }
+        }
         for (const page of this.root.querySelectorAll("[data-studio-page]"))page.hidden = page.dataset.studioPage !== this.studioView;
         for (const button of this.root.querySelectorAll('[data-action="studio-view"]'))button.setAttribute("aria-current", button.dataset.view === this.studioView ? "page" : "false");
         this.setStylesSection(this.stylesSection);
@@ -10509,7 +10338,6 @@ are removed when CSS is applied.</pre>
         const sizes = {
             generationWidth: "--ss-generation-width",
             historyWidth: "--ss-history-width",
-            libraryWidth: "--ss-library-width",
             promptHeight: "--ss-prompt-height"
         };
         for (const [key, property] of Object.entries(sizes)){
@@ -10546,7 +10374,6 @@ are removed when CSS is applied.</pre>
                 sizes: {
                     generationWidth: size("--ss-generation-width"),
                     historyWidth: size("--ss-history-width"),
-                    libraryWidth: size("--ss-library-width"),
                     promptHeight: size("--ss-prompt-height")
                 }
             }));
@@ -10593,8 +10420,6 @@ are removed when CSS is applied.</pre>
         if (![
             "generation",
             "history",
-            "dock",
-            "lora-split",
             "prompt"
         ].includes(kind)) return;
         event.preventDefault();
@@ -10628,16 +10453,6 @@ are removed when CSS is applied.</pre>
             const width = kind === "generation" ? clamp(clientX - bounds.left, 180, max) : clamp(bounds.right - clientX, 160, max);
             shell.style.setProperty(kind === "generation" ? "--ss-generation-width" : "--ss-history-width", `${Math.round(width)}px`);
         }
-        if (kind === "dock") {
-            const bounds = shell.getBoundingClientRect();
-            const max = Math.max(190, Math.min(540, bounds.height * 0.6));
-            shell.style.setProperty("--ss-dock-height", `${Math.round(clamp(bounds.bottom - clientY, 118, max))}px`);
-        }
-        if (kind === "lora-split") {
-            const bounds = this.get(".ss-lora-dock-content").getBoundingClientRect();
-            const width = clamp(clientX - bounds.left, 220, Math.max(220, bounds.width - 250));
-            shell.style.setProperty("--ss-library-width", `${Math.round(width)}px`);
-        }
         if (kind === "prompt") {
             const bounds = this.get(".ss-center").getBoundingClientRect();
             const max = Math.max(130, bounds.height - 180);
@@ -10650,8 +10465,6 @@ are removed when CSS is applied.</pre>
         const properties = {
             generation: "--ss-generation-width",
             history: "--ss-history-width",
-            dock: "--ss-dock-height",
-            "lora-split": "--ss-library-width",
             prompt: "--ss-prompt-height"
         };
         const property = properties[kind];
