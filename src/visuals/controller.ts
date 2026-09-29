@@ -254,6 +254,7 @@ class ChatVisualsController {
       return
     }
     if (payload?.type === "character_visual_canon_result" && this.data?.activeChat?.characterId === payload?.data?.character?.id) {
+      if (!this.data) return
       this.data.characterFolder = payload.data.folder || null
       this.selectedLookId = payload.data.activeLookId || "default"
       this.renderLookEditor()

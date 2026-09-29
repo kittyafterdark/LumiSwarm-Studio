@@ -1,6 +1,7 @@
 // These files intentionally share one top-level scope and are concatenated in order.
 // Keep feature implementation out of src/frontend.ts; it is only the public export surface.
 export const frontendSources = [
+  "src/state/recipes.ts",
   "src/state/types.ts",
   "src/state/runtime.ts",
   "src/visuals/icons.ts",

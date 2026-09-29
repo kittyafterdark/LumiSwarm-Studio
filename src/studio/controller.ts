@@ -62,6 +62,9 @@ class StudioController {
   private inspectorResizeObserver: ResizeObserver | null = null
   private stopActiveResize: (() => void) | null = null
   private profileSyncTimer: ReturnType<typeof setTimeout> | null = null
+  private renderStyles: StudioRenderStyle[] = []
+  private studioDefaults: StudioGenerationDefaults | null = null
+  private activeRenderStyleId = ""
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return
@@ -473,6 +476,7 @@ class StudioController {
         parameters,
       },
       recordHints: {
+        styleId: this.activeRenderStyleId,
         resolvedPrompt: draft.details.resolvedPrompt,
         resolvedNegativePrompt: draft.details.resolvedNegativePrompt,
         presets: draft.details.presets,
@@ -571,6 +575,13 @@ class StudioController {
           <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
           <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
         </nav>
+        <div class="ss-default-actions">
+          <button class="ss-button" data-action="save-defaults">Save current as Studio default</button>
+          <button class="ss-button" data-action="restore-defaults">Restore Studio defaults</button>
+          <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
+          <button class="ss-button" data-action="save-base-recipe" hidden>Save to active character base</button>
+          <button class="ss-button" data-action="save-look-recipe" hidden>Save to active look</button>
+        </div>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
         <div class="ss-workspace">
@@ -1007,6 +1018,13 @@ are removed when CSS is applied.</pre>
           <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
           <button class="ss-button" data-action="manage-stack">Manage active LoRA stack</button>
         </nav>
+        <div class="ss-default-actions">
+          <button class="ss-button" data-action="save-defaults">Save current as Studio default</button>
+          <button class="ss-button" data-action="restore-defaults">Restore Studio defaults</button>
+          <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
+          <button class="ss-button" data-action="save-base-recipe" hidden>Save to active character base</button>
+          <button class="ss-button" data-action="save-look-recipe" hidden>Save to active look</button>
+        </div>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
         <nav class="ss-mobile-tabs" aria-label="Studio sections">
@@ -1245,6 +1263,31 @@ are removed when CSS is applied.</pre>
           </aside>
         </div>
 
+        <section class="ss-style-manager" hidden>
+          <nav class="ss-view-nav" aria-label="Style tools">
+            <button class="ss-button" data-action="style-section" data-section="saved">Saved Styles</button>
+            <button class="ss-button" data-action="style-section" data-section="stacks">LoRA Stacks</button>
+            <button class="ss-button" data-action="style-section" data-section="library">LoRA Library</button>
+          </nav>
+          <div class="ss-style-editor" data-role="style-editor">
+            <label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label>
+            <label>Name<input class="ss-input" data-role="style-name" placeholder="Soft painterly render"></label>
+            <label>LoRA stack<select class="ss-select" data-role="style-stack"><option value="">No stack</option></select></label>
+            <label>Checkpoint<input class="ss-input" data-role="style-checkpoint" placeholder="Inherit"></label>
+            <label>Positive addition<textarea class="ss-textarea" data-role="style-positive"></textarea></label>
+            <label>Negative addition<textarea class="ss-textarea" data-role="style-negative"></textarea></label>
+            <label>Render recipe (blank fields inherit)<textarea class="ss-textarea" data-role="style-recipe" aria-label="Render recipe JSON">{}</textarea></label>
+            <div class="ss-view-nav">
+              <button class="ss-button" data-action="style-capture">Use current render settings</button>
+              <button class="ss-button" data-action="style-apply">Apply</button>
+              <button class="ss-button" data-action="style-save">Save / Rename</button>
+              <button class="ss-button" data-action="style-duplicate">Duplicate / Save as</button>
+              <button class="ss-button" data-action="style-delete">Delete</button>
+              <button class="ss-button" data-action="style-clear">Clear active Style</button>
+            </div>
+            <p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p>
+          </div>
+        </section>
         <section class="ss-lora-dock">
           <div class="ss-dock-resizer" data-resize="dock" role="separator" aria-orientation="horizontal" title="Drag to resize LoRA workspace"></div>
           <div class="ss-dock-head">
@@ -1550,6 +1593,7 @@ are removed when CSS is applied.</pre>
                     <label class="ss-field"><span>Positive base</span><textarea class="ss-textarea" data-role="visual-positive" placeholder="Character identity and consistent visual tags…"></textarea></label>
                     <label class="ss-field"><span>Negative base</span><textarea class="ss-textarea" data-role="visual-negative" placeholder="Things to consistently avoid…"></textarea></label>
                   </div>
+                  ${this.recipeEditorMarkup("base")}
                   <div class="ss-library-visual-options">
                     <label class="ss-field"><span>Checkpoint</span><select class="ss-select" data-role="visual-checkpoint"><option value="">Use current Studio checkpoint</option></select></label>
                     <label class="ss-field"><span>Base LoRA stack</span><select class="ss-select" data-role="visual-stack"><option value="">No bound stack</option></select></label>
@@ -1568,6 +1612,7 @@ are removed when CSS is applied.</pre>
               </div>
               <div class="ss-library-visual-body ss-library-look-editor" data-role="library-look-editor" hidden>
                 <section class="ss-library-visual-section">
+                  ${this.recipeEditorMarkup("look")}
                   <div class="ss-library-look-editor-grid">
                     <label class="ss-field"><span>Look name</span><input class="ss-input" data-role="library-look-name" placeholder="Formal"></label>
                     <label class="ss-field"><span>Aliases / prose cues</span><input class="ss-input" data-role="library-look-aliases" placeholder="formalwear, gala, suit"></label>
@@ -1847,8 +1892,18 @@ are removed when CSS is applied.</pre>
       const button = target.closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
+      if (action && (action.startsWith("style-") || ["save-defaults", "restore-defaults", "clear-defaults", "save-base-recipe", "save-look-recipe"].includes(action))) {
+        try { this.handleRenderAction(action, button.dataset.section) }
+        catch (error) { this.setRunStatus(error instanceof Error ? error.message : String(error), true) }
+        return
+      }
       if (action === "studio-view" || action === "manage-stack") {
         this.setStudioView(action === "manage-stack" ? "styles" : button.dataset.view)
+        if (action === "manage-stack") {
+          const style = this.selectedRenderStyle()
+          this.handleRenderAction("style-section", style ? "saved" : "stacks")
+          if (style) { this.get<HTMLSelectElement>('[data-role="render-style"]').value = style.id; this.editRenderStyle() }
+        }
         return
       }
       if (action === "refresh-metadata") this.refreshMetadata()
@@ -2129,7 +2184,16 @@ are removed when CSS is applied.</pre>
     if (this.disposed) return
     const data = payload?.data || {}
     switch (payload?.type) {
+      case "render_settings_result":
+        this.studioDefaults = sanitizeStudioDefaults(data?.defaults)
+        this.renderStyles = sanitizeRenderStyles(data?.styles)
+        if (!this.renderStyles.some(item => item.id === this.activeRenderStyleId)) this.activeRenderStyleId = ""
+        this.renderStyleOptions()
+        this.setRunStatus("Render settings saved.")
+        break
       case "bootstrap_result":
+        this.studioDefaults = sanitizeStudioDefaults(data?.renderSettings?.defaults)
+        this.renderStyles = sanitizeRenderStyles(data?.renderSettings?.styles)
         this.state.connections = Array.isArray(data.connections) ? data.connections : []
         this.state.parserConnections = Array.isArray(data.parserConnections) ? data.parserConnections : []
         this.acceptOutputPage(data)
@@ -2508,6 +2572,7 @@ are removed when CSS is applied.</pre>
         break
       case "output_folders_result":
         this.state.outputFolders = Array.isArray(data) ? data : []
+        this.renderStyleOptions()
         if (this.pendingCreatedFolder) {
           const pending = this.pendingCreatedFolder
           const created = pending.bindingType === "character"
@@ -2526,7 +2591,7 @@ are removed when CSS is applied.</pre>
       case "output_favorites_result": {
         this.state.outputFolders = Array.isArray(data.folders) ? data.folders : this.state.outputFolders
         const imageIds = Array.isArray(data.imageIds) ? data.imageIds.map(String) : []
-        imageIds.forEach((imageId) => this.librarySelection.delete(imageId))
+        imageIds.forEach((imageId: string) => this.librarySelection.delete(imageId))
         if (!this.librarySelection.size) this.librarySelectionAnchorId = ""
         this.renderOutputLibrary()
         this.renderOutputs()
@@ -2773,6 +2838,7 @@ are removed when CSS is applied.</pre>
     this.acceptSwarmOptions(data.swarmOptions)
     this.populateModels()
     this.applyConnectionDefaults()
+    this.applyStableSettings(this.studioDefaults)
     if (this.pendingDraftRestore && (!this.pendingDraftRestore.connectionId || this.pendingDraftRestore.connectionId === this.state.connection?.id)) {
       const draft = this.pendingDraftRestore
       this.pendingDraftRestore = null
@@ -3080,7 +3146,7 @@ are removed when CSS is applied.</pre>
       this.workflowValues.set(parameter.id, Number(input.value))
       input.addEventListener("input", () => {
         const value = Number(input.value)
-        if (Number.isFinite(value)) this.workflowValues.set(parameter.id, type === "integer" ? Math.trunc(value) : value)
+        if (Number.isFinite(value)) this.workflowValues.set(parameter.id, type === "integer" ? Math.trunc(Number(value)) : value)
       })
       field.appendChild(input)
     } else if (parameter.viewType === "prompt" || parameter.viewType === "big") {
@@ -3114,9 +3180,9 @@ are removed when CSS is applied.</pre>
       if (typeof value === "string") value = value.slice(0, 65_536)
       if (typeof value === "number") {
         if (!Number.isFinite(value)) continue
-        if (parameter.min !== null) value = Math.max(parameter.min, value)
-        if (parameter.max !== null) value = Math.min(parameter.max, value)
-        if (parameter.type === "integer") value = Math.trunc(value)
+        if (parameter.min !== null) value = Math.max(parameter.min, Number(value))
+        if (parameter.max !== null) value = Math.min(parameter.max, Number(value))
+        if (parameter.type === "integer") value = Math.trunc(Number(value))
       }
       if (value !== undefined && value !== null) result[parameter.id] = value
     }
@@ -4106,7 +4172,7 @@ are removed when CSS is applied.</pre>
   private toggleLoraDownloader(force?: boolean, focus = true): void {
     const search = this.get<HTMLInputElement>('[data-role="lora-search"]')
     const entry = this.get<HTMLElement>('[data-role="lora-download-entry"]')
-    const shouldOpen = force ?? entry.hidden
+    const shouldOpen = force ?? (entry.hidden === true)
     if (!shouldOpen && this.loraDownloadActive) {
       this.cancelLoraDownload()
       return
@@ -4305,6 +4371,7 @@ are removed when CSS is applied.</pre>
   }
 
   private renderStackPresets(): void {
+    this.renderStyleOptions()
     for (const select of this.root.querySelectorAll<HTMLSelectElement>(
       '[data-role="stack-preset"], [data-role="mobile-stack-preset"]',
     )) {
@@ -4654,10 +4721,158 @@ are removed when CSS is applied.</pre>
     this.setRunStatus(`Deleting LoRA stack “${preset.name}”…`)
   }
 
+  private recipeEditorMarkup(prefix: string): string {
+    return `<div class="ss-style-editor"><label>Render Style<select class="ss-select" data-role="${prefix}-recipe-style"></select></label>${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key}<input class="ss-input" data-role="${prefix}-recipe-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>`
+  }
+
+  private populateRecipeEditor(prefix: string, target: { generationRecipe?: GenerationRecipe; styleId?: string } | null | undefined): void {
+    const select = this.get<HTMLSelectElement>(`[data-role="${prefix}-recipe-style"]`)
+    select.replaceChildren()
+    const choices = [{ id: "", name: "Inherit Style" }, ...this.renderStyles]
+    if (target?.styleId && !choices.some(item => item.id === target.styleId)) choices.push({ id: target.styleId, name: "Reference missing" })
+    for (const item of choices) { const option = element("option", "", item.name); option.value = item.id; select.appendChild(option) }
+    select.value = target?.styleId || ""
+    const recipe = sanitizeGenerationRecipe(target?.generationRecipe) as Record<string, unknown>
+    for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"]) this.get<HTMLInputElement>(`[data-role="${prefix}-recipe-${key}"]`).value = String(recipe[key] ?? "")
+  }
+
+  private readRecipeEditor(prefix: string): { generationRecipe: GenerationRecipe; styleId: string } {
+    const recipe: Record<string, unknown> = {}
+    for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"]) {
+      const value = this.get<HTMLInputElement>(`[data-role="${prefix}-recipe-${key}"]`).value
+      if (value !== "") recipe[key] = ["sampler", "scheduler"].includes(key) ? value : Number(value)
+    }
+    return { generationRecipe: sanitizeGenerationRecipe(recipe), styleId: this.get<HTMLSelectElement>(`[data-role="${prefix}-recipe-style"]`).value }
+  }
+
+  private captureStableSettings(): StudioGenerationDefaults {
+    const recipe: Record<string, unknown> = {}
+    for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"]) {
+      const value = this.get<HTMLInputElement>(`[data-role="${key}"]`).value
+      recipe[key] = ["sampler", "scheduler"].includes(key) ? value : Number(value)
+    }
+    return { version: 1, ...sanitizeGenerationRecipe(recipe), checkpoint: this.get<HTMLSelectElement>('[data-role="model"]').value }
+  }
+
+  private applyStableSettings(value: unknown): void {
+    const settings = sanitizeStudioDefaults(value)
+    if (!settings) return
+    for (const [key, value] of Object.entries(sanitizeGenerationRecipe(settings))) {
+      const input = this.get<HTMLInputElement | HTMLSelectElement>(`[data-role="${key}"]`)
+      if (input instanceof HTMLSelectElement && ![...input.options].some(option => option.value === String(value))) {
+        const option = element("option", "", String(value)); option.value = String(value); input.appendChild(option)
+      }
+      input.value = String(value)
+    }
+    if (settings.checkpoint) {
+      const select = this.get<HTMLSelectElement>('[data-role="model"]')
+      if (![...select.options].some(option => option.value === settings.checkpoint)) {
+        const option = element("option", "", settings.checkpoint); option.value = settings.checkpoint; select.appendChild(option)
+      }
+      select.value = settings.checkpoint
+    }
+    this.setDimensions(Number(this.get<HTMLInputElement>('[data-role="width"]').value), Number(this.get<HTMLInputElement>('[data-role="height"]').value))
+    this.updateFamilyChip()
+    this.scheduleStudioProfileSync()
+  }
+
+  private selectedRenderStyle(): StudioRenderStyle | undefined {
+    const binding = this.activeVisualFolder()?.binding
+    const look = binding?.enabled ? binding.looks.find(item => item.id === binding.activeLookId) : undefined
+    const id = look?.styleId || (binding?.enabled ? binding.styleId : "") || this.activeRenderStyleId
+    return this.renderStyles.find(item => item.id === id)
+  }
+
+  private effectiveRecipe(): GenerationRecipe & { checkpoint?: string } {
+    const binding = this.activeVisualFolder()?.binding
+    return resolveGenerationConfig({ provider: this.state.connection?.default_parameters, studioDefaults: this.studioDefaults,
+      liveProfile: this.captureStableSettings(), style: this.selectedRenderStyle(),
+      characterBase: binding?.enabled ? binding : undefined,
+      characterLook: binding?.enabled ? binding.looks.find(item => item.id === binding.activeLookId) : undefined })
+  }
+
+  private renderStyleOptions(): void {
+    const select = this.root.querySelector<HTMLSelectElement>('[data-role="render-style"]')
+    if (!select) return
+    const previous = select.value
+    select.replaceChildren()
+    for (const item of [{ id: "", name: "New Style" }, ...this.renderStyles]) {
+      const option = element("option", "", item.name); option.value = item.id; select.appendChild(option)
+    }
+    select.value = this.renderStyles.some(item => item.id === previous) ? previous : ""
+    select.onchange = () => this.editRenderStyle()
+    const stack = this.get<HTMLSelectElement>('[data-role="style-stack"]')
+    const stackId = stack.value
+    stack.replaceChildren()
+    for (const item of [{ id: "", name: "No stack" }, ...this.state.stackPresets]) {
+      const option = element("option", "", item.name); option.value = item.id; stack.appendChild(option)
+    }
+    stack.value = stackId
+    const binding = this.activeVisualFolder()?.binding
+    this.get<HTMLElement>('[data-action="save-base-recipe"]').hidden = !binding
+    this.get<HTMLElement>('[data-action="save-look-recipe"]').hidden = !binding?.looks.some(item => item.id === binding.activeLookId)
+  }
+
+  private editRenderStyle(): void {
+    const style = this.renderStyles.find(item => item.id === this.get<HTMLSelectElement>('[data-role="render-style"]').value)
+    for (const [role, value] of Object.entries({ "style-name": style?.name, "style-stack": style?.loraStackId, "style-checkpoint": style?.checkpoint, "style-positive": style?.positiveAppend, "style-negative": style?.negativeAppend, "style-recipe": JSON.stringify(style?.recipe || {}, null, 2) })) {
+      const input = this.get<HTMLInputElement | HTMLSelectElement>(`[data-role="${role}"]`)
+      if (input instanceof HTMLSelectElement && value && ![...input.options].some(option => option.value === value)) {
+        const option = element("option", "", "Reference missing"); option.value = value; input.appendChild(option)
+      }
+      input.value = value || ""
+    }
+    const stack = this.state.stackPresets.find(item => item.id === style?.loraStackId)
+    this.get<HTMLElement>('[data-role="style-summary"]').textContent = style ? `${style.name} · ${stack?.items.length || 0} LoRAs · ${style.recipe?.width || "inherit"} × ${style.recipe?.height || "inherit"} · ${style.recipe?.steps ?? "inherit"} steps · CFG ${style.recipe?.cfg ?? "inherit"}${style.loraStackId && !stack ? " · Stack reference missing" : ""}` : "Create a reusable Style; raw LoRA stacks remain separate."
+  }
+
+  private handleRenderAction(action: string, section?: string): void {
+    const settings = this.captureStableSettings()
+    const value = (role: string) => this.get<HTMLInputElement>(`[data-role="${role}"]`).value
+    if (action === "save-defaults") this.send("save_studio_defaults", { defaults: settings })
+    if (action === "restore-defaults") this.applyStableSettings(this.studioDefaults)
+    if (action === "clear-defaults") {
+      this.studioDefaults = null
+      this.send("save_studio_defaults", { defaults: null })
+      this.applyConnectionDefaults()
+      this.get<HTMLSelectElement>('[data-role="model"]').value = this.state.connection?.model || ""
+      this.scheduleStudioProfileSync()
+    }
+    if (action === "save-base-recipe" || action === "save-look-recipe") this.send("save_active_render_recipe", { destination: action === "save-look-recipe" ? "look" : "base", recipe: settings, checkpoint: settings.checkpoint, styleId: this.selectedRenderStyle()?.id || "" })
+    if (action === "style-section") {
+      this.get<HTMLElement>('[data-role="style-editor"]').hidden = section !== "saved"
+      this.get<HTMLElement>(".ss-shell").dataset.styleSection = section || "saved"
+      if (section === "stacks") this.get<HTMLElement>('[data-role="stack-preset"]').focus()
+    }
+    if (action === "style-capture") {
+      this.get<HTMLTextAreaElement>('[data-role="style-recipe"]').value = JSON.stringify(sanitizeGenerationRecipe(settings), null, 2)
+      this.get<HTMLInputElement>('[data-role="style-checkpoint"]').value = settings.checkpoint || ""
+    }
+    if (action === "style-save" || action === "style-duplicate") {
+      if (!value("style-name").trim()) throw new Error("Give the Style a name.")
+      const recipe = JSON.parse(value("style-recipe") || "{}")
+      if (!recipe || typeof recipe !== "object" || Array.isArray(recipe)) throw new Error("Recipe must be a JSON object of stable render settings.")
+      const style = { id: action === "style-duplicate" ? createRequestId() : value("render-style") || createRequestId(), name: value("style-name") + (action === "style-duplicate" ? " copy" : ""), recipe: sanitizeGenerationRecipe(recipe), checkpoint: value("style-checkpoint"), loraStackId: value("style-stack"), positiveAppend: value("style-positive"), negativeAppend: value("style-negative") }
+      this.send("save_render_style", { style })
+    }
+    if (action === "style-delete" && value("render-style")) this.send("delete_render_style", { id: value("render-style") })
+    if (action === "style-clear") { this.activeRenderStyleId = ""; this.scheduleStudioProfileSync() }
+    if (action === "style-apply") {
+      const style = this.renderStyles.find(item => item.id === value("render-style"))
+      if (!style) throw new Error("Save or select a Style first.")
+      this.activeRenderStyleId = style.id
+      this.applyStableSettings({ ...style.recipe, checkpoint: style.checkpoint })
+      this.setRunStatus(`Applied ${style.name}${style.loraStackId && !this.state.stackPresets.some(item => item.id === style.loraStackId) ? " · Stack reference missing" : ""}.`)
+    }
+  }
+
   private setStudioView(view?: string): void {
     const selected = view === "styles" ? "styles" : "generate"
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.studioView = selected
+    const manager = this.root.querySelector<HTMLElement>(".ss-style-manager")
+    if (manager) manager.hidden = selected !== "styles"
+    if (selected === "styles") this.renderStyleOptions()
     shell.classList.remove("ss-loras-collapsed")
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="studio-view"]')) {
       button.setAttribute("aria-current", button.dataset.view === selected ? "page" : "false")
@@ -5327,7 +5542,7 @@ are removed when CSS is applied.</pre>
       if (this.state.models.length) {
         this.setRunStatus(`“${binding.checkpoint}” from ${folder.name} is not available on this SwarmUI connection.`, true)
       }
-      return items.length
+      return items.length > 0
     }
 
     this.hydratedVisualCharacterId = binding.characterId
@@ -5348,6 +5563,7 @@ are removed when CSS is applied.</pre>
     const selectedStackId = selectedStackValue === "__custom__" ? "" : selectedStackValue
     const selectedStack = this.state.stackPresets.find((preset) => preset.id === selectedStackId)
     const profile = {
+      ...this.readRecipeEditor("base"),
       positivePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value,
       negativePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value,
       checkpoint: this.get<HTMLSelectElement>('[data-role="visual-checkpoint"]').value,
@@ -5411,6 +5627,7 @@ are removed when CSS is applied.</pre>
     const set = (role: string, value: string) => {
       this.get<HTMLInputElement | HTMLTextAreaElement>(`[data-role="${role}"]`).value = value
     }
+    this.populateRecipeEditor("look", look)
     set("library-look-name", look?.name || "")
     set("library-look-aliases", look?.aliases.join(", ") || "")
     set("library-look-outfit", look?.outfitPrompt || "")
@@ -5467,6 +5684,7 @@ are removed when CSS is applied.</pre>
     const list = (value: string) => value.split(/[,|\n]+/).map((item) => item.trim()).filter(Boolean)
     const stackValue = this.get<HTMLSelectElement>('[data-role="library-look-stack"]').value
     return {
+      ...this.readRecipeEditor("look"),
       id: existing?.id || "",
       name,
       aliases: list(this.get<HTMLInputElement>('[data-role="library-look-aliases"]').value),
@@ -5578,6 +5796,7 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="visual-profile-title"]').textContent = `${folder.name} visuals`
     this.get<HTMLElement>('[data-role="visual-profile-subtitle"]').textContent = "Base generation profile and named continuity looks"
     this.get<HTMLElement>('[data-role="visual-profile-state"]').textContent = folder.binding.enabled ? "Active" : "Disabled"
+    this.populateRecipeEditor("base", folder.binding)
     this.get<HTMLInputElement>('[data-role="visual-enabled"]').checked = folder.binding.enabled
     this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value = folder.binding.positivePrompt
     this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value = folder.binding.negativePrompt
@@ -6041,7 +6260,8 @@ are removed when CSS is applied.</pre>
       : folder?.binding?.enabled
         ? folder.binding.stackSnapshot || []
         : []
-    for (const item of boundItems) {
+    const styleStack = this.state.stackPresets.find(item => item.id === this.selectedRenderStyle()?.loraStackId)?.items || []
+    for (const item of [...styleStack, ...boundItems]) {
       const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl)
       merged.set(normalizeModelName(item.name), {
         lora,
@@ -6071,7 +6291,7 @@ are removed when CSS is applied.</pre>
       : null
     const personaVisual = personaPreset?.positivePrompt.trim() || ""
     let layeredPrompt = prompt
-    for (const layer of [visual, personaVisual]) {
+    for (const layer of [this.selectedRenderStyle()?.positiveAppend, visual, personaVisual]) {
       if (layer && !layeredPrompt.toLowerCase().includes(layer.toLowerCase())) {
         layeredPrompt = [layer, layeredPrompt].filter(Boolean).join(", ")
       }
@@ -6085,7 +6305,7 @@ are removed when CSS is applied.</pre>
   }
 
   private finalNegativePrompt(): string {
-    const prompt = this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim()
+    const prompt = [this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim(), this.selectedRenderStyle()?.negativeAppend].filter(Boolean).join(", ")
     const folder = this.activeVisualFolder()
     const visual = folder?.binding?.enabled ? folder.binding.negativePrompt.trim() : ""
     if (!visual || prompt.toLowerCase().includes(visual.toLowerCase())) return prompt
@@ -6180,9 +6400,9 @@ are removed when CSS is applied.</pre>
     }
 
     const enabled = this.effectiveStack().filter((item) => item.enabled)
-    const parameters = this.collectGenerationParameters(rawRequestOverride, enabled)
+    const parameters = { ...this.collectGenerationParameters(rawRequestOverride, enabled), ...recipeParameters(this.effectiveRecipe()) }
 
-    const model = this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
+    const model = this.effectiveRecipe().checkpoint || this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
     const clientJobId = createRequestId()
     const negativePrompt = this.finalNegativePrompt()
     const profileInput = {
@@ -6236,6 +6456,7 @@ are removed when CSS is applied.</pre>
         parameters,
       },
       recordHints: {
+        styleId: this.activeRenderStyleId,
         resolvedPrompt: resolved.prompt,
         resolvedNegativePrompt: resolved.negativePrompt,
         presets: resolved.presets,

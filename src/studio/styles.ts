@@ -3469,7 +3469,7 @@ const STUDIO_V3_STYLES = `
   .ss-view-nav [aria-current="page"] { border-color: var(--lumiverse-accent); }
   .ss-shell:not([data-studio-view="styles"]) > .ss-lora-dock,
   .ss-shell[data-studio-view="styles"] > .ss-workspace { display: none !important; }
-  .ss-shell[data-studio-view="styles"] > .ss-lora-dock { display: flex; flex: 1 1 0; min-height: 0; height: auto; overflow: auto; }
+  .ss-shell[data-studio-view="styles"] > .ss-lora-dock { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; height: auto; overflow: auto; }
   .ss-dock-resizer, .ss-dock-head [data-action="toggle-loras"] { display: none; }
   .ss-history-grid { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); }
   .ss-shell .ss-workspace { grid-template-columns: minmax(0, var(--ss-generation-width)) minmax(0, 1fr) minmax(0, var(--ss-history-width)); }
@@ -3478,6 +3478,15 @@ const STUDIO_V3_STYLES = `
   }
   @media (max-width: 720px) {
     .ss-shell[data-studio-view="styles"] .ss-lora-dock-content { display: flex; flex-direction: column; overflow: auto; }
-    .ss-shell[data-studio-view="styles"] :is(.ss-lora-library, .ss-stack-panel) { display: flex !important; min-height: 260px; }
+    .ss-shell[data-studio-view="styles"] :is(.ss-lora-library, .ss-stack-pane) { display: flex !important; min-height: 260px; }
   }
+
+  .ss-default-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ss-style-manager { flex: 0 1 auto; min-height: 0; overflow: auto; }
+  .ss-style-manager[hidden], .ss-style-editor[hidden] { display: none; }
+  .ss-style-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; padding: 12px; }
+  .ss-style-editor label { display: grid; gap: 6px; min-width: 0; }
+  .ss-shell[data-studio-view="styles"]:not([data-style-section="stacks"]):not([data-style-section="library"]) .ss-lora-dock { display: none !important; }
+  .ss-shell[data-studio-view="styles"] .ss-style-manager { flex: 1 1 auto; }
+  .ss-shell[data-style-section="stacks"] .ss-style-manager, .ss-shell[data-style-section="library"] .ss-style-manager { flex: 0 0 auto; }
 `

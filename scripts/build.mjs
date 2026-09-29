@@ -6,7 +6,7 @@ import { frontendSources } from "./frontend-sources.mjs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const entries = [
-  [["src/backend.ts"], "dist/backend.js"],
+  [["src/state/recipes.ts", "src/backend.ts"], "dist/backend.js"],
   [frontendSources, "dist/frontend.js"],
 ]
 

@@ -3,9 +3,9 @@ function outputLibraryPageSize(viewportWidth: number): number {
 }
 
 function setOutputLibraryView(
-  library: { dataset: Record<string, string> },
-  landingSurface: { hidden: boolean },
-  folderSurface: { hidden: boolean },
+  library: { dataset: Record<string, string | undefined> },
+  landingSurface: { hidden: boolean | string },
+  folderSurface: { hidden: boolean | string },
   view: "folders" | "folder",
 ): void {
   library.dataset.view = view
