@@ -69,3 +69,11 @@ Do not merge into main until these visual and live integration checks are accept
 Folder overlays now composite theme layers over an opaque backing, including transparent themes. Preview-backed cards keep the same placeholder as cards without previews. Thumbnail sources are preloaded and decoded before an instantaneous reveal; failed decodes retain the placeholder. Superseded requests, connection changes, removed cards and disposal cannot reveal a late bitmap. Preview responses patch images without invoking the library renderer.
 
 Run `npx playwright install chromium` once, then `npm run test:browser` after building. This standalone Chromium diagnostic hydrates 60 mock LoRAs with delayed responses, holds decoded images behind a test barrier, and verifies placeholder visibility, opaque folder backing, zero library renders, zero card disconnections, retained identity and unchanged card geometry. It uses no live host or SwarmUI connection. The DOM suite separately covers failed and stale decode races.
+
+## Mobile workspace
+
+At 720px and below, the sole workspace navigation is the non-wrapping Create / Tune / Style / LoRAs / Stack / History strip. The provider header and navigation remain outside the scrolling content, within the existing safe-top boundary. A single breakpoint listener selects explicit persistent panes; switching tabs never rebuilds cards, prompts, rows or the Style draft. History excludes the desktop working-stack presentation. The original init-image controls move between their existing desktop Tune slot and mobile Create slot only on breakpoint changes, retaining their state and listeners.
+
+Mobile Style uses Apply / Save / an overflow disclosure for Duplicate, Delete and Clear. Repeated headings and nested panel borders are removed; the library retains its thumbnail layout, with a minimum card width controlling one versus two columns. Desktop keeps its two workspaces and three-column composition.
+
+`npm run test:browser` also checks six-pane isolation at 360/430/720px, initial mobile restoration, draft/node persistence, overflow actions, no horizontal page overflow, pinned navigation, safe-top and desktop restoration. Set `STUDIO_SCREENSHOT_DIR` to save mocked 430px views for review. Live host acceptance remains separate.

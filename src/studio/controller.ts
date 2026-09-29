@@ -10,6 +10,10 @@ class StudioController {
   private behavior: StudioBehavior
   private appearanceControlsInitialized = false
   private readonly state: StudioState
+  private readonly mobileMedia = window.matchMedia("(max-width: 720px)")
+  private readonly handleMobileLayout = () => {
+    this.setMobileTab(this.get<HTMLElement>(".ss-shell").dataset.mobileTab || "create")
+  }
   private loraPage = 0
   private loraFilterKey = ""
   private lorasDirty = true
@@ -210,6 +214,10 @@ class StudioController {
     this.buildV3()
     this.restoreWorkspaceState()
     this.bind()
+    this.get<HTMLElement>('[data-role="rail-history"] > summary').addEventListener("click", event => {
+      if (this.mobileMedia.matches) event.preventDefault()
+    })
+    this.mobileMedia.addEventListener("change", this.handleMobileLayout)
     if (typeof ResizeObserver !== "undefined") {
       this.inspectorResizeObserver = new ResizeObserver(() => this.fitInspectorToSpace())
       this.inspectorResizeObserver.observe(this.get<HTMLElement>('[data-role="inspector-stage"]'))
@@ -239,6 +247,7 @@ class StudioController {
     this.persistWorkspaceState()
     this.syncStudioProfile()
     this.disposed = true
+    this.mobileMedia.removeEventListener("change", this.handleMobileLayout)
     if (this.profileSyncTimer) clearTimeout(this.profileSyncTimer)
     this.profileSyncTimer = null
     if (this.loraSearchTimer) clearTimeout(this.loraSearchTimer)
@@ -824,13 +833,14 @@ are removed when CSS is applied.</pre>
         <nav class="ss-mobile-tabs" aria-label="Studio sections">
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="create" data-active="true">Create</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="generation" data-active="false">Tune</button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="style" data-active="false">Style</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="loras" data-active="false">LoRAs</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="stack" data-active="false">Stack</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="history" data-active="false">History</button>
         </nav>
 
         <div class="ss-workspace" data-studio-page="generate" aria-label="Generate">
-          <aside class="ss-generation-pane" data-mobile-panel="generation">
+          <aside class="ss-generation-pane" data-mobile-pane="generation">
             <div class="ss-pane-head">
               <div class="ss-pane-title"><strong>Generation</strong><div class="ss-muted ss-tiny">Model and render controls</div></div>
               <button class="ss-icon-button ss-pane-toggle" data-action="toggle-generation" title="Collapse generation sidebar" aria-label="Collapse generation sidebar">‹</button>
@@ -927,7 +937,7 @@ are removed when CSS is applied.</pre>
                   <button class="ss-button ss-context-button" data-action="change-orientation" data-role="orientation-action" title="Change image orientation">${PORTRAIT_ICON}<span>Portrait</span></button>
                   <button class="ss-button ss-context-button" data-action="toggle-seed-mode" data-role="seed-action" title="Reuse the current output seed">${CURRENT_SEED_ICON}<span>Current seed</span></button>
                 </div>
-                <div class="ss-init-panel">
+                <div class="ss-init-slot" data-role="tune-init-slot"><div class="ss-init-panel">
                   <div class="ss-init-preview" data-role="init-preview">No init</div>
                   <div class="ss-init-content">
                     <div class="ss-init-head"><strong class="ss-tiny">Init image</strong><span class="ss-init-label" data-role="init-label">Text-to-image</span></div>
@@ -940,6 +950,7 @@ are removed when CSS is applied.</pre>
                   <label class="ss-creativity-row"><span>Creativity</span><input data-role="denoise" type="range" min="0" max="1" step="0.05" value="0.6" /><span data-role="denoise-label">0.60</span></label>
                   <input data-role="init-file" type="file" accept="image/*" hidden />
                 </div>
+              </div>
               </div>
               <details class="ss-advanced">
                 <summary>Advanced Swarm controls</summary>
@@ -989,7 +1000,7 @@ are removed when CSS is applied.</pre>
           <div class="ss-resize-handle ss-resize-generation" data-resize="generation" role="separator" aria-orientation="vertical" title="Drag to resize generation controls"></div>
 
           <main class="ss-center">
-            <section class="ss-output-stage" data-role="output-stage" data-mobile-panel="create-output">
+            <section class="ss-output-stage" data-role="output-stage" data-mobile-pane="create">
               <div class="ss-output-stage-head">
                 <div class="ss-section-title"><strong>Current output</strong><span class="ss-muted ss-tiny">Saved by Lumiverse</span></div>
                 <div class="ss-output-actions">
@@ -1017,7 +1028,8 @@ are removed when CSS is applied.</pre>
 
             <div class="ss-center-resizer" data-resize="prompt" role="separator" aria-orientation="horizontal" title="Drag to resize prompt area"></div>
 
-            <section class="ss-prompt-panel" data-mobile-panel="create-prompt">
+            <section class="ss-prompt-panel" data-mobile-pane="create">
+              <div data-role="create-init-slot"></div>
               <div class="ss-section-head ss-prompt-head">
                 <div class="ss-section-title"><strong>Prompt</strong><span class="ss-muted ss-tiny">LoRA triggers are opt-in</span></div>
                 <div class="ss-prompt-status" data-role="prompt-run-status">Waiting for SwarmUI.</div>
@@ -1059,8 +1071,8 @@ are removed when CSS is applied.</pre>
 
           <div class="ss-resize-handle ss-resize-history" data-resize="history" role="separator" aria-orientation="vertical" title="Drag to resize stack and history"></div>
 
-          <aside class="ss-history-pane ss-utility-rail" data-mobile-panel="history">
-            <section class="ss-working-stack"><header class="ss-section-head"><strong>LoRA Stack</strong><span data-role="generate-stack-count" class="ss-muted"></span></header><div class="ss-stack-list" data-role="generate-stack-list"></div></section>
+          <aside class="ss-history-pane ss-utility-rail" data-mobile-pane="history">
+            <section class="ss-working-stack" data-mobile-pane="desktop-stack"><header class="ss-section-head"><strong>LoRA Stack</strong><span data-role="generate-stack-count" class="ss-muted"></span></header><div class="ss-stack-list" data-role="generate-stack-list"></div></section>
             <details class="ss-rail-history" data-role="rail-history"><summary>History · <span data-role="output-count">0</span> outputs</summary>
             <div class="ss-pane-head">
               <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny">Saved outputs</div></div>
@@ -1084,7 +1096,7 @@ are removed when CSS is applied.</pre>
         <section class="ss-styles-workspace" data-studio-page="styles" aria-label="Styles" hidden>
           <header class="ss-styles-header"><strong>Styles</strong><span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span></header>
           <div class="ss-styles-columns" data-role="styles-columns" data-collapsed="false">
-          <section class="ss-style-column ss-style-editor-column" data-style-column="saved">
+          <section class="ss-style-column ss-style-editor-column" data-style-column="saved" data-mobile-pane="style">
           <button class="ss-button ss-style-collapse" data-action="style-collapse" aria-expanded="true" aria-label="Collapse Styles editor">Styles ‹</button>
           <div class="ss-saved-style-editor" data-role="style-editor">
             <header class="ss-style-selection"><button class="ss-button" data-action="style-new" aria-label="New Style">+</button><label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label><p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p></header>
@@ -1102,18 +1114,20 @@ are removed when CSS is applied.</pre>
               </details>
             </div>
             <footer class="ss-style-footer">
-              <button class="ss-button ss-button-primary" data-action="style-apply">Apply Style</button>
-              <button class="ss-button" data-action="style-save">Save changes</button>
+              <button class="ss-button ss-button-primary" data-action="style-apply"><span class="ss-desktop-label">Apply Style</span><span class="ss-mobile-label">Apply</span></button>
+              <button class="ss-button" data-action="style-save"><span class="ss-desktop-label">Save changes</span><span class="ss-mobile-label">Save</span></button>
+              <details class="ss-style-more" data-role="style-more" open><summary class="ss-button" aria-label="More Style actions">⋯</summary><div class="ss-style-more-actions">
               <button class="ss-button" data-action="style-duplicate">Duplicate</button>
               <button class="ss-button ss-button-danger" data-action="style-delete">Delete</button>
               <button class="ss-button" data-action="style-clear">Clear active Style</button>
+              </div></details>
             </footer>
           </div>
           </section>
-          <section class="ss-style-column ss-style-library-column" data-style-column="library">
+          <section class="ss-style-column ss-style-library-column" data-style-column="library" data-mobile-pane="loras">
 <section class="ss-lora-library">
               <div class="ss-lora-titlebar">
-                <div class="ss-section-title"><strong>Select LoRAs</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
+                <div class="ss-section-title"><strong><span class="ss-desktop-label">Select LoRAs</span><span class="ss-mobile-label">LoRAs</span></strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
                 <span class="ss-family-chip" data-role="family-chip">Waiting for checkpoint</span>
               </div>
               <div class="ss-library-tools">
@@ -1167,10 +1181,10 @@ are removed when CSS is applied.</pre>
               </footer>
             </section>
           </section>
-          <section class="ss-style-column ss-style-stack-column" data-style-column="stacks">
+          <section class="ss-style-column ss-style-stack-column" data-style-column="stacks" data-mobile-pane="stack">
 <section class="ss-stack-pane">
               <div class="ss-section-head">
-                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
+                <div class="ss-section-title"><strong><span class="ss-desktop-label">LoRA stack</span><span class="ss-mobile-label">Stack</span></strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
               </div>
               <div class="ss-stack-head-tools">
                 <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
@@ -1725,7 +1739,7 @@ are removed when CSS is applied.</pre>
       }
       if (action === "save-native-main" || action === "save-native-character") { void this.saveNativePrompts(action === "save-native-character"); return }
       if (action && (action.startsWith("style-") || ["save-defaults", "restore-defaults", "clear-defaults", "save-base-recipe", "save-look-recipe"].includes(action))) {
-        try { this.handleRenderAction(action) }
+        try { this.handleRenderAction(action); if (this.mobileMedia.matches) this.get<HTMLDetailsElement>('[data-role="style-more"]').open = false }
         catch (error) { this.setRunStatus(error instanceof Error ? error.message : String(error), true) }
         return
       }
@@ -4861,7 +4875,7 @@ are removed when CSS is applied.</pre>
     this.studioView = view === "styles" ? "styles" : "generate"
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.studioView = this.studioView
-    if (this.studioView === "generate" && ["loras", "stack"].includes(shell.dataset.mobileTab || "")) {
+    if (this.studioView === "generate" && ["style", "loras", "stack"].includes(shell.dataset.mobileTab || "")) {
       shell.dataset.mobileTab = "create"
       for (const button of this.root.querySelectorAll<HTMLElement>(".ss-mobile-tab")) {
         button.dataset.active = String(button.dataset.tab === "create")
@@ -5049,19 +5063,26 @@ are removed when CSS is applied.</pre>
   }
 
   private setMobileTab(tab: string): void {
-    const allowed = new Set(["create", "generation", "loras", "stack", "history"])
+    const allowed = new Set(["create", "generation", "style", "loras", "stack", "history"])
     const selected = allowed.has(tab) ? tab : "create"
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.mobileTab = selected
-    this.setStudioView(["loras", "stack"].includes(selected) ? "styles" : "generate")
-    if (selected === "history") this.get<HTMLDetailsElement>('[data-role="rail-history"]').open = true
-    if (["loras", "stack"].includes(selected)) {
-      this.focusStyleColumn(selected === "stack" ? "stacks" : "library")
+    this.setStudioView(["style", "loras", "stack"].includes(selected) ? "styles" : "generate")
+    const mobile = this.mobileMedia.matches
+    // These panes are created once. Selection changes visibility, never their ownership or contents.
+    for (const pane of this.root.querySelectorAll<HTMLElement>("[data-mobile-pane]")) {
+      pane.hidden = mobile && pane.dataset.mobilePane !== selected
     }
+    if (selected === "history") this.get<HTMLDetailsElement>('[data-role="rail-history"]').open = true
+    this.get<HTMLDetailsElement>('[data-role="style-more"]').open = !mobile
+    const init = this.get<HTMLElement>(".ss-init-panel")
+    const slot = this.get<HTMLElement>(`[data-role="${mobile ? "create" : "tune"}-init-slot"]`)
+    if (init.parentElement !== slot) slot.appendChild(init)
     for (const button of this.root.querySelectorAll<HTMLButtonElement>(".ss-mobile-tab")) {
       const active = button.dataset.tab === selected
       button.dataset.active = String(active)
       button.setAttribute("aria-current", active ? "page" : "false")
+      if (active && mobile) button.scrollIntoView?.({ block: "nearest", inline: "nearest" })
     }
     this.persistWorkspaceState()
   }

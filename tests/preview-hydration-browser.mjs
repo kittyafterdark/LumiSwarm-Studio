@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { createServer } from 'node:http'
 import { runInNewContext } from 'node:vm'
 import { chromium } from 'playwright'
@@ -17,6 +18,7 @@ const server = createServer((req, res) => {
   }
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+if (process.env.STUDIO_SCREENSHOT_DIR) await mkdir(process.env.STUDIO_SCREENSHOT_DIR, {recursive:true})
 let browser
 try {
   browser = await chromium.launch({ headless: true })
@@ -28,7 +30,9 @@ try {
   await page.evaluate(async () => {
     const { StudioController, defaultStudioBehavior } = await import('/frontend.js')
     const root = document.querySelector('#root')
+    root.style.fontFamily = 'Arial, sans-serif'
     root.style.setProperty('--lumiverse-fill-subtle', 'transparent')
+    for (const [name,value] of Object.entries({'--lumiverse-text':'#e8e9ef','--lumiverse-text-muted':'#a0a3b1','--lumiverse-text-dim':'#7b7f91','--lumiverse-border':'#30323a','--lumiverse-bg':'#101117','--lumiverse-accent':'#a4a2f8'})) root.style.setProperty(name,value)
     const canvas = document.createElement('canvas')
     canvas.width = canvas.height = 4
     const nativeDecode = HTMLImageElement.prototype.decode
@@ -100,6 +104,74 @@ try {
   assert.equal(after.identity, true)
   assert.equal(after.decoded, true)
   assert.deepEqual(after.geometry, before.geometry, 'Thumbnail arrival must not shift card geometry')
+  // The same mounted components compose six exclusive mobile screens.
+  await page.evaluate(() => {
+    diagnostic.prompt = document.querySelector('[data-role="positive"]')
+    diagnostic.prompt.value = 'mobile draft'
+    diagnostic.styleInput = document.querySelector('[data-role="style-name"]')
+    diagnostic.styleInput.value = 'Unsaved mobile Style'
+    diagnostic.controller.addLora(diagnostic.controller.state.loras[0])
+    diagnostic.stackRow = document.querySelector('[data-role="stack-list"]').firstElementChild
+    document.documentElement.style.setProperty('--app-interactive-safe-top','24px')
+  })
+  for (const width of [360, 430, 720]) {
+    await page.setViewportSize({ width, height: 850 })
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('.ss-view-nav')).display === 'none')
+    for (const tab of ['create','generation','style','loras','stack','history','loras','style']) {
+      await page.locator(`[data-tab="${tab}"]`).click()
+      if (width === 430 && process.env.STUDIO_SCREENSHOT_DIR) await page.screenshot({path:join(process.env.STUDIO_SCREENSHOT_DIR, `${tab}.png`)})
+      const state = await page.evaluate(() => {
+        const visible = node => node.checkVisibility()
+        const nav = document.querySelector('.ss-mobile-tabs')
+        const panes = [...document.querySelectorAll('[data-mobile-pane]')].filter(visible).map(node=>node.dataset.mobilePane)
+        return {
+          panes: [...new Set(panes)],
+          tabs: [...nav.querySelectorAll('button')].map(button=>button.textContent),
+          singleRow: new Set([...nav.querySelectorAll('button')].map(button=>button.offsetTop)).size === 1,
+          noOverflow: document.querySelector('.ss-shell').scrollWidth <= innerWidth,
+          draft: diagnostic.styleInput.value,
+          identity: diagnostic.cards.every(card=>card.isConnected) && diagnostic.prompt === document.querySelector('[data-role="positive"]') && diagnostic.stackRow === document.querySelector('[data-role="stack-list"]').firstElementChild,
+          initVisible: visible(document.querySelector('.ss-init-panel')),
+          top: document.querySelector('.ss-shell').getBoundingClientRect().top,
+        }
+      })
+      assert.deepEqual(state.panes,[tab],`${width}px ${tab} shows only its pane`)
+      assert.deepEqual(state.tabs,['Create','Tune','Style','LoRAs','Stack','History'])
+      assert.equal(state.singleRow,true)
+      assert.equal(state.noOverflow,true,`${width}px ${tab} has no horizontal page overflow`)
+      assert.equal(state.draft,'Unsaved mobile Style')
+      assert.equal(state.identity,true)
+      assert.equal(state.initVisible,tab==='create')
+      assert.equal(state.top,24)
+    }
+    await page.locator('[data-tab="style"]').click()
+    assert.equal(await page.locator('[data-action="style-duplicate"]').isVisible(),false)
+    await page.locator('.ss-style-more > summary').click()
+    assert.equal(await page.locator('[data-action="style-duplicate"]').isVisible(),true)
+    await page.locator('[data-tab="loras"]').click()
+    const beforeScroll = await page.locator('.ss-mobile-tabs').boundingBox()
+    await page.evaluate(()=>document.querySelector('.ss-styles-workspace').scrollTop=1000)
+    assert.deepEqual(await page.locator('.ss-mobile-tabs').boundingBox(),beforeScroll,'Navigation stays beneath the header while content scrolls')
+  }
+  await page.setViewportSize({width:1440,height:1000})
+  await page.waitForFunction(()=>[...document.querySelectorAll('[data-style-column]')].every(node=>node.checkVisibility()))
+  assert.equal(await page.locator('.ss-view-nav').isVisible(),true)
+  assert.equal(await page.locator('[data-action="style-duplicate"]').isVisible(),true)
+  assert.equal(await page.evaluate(()=>diagnostic.cards.every(card=>card.isConnected)),true)
+  assert.equal(await page.evaluate(()=>diagnostic.disconnects),0,'Mobile switching must never detach library cards')
+  console.log('Chromium mobile: six isolated panes at 360/430/720px, persistent drafts/cards/rows, pinned tabs, overflow actions and desktop restoration: ok')
+  await page.setViewportSize({width:360,height:850})
+  await page.reload()
+  await page.addStyleTag({content:css})
+  await page.evaluate(async()=>{
+    const {StudioController,defaultStudioBehavior}=await import('/frontend.js')
+    window.mobileController=new StudioController({sendToBackend(){}},{root:document.querySelector('#root')},()=>{},()=>{},defaultStudioBehavior(),()=>{})
+  })
+  const initialMobile = await page.evaluate(()=>({
+    tab:document.querySelector('.ss-shell').dataset.mobileTab,
+    panes:[...new Set([...document.querySelectorAll('[data-mobile-pane]')].filter(node=>node.checkVisibility()).map(node=>node.dataset.mobilePane))],
+  }))
+  assert.deepEqual(initialMobile.panes,[initialMobile.tab],'Fresh mobile mount restores exactly one pane')
   assert.deepEqual(errors, [])
   console.log('Chromium: 60 delayed decoded previews, zero card disconnects, zero library renders, stable geometry, opaque folders: ok')
 } finally {
