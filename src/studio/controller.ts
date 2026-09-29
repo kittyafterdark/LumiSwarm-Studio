@@ -65,6 +65,8 @@ class StudioController {
   private renderStyles: StudioRenderStyle[] = []
   private studioDefaults: StudioGenerationDefaults | null = null
   private activeRenderStyleId = ""
+  private nativeImageGenReady = false
+  private nativeSavePending = false
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return
@@ -222,6 +224,7 @@ class StudioController {
       }
     }
     this.send("bootstrap")
+    void nativeImageGenAvailable().then(available => { if (!this.disposed) { this.nativeImageGenReady = available; this.renderStyleOptions() } })
     this.send("get_lora_download_status")
   }
 
@@ -579,6 +582,8 @@ class StudioController {
           <button class="ss-button" data-action="save-defaults">Save current as Studio default</button>
           <button class="ss-button" data-action="restore-defaults">Restore Studio defaults</button>
           <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
+          <button class="ss-button" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">Save prompts to Lumiverse Image Gen</button>
+          <button class="ss-button" data-action="save-native-character" hidden>Mirror active character prompts to Lumiverse</button>
           <button class="ss-button" data-action="save-base-recipe" hidden>Save to active character base</button>
           <button class="ss-button" data-action="save-look-recipe" hidden>Save to active look</button>
         </div>
@@ -1022,6 +1027,8 @@ are removed when CSS is applied.</pre>
           <button class="ss-button" data-action="save-defaults">Save current as Studio default</button>
           <button class="ss-button" data-action="restore-defaults">Restore Studio defaults</button>
           <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
+          <button class="ss-button" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">Save prompts to Lumiverse Image Gen</button>
+          <button class="ss-button" data-action="save-native-character" hidden>Mirror active character prompts to Lumiverse</button>
           <button class="ss-button" data-action="save-base-recipe" hidden>Save to active character base</button>
           <button class="ss-button" data-action="save-look-recipe" hidden>Save to active look</button>
         </div>
@@ -1276,7 +1283,7 @@ are removed when CSS is applied.</pre>
             <label>Checkpoint<input class="ss-input" data-role="style-checkpoint" placeholder="Inherit"></label>
             <label>Positive addition<textarea class="ss-textarea" data-role="style-positive"></textarea></label>
             <label>Negative addition<textarea class="ss-textarea" data-role="style-negative"></textarea></label>
-            <label>Render recipe (blank fields inherit)<textarea class="ss-textarea" data-role="style-recipe" aria-label="Render recipe JSON">{}</textarea></label>
+            ${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key}<input class="ss-input" data-role="style-render-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}
             <div class="ss-view-nav">
               <button class="ss-button" data-action="style-capture">Use current render settings</button>
               <button class="ss-button" data-action="style-apply">Apply</button>
@@ -1892,6 +1899,7 @@ are removed when CSS is applied.</pre>
       const button = target.closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
+      if (action === "save-native-main" || action === "save-native-character") { void this.saveNativePrompts(action === "save-native-character"); return }
       if (action && (action.startsWith("style-") || ["save-defaults", "restore-defaults", "clear-defaults", "save-base-recipe", "save-look-recipe"].includes(action))) {
         try { this.handleRenderAction(action, button.dataset.section) }
         catch (error) { this.setRunStatus(error instanceof Error ? error.message : String(error), true) }
@@ -4721,6 +4729,25 @@ are removed when CSS is applied.</pre>
     this.setRunStatus(`Deleting LoRA stack “${preset.name}”…`)
   }
 
+  private async saveNativePrompts(character: boolean): Promise<void> {
+    if (!this.nativeImageGenReady || this.nativeSavePending) return
+    const binding = this.activeVisualFolder()?.binding
+    if (character && !binding) return
+    const look = binding?.looks.find(item => item.id === binding.activeLookId)
+    if (character && binding?.activeLookId && !look) { this.setRunStatus("The active look no longer exists.", true); return }
+    this.nativeSavePending = true
+    try {
+      const style = this.selectedRenderStyle()
+      const result = await upsertStudioNativePreset({ kind: character ? "character" : "main", characterId: binding?.characterId,
+        lookId: character ? look?.id : undefined, name: character ? `Studio character · ${this.activeVisualFolder()?.name} · ${look?.name || "base"}` : "Studio Image Gen",
+        prompt: character ? [binding?.positivePrompt, look?.outfitPrompt, style?.positiveAppend].filter(Boolean).join(", ") : this.get<HTMLTextAreaElement>('[data-role="positive"]').value,
+        negativePrompt: character ? [binding?.negativePrompt, look?.negativePrompt, style?.negativeAppend].filter(Boolean).join(", ") : this.get<HTMLTextAreaElement>('[data-role="negative"]').value })
+      if (!this.disposed) this.setRunStatus(`Saved native prompt preset. Renderer settings remain in Studio.${result.warnings.length ? " " + result.warnings.join("; ") : ""}`)
+    } catch (error) {
+      if (!this.disposed) this.setRunStatus(error instanceof Error ? error.message : String(error), true)
+    } finally { this.nativeSavePending = false }
+  }
+
   private recipeEditorMarkup(prefix: string): string {
     return `<div class="ss-style-editor"><label>Render Style<select class="ss-select" data-role="${prefix}-recipe-style"></select></label>${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key}<input class="ss-input" data-role="${prefix}-recipe-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>`
   }
@@ -4809,21 +4836,30 @@ are removed when CSS is applied.</pre>
     }
     stack.value = stackId
     const binding = this.activeVisualFolder()?.binding
+    const native = this.get<HTMLButtonElement>('[data-action="save-native-main"]')
+    native.disabled = !this.nativeImageGenReady
+    native.title = this.nativeImageGenReady ? "Save compatible prompts; leaves the active native preset unchanged" : "Lumiverse Image Gen is unavailable"
+    this.get<HTMLElement>('[data-action="save-native-character"]').hidden = !this.nativeImageGenReady || !binding
     this.get<HTMLElement>('[data-action="save-base-recipe"]').hidden = !binding
     this.get<HTMLElement>('[data-action="save-look-recipe"]').hidden = !binding?.looks.some(item => item.id === binding.activeLookId)
   }
 
   private editRenderStyle(): void {
     const style = this.renderStyles.find(item => item.id === this.get<HTMLSelectElement>('[data-role="render-style"]').value)
-    for (const [role, value] of Object.entries({ "style-name": style?.name, "style-stack": style?.loraStackId, "style-checkpoint": style?.checkpoint, "style-positive": style?.positiveAppend, "style-negative": style?.negativeAppend, "style-recipe": JSON.stringify(style?.recipe || {}, null, 2) })) {
+    for (const [role, value] of Object.entries({ "style-name": style?.name, "style-stack": style?.loraStackId, "style-checkpoint": style?.checkpoint, "style-positive": style?.positiveAppend, "style-negative": style?.negativeAppend })) {
       const input = this.get<HTMLInputElement | HTMLSelectElement>(`[data-role="${role}"]`)
       if (input instanceof HTMLSelectElement && value && ![...input.options].some(option => option.value === value)) {
         const option = element("option", "", "Reference missing"); option.value = value; input.appendChild(option)
       }
       input.value = value || ""
     }
+    this.fillStyleRecipe(style?.recipe || {})
     const stack = this.state.stackPresets.find(item => item.id === style?.loraStackId)
     this.get<HTMLElement>('[data-role="style-summary"]').textContent = style ? `${style.name} · ${stack?.items.length || 0} LoRAs · ${style.recipe?.width || "inherit"} × ${style.recipe?.height || "inherit"} · ${style.recipe?.steps ?? "inherit"} steps · CFG ${style.recipe?.cfg ?? "inherit"}${style.loraStackId && !stack ? " · Stack reference missing" : ""}` : "Create a reusable Style; raw LoRA stacks remain separate."
+  }
+
+  private fillStyleRecipe(recipe: GenerationRecipe): void {
+    for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"] as const) this.get<HTMLInputElement>(`[data-role="style-render-${key}"]`).value = String(recipe[key] ?? "")
   }
 
   private handleRenderAction(action: string, section?: string): void {
@@ -4845,13 +4881,16 @@ are removed when CSS is applied.</pre>
       if (section === "stacks") this.get<HTMLElement>('[data-role="stack-preset"]').focus()
     }
     if (action === "style-capture") {
-      this.get<HTMLTextAreaElement>('[data-role="style-recipe"]').value = JSON.stringify(sanitizeGenerationRecipe(settings), null, 2)
+      this.fillStyleRecipe(settings)
       this.get<HTMLInputElement>('[data-role="style-checkpoint"]').value = settings.checkpoint || ""
     }
     if (action === "style-save" || action === "style-duplicate") {
       if (!value("style-name").trim()) throw new Error("Give the Style a name.")
-      const recipe = JSON.parse(value("style-recipe") || "{}")
-      if (!recipe || typeof recipe !== "object" || Array.isArray(recipe)) throw new Error("Recipe must be a JSON object of stable render settings.")
+      const recipe: Record<string, unknown> = {}
+      for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"]) {
+        const raw = value(`style-render-${key}`)
+        if (raw !== "") recipe[key] = ["sampler", "scheduler"].includes(key) ? raw : Number(raw)
+      }
       const style = { id: action === "style-duplicate" ? createRequestId() : value("render-style") || createRequestId(), name: value("style-name") + (action === "style-duplicate" ? " copy" : ""), recipe: sanitizeGenerationRecipe(recipe), checkpoint: value("style-checkpoint"), loraStackId: value("style-stack"), positiveAppend: value("style-positive"), negativeAppend: value("style-negative") }
       this.send("save_render_style", { style })
     }
@@ -4870,6 +4909,7 @@ are removed when CSS is applied.</pre>
     const selected = view === "styles" ? "styles" : "generate"
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.studioView = selected
+    if (selected === "generate" && ["loras", "stack"].includes(shell.dataset.mobileTab || "")) shell.dataset.mobileTab = "create"
     const manager = this.root.querySelector<HTMLElement>(".ss-style-manager")
     if (manager) manager.hidden = selected !== "styles"
     if (selected === "styles") this.renderStyleOptions()
@@ -5081,6 +5121,10 @@ are removed when CSS is applied.</pre>
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.mobileTab = selected
     this.setStudioView(["loras", "stack"].includes(selected) ? "styles" : "generate")
+    if (["loras", "stack"].includes(selected)) {
+      shell.dataset.styleSection = selected === "stack" ? "stacks" : "library"
+      this.get<HTMLElement>('[data-role="style-editor"]').hidden = true
+    }
     for (const button of this.root.querySelectorAll<HTMLButtonElement>(".ss-mobile-tab")) {
       const active = button.dataset.tab === selected
       button.dataset.active = String(active)
@@ -6261,7 +6305,9 @@ are removed when CSS is applied.</pre>
         ? folder.binding.stackSnapshot || []
         : []
     const styleStack = this.state.stackPresets.find(item => item.id === this.selectedRenderStyle()?.loraStackId)?.items || []
-    for (const item of [...styleStack, ...boundItems]) {
+    const look = folder?.binding?.enabled ? folder.binding.looks.find(item => item.id === folder.binding?.activeLookId) : undefined
+    const lookStack = this.state.stackPresets.find(item => item.id === look?.stackPresetId)?.items || look?.stackSnapshot || []
+    for (const item of [...styleStack, ...boundItems, ...lookStack]) {
       const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl)
       merged.set(normalizeModelName(item.name), {
         lora,
@@ -6291,7 +6337,8 @@ are removed when CSS is applied.</pre>
       : null
     const personaVisual = personaPreset?.positivePrompt.trim() || ""
     let layeredPrompt = prompt
-    for (const layer of [this.selectedRenderStyle()?.positiveAppend, visual, personaVisual]) {
+    const look = folder?.binding?.enabled ? folder.binding.looks.find(item => item.id === folder.binding?.activeLookId) : undefined
+    for (const layer of [this.selectedRenderStyle()?.positiveAppend, visual, look?.outfitPrompt, ...(look?.triggerWords || []), personaVisual]) {
       if (layer && !layeredPrompt.toLowerCase().includes(layer.toLowerCase())) {
         layeredPrompt = [layer, layeredPrompt].filter(Boolean).join(", ")
       }
@@ -6307,7 +6354,8 @@ are removed when CSS is applied.</pre>
   private finalNegativePrompt(): string {
     const prompt = [this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim(), this.selectedRenderStyle()?.negativeAppend].filter(Boolean).join(", ")
     const folder = this.activeVisualFolder()
-    const visual = folder?.binding?.enabled ? folder.binding.negativePrompt.trim() : ""
+    const look = folder?.binding?.enabled ? folder.binding.looks.find(item => item.id === folder.binding?.activeLookId) : undefined
+    const visual = folder?.binding?.enabled ? [folder.binding.negativePrompt.trim(), look?.negativePrompt].filter(Boolean).join(", ") : ""
     if (!visual || prompt.toLowerCase().includes(visual.toLowerCase())) return prompt
     return [visual, prompt].filter(Boolean).join(", ")
   }

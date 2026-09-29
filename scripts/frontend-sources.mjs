@@ -11,6 +11,7 @@ export const frontendSources = [
   "src/settings/options.ts",
   "src/studio/styles.ts",
   "src/host/dom.ts",
+  "src/host/image-gen.ts",
   "src/miniplayer/surface.ts",
   "src/settings/preferences.ts",
   "src/state/utils.ts",
