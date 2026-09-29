@@ -1,6 +1,11 @@
 // Swarm Studio's authored frontend is split by feature under src/.
 // The build concatenates the ordered source modules into the single Spindle entry artifact.
 export {
+  defaultStudioBehavior,
+  studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset,
+  sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters,
+  normalizeWorkspaceState,
+  StudioController,
   applyPresetPrompt,
   applyPresetStackPrompts,
   applySwarmPresetTokens,

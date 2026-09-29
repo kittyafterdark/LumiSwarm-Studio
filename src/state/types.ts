@@ -181,6 +181,8 @@ interface OutputFolder {
   imageIds: string[]
   binding: {
     type: "character"
+    generationRecipe?: GenerationRecipe
+    styleId?: string
     characterId: string
     positivePrompt: string
     negativePrompt: string
@@ -196,6 +198,8 @@ interface OutputFolder {
 }
 
 interface CharacterVisualLook {
+  generationRecipe?: GenerationRecipe
+  styleId?: string
   id: string
   name: string
   aliases: string[]

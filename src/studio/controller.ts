@@ -10,7 +10,20 @@ class StudioController {
   private behavior: StudioBehavior
   private appearanceControlsInitialized = false
   private readonly state: StudioState
+  private readonly mobileMedia = window.matchMedia("(max-width: 720px)")
+  private readonly handleMobileLayout = () => {
+    this.setMobileTab(this.get<HTMLElement>(".ss-shell").dataset.mobileTab || "create")
+  }
+  private loraPage = 0
+  private loraFilterKey = ""
+  private lorasDirty = true
+  private loraSearchTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly loraCards = new Map<string, { signature: string; node: HTMLElement }>()
+  private folderTreeKey = ""
+  private readonly previewRequests = new Map<string, { connectionId: string; name: string }>()
   private previewObserver: IntersectionObserver | null = null
+  private previewEpoch = 0
+  private readonly previewLoads = new WeakMap<HTMLImageElement, { url: string; epoch: number }>()
   private readonly previewCache = new Map<string, string>()
   private readonly requestedPreviews = new Set<string>()
   private connectionRequestId = ""
@@ -58,10 +71,15 @@ class StudioController {
   private pendingMoveImageIds: string[] = []
   private outputMetadataRequestId = ""
   private pendingMetadataAction: "reuse" | "init" | "" = ""
-  private outputResizeObserver: ResizeObserver | null = null
   private inspectorResizeObserver: ResizeObserver | null = null
   private stopActiveResize: (() => void) | null = null
   private profileSyncTimer: ReturnType<typeof setTimeout> | null = null
+  private studioView: "generate" | "styles" = "generate"
+  private renderStyles: StudioRenderStyle[] = []
+  private studioDefaults: StudioGenerationDefaults | null = null
+  private activeRenderStyleId = ""
+  private nativeImageGenReady = false
+  private nativeSavePending = false
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return
@@ -196,9 +214,11 @@ class StudioController {
     this.buildV3()
     this.restoreWorkspaceState()
     this.bind()
+    this.get<HTMLElement>('[data-role="rail-history"] > summary').addEventListener("click", event => {
+      if (this.mobileMedia.matches) event.preventDefault()
+    })
+    this.mobileMedia.addEventListener("change", this.handleMobileLayout)
     if (typeof ResizeObserver !== "undefined") {
-      this.outputResizeObserver = new ResizeObserver(() => this.fitPreviewToAspect())
-      this.outputResizeObserver.observe(this.get<HTMLElement>('[data-role="output-stage"]'))
       this.inspectorResizeObserver = new ResizeObserver(() => this.fitInspectorToSpace())
       this.inspectorResizeObserver.observe(this.get<HTMLElement>('[data-role="inspector-stage"]'))
     }
@@ -219,6 +239,7 @@ class StudioController {
       }
     }
     this.send("bootstrap")
+    void nativeImageGenAvailable().then(available => { if (!this.disposed) { this.nativeImageGenReady = available; this.renderStyleOptions() } })
     this.send("get_lora_download_status")
   }
 
@@ -226,12 +247,14 @@ class StudioController {
     this.persistWorkspaceState()
     this.syncStudioProfile()
     this.disposed = true
+    this.mobileMedia.removeEventListener("change", this.handleMobileLayout)
     if (this.profileSyncTimer) clearTimeout(this.profileSyncTimer)
     this.profileSyncTimer = null
+    if (this.loraSearchTimer) clearTimeout(this.loraSearchTimer)
+    this.loraCards.clear()
+    this.previewRequests.clear()
     this.previewObserver?.disconnect()
     this.previewObserver = null
-    this.outputResizeObserver?.disconnect()
-    this.outputResizeObserver = null
     this.inspectorResizeObserver?.disconnect()
     this.inspectorResizeObserver = null
     this.stopActiveResize?.()
@@ -473,6 +496,7 @@ class StudioController {
         parameters,
       },
       recordHints: {
+        styleId: this.activeRenderStyleId,
         resolvedPrompt: draft.details.resolvedPrompt,
         resolvedNegativePrompt: draft.details.resolvedNegativePrompt,
         presets: draft.details.presets,
@@ -540,204 +564,6 @@ class StudioController {
     const found = this.root.querySelector(selector)
     if (!found) throw new Error(`Swarm Studio UI element missing: ${selector}`)
     return found as T
-  }
-
-  private build(): void {
-    this.root.innerHTML = `
-      <div class="ss-shell">
-        <div class="ss-topbar">
-          <div class="ss-connection-wrap">
-            <select class="ss-select ss-connection" data-role="connection" aria-label="SwarmUI connection">
-              <option value="">Loading SwarmUI connections…</option>
-            </select>
-          </div>
-          <button class="ss-button" data-action="refresh-metadata" title="Rescan LoRAs and their metadata">Refresh metadata</button>
-          <div class="ss-token-wrap">
-            <button class="ss-button" data-action="toggle-token" aria-expanded="false">Metadata token</button>
-            <div class="ss-token-popover" data-role="token-popover" hidden>
-              <p>Lumiverse keeps the connection secret private from extensions. If SwarmUI authentication is enabled, save the same <code>swarm_token</code> here for metadata and preview requests only. It is stored in Lumiverse's encrypted enclave.</p>
-              <div class="ss-token-row">
-                <input class="ss-input" data-role="metadata-token" type="password" autocomplete="off" placeholder="swarm_token value" />
-                <button class="ss-button ss-button-primary" data-action="save-token">Save</button>
-                <button class="ss-button ss-button-danger" data-action="clear-token">Clear</button>
-              </div>
-              <div class="ss-field-help" data-role="token-status">No extension metadata token saved.</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="ss-permission-banner" data-role="permission-banner"></div>
-
-        <div class="ss-workspace">
-          <div class="ss-editor">
-            <section class="ss-panel">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>Prompt</strong><span class="ss-muted ss-tiny">Trigger phrases can be inherited from the LoRA stack</span></div>
-              </div>
-              <div class="ss-prompt-grid">
-                <div class="ss-field">
-                  <label for="ss-positive">Positive</label>
-                  <textarea id="ss-positive" class="ss-textarea" data-role="positive" placeholder="Describe the image…"></textarea>
-                  <div class="ss-field-help" data-role="trigger-summary">No inherited trigger phrases.</div>
-                </div>
-                <div class="ss-field">
-                  <label for="ss-negative">Negative</label>
-                  <textarea id="ss-negative" class="ss-textarea" data-role="negative" placeholder="What should not appear…"></textarea>
-                  <div class="ss-field-help">Passed through Lumiverse's SwarmUI provider.</div>
-                </div>
-              </div>
-            </section>
-
-            <section class="ss-panel">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>Generation</strong><span class="ss-muted ss-tiny">Connection defaults are loaded first</span></div>
-              </div>
-              <div class="ss-controls-grid">
-                <div class="ss-field ss-model-field">
-                  <label>Checkpoint</label>
-                  <select class="ss-select" data-role="model"><option value="">Select a connection first</option></select>
-                </div>
-                <div class="ss-field">
-                  <label>Width</label>
-                  <input class="ss-input" data-role="width" type="number" min="64" max="4096" step="64" value="1024" />
-                </div>
-                <div class="ss-field">
-                  <label>Height</label>
-                  <input class="ss-input" data-role="height" type="number" min="64" max="4096" step="64" value="1024" />
-                </div>
-                <div class="ss-field">
-                  <label>Steps</label>
-                  <input class="ss-input" data-role="steps" type="number" min="1" max="150" step="1" value="20" />
-                </div>
-                <div class="ss-field">
-                  <label>CFG</label>
-                  <input class="ss-input" data-role="cfg" type="number" min="1" max="30" step="0.5" value="7" />
-                </div>
-                <div class="ss-field">
-                  <label>Seed</label>
-                  <input class="ss-input" data-role="seed" type="number" step="1" value="-1" title="-1 uses a random seed" />
-                </div>
-                <div class="ss-field ss-sampler-field">
-                  <label>Sampler</label>
-                  <input class="ss-input" data-role="sampler" list="ss-samplers" placeholder="Connection default" />
-                  <datalist id="ss-samplers">
-                    <option value="euler"></option><option value="euler_ancestral"></option>
-                    <option value="dpmpp_2m"></option><option value="dpmpp_2m_sde"></option>
-                    <option value="dpmpp_3m_sde"></option><option value="uni_pc"></option>
-                  </datalist>
-                </div>
-                <div class="ss-field ss-scheduler-field">
-                  <label>Scheduler</label>
-                  <input class="ss-input" data-role="scheduler" list="ss-schedulers" placeholder="Connection default" />
-                  <datalist id="ss-schedulers">
-                    <option value="normal"></option><option value="karras"></option>
-                    <option value="exponential"></option><option value="sgm_uniform"></option>
-                    <option value="simple"></option><option value="ddim_uniform"></option>
-                  </datalist>
-                </div>
-                <div class="ss-inline-actions">
-                  <button class="ss-icon-button" data-action="swap-size" title="Swap width and height" aria-label="Swap width and height">↔</button>
-                  <button class="ss-icon-button" data-action="random-seed" title="Use a random seed" aria-label="Use random seed">✦</button>
-                </div>
-              </div>
-              <details class="ss-advanced">
-                <summary>Advanced Swarm controls</summary>
-                <div class="ss-advanced-grid">
-                  <div class="ss-field">
-                    <label>Swarm preset(s)</label>
-                    <input class="ss-input" data-role="presets" placeholder="portrait, cinematic" />
-                  </div>
-                  <div class="ss-field">
-                    <label>VAE override</label>
-                    <input class="ss-input" data-role="vae" placeholder="Built-in/default" />
-                  </div>
-                  <div class="ss-field">
-                    <label>UNet override</label>
-                    <input class="ss-input" data-role="unet" placeholder="Use checkpoint" />
-                  </div>
-                  <div class="ss-field">
-                    <label>CLIP-L</label>
-                    <input class="ss-input" data-role="clip-l" placeholder="Optional text encoder" />
-                  </div>
-                  <div class="ss-field">
-                    <label>CLIP-G</label>
-                    <input class="ss-input" data-role="clip-g" placeholder="Optional text encoder" />
-                  </div>
-                  <div class="ss-field">
-                    <label>T5-XXL</label>
-                    <input class="ss-input" data-role="t5" placeholder="Optional text encoder" />
-                  </div>
-                  <div class="ss-field ss-wide">
-                    <label>Raw request override (JSON)</label>
-                    <textarea class="ss-textarea" data-role="raw-override" spellcheck="false" placeholder='{"refinerupscale": 1.25, "refinermethod": "PostApply"}'></textarea>
-                    <div class="ss-field-help">Merged by Lumiverse after the controls above. Protected connection/model/auth fields remain protected.</div>
-                  </div>
-                </div>
-              </details>
-            </section>
-
-            <section class="ss-panel">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>LoRA library</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
-              </div>
-              <div class="ss-library-tools">
-                <input class="ss-input" data-role="lora-search" type="search" placeholder="Search title, author, tag, trigger, architecture…" />
-                <select class="ss-select" data-role="lora-sort" aria-label="Sort LoRAs">
-                  <option value="title">Title</option>
-                  <option value="name">Filename</option>
-                  <option value="newest">Newest</option>
-                </select>
-              </div>
-              <div class="ss-library-status" data-role="metadata-error" hidden></div>
-              <div class="ss-lora-grid" data-role="lora-grid">
-                <div class="ss-empty">Choose a SwarmUI connection to load its LoRA library.</div>
-              </div>
-            </section>
-
-            <section class="ss-panel">
-              <div class="ss-section-head">
-                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
-                <button class="ss-button ss-button-danger" data-action="clear-stack" disabled>Clear</button>
-              </div>
-              <div class="ss-stack-list" data-role="stack-list">
-                <div class="ss-empty">Add LoRAs above. Their metadata default weight and trigger phrase are inherited automatically.</div>
-              </div>
-            </section>
-
-            <div class="ss-generate-bar">
-              <button class="ss-button ss-button-primary ss-generate" data-action="generate" disabled>Generate image</button>
-              <div class="ss-run-status" data-role="run-status">Waiting for a SwarmUI connection.</div>
-            </div>
-          </div>
-
-          <aside class="ss-output">
-            <div class="ss-section-title"><strong>Output</strong><span class="ss-muted ss-tiny">Saved by Lumiverse</span></div>
-            <div class="ss-current-preview" data-role="current-preview">
-              <div class="ss-preview-empty" data-role="preview-empty"><strong>No output yet</strong>Generate an image or choose one from this extension's history.</div>
-              <img data-role="preview-image" alt="Generated image preview" hidden />
-              <div class="ss-preview-loading" data-role="preview-loading">
-                <div class="ss-generation-progress" data-role="generation-progress" data-indeterminate="true">
-                  <div class="ss-progress-track"><span class="ss-progress-fill" data-role="progress-fill"></span></div>
-                  <div class="ss-progress-label" data-role="progress-label">Preparing…</div>
-                </div>
-              </div>
-            </div>
-            <div class="ss-output-label" data-role="output-label">Nothing selected</div>
-            <div class="ss-output-actions">
-              <button class="ss-button" data-action="download-output" disabled>Download</button>
-              <button class="ss-button" data-action="copy-output" disabled>Copy URL</button>
-            </div>
-            <div class="ss-history-head">
-              <div class="ss-section-title"><strong>History</strong><span class="ss-muted ss-tiny" data-role="output-count">0</span></div>
-              <button class="ss-icon-button" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
-            </div>
-            <div class="ss-history-grid" data-role="history-grid">
-              <div class="ss-empty">Outputs created in this chat will appear here.</div>
-            </div>
-          </aside>
-        </div>
-      </div>
-    `
   }
 
   private buildV3(): void {
@@ -948,7 +774,7 @@ class StudioController {
 .ss-generation-pane       generation sidebar
 .ss-output-stage          current image
 .ss-prompt-panel          prompt editor
-.ss-lora-dock             LoRA workspace
+.ss-styles-workspace      Styles workspace
 .ss-stack-row             stacked LoRA
 .ss-history-card          history image
 .ss-output-library        fullscreen library
@@ -997,24 +823,51 @@ are removed when CSS is applied.</pre>
           </div>
         </div>
 
+        <nav class="ss-view-nav" aria-label="Studio workspaces">
+          <button class="ss-button" data-action="studio-view" data-view="generate" aria-current="page">Generate</button>
+          <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
+        </nav>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
+
 
         <nav class="ss-mobile-tabs" aria-label="Studio sections">
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="create" data-active="true">Create</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="generation" data-active="false">Tune</button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="style" data-active="false">Style</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="loras" data-active="false">LoRAs</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="stack" data-active="false">Stack</button>
           <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="history" data-active="false">History</button>
         </nav>
 
-        <div class="ss-workspace">
-          <aside class="ss-generation-pane" data-mobile-panel="generation">
+        <div class="ss-workspace" data-studio-page="generate" aria-label="Generate">
+          <aside class="ss-generation-pane" data-mobile-pane="generation">
             <div class="ss-pane-head">
               <div class="ss-pane-title"><strong>Generation</strong><div class="ss-muted ss-tiny">Model and render controls</div></div>
               <button class="ss-icon-button ss-pane-toggle" data-action="toggle-generation" title="Collapse generation sidebar" aria-label="Collapse generation sidebar">‹</button>
             </div>
             <div class="ss-pane-body">
               <div class="ss-generation-controls">
+                <details class="ss-defaults-menu"><summary>Studio defaults</summary>
+                  <div class="ss-context-actions">
+                    <button class="ss-button" data-action="save-defaults">Save current as default</button>
+                    <button class="ss-button" data-action="restore-defaults">Restore defaults</button>
+                    <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
+                  </div>
+                </details>
+                <details class="ss-character-actions" data-role="active-character-actions" hidden>
+                  <summary data-role="active-character-actions-label">Active character</summary>
+                  <div class="ss-context-actions">
+                    <button class="ss-button" data-action="save-base-recipe" hidden>Save current recipe to character base</button>
+                    <button class="ss-button" data-action="save-look-recipe" hidden>Save current recipe to active look</button>
+                    <button class="ss-button" data-action="save-native-character" hidden>Mirror character prompts to Lumiverse</button>
+                  </div>
+                </details>
+                <details class="ss-native-actions"><summary>Lumiverse Image Gen</summary>
+                  <div class="ss-context-actions">
+                    <p class="ss-muted ss-tiny">Save the current prompts as a native preset. Render settings stay in Studio.</p>
+                    <button class="ss-button" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">Save prompts to Lumiverse</button>
+                  </div>
+                </details>
                 <section class="ss-workflow-panel">
                   <div class="ss-workflow-picker">
                     <div class="ss-field">
@@ -1084,7 +937,7 @@ are removed when CSS is applied.</pre>
                   <button class="ss-button ss-context-button" data-action="change-orientation" data-role="orientation-action" title="Change image orientation">${PORTRAIT_ICON}<span>Portrait</span></button>
                   <button class="ss-button ss-context-button" data-action="toggle-seed-mode" data-role="seed-action" title="Reuse the current output seed">${CURRENT_SEED_ICON}<span>Current seed</span></button>
                 </div>
-                <div class="ss-init-panel">
+                <div class="ss-init-slot" data-role="tune-init-slot"><div class="ss-init-panel">
                   <div class="ss-init-preview" data-role="init-preview">No init</div>
                   <div class="ss-init-content">
                     <div class="ss-init-head"><strong class="ss-tiny">Init image</strong><span class="ss-init-label" data-role="init-label">Text-to-image</span></div>
@@ -1097,6 +950,7 @@ are removed when CSS is applied.</pre>
                   <label class="ss-creativity-row"><span>Creativity</span><input data-role="denoise" type="range" min="0" max="1" step="0.05" value="0.6" /><span data-role="denoise-label">0.60</span></label>
                   <input data-role="init-file" type="file" accept="image/*" hidden />
                 </div>
+              </div>
               </div>
               <details class="ss-advanced">
                 <summary>Advanced Swarm controls</summary>
@@ -1146,7 +1000,7 @@ are removed when CSS is applied.</pre>
           <div class="ss-resize-handle ss-resize-generation" data-resize="generation" role="separator" aria-orientation="vertical" title="Drag to resize generation controls"></div>
 
           <main class="ss-center">
-            <section class="ss-output-stage" data-role="output-stage" data-mobile-panel="create-output">
+            <section class="ss-output-stage" data-role="output-stage" data-mobile-pane="create">
               <div class="ss-output-stage-head">
                 <div class="ss-section-title"><strong>Current output</strong><span class="ss-muted ss-tiny">Saved by Lumiverse</span></div>
                 <div class="ss-output-actions">
@@ -1174,7 +1028,8 @@ are removed when CSS is applied.</pre>
 
             <div class="ss-center-resizer" data-resize="prompt" role="separator" aria-orientation="horizontal" title="Drag to resize prompt area"></div>
 
-            <section class="ss-prompt-panel" data-mobile-panel="create-prompt">
+            <section class="ss-prompt-panel" data-mobile-pane="create">
+              <div data-role="create-init-slot"></div>
               <div class="ss-section-head ss-prompt-head">
                 <div class="ss-section-title"><strong>Prompt</strong><span class="ss-muted ss-tiny">LoRA triggers are opt-in</span></div>
                 <div class="ss-prompt-status" data-role="prompt-run-status">Waiting for SwarmUI.</div>
@@ -1214,14 +1069,16 @@ are removed when CSS is applied.</pre>
             </section>
           </main>
 
-          <div class="ss-resize-handle ss-resize-history" data-resize="history" role="separator" aria-orientation="vertical" title="Drag to resize history"></div>
+          <div class="ss-resize-handle ss-resize-history" data-resize="history" role="separator" aria-orientation="vertical" title="Drag to resize stack and history"></div>
 
-          <aside class="ss-history-pane" data-mobile-panel="history">
+          <aside class="ss-history-pane ss-utility-rail" data-mobile-pane="history">
+            <section class="ss-working-stack" data-mobile-pane="desktop-stack"><header class="ss-section-head"><strong>LoRA Stack</strong><span data-role="generate-stack-count" class="ss-muted"></span></header><div class="ss-stack-list" data-role="generate-stack-list"></div></section>
+            <details class="ss-rail-history" data-role="rail-history"><summary>History · <span data-role="output-count">0</span> outputs</summary>
             <div class="ss-pane-head">
-              <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny"><span data-role="output-count">0</span> saved outputs</div></div>
+              <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny">Saved outputs</div></div>
               <div>
                 <button class="ss-icon-button ss-pane-toggle" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
-                <button class="ss-icon-button ss-pane-toggle" data-action="toggle-history" title="Collapse history sidebar" aria-label="Collapse history sidebar">›</button>
+
               </div>
             </div>
             <div class="ss-pane-body ss-history-grid" data-role="history-grid">
@@ -1232,19 +1089,45 @@ are removed when CSS is applied.</pre>
               <span class="ss-history-page-label" data-role="history-page">1 / 1</span>
               <button class="ss-button" data-action="history-next" disabled>›</button>
             </div>
+            </details>
           </aside>
         </div>
 
-        <section class="ss-lora-dock">
-          <div class="ss-dock-resizer" data-resize="dock" role="separator" aria-orientation="horizontal" title="Drag to resize LoRA workspace"></div>
-          <div class="ss-dock-head">
-            <div class="ss-section-title"><strong>LoRA workspace</strong><span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span></div>
-            <button class="ss-icon-button ss-pane-toggle" data-action="toggle-loras" title="Collapse LoRA workspace" aria-label="Collapse LoRA workspace" aria-expanded="true">⌄</button>
+        <section class="ss-styles-workspace" data-studio-page="styles" aria-label="Styles" hidden>
+          <header class="ss-styles-header"><strong>Styles</strong><span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span></header>
+          <div class="ss-styles-columns" data-role="styles-columns" data-collapsed="false">
+          <section class="ss-style-column ss-style-editor-column" data-style-column="saved" data-mobile-pane="style">
+          <button class="ss-button ss-style-collapse" data-action="style-collapse" aria-expanded="true" aria-label="Collapse Styles editor">Styles ‹</button>
+          <div class="ss-saved-style-editor" data-role="style-editor">
+            <header class="ss-style-selection"><button class="ss-button" data-action="style-new" aria-label="New Style">+</button><label>Saved Style<select class="ss-select" data-role="render-style"><option value="">New Style</option></select></label><p class="ss-muted" data-role="style-summary">Choose a Style or create one.</p></header>
+            <div class="ss-style-columns">
+              <section class="ss-style-composition"><h3>Identity &amp; prompts</h3>
+                <label>Name<input class="ss-input" data-role="style-name" placeholder="Soft painterly render"></label>
+                <label>LoRA stack<select class="ss-select" data-role="style-stack"><option value="">No stack</option></select></label>
+                <label>Positive addition<textarea class="ss-textarea" data-role="style-positive" placeholder="Lighting, medium, mood…"></textarea></label>
+                <label>Negative addition<textarea class="ss-textarea" data-role="style-negative" placeholder="Things to avoid…"></textarea></label>
+              </section>
+              <details class="ss-style-recipe"><summary>Render recipe <span data-role="recipe-summary">Inherits current settings</span></summary><p class="ss-muted ss-tiny">Leave a field empty to inherit the current settings.</p>
+                <label>Checkpoint<input class="ss-input" data-role="style-checkpoint" placeholder="Inherit"></label>
+                <div class="ss-recipe-fields">${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key === "cfg" ? "CFG" : key[0].toUpperCase() + key.slice(1)}<input class="ss-input" data-role="style-render-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>
+                <button class="ss-button" data-action="style-capture">Use current render settings</button>
+              </details>
+            </div>
+            <footer class="ss-style-footer">
+              <button class="ss-button ss-button-primary" data-action="style-apply"><span class="ss-desktop-label">Apply Style</span><span class="ss-mobile-label">Apply</span></button>
+              <button class="ss-button" data-action="style-save"><span class="ss-desktop-label">Save changes</span><span class="ss-mobile-label">Save</span></button>
+              <details class="ss-style-more" data-role="style-more" open><summary class="ss-button" aria-label="More Style actions">⋯</summary><div class="ss-style-more-actions">
+              <button class="ss-button" data-action="style-duplicate">Duplicate</button>
+              <button class="ss-button ss-button-danger" data-action="style-delete">Delete</button>
+              <button class="ss-button" data-action="style-clear">Clear active Style</button>
+              </div></details>
+            </footer>
           </div>
-          <div class="ss-lora-dock-content">
-            <section class="ss-lora-library">
+          </section>
+          <section class="ss-style-column ss-style-library-column" data-style-column="library" data-mobile-pane="loras">
+<section class="ss-lora-library">
               <div class="ss-lora-titlebar">
-                <div class="ss-section-title"><strong>Select LoRAs</strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
+                <div class="ss-section-title"><strong><span class="ss-desktop-label">Select LoRAs</span><span class="ss-mobile-label">LoRAs</span></strong><span class="ss-muted ss-tiny" data-role="lora-count">0 models</span></div>
                 <span class="ss-family-chip" data-role="family-chip">Waiting for checkpoint</span>
               </div>
               <div class="ss-library-tools">
@@ -1276,11 +1159,11 @@ are removed when CSS is applied.</pre>
                     <option value="newest">Newest</option>
                   </select>
                 </div>
-                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}</button>
+                <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" data-role="lora-folder-toggle" aria-controls="ss-lora-folders" data-active="false" title="Browse LoRA folders" aria-label="Browse LoRA folders" aria-expanded="false">${FOLDER_TREE_ICON}</button>
               </div>
               <div class="ss-library-status" data-role="metadata-error" hidden></div>
               <div class="ss-lora-browser" data-role="lora-browser" data-folders-open="false">
-                <aside class="ss-lora-folder-sidebar" data-role="lora-folder-sidebar" aria-label="LoRA folders" hidden>
+                <aside class="ss-lora-folder-sidebar" data-role="lora-folder-sidebar" id="ss-lora-folders" aria-label="LoRA folders" hidden>
                   <div class="ss-lora-folder-head">
                     <strong>LoRA folders</strong>
                     <button class="ss-icon-button ss-lora-tool-icon" data-action="toggle-lora-folders" title="Close folder browser" aria-label="Close folder browser">${FOLDER_TREE_ICON}</button>
@@ -1291,13 +1174,17 @@ are removed when CSS is applied.</pre>
                   <div class="ss-empty">Choose a SwarmUI connection to load its LoRA library.</div>
                 </div>
               </div>
+              <footer class="ss-library-pagination">
+                <button class="ss-button" data-action="lora-page-prev" aria-label="Previous LoRA page">Previous</button>
+                <span class="ss-muted" data-role="lora-page-status" aria-live="polite">0 models</span>
+                <button class="ss-button" data-action="lora-page-next" aria-label="Next LoRA page">Next</button>
+              </footer>
             </section>
-
-            <div class="ss-lora-divider" data-resize="lora-split" role="separator" aria-orientation="vertical" title="Drag to resize LoRA library and stack"></div>
-
-            <section class="ss-stack-pane">
+          </section>
+          <section class="ss-style-column ss-style-stack-column" data-style-column="stacks" data-mobile-pane="stack">
+<section class="ss-stack-pane">
               <div class="ss-section-head">
-                <div class="ss-section-title"><strong>LoRA stack</strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
+                <div class="ss-section-title"><strong><span class="ss-desktop-label">LoRA stack</span><span class="ss-mobile-label">Stack</span></strong><span class="ss-muted ss-tiny" data-role="stack-count">0 enabled</span></div>
               </div>
               <div class="ss-stack-head-tools">
                 <select class="ss-select" data-role="stack-preset" aria-label="Saved LoRA stacks">
@@ -1318,6 +1205,7 @@ are removed when CSS is applied.</pre>
                 <input data-role="stack-import-file" type="file" accept="application/json,.json" hidden />
               </div>
             </section>
+          </section>
           </div>
         </section>
 
@@ -1540,6 +1428,7 @@ are removed when CSS is applied.</pre>
                     <label class="ss-field"><span>Positive base</span><textarea class="ss-textarea" data-role="visual-positive" placeholder="Character identity and consistent visual tags…"></textarea></label>
                     <label class="ss-field"><span>Negative base</span><textarea class="ss-textarea" data-role="visual-negative" placeholder="Things to consistently avoid…"></textarea></label>
                   </div>
+                  ${this.recipeEditorMarkup("base")}
                   <div class="ss-library-visual-options">
                     <label class="ss-field"><span>Checkpoint</span><select class="ss-select" data-role="visual-checkpoint"><option value="">Use current Studio checkpoint</option></select></label>
                     <label class="ss-field"><span>Base LoRA stack</span><select class="ss-select" data-role="visual-stack"><option value="">No bound stack</option></select></label>
@@ -1558,6 +1447,7 @@ are removed when CSS is applied.</pre>
               </div>
               <div class="ss-library-visual-body ss-library-look-editor" data-role="library-look-editor" hidden>
                 <section class="ss-library-visual-section">
+                  ${this.recipeEditorMarkup("look")}
                   <div class="ss-library-look-editor-grid">
                     <label class="ss-field"><span>Look name</span><input class="ss-input" data-role="library-look-name" placeholder="Formal"></label>
                     <label class="ss-field"><span>Aliases / prose cues</span><input class="ss-input" data-role="library-look-aliases" placeholder="formalwear, gala, suit"></label>
@@ -1597,7 +1487,11 @@ are removed when CSS is applied.</pre>
       const connectionId = (event.currentTarget as HTMLSelectElement).value
       if (connectionId) this.loadConnection(connectionId)
     })
-    this.get<HTMLInputElement>('[data-role="lora-search"]').addEventListener("input", () => this.renderLoras())
+    this.get<HTMLElement>('[data-role="style-editor"]').addEventListener("input", () => this.updateRecipeSummary())
+    this.get<HTMLInputElement>('[data-role="lora-search"]').addEventListener("input", () => {
+      if (this.loraSearchTimer) clearTimeout(this.loraSearchTimer)
+      this.loraSearchTimer = setTimeout(() => { this.loraSearchTimer = null; this.renderLoras() }, 120)
+    })
     const downloadUrl = this.get<HTMLInputElement>('[data-role="lora-download-url"]')
     downloadUrl.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -1837,6 +1731,22 @@ are removed when CSS is applied.</pre>
       const button = target.closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
+      if (action === "lora-page-prev" || action === "lora-page-next") {
+        this.loraPage += action === "lora-page-next" ? 1 : -1
+        this.renderLoras()
+        this.get<HTMLElement>('[data-role="lora-grid"]').scrollTop = 0
+        return
+      }
+      if (action === "save-native-main" || action === "save-native-character") { void this.saveNativePrompts(action === "save-native-character"); return }
+      if (action && (action.startsWith("style-") || ["save-defaults", "restore-defaults", "clear-defaults", "save-base-recipe", "save-look-recipe"].includes(action))) {
+        try { this.handleRenderAction(action); if (this.mobileMedia.matches) this.get<HTMLDetailsElement>('[data-role="style-more"]').open = false }
+        catch (error) { this.setRunStatus(error instanceof Error ? error.message : String(error), true) }
+        return
+      }
+      if (action === "studio-view") {
+        this.setStudioView(button.dataset.view)
+        return
+      }
       if (action === "refresh-metadata") this.refreshMetadata()
       if (action === "toggle-config") this.toggleConfigPopover(button)
       if (action === "close-settings") this.closeConfigPopover()
@@ -1917,7 +1827,6 @@ are removed when CSS is applied.</pre>
       if (action === "clear-stack") {
         this.state.stack = []
         this.renderStack()
-        this.renderLoras()
       }
       if (action === "save-stack") this.saveStackPreset()
       if (action === "load-stack") this.loadStackPreset()
@@ -2003,6 +1912,7 @@ are removed when CSS is applied.</pre>
 
   private send(type: string, data: Record<string, unknown> = {}): string {
     const requestId = createRequestId()
+    if (type === "preview") this.previewRequests.set(requestId, { connectionId: String(data.connectionId || ""), name: String(data.name || "") })
     this.ctx.sendToBackend({ type, requestId, ...data })
     return requestId
   }
@@ -2115,7 +2025,16 @@ are removed when CSS is applied.</pre>
     if (this.disposed) return
     const data = payload?.data || {}
     switch (payload?.type) {
+      case "render_settings_result":
+        this.studioDefaults = sanitizeStudioDefaults(data?.defaults)
+        this.renderStyles = sanitizeRenderStyles(data?.styles)
+        if (!this.renderStyles.some(item => item.id === this.activeRenderStyleId)) this.activeRenderStyleId = ""
+        this.renderStyleOptions()
+        this.setRunStatus("Render settings saved.")
+        break
       case "bootstrap_result":
+        this.studioDefaults = sanitizeStudioDefaults(data?.renderSettings?.defaults)
+        this.renderStyles = sanitizeRenderStyles(data?.renderSettings?.styles)
         this.state.connections = Array.isArray(data.connections) ? data.connections : []
         this.state.parserConnections = Array.isArray(data.parserConnections) ? data.parserConnections : []
         this.acceptOutputPage(data)
@@ -2226,12 +2145,15 @@ are removed when CSS is applied.</pre>
         break
       }
         break
-      case "preview_result":
-        if (payload?.name && payload?.dataUrl) {
+      case "preview_result": {
+        const request = this.previewRequests.get(payload.requestId)
+        this.previewRequests.delete(payload.requestId)
+        if (request && request.connectionId === this.state.connection?.id && request?.name === payload.name && payload.dataUrl) {
           this.previewCache.set(payload.name, payload.dataUrl)
           this.updatePreviewImages(payload.name, payload.dataUrl)
         }
         break
+      }
       case "text_editor_result": {
         const editorId = String(data.editorId || "")
         if (!editorId.startsWith("studio-") || data.cancelled === true) break
@@ -2494,6 +2416,7 @@ are removed when CSS is applied.</pre>
         break
       case "output_folders_result":
         this.state.outputFolders = Array.isArray(data) ? data : []
+        this.renderStyleOptions()
         if (this.pendingCreatedFolder) {
           const pending = this.pendingCreatedFolder
           const created = pending.bindingType === "character"
@@ -2512,7 +2435,7 @@ are removed when CSS is applied.</pre>
       case "output_favorites_result": {
         this.state.outputFolders = Array.isArray(data.folders) ? data.folders : this.state.outputFolders
         const imageIds = Array.isArray(data.imageIds) ? data.imageIds.map(String) : []
-        imageIds.forEach((imageId) => this.librarySelection.delete(imageId))
+        imageIds.forEach((imageId: string) => this.librarySelection.delete(imageId))
         if (!this.librarySelection.size) this.librarySelectionAnchorId = ""
         this.renderOutputLibrary()
         this.renderOutputs()
@@ -2566,6 +2489,12 @@ are removed when CSS is applied.</pre>
         this.setRunStatus("Saved LoRA stacks updated.")
         break
       case "studio_error":
+        if (payload.operation === "preview") {
+          const request = this.previewRequests.get(payload.requestId)
+          this.previewRequests.delete(payload.requestId)
+          if (request && request.connectionId === this.state.connection?.id) this.requestedPreviews.delete(request.name)
+          break
+        }
         if (payload.operation === "resolve_output_metadata" && this.outputMetadataRequestId) {
           const action = this.pendingMetadataAction
           this.outputMetadataRequestId = ""
@@ -2733,7 +2662,10 @@ are removed when CSS is applied.</pre>
     this.state.schedulers = []
     this.previewObserver?.disconnect()
     this.requestedPreviews.clear()
+    this.previewEpoch++
     this.previewCache.clear()
+    this.previewRequests.clear()
+    this.renderStack()
     this.setConnectionStatus("loading")
     this.setRunStatus(`Loading ${connection?.name || "SwarmUI"} models and LoRA metadata…`)
     for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="generate"]')) {
@@ -2759,6 +2691,7 @@ are removed when CSS is applied.</pre>
     this.acceptSwarmOptions(data.swarmOptions)
     this.populateModels()
     this.applyConnectionDefaults()
+    this.applyStableSettings(this.studioDefaults)
     if (this.pendingDraftRestore && (!this.pendingDraftRestore.connectionId || this.pendingDraftRestore.connectionId === this.state.connection?.id)) {
       const draft = this.pendingDraftRestore
       this.pendingDraftRestore = null
@@ -3066,7 +2999,7 @@ are removed when CSS is applied.</pre>
       this.workflowValues.set(parameter.id, Number(input.value))
       input.addEventListener("input", () => {
         const value = Number(input.value)
-        if (Number.isFinite(value)) this.workflowValues.set(parameter.id, type === "integer" ? Math.trunc(value) : value)
+        if (Number.isFinite(value)) this.workflowValues.set(parameter.id, type === "integer" ? Math.trunc(Number(value)) : value)
       })
       field.appendChild(input)
     } else if (parameter.viewType === "prompt" || parameter.viewType === "big") {
@@ -3100,9 +3033,9 @@ are removed when CSS is applied.</pre>
       if (typeof value === "string") value = value.slice(0, 65_536)
       if (typeof value === "number") {
         if (!Number.isFinite(value)) continue
-        if (parameter.min !== null) value = Math.max(parameter.min, value)
-        if (parameter.max !== null) value = Math.min(parameter.max, value)
-        if (parameter.type === "integer") value = Math.trunc(value)
+        if (parameter.min !== null) value = Math.max(parameter.min, Number(value))
+        if (parameter.max !== null) value = Math.min(parameter.max, Number(value))
+        if (parameter.type === "integer") value = Math.trunc(Number(value))
       }
       if (value !== undefined && value !== null) result[parameter.id] = value
     }
@@ -3348,7 +3281,6 @@ are removed when CSS is applied.</pre>
     this.get<HTMLSelectElement>('[data-role="aspect"]').value = "custom"
     this.renderPresetStack()
     this.renderStack()
-    this.renderLoras()
     this.updatePreviewAspect(
       numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024),
       numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024),
@@ -3609,7 +3541,9 @@ are removed when CSS is applied.</pre>
     this.state.checkpoints = []
     this.previewObserver?.disconnect()
     this.requestedPreviews.clear()
+    this.previewEpoch++
     this.previewCache.clear()
+    this.previewRequests.clear()
     this.renderLoras()
     this.setConnectionStatus("loading")
     this.setRunStatus("Refreshing SwarmUI LoRA metadata…")
@@ -3892,6 +3826,16 @@ are removed when CSS is applied.</pre>
       && !counts.has(this.selectedLoraFolder)
     ) this.selectedLoraFolder = null
 
+    const treeKey = JSON.stringify([this.state.connection?.id, rootCount, [...counts], this.state.loras.length])
+    if (this.folderTreeKey === treeKey) {
+      for (const button of tree.querySelectorAll<HTMLElement>("[data-folder-path]")) {
+        const selected = button.dataset.folderPath === (this.selectedLoraFolder === null ? "__all__" : this.selectedLoraFolder || "__root__")
+        button.dataset.selected = String(selected)
+        button.setAttribute("aria-selected", String(selected))
+      }
+      return
+    }
+    this.folderTreeKey = treeKey
     tree.replaceChildren()
     const addRow = (
       label: string,
@@ -3968,52 +3912,79 @@ are removed when CSS is applied.</pre>
   }
 
   private renderLoras(): void {
+    // Data may arrive while Generate or another Styles page is visible. Defer
+    // library DOM work until it has a real viewport; never remount on navigation.
+    if (this.studioView !== "styles") { this.lorasDirty = true; return }
+    this.lorasDirty = false
     const grid = this.get<HTMLElement>('[data-role="lora-grid"]')
-    this.previewObserver?.disconnect()
-    grid.replaceChildren()
     this.renderLoraFolders()
-    const items = this.filteredLoras()
-    this.get<HTMLElement>('[data-role="lora-count"]').textContent =
-      `${items.length}${items.length !== this.state.loras.length ? ` of ${this.state.loras.length}` : ""} model${items.length === 1 ? "" : "s"}`
+    const filterKey = JSON.stringify([this.state.connection?.id, this.selectedLoraFolder,
+      this.get<HTMLInputElement>('[data-role="lora-search"]').value,
+      this.get<HTMLSelectElement>('[data-role="lora-sort"]').value,
+      this.get<HTMLSelectElement>('[data-role="lora-filter"]').value, this.selectedModelFamily()])
+    if (filterKey !== this.loraFilterKey) { this.loraPage = 0; grid.scrollTop = 0; this.loraFilterKey = filterKey }
+    const items = this.state.connection ? this.filteredLoras() : []
+    const pageCount = Math.max(1, Math.ceil(items.length / 60))
+    this.loraPage = clamp(this.loraPage, 0, pageCount - 1)
+    const visible = items.slice(this.loraPage * 60, (this.loraPage + 1) * 60)
+    this.get<HTMLElement>('[data-role="lora-count"]').textContent = `${items.length} of ${this.state.loras.length} models`
+    this.get<HTMLElement>('[data-role="lora-page-status"]').textContent = items.length ? `${this.loraPage * 60 + 1}–${this.loraPage * 60 + visible.length} of ${items.length}` : "0 models"
+    this.get<HTMLButtonElement>('[data-action="lora-page-prev"]').disabled = this.loraPage === 0
+    this.get<HTMLButtonElement>('[data-action="lora-page-next"]').disabled = this.loraPage >= pageCount - 1
     this.updateDockSummary()
-
-    if (!this.state.connection) {
-      grid.appendChild(element("div", "ss-empty", "Choose a SwarmUI connection to load its LoRA library."))
-      return
+    if (!this.previewObserver && typeof IntersectionObserver !== "undefined") {
+      this.previewObserver = new IntersectionObserver(entries => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting || this.studioView !== "styles") continue
+          const image = entry.target as HTMLImageElement
+          const name = image.dataset.name || ""
+          const previewRef = image.dataset.previewRef || ""
+          this.previewObserver?.unobserve(image)
+          if (!name || !previewRef || this.requestedPreviews.has(name)) continue
+          this.requestedPreviews.add(name)
+          this.send("preview", { connectionId: this.state.connection?.id, name, previewRef })
+        }
+      }, { root: grid, rootMargin: "120px" })
     }
-    if (!items.length) {
-      const compatibleOnly = this.get<HTMLSelectElement>('[data-role="lora-filter"]').value === "compatible"
-      const text = this.state.loras.length
-        ? compatibleOnly
-          ? `No compatible LoRAs match ${familyLabel(this.selectedModelFamily())}. Switch to “All model families” to inspect everything.`
-          : "No LoRAs match this search."
-        : "No LoRA metadata was returned. You can still add a model by filename."
-      grid.appendChild(element("div", "ss-empty", text))
-      return
+    const wanted = new Set(visible.map(lora => lora.name))
+    for (const [name, cached] of this.loraCards) {
+      if (wanted.has(name)) continue
+      const image = cached.node.querySelector<HTMLImageElement>("[data-preview-ref]")
+      if (image) this.previewObserver?.unobserve(image)
+      cached.node.remove()
+      this.loraCards.delete(name)
     }
-
-    this.previewObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue
-        const image = entry.target as HTMLImageElement
-        this.previewObserver?.unobserve(image)
-        const name = image.dataset.name || ""
-        const previewRef = image.dataset.previewRef || ""
-        if (!name || !previewRef || this.requestedPreviews.has(name)) continue
-        this.requestedPreviews.add(name)
-        this.send("preview", {
-          connectionId: this.state.connection?.id,
-          name,
-          previewRef,
-        })
+    for (const empty of grid.querySelectorAll(".ss-empty")) empty.remove()
+    visible.forEach((lora, index) => {
+      const signature = JSON.stringify([this.state.connection?.id, lora, this.isLoraCompatible(lora)])
+      let cached = this.loraCards.get(lora.name)
+      if (cached?.signature !== signature) {
+        const image = cached?.node.querySelector<HTMLImageElement>("[data-preview-ref]")
+        if (image) this.previewObserver?.unobserve(image)
+        cached?.node.remove()
+        cached = { signature, node: this.makeLoraCard(lora) }
+        this.loraCards.set(lora.name, cached)
       }
-    }, { root: grid, rootMargin: "120px" })
-
-    for (const lora of items) grid.appendChild(this.makeLoraCard(lora))
+      const node = cached!.node
+      const pendingPreview = node.querySelector<HTMLImageElement>("img[data-preview-ref]")
+      if (pendingPreview && !pendingPreview.getAttribute("src") && !this.requestedPreviews.has(lora.name)) this.previewObserver?.observe(pendingPreview)
+      const add = node.querySelector<HTMLButtonElement>(".ss-add-button")!
+      const inStack = this.state.stack.some(item => item.lora.name === lora.name)
+      if (add.disabled !== inStack) {
+        add.disabled = inStack
+        add.textContent = inStack ? "Stacked" : "Add"
+        add.classList.toggle("ss-button-primary", !inStack)
+      }
+      if (grid.children[index] !== node) grid.insertBefore(node, grid.children[index] || null)
+    })
+    if (!visible.length) grid.appendChild(element("div", "ss-empty", !this.state.connection
+      ? "Choose a SwarmUI connection in Generate to load its LoRA library."
+      : this.state.loras.length ? "No LoRAs match this folder and search. Try All model families or clear the search." : "No LoRA metadata was returned."))
   }
 
   private makeLoraCard(lora: LoraMetadata): HTMLElement {
     const card = element("article", "ss-lora-card")
+    card.dataset.loraName = lora.name
     card.title = [
       lora.name,
       lora.triggerPhrase ? `Trigger: ${lora.triggerPhrase}` : "",
@@ -4022,23 +3993,17 @@ are removed when CSS is applied.</pre>
     ].filter(Boolean).join("\n")
 
     const preview = element("div", "ss-lora-preview")
+    preview.appendChild(element("div", "ss-lora-placeholder", "◇"))
     const cached = this.previewCache.get(lora.name)
-    if (cached) {
+    if (cached || lora.previewRef) {
       const image = element("img")
-      image.src = cached
-      image.alt = `${lora.title} preview`
-      image.dataset.loraImage = lora.name
-      preview.appendChild(image)
-    } else if (lora.previewRef) {
-      const image = element("img")
-      image.alt = ""
+      image.alt = `${lora.title || labelFromName(lora.name)} preview`
       image.dataset.name = lora.name
-      image.dataset.previewRef = lora.previewRef
       image.dataset.loraImage = lora.name
+      if (lora.previewRef) image.dataset.previewRef = lora.previewRef
       preview.appendChild(image)
-      this.previewObserver?.observe(image)
-    } else {
-      preview.appendChild(element("div", "ss-lora-placeholder", "◇"))
+      if (cached) this.revealDecodedPreview(image, cached)
+      else this.previewObserver?.observe(image)
     }
 
     const body = element("div", "ss-lora-body")
@@ -4071,9 +4036,28 @@ are removed when CSS is applied.</pre>
     return card
   }
 
+  private revealDecodedPreview(image: HTMLImageElement, dataUrl: string): void {
+    const pending = this.previewLoads.get(image)
+    if (pending?.url === dataUrl && pending.epoch === this.previewEpoch) return
+    const load = { url: dataUrl, epoch: this.previewEpoch }
+    this.previewLoads.set(image, load)
+    const preload = document.createElement("img")
+    preload.src = dataUrl
+    void preload.decode().then(() => {
+      // A connection change, newer response, removed card or disposal invalidates this decode.
+      if (this.disposed || !image.isConnected || load.epoch !== this.previewEpoch || this.previewLoads.get(image) !== load) return
+      if (image.getAttribute("src") !== dataUrl) image.src = dataUrl
+      image.hidden = false
+      image.dataset.loaded = "true"
+    }).catch(() => {
+      // Keep the placeholder (or previous decoded bitmap) instead of revealing a broken image.
+      if (this.previewLoads.get(image) === load) this.previewLoads.delete(image)
+    })
+  }
+
   private updatePreviewImages(name: string, dataUrl: string): void {
     for (const image of this.root.querySelectorAll<HTMLImageElement>("[data-lora-image]")) {
-      if (image.dataset.loraImage === name) image.src = dataUrl
+      if (image.dataset.loraImage === name) this.revealDecodedPreview(image, dataUrl)
     }
   }
 
@@ -4086,13 +4070,12 @@ are removed when CSS is applied.</pre>
       useTrigger: false,
     })
     this.renderStack()
-    this.renderLoras()
   }
 
   private toggleLoraDownloader(force?: boolean, focus = true): void {
     const search = this.get<HTMLInputElement>('[data-role="lora-search"]')
     const entry = this.get<HTMLElement>('[data-role="lora-download-entry"]')
-    const shouldOpen = force ?? entry.hidden
+    const shouldOpen = force ?? (entry.hidden === true)
     if (!shouldOpen && this.loraDownloadActive) {
       this.cancelLoraDownload()
       return
@@ -4167,25 +4150,94 @@ are removed when CSS is applied.</pre>
   }
 
   private renderStack(): void {
-    const list = this.get<HTMLElement>('[data-role="stack-list"]')
-    list.replaceChildren()
-    if (!this.state.stack.length) {
-      list.appendChild(element("div", "ss-empty", "Add LoRAs from the library. Metadata triggers stay off until you enable them."))
-    } else {
-      this.state.stack.forEach((item, index) => list.appendChild(this.makeStackRow(item, index)))
+    for (const role of ["stack-list", "generate-stack-list"]) {
+      const list = this.get<HTMLElement>(`[data-role="${role}"]`)
+      for (const child of [...list.children] as HTMLElement[]) {
+        if (child.dataset.stackName ? !this.state.stack.some(item => item.lora.name === child.dataset.stackName) : this.state.stack.length > 0) child.remove()
+      }
+      this.state.stack.forEach((item, index) => {
+        let row = [...list.children].find(child => (child as HTMLElement).dataset.stackName === item.lora.name) as HTMLElement | undefined
+        if (!row) row = this.makeStackRow(item, index)
+        const installed = Boolean(this.installedLora(item.lora.name))
+        row.dataset.disabled = String(!item.enabled)
+        row.dataset.missing = String(!installed)
+        row.dataset.incompatible = String(installed && !this.isLoraCompatible(item.lora))
+        const image = row.querySelector<HTMLImageElement>('.ss-stack-preview img')!
+        const cached = this.previewCache.get(item.lora.name)
+        if (cached) {
+          this.revealDecodedPreview(image, cached)
+          image.alt = `${item.lora.title || labelFromName(item.lora.name)} preview`
+        } else {
+          this.previewLoads.delete(image)
+          delete image.dataset.loaded
+          if (image.hasAttribute("src")) image.removeAttribute("src")
+          image.hidden = true
+          if (installed && item.lora.previewRef && !this.requestedPreviews.has(item.lora.name)) {
+            this.requestedPreviews.add(item.lora.name)
+            this.send("preview", { connectionId: this.state.connection?.id, name: item.lora.name, previewRef: item.lora.previewRef })
+          }
+        }
+        row.querySelector<HTMLInputElement>('[data-stack-control="enabled"]')!.checked = item.enabled
+        const weight = row.querySelector<HTMLInputElement>('.ss-stack-weight')!
+        if (weight.value !== String(item.weight)) weight.value = String(item.weight)
+        const trigger = row.querySelector<HTMLInputElement>('.ss-trigger-toggle input')!
+        trigger.checked = item.useTrigger
+        trigger.disabled = !item.lora.triggerPhrase
+        row.querySelector<HTMLElement>('.ss-trigger-toggle')!.title = item.lora.triggerPhrase || "No trigger phrase in metadata"
+        row.querySelector<HTMLElement>('.ss-stack-name strong')!.textContent = item.lora.title || labelFromName(item.lora.name)
+        const buttons = row.querySelectorAll<HTMLButtonElement>('.ss-stack-actions button')
+        buttons[0].disabled = index === 0
+        buttons[1].disabled = index === this.state.stack.length - 1
+        if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null)
+      })
+      if (!this.state.stack.length && !list.firstElementChild) list.appendChild(element("div", "ss-empty", "Add LoRAs from the library."))
     }
+    this.patchLoraStackButtons()
     const enabled = this.state.stack.filter((item) => item.enabled).length
     this.get<HTMLElement>('[data-role="stack-count"]').textContent = `${enabled} enabled · ${this.state.stack.length} stacked`
     this.get<HTMLButtonElement>('[data-action="clear-stack"]').disabled = this.state.stack.length === 0
     this.get<HTMLElement>('[data-role="command-stack-summary"]').textContent = enabled
       ? `${enabled} LoRA${enabled === 1 ? "" : "s"} enabled`
       : "No LoRAs enabled"
+    this.get<HTMLElement>('[data-role="generate-stack-count"]').textContent = `${enabled} enabled`
     this.updateDockSummary()
     this.updateTriggerSummary()
   }
 
+  private patchLoraStackButtons(): void {
+    const names = new Set(this.state.stack.map(item => item.lora.name))
+    for (const [name, entry] of this.loraCards) {
+      const button = entry.node.querySelector<HTMLButtonElement>(".ss-add-button")
+      if (!button) continue
+      const inStack = names.has(name)
+      if (button.disabled !== inStack) {
+        button.disabled = inStack
+        button.textContent = inStack ? "Stacked" : "Add"
+        button.classList.toggle("ss-button-primary", !inStack)
+      }
+    }
+  }
+
   private makeStackRow(item: StackItem, index: number): HTMLElement {
+    const key = item.lora.name
+    // Events resolve the current item even after loading a saved stack with the same names.
+    const currentItem = () => this.state.stack.find(entry => entry.lora.name === key) || item
+    const currentIndex = () => this.state.stack.findIndex(entry => entry.lora.name === key)
     const row = element("div", "ss-stack-row")
+    row.dataset.stackName = key
+    const drag = element("button", "ss-icon-button ss-stack-drag", "⠿")
+    drag.type = "button"
+    drag.draggable = true
+    drag.title = "Drag to reorder LoRA"
+    drag.setAttribute("aria-label", "Drag to reorder LoRA")
+    drag.addEventListener("dragstart", event => { event.dataTransfer?.setData("application/x-studio-lora", key) })
+    row.addEventListener("dragover", event => { if (event.dataTransfer?.types.includes("application/x-studio-lora")) event.preventDefault() })
+    row.addEventListener("drop", event => {
+      const source = this.state.stack.findIndex(entry => entry.lora.name === event.dataTransfer?.getData("application/x-studio-lora"))
+      if (source < 0) return
+      event.preventDefault()
+      this.moveStack(source, currentIndex() - source)
+    })
     const installed = Boolean(this.installedLora(item.lora.name))
     row.dataset.disabled = String(!item.enabled)
     row.dataset.missing = String(!installed)
@@ -4195,35 +4247,18 @@ are removed when CSS is applied.</pre>
     enabled.type = "checkbox"
     enabled.checked = item.enabled
     enabled.title = "Enable LoRA"
+    enabled.dataset.stackControl = "enabled"
     enabled.addEventListener("change", () => {
-      item.enabled = enabled.checked
+      currentItem().enabled = enabled.checked
       this.renderStack()
     })
 
     const preview = element("div", "ss-stack-preview")
-    const cachedPreview = this.previewCache.get(item.lora.name)
-    if (cachedPreview || item.lora.previewRef) {
-      const image = element("img")
-      image.alt = cachedPreview ? `${item.lora.title || labelFromName(item.lora.name)} preview` : ""
-      image.dataset.loraImage = item.lora.name
-      if (cachedPreview) {
-        image.src = cachedPreview
-      } else if (item.lora.previewRef) {
-        image.dataset.name = item.lora.name
-        image.dataset.previewRef = item.lora.previewRef
-        if (!this.requestedPreviews.has(item.lora.name)) {
-          this.requestedPreviews.add(item.lora.name)
-          this.send("preview", {
-            connectionId: this.state.connection?.id,
-            name: item.lora.name,
-            previewRef: item.lora.previewRef,
-          })
-        }
-      }
-      preview.appendChild(image)
-    } else {
-      preview.textContent = "◇"
-    }
+    const image = element("img")
+    image.dataset.loraImage = item.lora.name
+    image.alt = ""
+    image.hidden = true
+    preview.appendChild(image)
 
     const name = element("div", "ss-stack-name")
     name.appendChild(element("strong", "", item.lora.title || labelFromName(item.lora.name)))
@@ -4237,8 +4272,9 @@ are removed when CSS is applied.</pre>
     weight.value = String(item.weight)
     weight.title = "LoRA weight"
     weight.addEventListener("change", () => {
-      item.weight = clamp(numberValue(weight, item.weight), -10, 10)
-      weight.value = String(item.weight)
+      currentItem().weight = clamp(numberValue(weight, currentItem().weight), -10, 10)
+      weight.value = String(currentItem().weight)
+      this.renderStack()
     })
 
     const trigger = element("label", "ss-trigger-toggle")
@@ -4247,8 +4283,8 @@ are removed when CSS is applied.</pre>
     triggerCheckbox.checked = item.useTrigger
     triggerCheckbox.disabled = !item.lora.triggerPhrase
     triggerCheckbox.addEventListener("change", () => {
-      item.useTrigger = triggerCheckbox.checked
-      this.updateTriggerSummary()
+      currentItem().useTrigger = triggerCheckbox.checked
+      this.renderStack()
     })
     trigger.append(triggerCheckbox, document.createTextNode("trigger"))
     trigger.title = item.lora.triggerPhrase || "No trigger phrase in metadata"
@@ -4257,20 +4293,19 @@ are removed when CSS is applied.</pre>
     const up = element("button", "ss-icon-button", "↑")
     up.disabled = index === 0
     up.title = "Move up"
-    up.addEventListener("click", () => this.moveStack(index, -1))
+    up.addEventListener("click", () => this.moveStack(currentIndex(), -1))
     const down = element("button", "ss-icon-button", "↓")
     down.disabled = index === this.state.stack.length - 1
     down.title = "Move down"
-    down.addEventListener("click", () => this.moveStack(index, 1))
+    down.addEventListener("click", () => this.moveStack(currentIndex(), 1))
     const remove = element("button", "ss-icon-button ss-button-danger", "×")
     remove.title = "Remove"
     remove.addEventListener("click", () => {
-      this.state.stack.splice(index, 1)
+      this.state.stack.splice(currentIndex(), 1)
       this.renderStack()
-      this.renderLoras()
     })
     actions.append(up, down, remove)
-    row.append(enabled, preview, name, weight, trigger, actions)
+    row.append(drag, enabled, preview, name, weight, trigger, actions)
     return row
   }
 
@@ -4289,6 +4324,7 @@ are removed when CSS is applied.</pre>
   }
 
   private renderStackPresets(): void {
+    this.renderStyleOptions()
     for (const select of this.root.querySelectorAll<HTMLSelectElement>(
       '[data-role="stack-preset"], [data-role="mobile-stack-preset"]',
     )) {
@@ -4365,7 +4401,6 @@ are removed when CSS is applied.</pre>
     })
     this.setStackPresetSelection(preset.id)
     this.renderStack()
-    this.renderLoras()
     if (announce) this.setRunStatus(`Loaded LoRA stack “${preset.name}”.`)
   }
 
@@ -4526,7 +4561,6 @@ are removed when CSS is applied.</pre>
       })
       this.missingLoras = imported.items.filter((item) => !this.installedLora(item.name))
       this.renderStack()
-      this.renderLoras()
       this.setRunStatus(`Imported “${imported.name}” with ${imported.items.length} LoRA${imported.items.length === 1 ? "" : "s"}.`)
       if (this.missingLoras.length) this.showMissingLoras()
     } catch (error) {
@@ -4638,13 +4672,229 @@ are removed when CSS is applied.</pre>
     this.setRunStatus(`Deleting LoRA stack “${preset.name}”…`)
   }
 
+  private async saveNativePrompts(character: boolean): Promise<void> {
+    if (!this.nativeImageGenReady || this.nativeSavePending) return
+    const binding = this.activeVisualFolder()?.binding
+    if (character && !binding) return
+    const look = binding?.looks.find(item => item.id === binding.activeLookId)
+    if (character && binding?.activeLookId && !look) { this.setRunStatus("The active look no longer exists.", true); return }
+    this.nativeSavePending = true
+    try {
+      const style = this.selectedRenderStyle()
+      const result = await upsertStudioNativePreset({ kind: character ? "character" : "main", characterId: binding?.characterId,
+        lookId: character ? look?.id : undefined, name: character ? `Studio character · ${this.activeVisualFolder()?.name} · ${look?.name || "base"}` : "Studio Image Gen",
+        prompt: character ? [binding?.positivePrompt, look?.outfitPrompt, style?.positiveAppend].filter(Boolean).join(", ") : this.get<HTMLTextAreaElement>('[data-role="positive"]').value,
+        negativePrompt: character ? [binding?.negativePrompt, look?.negativePrompt, style?.negativeAppend].filter(Boolean).join(", ") : this.get<HTMLTextAreaElement>('[data-role="negative"]').value })
+      if (!this.disposed) this.setRunStatus(`Saved native prompt preset. Renderer settings remain in Studio.${result.warnings.length ? " " + result.warnings.join("; ") : ""}`)
+    } catch (error) {
+      if (!this.disposed) this.setRunStatus(error instanceof Error ? error.message : String(error), true)
+    } finally { this.nativeSavePending = false }
+  }
+
+  private recipeEditorMarkup(prefix: string): string {
+    return `<div class="ss-style-editor"><label>Render Style<select class="ss-select" data-role="${prefix}-recipe-style"></select></label>${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key}<input class="ss-input" data-role="${prefix}-recipe-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>`
+  }
+
+  private populateRecipeEditor(prefix: string, target: { generationRecipe?: GenerationRecipe; styleId?: string } | null | undefined): void {
+    const select = this.get<HTMLSelectElement>(`[data-role="${prefix}-recipe-style"]`)
+    select.replaceChildren()
+    const choices = [{ id: "", name: "Inherit Style" }, ...this.renderStyles]
+    if (target?.styleId && !choices.some(item => item.id === target.styleId)) choices.push({ id: target.styleId, name: "Reference missing" })
+    for (const item of choices) { const option = element("option", "", item.name); option.value = item.id; select.appendChild(option) }
+    select.value = target?.styleId || ""
+    const recipe = sanitizeGenerationRecipe(target?.generationRecipe) as Record<string, unknown>
+    for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"]) this.get<HTMLInputElement>(`[data-role="${prefix}-recipe-${key}"]`).value = String(recipe[key] ?? "")
+    this.updateRecipeSummary()
+  }
+
+  private readRecipeEditor(prefix: string): { generationRecipe: GenerationRecipe; styleId: string } {
+    const recipe: Record<string, unknown> = {}
+    for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"]) {
+      const value = this.get<HTMLInputElement>(`[data-role="${prefix}-recipe-${key}"]`).value
+      if (value !== "") recipe[key] = ["sampler", "scheduler"].includes(key) ? value : Number(value)
+    }
+    return { generationRecipe: sanitizeGenerationRecipe(recipe), styleId: this.get<HTMLSelectElement>(`[data-role="${prefix}-recipe-style"]`).value }
+  }
+
+  private captureStableSettings(): StudioGenerationDefaults {
+    const recipe: Record<string, unknown> = {}
+    for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"]) {
+      const value = this.get<HTMLInputElement>(`[data-role="${key}"]`).value
+      recipe[key] = ["sampler", "scheduler"].includes(key) ? value : Number(value)
+    }
+    return { version: 1, ...sanitizeGenerationRecipe(recipe), checkpoint: this.get<HTMLSelectElement>('[data-role="model"]').value }
+  }
+
+  private applyStableSettings(value: unknown): void {
+    const settings = sanitizeStudioDefaults(value)
+    if (!settings) return
+    for (const [key, value] of Object.entries(sanitizeGenerationRecipe(settings))) {
+      const input = this.get<HTMLInputElement | HTMLSelectElement>(`[data-role="${key}"]`)
+      if (input instanceof HTMLSelectElement && ![...input.options].some(option => option.value === String(value))) {
+        const option = element("option", "", String(value)); option.value = String(value); input.appendChild(option)
+      }
+      input.value = String(value)
+    }
+    if (settings.checkpoint) {
+      const select = this.get<HTMLSelectElement>('[data-role="model"]')
+      if (![...select.options].some(option => option.value === settings.checkpoint)) {
+        const option = element("option", "", settings.checkpoint); option.value = settings.checkpoint; select.appendChild(option)
+      }
+      select.value = settings.checkpoint
+    }
+    this.setDimensions(Number(this.get<HTMLInputElement>('[data-role="width"]').value), Number(this.get<HTMLInputElement>('[data-role="height"]').value))
+    this.updateFamilyChip()
+    this.scheduleStudioProfileSync()
+  }
+
+  private selectedRenderStyle(): StudioRenderStyle | undefined {
+    const binding = this.activeVisualFolder()?.binding
+    const look = binding?.enabled ? binding.looks.find(item => item.id === binding.activeLookId) : undefined
+    const id = look?.styleId || (binding?.enabled ? binding.styleId : "") || this.activeRenderStyleId
+    return this.renderStyles.find(item => item.id === id)
+  }
+
+  private effectiveRecipe(): GenerationRecipe & { checkpoint?: string } {
+    const binding = this.activeVisualFolder()?.binding
+    return resolveGenerationConfig({ provider: this.state.connection?.default_parameters, studioDefaults: this.studioDefaults,
+      liveProfile: this.captureStableSettings(), style: this.selectedRenderStyle(),
+      characterBase: binding?.enabled ? binding : undefined,
+      characterLook: binding?.enabled ? binding.looks.find(item => item.id === binding.activeLookId) : undefined })
+  }
+
+  private renderStyleOptions(): void {
+    const select = this.root.querySelector<HTMLSelectElement>('[data-role="render-style"]')
+    if (!select) return
+    const previous = select.value
+    select.replaceChildren()
+    for (const item of [{ id: "", name: "New Style" }, ...this.renderStyles]) {
+      const option = element("option", "", item.name); option.value = item.id; select.appendChild(option)
+    }
+    select.value = this.renderStyles.some(item => item.id === previous) ? previous : ""
+    select.onchange = () => this.editRenderStyle()
+    const stack = this.get<HTMLSelectElement>('[data-role="style-stack"]')
+    const stackId = stack.value
+    stack.replaceChildren()
+    for (const item of [{ id: "", name: "No stack" }, ...this.state.stackPresets]) {
+      const option = element("option", "", item.name); option.value = item.id; stack.appendChild(option)
+    }
+    stack.value = stackId
+    const binding = this.activeVisualFolder()?.binding
+    const native = this.get<HTMLButtonElement>('[data-action="save-native-main"]')
+    native.disabled = !this.nativeImageGenReady
+    native.title = this.nativeImageGenReady ? "Save compatible prompts; leaves the active native preset unchanged" : "Lumiverse Image Gen is unavailable"
+    this.get<HTMLElement>('[data-action="save-native-character"]').hidden = !this.nativeImageGenReady || !binding
+    this.get<HTMLElement>('[data-role="active-character-actions"]').hidden = !binding
+    this.get<HTMLElement>('[data-role="active-character-actions-label"]').textContent = this.activeVisualFolder()?.name || "Active character"
+    const look = binding?.looks.find(item => item.id === binding.activeLookId)
+    this.get<HTMLElement>('[data-action="save-look-recipe"]').textContent = look ? `Save current recipe to ${look.name}` : "Save current recipe to active look"
+    this.get<HTMLElement>('[data-action="save-base-recipe"]').hidden = !binding
+    this.get<HTMLElement>('[data-action="save-look-recipe"]').hidden = !binding?.looks.some(item => item.id === binding.activeLookId)
+  }
+
+  private editRenderStyle(): void {
+    const style = this.renderStyles.find(item => item.id === this.get<HTMLSelectElement>('[data-role="render-style"]').value)
+    for (const [role, value] of Object.entries({ "style-name": style?.name, "style-stack": style?.loraStackId, "style-checkpoint": style?.checkpoint, "style-positive": style?.positiveAppend, "style-negative": style?.negativeAppend })) {
+      const input = this.get<HTMLInputElement | HTMLSelectElement>(`[data-role="${role}"]`)
+      if (input instanceof HTMLSelectElement && value && ![...input.options].some(option => option.value === value)) {
+        const option = element("option", "", "Reference missing"); option.value = value; input.appendChild(option)
+      }
+      input.value = value || ""
+    }
+    this.fillStyleRecipe(style?.recipe || {})
+    const stack = this.state.stackPresets.find(item => item.id === style?.loraStackId)
+    this.get<HTMLElement>('[data-role="style-summary"]').textContent = style ? `${style.name} · ${stack?.items.length || 0} LoRAs · ${style.recipe?.width || "inherit"} × ${style.recipe?.height || "inherit"} · ${style.recipe?.steps ?? "inherit"} steps · CFG ${style.recipe?.cfg ?? "inherit"}${style.loraStackId && !stack ? " · Stack reference missing" : ""}` : "Create a reusable Style; raw LoRA stacks remain separate."
+  }
+
+  private updateRecipeSummary(): void {
+    const parts = ["checkpoint", "width", "height", "steps", "cfg", "sampler", "scheduler"].flatMap(key => {
+      const value = this.get<HTMLInputElement>(`[data-role="style-${key === "checkpoint" ? key : `render-${key}`}"]`).value
+      return value ? [`${key === "cfg" ? "CFG" : key}: ${value}`] : []
+    })
+    this.get<HTMLElement>('[data-role="recipe-summary"]').textContent = parts.join(" · ") || "Inherits current settings"
+  }
+
+  private fillStyleRecipe(recipe: GenerationRecipe): void {
+    for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"] as const) this.get<HTMLInputElement>(`[data-role="style-render-${key}"]`).value = String(recipe[key] ?? "")
+  }
+
+  private handleRenderAction(action: string): void {
+    const settings = this.captureStableSettings()
+    const value = (role: string) => this.get<HTMLInputElement>(`[data-role="${role}"]`).value
+    if (action === "save-defaults") this.send("save_studio_defaults", { defaults: settings })
+    if (action === "restore-defaults") this.applyStableSettings(this.studioDefaults)
+    if (action === "clear-defaults") {
+      this.studioDefaults = null
+      this.send("save_studio_defaults", { defaults: null })
+      this.applyConnectionDefaults()
+      this.get<HTMLSelectElement>('[data-role="model"]').value = this.state.connection?.model || ""
+      this.scheduleStudioProfileSync()
+    }
+    if (action === "save-base-recipe" || action === "save-look-recipe") this.send("save_active_render_recipe", { destination: action === "save-look-recipe" ? "look" : "base", recipe: settings, checkpoint: settings.checkpoint, styleId: this.selectedRenderStyle()?.id || "" })
+    if (action === "style-new") { this.get<HTMLSelectElement>('[data-role="render-style"]').value = ""; this.editRenderStyle() }
+    if (action === "style-collapse") {
+      const columns = this.get<HTMLElement>('[data-role="styles-columns"]')
+      const collapsed = columns.dataset.collapsed !== "true"
+      columns.dataset.collapsed = String(collapsed)
+      const button = this.get<HTMLButtonElement>('[data-action="style-collapse"]')
+      button.setAttribute("aria-expanded", String(!collapsed))
+      button.setAttribute("aria-label", collapsed ? "Expand Styles editor" : "Collapse Styles editor")
+      button.textContent = collapsed ? "›" : "Styles ‹"
+    }
+    if (action === "style-capture") {
+      this.fillStyleRecipe(settings)
+      this.get<HTMLInputElement>('[data-role="style-checkpoint"]').value = settings.checkpoint || ""
+      this.updateRecipeSummary()
+    }
+    if (action === "style-save" || action === "style-duplicate") {
+      if (!value("style-name").trim()) throw new Error("Give the Style a name.")
+      const recipe: Record<string, unknown> = {}
+      for (const key of ["width", "height", "steps", "cfg", "sampler", "scheduler"]) {
+        const raw = value(`style-render-${key}`)
+        if (raw !== "") recipe[key] = ["sampler", "scheduler"].includes(key) ? raw : Number(raw)
+      }
+      const style = { id: action === "style-duplicate" ? createRequestId() : value("render-style") || createRequestId(), name: value("style-name") + (action === "style-duplicate" ? " copy" : ""), recipe: sanitizeGenerationRecipe(recipe), checkpoint: value("style-checkpoint"), loraStackId: value("style-stack"), positiveAppend: value("style-positive"), negativeAppend: value("style-negative") }
+      this.send("save_render_style", { style })
+    }
+    if (action === "style-delete" && value("render-style")) this.send("delete_render_style", { id: value("render-style") })
+    if (action === "style-clear") { this.activeRenderStyleId = ""; this.scheduleStudioProfileSync() }
+    if (action === "style-apply") {
+      const style = this.renderStyles.find(item => item.id === value("render-style"))
+      if (!style) throw new Error("Save or select a Style first.")
+      this.activeRenderStyleId = style.id
+      this.applyStableSettings({ ...style.recipe, checkpoint: style.checkpoint })
+      this.setRunStatus(`Applied ${style.name}${style.loraStackId && !this.state.stackPresets.some(item => item.id === style.loraStackId) ? " · Stack reference missing" : ""}.`)
+    }
+  }
+
+  private focusStyleColumn(section?: string): void {
+    this.root.querySelector<HTMLElement>(`[data-style-column="${section === "stacks" || section === "library" ? section : "saved"}"]`)?.scrollIntoView?.({ block: "nearest" })
+  }
+
+  private setStudioView(view?: string): void {
+    this.studioView = view === "styles" ? "styles" : "generate"
+    const shell = this.get<HTMLElement>(".ss-shell")
+    shell.dataset.studioView = this.studioView
+    if (this.studioView === "generate" && ["style", "loras", "stack"].includes(shell.dataset.mobileTab || "")) {
+      shell.dataset.mobileTab = "create"
+      for (const button of this.root.querySelectorAll<HTMLElement>(".ss-mobile-tab")) {
+        button.dataset.active = String(button.dataset.tab === "create")
+        button.setAttribute("aria-current", button.dataset.tab === "create" ? "page" : "false")
+      }
+    }
+    for (const page of this.root.querySelectorAll<HTMLElement>("[data-studio-page]")) page.hidden = page.dataset.studioPage !== this.studioView
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="studio-view"]')) button.setAttribute("aria-current", button.dataset.view === this.studioView ? "page" : "false")
+    if (this.studioView === "styles" && this.lorasDirty) this.renderLoras()
+  }
+
   private restoreWorkspaceState(): void {
     let state: any = {}
-    try { state = JSON.parse(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || "{}") } catch {}
+    try { state = JSON.parse(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || window.localStorage.getItem("swarm-studio-workspace-v1") || "{}") } catch {}
+    state = normalizeWorkspaceState(state)
+    this.setStudioView("generate")
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.classList.toggle("ss-generation-collapsed", state?.collapsed?.generation === true)
-    shell.classList.toggle("ss-history-collapsed", state?.collapsed?.history === true)
-    shell.classList.toggle("ss-loras-collapsed", state?.collapsed?.loras === true)
+    shell.classList.remove("ss-history-collapsed")
     shell.classList.toggle("ss-fullscreen-layer", state?.fullscreen === true)
     const advanced = this.root.querySelector<HTMLDetailsElement>("details.ss-advanced")
     if (advanced) advanced.open = state?.details?.advanced === true
@@ -4652,7 +4902,7 @@ are removed when CSS is applied.</pre>
     this.selectedLoraFolder = savedLoraFolder === null || typeof savedLoraFolder === "string"
       ? savedLoraFolder
       : null
-    this.loraFoldersOpen = state?.loraBrowser?.open === true
+    this.loraFoldersOpen = state?.loraBrowser?.open !== false
       && !window.matchMedia("(max-width: 720px)").matches
     const loraBrowser = this.get<HTMLElement>('[data-role="lora-browser"]')
     const loraFolderSidebar = this.get<HTMLElement>('[data-role="lora-folder-sidebar"]')
@@ -4676,8 +4926,6 @@ are removed when CSS is applied.</pre>
     const sizes: Record<string, string> = {
       generationWidth: "--ss-generation-width",
       historyWidth: "--ss-history-width",
-      dockHeight: "--ss-dock-height",
-      libraryWidth: "--ss-library-width",
       promptHeight: "--ss-prompt-height",
     }
     for (const [key, property] of Object.entries(sizes)) {
@@ -4697,12 +4945,12 @@ are removed when CSS is applied.</pre>
     }
     try {
       window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
+        version: 2,
         fullscreen: shell.classList.contains("ss-fullscreen-layer"),
         mobileTab: shell.dataset.mobileTab || "create",
         collapsed: {
           generation: shell.classList.contains("ss-generation-collapsed"),
           history: shell.classList.contains("ss-history-collapsed"),
-          loras: shell.classList.contains("ss-loras-collapsed"),
         },
         details: {
           advanced: this.root.querySelector<HTMLDetailsElement>("details.ss-advanced")?.open === true,
@@ -4715,8 +4963,6 @@ are removed when CSS is applied.</pre>
         sizes: {
           generationWidth: size("--ss-generation-width"),
           historyWidth: size("--ss-history-width"),
-          dockHeight: size("--ss-dock-height"),
-          libraryWidth: size("--ss-library-width"),
           promptHeight: size("--ss-prompt-height"),
         },
       }))
@@ -4746,12 +4992,11 @@ are removed when CSS is applied.</pre>
     void collapsed
     this.updateWorkspaceButtons()
     this.persistWorkspaceState()
-    requestAnimationFrame(() => this.fitPreviewToAspect())
   }
 
   private beginResize(kind: string, event: PointerEvent): void {
     if (window.matchMedia("(max-width: 720px)").matches) return
-    if (!["generation", "history", "dock", "lora-split", "prompt"].includes(kind)) return
+    if (!["generation", "history", "prompt"].includes(kind)) return
     event.preventDefault()
     this.stopActiveResize?.()
     const shell = this.get<HTMLElement>(".ss-shell")
@@ -4790,22 +5035,11 @@ are removed when CSS is applied.</pre>
         `${Math.round(width)}px`,
       )
     }
-    if (kind === "dock") {
-      const bounds = shell.getBoundingClientRect()
-      const max = Math.max(190, Math.min(540, bounds.height * 0.6))
-      shell.style.setProperty("--ss-dock-height", `${Math.round(clamp(bounds.bottom - clientY, 118, max))}px`)
-    }
-    if (kind === "lora-split") {
-      const bounds = this.get<HTMLElement>(".ss-lora-dock-content").getBoundingClientRect()
-      const width = clamp(clientX - bounds.left, 220, Math.max(220, bounds.width - 250))
-      shell.style.setProperty("--ss-library-width", `${Math.round(width)}px`)
-    }
     if (kind === "prompt") {
       const bounds = this.get<HTMLElement>(".ss-center").getBoundingClientRect()
       const max = Math.max(130, bounds.height - 180)
       shell.style.setProperty("--ss-prompt-height", `${Math.round(clamp(bounds.bottom - clientY, 105, max))}px`)
     }
-    this.fitPreviewToAspect()
   }
 
   private resetResize(kind: string): void {
@@ -4813,14 +5047,11 @@ are removed when CSS is applied.</pre>
     const properties: Record<string, string> = {
       generation: "--ss-generation-width",
       history: "--ss-history-width",
-      dock: "--ss-dock-height",
-      "lora-split": "--ss-library-width",
       prompt: "--ss-prompt-height",
     }
     const property = properties[kind]
     if (property) shell.style.removeProperty(property)
     this.persistWorkspaceState()
-    this.fitPreviewToAspect()
   }
 
   private toggleFullscreen(force?: boolean): void {
@@ -4829,21 +5060,31 @@ are removed when CSS is applied.</pre>
     shell.classList.toggle("ss-fullscreen-layer", shouldEnter)
     this.updateWorkspaceButtons()
     this.persistWorkspaceState()
-    requestAnimationFrame(() => this.fitPreviewToAspect())
   }
 
   private setMobileTab(tab: string): void {
-    const allowed = new Set(["create", "generation", "loras", "stack", "history"])
+    const allowed = new Set(["create", "generation", "style", "loras", "stack", "history"])
     const selected = allowed.has(tab) ? tab : "create"
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.mobileTab = selected
+    this.setStudioView(["style", "loras", "stack"].includes(selected) ? "styles" : "generate")
+    const mobile = this.mobileMedia.matches
+    // These panes are created once. Selection changes visibility, never their ownership or contents.
+    for (const pane of this.root.querySelectorAll<HTMLElement>("[data-mobile-pane]")) {
+      pane.hidden = mobile && pane.dataset.mobilePane !== selected
+    }
+    if (selected === "history") this.get<HTMLDetailsElement>('[data-role="rail-history"]').open = true
+    this.get<HTMLDetailsElement>('[data-role="style-more"]').open = !mobile
+    const init = this.get<HTMLElement>(".ss-init-panel")
+    const slot = this.get<HTMLElement>(`[data-role="${mobile ? "create" : "tune"}-init-slot"]`)
+    if (init.parentElement !== slot) slot.appendChild(init)
     for (const button of this.root.querySelectorAll<HTMLButtonElement>(".ss-mobile-tab")) {
       const active = button.dataset.tab === selected
       button.dataset.active = String(active)
       button.setAttribute("aria-current", active ? "page" : "false")
+      if (active && mobile) button.scrollIntoView?.({ block: "nearest", inline: "nearest" })
     }
     this.persistWorkspaceState()
-    requestAnimationFrame(() => this.fitPreviewToAspect())
   }
 
   private openInspector(): void {
@@ -5009,7 +5250,6 @@ are removed when CSS is applied.</pre>
       this.renderInitImage()
     }
     this.renderStack()
-    this.renderLoras()
     this.renderPresetStack()
     this.updateContextControls()
     if (closeOverlays) {
@@ -5291,14 +5531,13 @@ are removed when CSS is applied.</pre>
       })
       this.setStackPresetSelection(preset?.id || "")
       this.renderStack()
-      this.renderLoras()
     }
 
     if (!checkpointLoaded) {
       if (this.state.models.length) {
         this.setRunStatus(`“${binding.checkpoint}” from ${folder.name} is not available on this SwarmUI connection.`, true)
       }
-      return items.length
+      return items.length > 0
     }
 
     this.hydratedVisualCharacterId = binding.characterId
@@ -5319,6 +5558,7 @@ are removed when CSS is applied.</pre>
     const selectedStackId = selectedStackValue === "__custom__" ? "" : selectedStackValue
     const selectedStack = this.state.stackPresets.find((preset) => preset.id === selectedStackId)
     const profile = {
+      ...this.readRecipeEditor("base"),
       positivePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value,
       negativePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value,
       checkpoint: this.get<HTMLSelectElement>('[data-role="visual-checkpoint"]').value,
@@ -5382,6 +5622,7 @@ are removed when CSS is applied.</pre>
     const set = (role: string, value: string) => {
       this.get<HTMLInputElement | HTMLTextAreaElement>(`[data-role="${role}"]`).value = value
     }
+    this.populateRecipeEditor("look", look)
     set("library-look-name", look?.name || "")
     set("library-look-aliases", look?.aliases.join(", ") || "")
     set("library-look-outfit", look?.outfitPrompt || "")
@@ -5438,6 +5679,7 @@ are removed when CSS is applied.</pre>
     const list = (value: string) => value.split(/[,|\n]+/).map((item) => item.trim()).filter(Boolean)
     const stackValue = this.get<HTMLSelectElement>('[data-role="library-look-stack"]').value
     return {
+      ...this.readRecipeEditor("look"),
       id: existing?.id || "",
       name,
       aliases: list(this.get<HTMLInputElement>('[data-role="library-look-aliases"]').value),
@@ -5549,6 +5791,7 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="visual-profile-title"]').textContent = `${folder.name} visuals`
     this.get<HTMLElement>('[data-role="visual-profile-subtitle"]').textContent = "Base generation profile and named continuity looks"
     this.get<HTMLElement>('[data-role="visual-profile-state"]').textContent = folder.binding.enabled ? "Active" : "Disabled"
+    this.populateRecipeEditor("base", folder.binding)
     this.get<HTMLInputElement>('[data-role="visual-enabled"]').checked = folder.binding.enabled
     this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value = folder.binding.positivePrompt
     this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value = folder.binding.negativePrompt
@@ -6012,7 +6255,10 @@ are removed when CSS is applied.</pre>
       : folder?.binding?.enabled
         ? folder.binding.stackSnapshot || []
         : []
-    for (const item of boundItems) {
+    const styleStack = this.state.stackPresets.find(item => item.id === this.selectedRenderStyle()?.loraStackId)?.items || []
+    const look = folder?.binding?.enabled ? folder.binding.looks.find(item => item.id === folder.binding?.activeLookId) : undefined
+    const lookStack = this.state.stackPresets.find(item => item.id === look?.stackPresetId)?.items || look?.stackSnapshot || []
+    for (const item of [...styleStack, ...boundItems, ...lookStack]) {
       const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl)
       merged.set(normalizeModelName(item.name), {
         lora,
@@ -6042,7 +6288,8 @@ are removed when CSS is applied.</pre>
       : null
     const personaVisual = personaPreset?.positivePrompt.trim() || ""
     let layeredPrompt = prompt
-    for (const layer of [visual, personaVisual]) {
+    const look = folder?.binding?.enabled ? folder.binding.looks.find(item => item.id === folder.binding?.activeLookId) : undefined
+    for (const layer of [this.selectedRenderStyle()?.positiveAppend, visual, look?.outfitPrompt, ...(look?.triggerWords || []), personaVisual]) {
       if (layer && !layeredPrompt.toLowerCase().includes(layer.toLowerCase())) {
         layeredPrompt = [layer, layeredPrompt].filter(Boolean).join(", ")
       }
@@ -6056,9 +6303,10 @@ are removed when CSS is applied.</pre>
   }
 
   private finalNegativePrompt(): string {
-    const prompt = this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim()
+    const prompt = [this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim(), this.selectedRenderStyle()?.negativeAppend].filter(Boolean).join(", ")
     const folder = this.activeVisualFolder()
-    const visual = folder?.binding?.enabled ? folder.binding.negativePrompt.trim() : ""
+    const look = folder?.binding?.enabled ? folder.binding.looks.find(item => item.id === folder.binding?.activeLookId) : undefined
+    const visual = folder?.binding?.enabled ? [folder.binding.negativePrompt.trim(), look?.negativePrompt].filter(Boolean).join(", ") : ""
     if (!visual || prompt.toLowerCase().includes(visual.toLowerCase())) return prompt
     return [visual, prompt].filter(Boolean).join(", ")
   }
@@ -6151,9 +6399,9 @@ are removed when CSS is applied.</pre>
     }
 
     const enabled = this.effectiveStack().filter((item) => item.enabled)
-    const parameters = this.collectGenerationParameters(rawRequestOverride, enabled)
+    const parameters = { ...this.collectGenerationParameters(rawRequestOverride, enabled), ...recipeParameters(this.effectiveRecipe()) }
 
-    const model = this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
+    const model = this.effectiveRecipe().checkpoint || this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
     const clientJobId = createRequestId()
     const negativePrompt = this.finalNegativePrompt()
     const profileInput = {
@@ -6207,6 +6455,7 @@ are removed when CSS is applied.</pre>
         parameters,
       },
       recordHints: {
+        styleId: this.activeRenderStyleId,
         resolvedPrompt: resolved.prompt,
         resolvedNegativePrompt: resolved.negativePrompt,
         presets: resolved.presets,
@@ -6223,35 +6472,7 @@ are removed when CSS is applied.</pre>
     if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
       this.previewAspect = clamp(width / height, 0.1, 10)
     }
-    this.get<HTMLElement>('[data-role="current-preview"]').style.setProperty(
-      "--ss-preview-aspect",
-      String(this.previewAspect),
-    )
-    requestAnimationFrame(() => this.fitPreviewToAspect())
-  }
 
-  private fitPreviewToAspect(): void {
-    if (this.disposed) return
-    const stage = this.root.querySelector<HTMLElement>('[data-role="output-stage"]')
-    const preview = this.root.querySelector<HTMLElement>('[data-role="current-preview"]')
-    if (!stage || !preview || stage.clientWidth <= 0) return
-    const availableWidth = Math.max(120, stage.clientWidth - 18)
-    let maximumHeight: number
-
-    if (window.matchMedia("(max-width: 720px)").matches) {
-      maximumHeight = Math.max(190, window.innerHeight * 0.52)
-    } else {
-      const head = stage.querySelector<HTMLElement>(".ss-output-stage-head")
-      const meta = stage.querySelector<HTMLElement>(".ss-output-meta")
-      maximumHeight = Math.max(
-        150,
-        stage.clientHeight - (head?.offsetHeight || 0) - (meta?.offsetHeight || 0) - 34,
-      )
-    }
-
-    const fitted = fitAspectWithin(this.previewAspect, availableWidth, maximumHeight)
-    preview.style.width = `${Math.round(fitted.width)}px`
-    preview.style.height = `${Math.round(fitted.height)}px`
   }
 
   private setGenerating(value: boolean): void {
@@ -6321,7 +6542,7 @@ are removed when CSS is applied.</pre>
         this.updatePreviewAspect(preview.naturalWidth, preview.naturalHeight)
       }
     }
-    preview.src = src
+    if (preview.getAttribute("src") !== src) preview.src = src
     preview.hidden = false
     this.get<HTMLElement>('[data-role="preview-empty"]').hidden = true
     this.updateGenerationProgress(step, totalSteps)
@@ -6332,7 +6553,9 @@ are removed when CSS is applied.</pre>
 
   private renderOutputs(): void {
     const grid = this.get<HTMLElement>('[data-role="history-grid"]')
-    grid.replaceChildren()
+    for (const child of [...grid.children] as HTMLElement[]) {
+      if (child.dataset.outputId ? !this.state.outputs.some(output => String(output.id) === child.dataset.outputId) : this.state.outputs.length > 0) child.remove()
+    }
     this.get<HTMLElement>('[data-role="output-count"]').textContent = String(this.state.outputTotal)
     const pages = Math.max(1, Math.ceil(this.state.outputTotal / this.state.outputLimit))
     const page = Math.min(pages, Math.floor(this.state.outputOffset / this.state.outputLimit) + 1)
@@ -6341,12 +6564,29 @@ are removed when CSS is applied.</pre>
     this.get<HTMLButtonElement>('[data-action="history-next"]').disabled =
       this.state.outputOffset + this.state.outputLimit >= this.state.outputTotal
     if (!this.state.outputs.length) {
-      grid.appendChild(element("div", "ss-empty", "Outputs created in this chat will appear here."))
+      if (!grid.firstElementChild) grid.appendChild(element("div", "ss-empty", "Outputs created in this chat will appear here."))
       return
     }
-    for (const output of this.state.outputs) {
+    for (const [index, output] of this.state.outputs.entries()) {
+      const existing = [...grid.children].find(child => (child as HTMLElement).dataset.outputId === String(output.id)) as HTMLElement | undefined
+      if (existing) {
+        const image = existing.querySelector<HTMLImageElement>("img")!
+        if (image.getAttribute("src") !== output.url) image.src = output.url
+        image.alt = output.original_filename || "Generated image"
+        existing.querySelector<HTMLButtonElement>(".ss-history-item")!.title = image.alt
+        existing.querySelector(".ss-history-menu-toggle")!.setAttribute("aria-label", `Actions for ${this.outputToCurrentImage(output).label}`)
+        const actions = existing.querySelectorAll<HTMLButtonElement>(".ss-history-menu button")
+        const current = this.outputToCurrentImage(output)
+        actions[0].disabled = !current.details
+        actions[1].disabled = !current.src
+        actions[2].disabled = !current.id || !this.state.activeChat?.id || !this.state.permissions.chatMutation
+        actions[3].disabled = !current.id
+        if (grid.children[index] !== existing) grid.insertBefore(existing, grid.children[index] || null)
+        continue
+      }
       const current = this.outputToCurrentImage(output)
       const card = element("div", "ss-history-card")
+      card.dataset.outputId = String(output.id)
       const button = element("button", "ss-history-item")
       button.title = output.original_filename || "Generated image"
       const image = element("img")
@@ -6355,7 +6595,7 @@ are removed when CSS is applied.</pre>
       button.appendChild(image)
       button.addEventListener("click", () => {
         this.closeHistoryMenus()
-        this.setCurrentImage(current)
+        this.setCurrentImage(this.outputToCurrentImage(this.state.outputs.find(item => item.id === output.id) || output))
         this.openInspector()
       })
       const menuToggle = element("button", "ss-history-menu-toggle", "⋮")
@@ -6376,7 +6616,7 @@ are removed when CSS is applied.</pre>
         action.addEventListener("click", (event) => {
           event.stopPropagation()
           this.closeHistoryMenus()
-          this.setCurrentImage(current)
+          this.setCurrentImage(this.outputToCurrentImage(this.state.outputs.find(item => item.id === output.id) || output))
           handler()
         })
         menu.appendChild(action)
@@ -6398,7 +6638,7 @@ are removed when CSS is applied.</pre>
         menuToggle.setAttribute("aria-expanded", String(shouldOpen))
       })
       card.append(button, menuToggle, menu)
-      grid.appendChild(card)
+      grid.insertBefore(card, grid.children[index] || null)
     }
   }
 
@@ -6474,7 +6714,7 @@ are removed when CSS is applied.</pre>
         this.updatePreviewAspect(preview.naturalWidth, preview.naturalHeight)
       }
     }
-    preview.src = image.src
+    if (preview.getAttribute("src") !== image.src) preview.src = image.src
     preview.hidden = false
     for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="use-current-init"]')) {
       button.disabled = false

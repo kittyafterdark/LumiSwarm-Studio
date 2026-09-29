@@ -156,6 +156,8 @@ interface OutputFolder {
 }
 
 interface OutputFolderBinding {
+  generationRecipe?: GenerationRecipe
+  styleId?: string
   type: "character"
   characterId: string
   positivePrompt: string
@@ -170,6 +172,8 @@ interface OutputFolderBinding {
 }
 
 interface CharacterVisualLook {
+  generationRecipe?: GenerationRecipe
+  styleId?: string
   id: string
   name: string
   aliases: string[]
@@ -833,7 +837,7 @@ function updateLoraDownloadJob(
 }
 
 function normalizeLoraDownloadQueue(payload: any): LoraDownloadQueueItem[] {
-  const source = Array.isArray(payload?.items)
+  const source: unknown[] = Array.isArray(payload?.items)
     ? payload.items
     : [{ url: payload?.url, name: payload?.name, title: payload?.title }]
   const items = source.slice(0, 48).map((raw) => {
@@ -1656,6 +1660,12 @@ function defaultCharacterLook(): CharacterVisualLook {
   }
 }
 
+async function loadRenderSettings(userId?: string): Promise<{ defaults: StudioGenerationDefaults | null; styles: StudioRenderStyle[] }> {
+  const defaults = await spindle.userStorage.getJson("studio-defaults.json", { fallback: null, userId })
+  const styles = await spindle.userStorage.getJson("studio-render-styles.json", { fallback: [], userId })
+  return { defaults: sanitizeStudioDefaults(defaults), styles: sanitizeRenderStyles(styles) }
+}
+
 function cleanCharacterLooks(value: unknown): CharacterVisualLook[] {
   const source = Array.isArray(value) ? value.slice(0, 48) : []
   const seen = new Set<string>()
@@ -1670,6 +1680,8 @@ function cleanCharacterLooks(value: unknown): CharacterVisualLook[] {
     return [{
       id,
       name,
+      generationRecipe: sanitizeGenerationRecipe(item.generationRecipe),
+      styleId: asString(item.styleId).slice(0, 200),
       aliases: cleanVisualWords(item.aliases),
       outfitPrompt: asString(item.outfitPrompt).trim().slice(0, 12_000),
       negativePrompt: asString(item.negativePrompt).trim().slice(0, 12_000),
@@ -1746,6 +1758,8 @@ function cleanOutputFolders(value: unknown): OutputFolder[] {
       ? {
           type: "character",
           characterId,
+          generationRecipe: sanitizeGenerationRecipe(rawBinding.generationRecipe),
+          styleId: asString(rawBinding.styleId).slice(0, 200),
           positivePrompt: asString(rawBinding.positivePrompt).trim().slice(0, 12_000),
           negativePrompt: asString(rawBinding.negativePrompt).trim().slice(0, 12_000),
           checkpoint: asString(rawBinding.checkpoint).trim().slice(0, 500),
@@ -1901,6 +1915,8 @@ async function updateOutputFolderProfile(
   }
   folder.binding = {
     ...folder.binding,
+    generationRecipe: sanitizeGenerationRecipe(input.generationRecipe ?? folder.binding.generationRecipe),
+    styleId: typeof input.styleId === "string" ? input.styleId.slice(0, 200) : folder.binding.styleId,
     positivePrompt: asString(input.positivePrompt).trim().slice(0, 12_000),
     negativePrompt: asString(input.negativePrompt).trim().slice(0, 12_000),
     checkpoint: Object.prototype.hasOwnProperty.call(input, "checkpoint")
@@ -1947,7 +1963,7 @@ async function saveCharacterLook(
     ? (await loadStackPresets(userId)).find((preset) => preset.id === stackPresetId)
     : null
   if (stackPresetId && !stackPreset) throw new Error("That saved LoRA stack no longer exists.")
-  const look = cleanCharacterLooks([{ ...input, id, name, updatedAt: Date.now() }])
+  const look = cleanCharacterLooks([{ ...(existingIndex >= 0 ? folder.binding.looks[existingIndex] : {}), ...input, id, name, updatedAt: Date.now() }])
     .find((candidate) => candidate.id === id)
   if (!look) throw new Error("That character look could not be normalized.")
   look.stackPresetId = stackPreset?.id || ""
@@ -3748,7 +3764,7 @@ async function applyCharacterLayer(
   automation: TagAutomationConfig = cleanTagAutomationConfig(null),
   requestedLook = "",
   userId?: string,
-): Promise<{ prompt: string; negativePrompt: string; checkpoint: string; preferredAspect: string; stack: StackPresetItem[]; excludedLoras: string[]; characterId: string; characterName: string; lookId: string; lookName: string; visualLoreEntryIds: string[]; referenceImageId: string; referenceImageUrl: string }> {
+): Promise<{ generationRecipe: GenerationRecipe; prompt: string; negativePrompt: string; checkpoint: string; preferredAspect: string; stack: StackPresetItem[]; excludedLoras: string[]; characterId: string; characterName: string; lookId: string; lookName: string; visualLoreEntryIds: string[]; referenceImageId: string; referenceImageUrl: string }> {
   const chat = spindle.permissions.has("chats") ? await spindle.chats.get(chatId, userId) : null
   const characterId = asString(chat?.character_id)
   const visualFolder = (await loadOutputFolders(userId)).find((folder) =>
@@ -3776,6 +3792,11 @@ async function applyCharacterLayer(
       || looks.find((look) => look.id === "default")
       || null
     : null
+  const renderSettings = await loadRenderSettings(userId)
+  const liveProfile = await loadStudioGenerationProfile(userId)
+  const style = renderSettings.styles.find(item => item.id === ((includeCharacter ? activeLook?.styleId || visualFolder?.binding?.styleId : "") || asString(liveProfile?.recordHints?.styleId)))
+  const generationRecipe = resolveGenerationConfig({ style, characterBase: includeCharacter ? visualFolder?.binding : undefined, characterLook: activeLook })
+  const styleStack = stackPresets.find(item => item.id === style?.loraStackId)?.items || []
   const activeLookStackPreset = activeLook?.stackPresetId
     ? stackPresets.find((preset) => preset.id === activeLook.stackPresetId)?.items || []
     : []
@@ -3825,6 +3846,7 @@ async function applyCharacterLayer(
     .trim()
   const contains = (value: string) => Boolean(value && prompt.toLowerCase().includes(value.toLowerCase()))
   const characterLayers = [
+    style?.positiveAppend || "",
     automation.autoPrintCharacterPositive ? characterBase : "",
     lookPositive,
     ...lookTriggers,
@@ -3873,12 +3895,13 @@ async function applyCharacterLayer(
   prompt = prompt.replace(/(?:\s*,\s*){2,}/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "").trim()
   const loreNegative = visualLore.map((item) => item.identity.negativePrompt).filter(Boolean)
   const negativeLayers = [
+    style?.negativeAppend || "",
     includeCharacter ? visualFolder?.binding?.negativePrompt || "" : includePersona ? "" : NO_CHARACTER_NEGATIVE,
     activeLook?.negativePrompt || "",
     ...loreNegative,
   ].filter(Boolean)
   const mergedStack = new Map<string, StackPresetItem>()
-  for (const item of [...visualStack, ...lookStack]) mergedStack.set(item.name.toLowerCase(), item)
+  for (const item of [...styleStack, ...visualStack, ...lookStack]) mergedStack.set(item.name.toLowerCase(), item)
   for (const item of visualLore) {
     const presetItems = item.identity.stackPresetId
       ? stackPresets.find((preset) => preset.id === item.identity.stackPresetId)?.items || []
@@ -3888,10 +3911,11 @@ async function applyCharacterLayer(
     }
   }
   return {
+    generationRecipe,
     prompt,
     negativePrompt: [...new Set(negativeLayers)].join(", "),
     checkpoint: includeCharacter
-      ? activeLook?.checkpoint || visualFolder?.binding?.checkpoint || visualLore.find((item) => item.identity.checkpoint)?.identity.checkpoint || ""
+      ? generationRecipe.checkpoint || visualLore.find((item) => item.identity.checkpoint)?.identity.checkpoint || ""
       : visualLore.find((item) => item.identity.checkpoint)?.identity.checkpoint || "",
     preferredAspect: visualLore.find((item) => item.identity.preferredAspect)?.identity.preferredAspect || "",
     stack: includeCharacter || visualLore.length ? [...mergedStack.values()] : [],
@@ -4288,7 +4312,10 @@ async function runTaggedImageJob(
       model: asString(profileInput.model) || connection.model,
       parameters: { ...asRecord(connection.default_parameters), ...asRecord(profileInput.parameters) },
     }
+    const renderSettings = await loadRenderSettings(userId)
     const parameters = asRecord(input.parameters)
+    Object.assign(parameters, recipeParameters(resolveGenerationConfig({ provider: connection.default_parameters, studioDefaults: renderSettings.defaults, liveProfile: profileInput.parameters })))
+    if (!asString(profileInput.model) && renderSettings.defaults?.checkpoint) input.model = renderSettings.defaults.checkpoint
     applyAspectToParameters(parameters, job.aspect || "4:3")
     removeTaggedPresetOverride(parameters)
     // Every in-chat retry should produce a new candidate, even when the
@@ -4315,6 +4342,8 @@ async function runTaggedImageJob(
       job.aspect = characterLayer.preferredAspect
       applyAspectToParameters(parameters, characterLayer.preferredAspect)
     }
+    Object.assign(parameters, recipeParameters(characterLayer.generationRecipe))
+    if (originalTag?.attrs.aspect) applyAspectToParameters(parameters, job.aspect)
     if (characterLayer.checkpoint) input.model = characterLayer.checkpoint
     if (characterLayer.referenceImageId || characterLayer.referenceImageUrl) {
       try {
@@ -4823,6 +4852,7 @@ async function bootstrap(userId?: string): Promise<JsonObject> {
   const outputPage = await listOutputs(userId, activeChat)
 
   return {
+    renderSettings: await loadRenderSettings(userId),
     permissions,
     connections,
     parserConnections,
@@ -4893,6 +4923,37 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
   const requestId = asString(payload?.requestId)
   try {
     switch (type) {
+      case "save_studio_defaults": {
+        await spindle.userStorage.setJson("studio-defaults.json", sanitizeStudioDefaults(payload.defaults), { indent: 2, userId })
+        spindle.sendToFrontend({ type: "render_settings_result", requestId, data: await loadRenderSettings(userId) }, userId)
+        return
+      }
+      case "save_render_style":
+      case "delete_render_style": {
+        const settings = await loadRenderSettings(userId)
+        const style = sanitizeRenderStyles([payload.style])[0]
+        if (type === "save_render_style" && !style) throw new Error("A style needs an ID and name.")
+        const id = style?.id || asString(payload.id)
+        const styles = settings.styles.filter(item => item.id !== id)
+        if (type === "save_render_style" && style) styles.unshift(style)
+        await spindle.userStorage.setJson("studio-render-styles.json", styles, { indent: 2, userId })
+        spindle.sendToFrontend({ type: "render_settings_result", requestId, data: await loadRenderSettings(userId) }, userId)
+        return
+      }
+      case "save_active_render_recipe": {
+        const chat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null
+        const folders = await loadOutputFolders(userId)
+        const folder = folders.find(item => item.binding?.characterId === chat?.character_id)
+        if (!folder?.binding) throw new Error("No active character visual binding.")
+        const target = payload.destination === "look" ? folder.binding.looks.find(item => item.id === folder.binding?.activeLookId) : folder.binding
+        if (!target) throw new Error("The active look no longer exists.")
+        target.generationRecipe = sanitizeGenerationRecipe(payload.recipe)
+        target.styleId = asString(payload.styleId).slice(0, 200)
+        target.checkpoint = asString(payload.checkpoint).slice(0, 500)
+        await persistOutputFolders(folders, userId)
+        spindle.sendToFrontend({ type: "output_folders_result", requestId, data: folders }, userId)
+        return
+      }
       case "bootstrap": {
         spindle.sendToFrontend({
           type: "bootstrap_result",
