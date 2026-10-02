@@ -1,6 +1,6 @@
 # Experimental Generate / Styles workspace
 
-Branch: `experimental/studio-styles-defaults`. Main remains the pre-change backup.
+Branch: `experimental`. Main remains the pre-change backup.
 
 ## Source map
 
@@ -77,3 +77,11 @@ At 720px and below, the sole workspace navigation is the non-wrapping Create / T
 Mobile Style uses Apply / Save / an overflow disclosure for Duplicate, Delete and Clear. Repeated headings and nested panel borders are removed; the library retains its thumbnail layout, with a minimum card width controlling one versus two columns. Desktop keeps its two workspaces and three-column composition.
 
 `npm run test:browser` also checks six-pane isolation at 360/430/720px, initial mobile restoration, draft/node persistence, overflow actions, no horizontal page overflow, pinned navigation, safe-top and desktop restoration. Set `STUDIO_SCREENSHOT_DIR` to save mocked 430px views for review. Live host acceptance remains separate.
+
+## Safe areas, widget refresh and request formatting
+
+The mobile Save preset modal follows VisualViewport resize/scroll events and safe insets. Its header and footer remain outside the scrolling field list, including while the keyboard reduces the visible height. Chromium geometry checks simulate portrait, landscape, bottom safe area and keyboard panning; physical iPhone/Safari validation is still required.
+
+Native Lumi widgets now restore the last position through `initialPosition`, save `onDragEnd` coordinates, and flush their position on pagehide, backgrounding and teardown. Host placement retains responsibility for viewport clamping. The compatibility overlay retains its existing position storage.
+
+Injected protocols identify bracketed image-history summaries as application-generated context and prohibit emitting them for new illustrations. New images require complete tags in the configured request mode. This guidance applies to defaults, parser requests and existing saved custom protocols.

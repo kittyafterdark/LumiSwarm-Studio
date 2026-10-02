@@ -1,3 +1,33 @@
+function readMiniplayerPosition(): { x: number; y: number } | undefined {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(MINIPLAYER_POSITION_STORAGE_KEY) || "null")
+    if (typeof saved?.x === "number" && Number.isFinite(saved.x) && typeof saved?.y === "number" && Number.isFinite(saved.y)) return { x: saved.x, y: saved.y }
+  } catch {}
+  return undefined
+}
+
+function saveMiniplayerPosition(position: { x: number; y: number }): void {
+  if (!Number.isFinite(position?.x) || !Number.isFinite(position?.y)) return
+  try { window.localStorage.setItem(MINIPLAYER_POSITION_STORAGE_KEY, JSON.stringify(position)) } catch {}
+}
+
+function persistNativeMiniplayerPosition(widget: any): () => void {
+  if (typeof widget.getPosition !== "function") return () => {}
+  const save = () => {
+    try { saveMiniplayerPosition(widget.getPosition()) } catch {}
+  }
+  const offDrag = typeof widget.onDragEnd === "function" ? widget.onDragEnd(saveMiniplayerPosition) : () => {}
+  const onVisibility = () => { if (document.visibilityState === "hidden") save() }
+  window.addEventListener("pagehide", save)
+  document.addEventListener("visibilitychange", onVisibility)
+  return () => {
+    save()
+    offDrag?.()
+    window.removeEventListener("pagehide", save)
+    document.removeEventListener("visibilitychange", onVisibility)
+  }
+}
+
 function createOverlayMiniplayerWidget(): any | null {
   if (!document.documentElement) return null
   const surface = element("div", "ss-miniplayer-app-surface")

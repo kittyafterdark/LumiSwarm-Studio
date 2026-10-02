@@ -261,6 +261,10 @@ function swarmImageProtocolExample(family) {
     return family === "illustrious" ? ILLUSTRIOUS_SWARM_IMAGE_PROTOCOL_EXAMPLE : ANIMA_SWARM_IMAGE_PROTOCOL_EXAMPLE;
 }
 const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `SWARM STUDIO IMAGE REQUEST PROTOCOL
+
+HISTORY IMAGE MARKERS
+Bracketed summaries such as [Generated illustration: ...], [Illustration requested: ...], and [Embedded generated image omitted] are application-authored descriptions of earlier images in chat history. They are historical context only, never an output format or an image request. Do not copy, imitate, or emit those markers in a new reply. To request a new illustration, emit a complete <swarm-image> tag using the request mode and attributes specified below, at the point where the image belongs. A bracketed caption, Markdown image placeholder, or prose saying an image was generated cannot trigger generation and does not satisfy any required image count.
+
 Place this exact XML-like request wherever an illustration selected under the image-count instructions should appear. Attributes may be written on one line or separate lines:
 <swarm-image
   request="generate"
@@ -3949,6 +3953,28 @@ const STUDIO_V3_STYLES = `
     .ss-shell .ss-output-stage { display: grid; }
   }
 
+  @media (max-width: 720px) {
+    .ss-workflow-modal[data-role="save-preset-modal"] {
+      box-sizing: border-box;
+      top: max(var(--studio-safe-top), var(--ss-modal-viewport-top, 0px));
+      bottom: auto;
+      height: calc(var(--ss-modal-viewport-height, 100dvh) - max(0px, calc(var(--studio-safe-top) - var(--ss-modal-viewport-top, 0px))));
+      min-height: 0;
+      padding: 12px max(12px, var(--studio-safe-right, env(safe-area-inset-right, 0px)))
+        max(12px, calc(var(--studio-safe-bottom, env(safe-area-inset-bottom, 0px)) - var(--app-keyboard-inset-bottom, 0px)))
+        max(12px, var(--studio-safe-left, env(safe-area-inset-left, 0px)));
+      overflow: hidden;
+    }
+    .ss-workflow-modal[data-role="save-preset-modal"] .ss-workflow-modal-card {
+      box-sizing: border-box;
+      min-height: 0;
+      max-height: 100%;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+    }
+    .ss-workflow-modal[data-role="save-preset-modal"] :is(.ss-workflow-modal-head, .ss-workflow-modal-actions) { flex-shrink: 0; }
+    .ss-workflow-modal[data-role="save-preset-modal"] .ss-save-preset-fields { overscroll-behavior: contain; }
+  }
+
 `;
 function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -4029,6 +4055,42 @@ async function upsertStudioNativePreset(input, fetcher = fetch) {
     return {
         id: String(preset.id),
         warnings: Array.isArray(data.errors) ? data.errors.map(String) : []
+    };
+}
+function readMiniplayerPosition() {
+    try {
+        const saved = JSON.parse(window.localStorage.getItem(MINIPLAYER_POSITION_STORAGE_KEY) || "null");
+        if (typeof saved?.x === "number" && Number.isFinite(saved.x) && typeof saved?.y === "number" && Number.isFinite(saved.y)) return {
+            x: saved.x,
+            y: saved.y
+        };
+    } catch  {}
+    return undefined;
+}
+function saveMiniplayerPosition(position) {
+    if (!Number.isFinite(position?.x) || !Number.isFinite(position?.y)) return;
+    try {
+        window.localStorage.setItem(MINIPLAYER_POSITION_STORAGE_KEY, JSON.stringify(position));
+    } catch  {}
+}
+function persistNativeMiniplayerPosition(widget) {
+    if (typeof widget.getPosition !== "function") return ()=>{};
+    const save = ()=>{
+        try {
+            saveMiniplayerPosition(widget.getPosition());
+        } catch  {}
+    };
+    const offDrag = typeof widget.onDragEnd === "function" ? widget.onDragEnd(saveMiniplayerPosition) : ()=>{};
+    const onVisibility = ()=>{
+        if (document.visibilityState === "hidden") save();
+    };
+    window.addEventListener("pagehide", save);
+    document.addEventListener("visibilitychange", onVisibility);
+    return ()=>{
+        save();
+        offDrag?.();
+        window.removeEventListener("pagehide", save);
+        document.removeEventListener("visibilitychange", onVisibility);
     };
 }
 function createOverlayMiniplayerWidget() {
@@ -4616,6 +4678,7 @@ function manualLora(name, title = "", sourceUrl = "") {
     };
 }
 class MiniPlayerController {
+    stopPositionPersistence;
     ctx;
     widget;
     root;
@@ -4674,6 +4737,7 @@ class MiniPlayerController {
     constructor(ctx, widget, openStudio, openLibrary, getStudioDraft, behavior, onBehaviorChange){
         this.ctx = ctx;
         this.widget = widget;
+        this.stopPositionPersistence = persistNativeMiniplayerPosition(widget);
         this.root = widget.root;
         this.root.style.width = "100%";
         this.root.style.height = "100%";
@@ -5166,6 +5230,7 @@ class MiniPlayerController {
         }
     }
     destroy() {
+        this.stopPositionPersistence();
         this.cancelLongPress();
         document.removeEventListener("pointerdown", this.onDocumentPointerDown);
         document.removeEventListener("keydown", this.onDocumentKeyDown);
@@ -5532,6 +5597,13 @@ class StudioController {
     handleMobileLayout = ()=>{
         this.setMobileTab(this.get(".ss-shell").dataset.mobileTab || "create");
     };
+    updatePresetViewport = ()=>{
+        const viewport = window.visualViewport;
+        const shell = this.root.querySelector(".ss-shell");
+        if (!shell) return;
+        shell.style.setProperty("--ss-modal-viewport-top", `${viewport?.offsetTop || 0}px`);
+        shell.style.setProperty("--ss-modal-viewport-height", `${viewport?.height || window.innerHeight}px`);
+    };
     loraPage = 0;
     loraFilterKey = "";
     lorasDirty = true;
@@ -5725,6 +5797,10 @@ class StudioController {
         this.buildV3();
         this.restoreWorkspaceState();
         this.bind();
+        this.updatePresetViewport();
+        window.visualViewport?.addEventListener("resize", this.updatePresetViewport);
+        window.visualViewport?.addEventListener("scroll", this.updatePresetViewport);
+        window.addEventListener("resize", this.updatePresetViewport);
         this.get('[data-role="rail-history"] > summary').addEventListener("click", (event)=>{
             if (this.mobileMedia.matches) event.preventDefault();
         });
@@ -5762,6 +5838,9 @@ class StudioController {
         this.persistWorkspaceState();
         this.syncStudioProfile();
         this.disposed = true;
+        window.visualViewport?.removeEventListener("resize", this.updatePresetViewport);
+        window.visualViewport?.removeEventListener("scroll", this.updatePresetViewport);
+        window.removeEventListener("resize", this.updatePresetViewport);
         this.mobileMedia.removeEventListener("change", this.handleMobileLayout);
         if (this.profileSyncTimer) clearTimeout(this.profileSyncTimer);
         this.profileSyncTimer = null;
@@ -8570,6 +8649,7 @@ are removed when CSS is applied.</pre>
             label.append(checkbox, copy);
             fields.appendChild(label);
         }
+        this.updatePresetViewport();
         this.get('[data-role="save-preset-modal"]').hidden = false;
         this.get('[data-role="save-preset-name"]').focus();
     }
@@ -14296,6 +14376,7 @@ function setup(ctx) {
             const widget = (typeof ctx.ui.createFloatWidget === "function" ? ctx.ui.createFloatWidget({
                 width: mobile ? 64 : 318,
                 height: mobile ? 64 : 94,
+                initialPosition: readMiniplayerPosition(),
                 snapToEdge: true,
                 tooltip: "Swarm Studio miniplayer",
                 chromeless: true
