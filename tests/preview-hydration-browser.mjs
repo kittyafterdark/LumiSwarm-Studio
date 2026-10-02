@@ -172,6 +172,39 @@ try {
     panes:[...new Set([...document.querySelectorAll('[data-mobile-pane]')].filter(node=>node.checkVisibility()).map(node=>node.dataset.mobilePane))],
   }))
   assert.deepEqual(initialMobile.panes,[initialMobile.tab],'Fresh mobile mount restores exactly one pane')
+  // Simulate safe insets and a shortened VisualViewport; this is geometry coverage, not iPhone hardware QA.
+  for (const geometry of [
+    {width:390,height:844,visible:844,offset:0,safe:59,bottom:34},
+    {width:390,height:844,visible:414,offset:0,safe:59,bottom:34},
+    {width:390,height:844,visible:360,offset:70,safe:59,bottom:34},
+    {width:667,height:390,visible:390,offset:0,safe:0,bottom:21},
+  ]) {
+    await page.setViewportSize({width:geometry.width,height:geometry.height})
+    const bounds=await page.evaluate(g=>{
+      const viewport=new EventTarget()
+      Object.assign(viewport,{height:g.visible,offsetTop:g.offset})
+      Object.defineProperty(window,'visualViewport',{configurable:true,value:viewport})
+      const shell=document.querySelector('.ss-shell')
+      shell.style.setProperty('--studio-safe-top',`${g.safe}px`)
+      shell.style.setProperty('--studio-safe-bottom',`${g.bottom}px`)
+      mobileController.updatePresetViewport()
+      const modal=document.querySelector('[data-role="save-preset-modal"]')
+      modal.hidden=false
+      const fields=modal.querySelector('.ss-save-preset-fields')
+      if (!fields.querySelector('.diagnostic-fields')) {
+        const extra=document.createElement('div');extra.className='diagnostic-fields';extra.style.height='1200px';fields.appendChild(extra)
+      }
+      document.querySelector('[data-role="save-preset-name"]').focus()
+      const rect=node=>{const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right}}
+      return {card:rect(modal.querySelector('.ss-workflow-modal-card')),close:rect(modal.querySelector('[data-action="close-save-preset"]')),save:rect(modal.querySelector('[data-action="confirm-save-preset"]')),scrollable:fields.scrollHeight>fields.clientHeight}
+    },geometry)
+    assert.ok(bounds.card.top>=Math.max(geometry.safe,geometry.offset)+12)
+    assert.ok(bounds.save.bottom<=geometry.offset+geometry.visible-12)
+    assert.ok(bounds.close.top>=Math.max(geometry.safe,geometry.offset))
+    assert.ok(bounds.card.right<=geometry.width-12)
+    assert.ok(bounds.scrollable,'Preset fields scroll while close/save controls remain visible')
+  }
+  console.log('Preset modal simulated safe-area/keyboard/landscape geometry: ok (no physical iPhone test)')
   assert.deepEqual(errors, [])
   console.log('Chromium: 60 delayed decoded previews, zero card disconnects, zero library renders, stable geometry, opaque folders: ok')
 } finally {

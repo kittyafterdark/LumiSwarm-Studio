@@ -14,6 +14,13 @@ class StudioController {
   private readonly handleMobileLayout = () => {
     this.setMobileTab(this.get<HTMLElement>(".ss-shell").dataset.mobileTab || "create")
   }
+  private readonly updatePresetViewport = () => {
+    const viewport = window.visualViewport
+    const shell = this.root.querySelector<HTMLElement>(".ss-shell")
+    if (!shell) return
+    shell.style.setProperty("--ss-modal-viewport-top", `${viewport?.offsetTop || 0}px`)
+    shell.style.setProperty("--ss-modal-viewport-height", `${viewport?.height || window.innerHeight}px`)
+  }
   private loraPage = 0
   private loraFilterKey = ""
   private lorasDirty = true
@@ -214,6 +221,10 @@ class StudioController {
     this.buildV3()
     this.restoreWorkspaceState()
     this.bind()
+    this.updatePresetViewport()
+    window.visualViewport?.addEventListener("resize", this.updatePresetViewport)
+    window.visualViewport?.addEventListener("scroll", this.updatePresetViewport)
+    window.addEventListener("resize", this.updatePresetViewport)
     this.get<HTMLElement>('[data-role="rail-history"] > summary').addEventListener("click", event => {
       if (this.mobileMedia.matches) event.preventDefault()
     })
@@ -247,6 +258,9 @@ class StudioController {
     this.persistWorkspaceState()
     this.syncStudioProfile()
     this.disposed = true
+    window.visualViewport?.removeEventListener("resize", this.updatePresetViewport)
+    window.visualViewport?.removeEventListener("scroll", this.updatePresetViewport)
+    window.removeEventListener("resize", this.updatePresetViewport)
     this.mobileMedia.removeEventListener("change", this.handleMobileLayout)
     if (this.profileSyncTimer) clearTimeout(this.profileSyncTimer)
     this.profileSyncTimer = null
@@ -3127,6 +3141,7 @@ are removed when CSS is applied.</pre>
       label.append(checkbox, copy)
       fields.appendChild(label)
     }
+    this.updatePresetViewport()
     this.get<HTMLElement>('[data-role="save-preset-modal"]').hidden = false
     this.get<HTMLInputElement>('[data-role="save-preset-name"]').focus()
   }

@@ -46,6 +46,10 @@ function swarmImageProtocolExample(family: "anima" | "illustrious"): string {
 }
 
 const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `SWARM STUDIO IMAGE REQUEST PROTOCOL
+
+HISTORY IMAGE MARKERS
+Bracketed summaries such as [Generated illustration: ...], [Illustration requested: ...], and [Embedded generated image omitted] are application-authored descriptions of earlier images in chat history. They are historical context only, never an output format or an image request. Do not copy, imitate, or emit those markers in a new reply. To request a new illustration, emit a complete <swarm-image> tag using the request mode and attributes specified below, at the point where the image belongs. A bracketed caption, Markdown image placeholder, or prose saying an image was generated cannot trigger generation and does not satisfy any required image count.
+
 Place this exact XML-like request wherever an illustration selected under the image-count instructions should appear. Attributes may be written on one line or separate lines:
 <swarm-image
   request="generate"

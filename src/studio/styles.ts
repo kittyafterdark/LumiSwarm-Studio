@@ -3576,4 +3576,26 @@ const STUDIO_V3_STYLES = `
     .ss-shell .ss-output-stage { display: grid; }
   }
 
+  @media (max-width: 720px) {
+    .ss-workflow-modal[data-role="save-preset-modal"] {
+      box-sizing: border-box;
+      top: max(var(--studio-safe-top), var(--ss-modal-viewport-top, 0px));
+      bottom: auto;
+      height: calc(var(--ss-modal-viewport-height, 100dvh) - max(0px, calc(var(--studio-safe-top) - var(--ss-modal-viewport-top, 0px))));
+      min-height: 0;
+      padding: 12px max(12px, var(--studio-safe-right, env(safe-area-inset-right, 0px)))
+        max(12px, calc(var(--studio-safe-bottom, env(safe-area-inset-bottom, 0px)) - var(--app-keyboard-inset-bottom, 0px)))
+        max(12px, var(--studio-safe-left, env(safe-area-inset-left, 0px)));
+      overflow: hidden;
+    }
+    .ss-workflow-modal[data-role="save-preset-modal"] .ss-workflow-modal-card {
+      box-sizing: border-box;
+      min-height: 0;
+      max-height: 100%;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+    }
+    .ss-workflow-modal[data-role="save-preset-modal"] :is(.ss-workflow-modal-head, .ss-workflow-modal-actions) { flex-shrink: 0; }
+    .ss-workflow-modal[data-role="save-preset-modal"] .ss-save-preset-fields { overscroll-behavior: contain; }
+  }
+
 `

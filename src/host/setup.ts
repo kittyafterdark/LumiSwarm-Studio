@@ -198,6 +198,7 @@ function setup(ctx: FrontendContext): () => void {
         ? ctx.ui.createFloatWidget({
             width: mobile ? 64 : 318,
             height: mobile ? 64 : 94,
+            initialPosition: readMiniplayerPosition(),
             snapToEdge: true,
             tooltip: "Swarm Studio miniplayer",
             chromeless: true,

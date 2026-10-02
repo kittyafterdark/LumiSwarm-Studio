@@ -11,6 +11,7 @@ interface StudioActivitySnapshot {
 }
 
 class MiniPlayerController {
+  private readonly stopPositionPersistence: () => void
   private readonly ctx: FrontendContext
   private readonly widget: any
   private readonly root: HTMLElement
@@ -81,6 +82,7 @@ class MiniPlayerController {
   ) {
     this.ctx = ctx
     this.widget = widget
+    this.stopPositionPersistence = persistNativeMiniplayerPosition(widget)
     this.root = widget.root
     this.root.style.width = "100%"
     this.root.style.height = "100%"
@@ -656,6 +658,7 @@ class MiniPlayerController {
   }
 
   destroy(): void {
+    this.stopPositionPersistence()
     this.cancelLongPress()
     document.removeEventListener("pointerdown", this.onDocumentPointerDown)
     document.removeEventListener("keydown", this.onDocumentKeyDown)
