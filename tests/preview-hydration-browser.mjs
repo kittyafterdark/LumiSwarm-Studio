@@ -182,13 +182,21 @@ try {
   await page.addStyleTag({content:css})
   await page.evaluate(async()=>{
     const {StudioController,defaultStudioBehavior}=await import('/frontend.js')
-    window.mobileController=new StudioController({sendToBackend(){}},{root:document.querySelector('#root')},()=>{},()=>{},defaultStudioBehavior(),()=>{})
+    window.testMessages=[]
+    window.mobileController=new StudioController({sendToBackend(message){testMessages.push(message)}},{root:document.querySelector('#root')},()=>{},()=>{},defaultStudioBehavior(),()=>{})
   })
   const initialMobile = await page.evaluate(()=>({
     tab:document.querySelector('.ss-shell').dataset.mobileTab,
     panes:[...new Set([...document.querySelectorAll('[data-mobile-pane]')].filter(node=>node.checkVisibility()).map(node=>node.dataset.mobilePane))],
   }))
   assert.deepEqual(initialMobile.panes,[initialMobile.tab],'Fresh mobile mount restores exactly one pane')
+  // Simulate the host's dialog reset: native UA margin defaults cannot be relied on.
+  await page.addStyleTag({content:'dialog { margin: 0; }'})
+  const assertCentered=async(selector)=>{
+    const box=await page.locator(selector).boundingBox(), viewport=page.viewportSize()
+    assert.ok(Math.abs(box.x+box.width/2-viewport.width/2)<2,`${selector} centered horizontally`)
+    assert.ok(Math.abs(box.y+box.height/2-viewport.height/2)<2,`${selector} centered vertically`)
+  }
   // Exercise the character actions using controlled host API fixtures, never personal character data.
   await page.evaluate(()=>{
     mobileController.state.permissions={characters:true,personas:true,images:true}
@@ -197,8 +205,15 @@ try {
     mobileController.setCurrentImage({id:'saved-one',src:'/api/v1/images/saved-one',label:'Test output'})
     mobileController.openInspector()
   })
+  const avatarGroup=await page.locator('.ss-set-as-group').evaluate(node=>{
+    const group=node.getBoundingClientRect(), label=node.querySelector('.ss-set-as-label')
+    return {width:group.width,parentWidth:node.parentElement.getBoundingClientRect().width,fontSize:parseFloat(getComputedStyle(label).fontSize),labelY:label.getBoundingClientRect().bottom,buttonY:node.querySelector('button').getBoundingClientRect().top}
+  })
+  assert.ok(avatarGroup.width>=avatarGroup.parentWidth-2,'Set as group spans the action grid')
+  assert.ok(avatarGroup.fontSize>=14 && avatarGroup.labelY<avatarGroup.buttonY,'Readable label above both targets')
   await page.locator('[data-action="set-character-picture"]').click()
   await page.locator('[data-crop="apply"]').waitFor()
+  await assertCentered('.ss-avatar-crop')
   await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
   assert.equal(avatarUploads,0,'Opening the crop must not upload')
   await page.keyboard.press('Escape')
@@ -224,6 +239,7 @@ try {
   await page.setViewportSize({width:1440,height:1000})
   await page.locator('[data-action="set-persona-picture"]').click()
   await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
+  await assertCentered('.ss-avatar-crop')
   await page.locator('[data-crop="cancel"]').click()
   await page.waitForFunction(()=>!mobileController.characterImageActionPending)
   assert.equal(personaUploads,0)
@@ -266,7 +282,41 @@ try {
   assert.equal(await page.locator('[data-action="send-character-gallery"]').isDisabled(),true)
   assert.equal(await page.locator('[data-action="set-persona-picture"]').isDisabled(),true)
   await page.evaluate(()=>mobileController.closeInspector())
-  console.log('Character actions: inspector avatar/gallery, selected outputs, duplicate skipping and missing character: ok')
+  console.log('Character/persona crops: centered despite host reset, grouped targets, cancel focus, uploads and galleries: ok')
+  await page.evaluate(()=>{
+    window.confirm=()=>{throw new Error('Native confirmation is unavailable in this host')}
+    mobileController.state.outputFolders=[{id:'test-folder',name:'Folder <b>with images</b>',imageIds:['saved-one','saved-two'],createdAt:0,updatedAt:0}]
+    mobileController.openOutputLibrary()
+    mobileController.libraryFolderId='test-folder'
+    mobileController.renderOutputLibrary()
+    testMessages.length=0
+  })
+  const deleteRequests=()=>page.evaluate(()=>testMessages.filter(message=>message.type==='delete_output_folder'))
+  await page.locator('[data-action="delete-output-folder"]').click()
+  await page.locator('.ss-confirm-folder').waitFor()
+  await assertCentered('.ss-confirm-folder')
+  assert.deepEqual(await deleteRequests(),[],'Opening confirmation does not delete')
+  assert.equal(await page.locator('.ss-confirm-folder-name').textContent(),'Folder <b>with images</b>')
+  assert.equal(await page.locator('.ss-confirm-folder-name b').count(),0,'Folder name is plain text')
+  assert.equal(await page.locator('[data-confirm="cancel"]').evaluate(node=>node===document.activeElement),true,'Safe action gets initial focus')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(()=>!mobileController.folderDeleteAbort)
+  assert.deepEqual(await deleteRequests(),[],'Escape does not delete')
+  await page.locator('[data-action="delete-output-folder"]').click()
+  await page.locator('[data-confirm="cancel"]').click()
+  await page.waitForFunction(()=>!mobileController.folderDeleteAbort)
+  assert.deepEqual(await deleteRequests(),[],'Cancel does not delete')
+  await page.setViewportSize({width:1440,height:1000})
+  await page.locator('[data-action="delete-output-folder"]').click()
+  await assertCentered('.ss-confirm-folder')
+  await page.locator('[data-confirm="delete"]').click()
+  await page.waitForFunction(()=>testMessages.some(message=>message.type==='delete_output_folder'))
+  const deletes=await deleteRequests()
+  assert.equal(deletes.length,1,'Explicit confirmation sends one deletion')
+  assert.equal(deletes[0].folderId,'test-folder')
+  assert.equal(await page.evaluate(()=>mobileController.state.libraryOutputs.length),2,'Images remain intact')
+  await page.evaluate(()=>mobileController.closeOutputLibrary())
+  console.log('Folder deletion: visible native dialog, safe focus, Escape/Cancel preserve folder, confirm sends exact captured ID: ok')
   // Simulate safe insets and a shortened VisualViewport; this is geometry coverage, not iPhone hardware QA.
   for (const geometry of [
     {width:390,height:844,visible:844,offset:0,safe:59,bottom:34},

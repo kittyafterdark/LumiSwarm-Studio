@@ -61,6 +61,7 @@ class StudioController {
   private librarySelectionAnchorId = ""
   private librarySearchOpen = false
   private librarySelectionMode = false
+  private folderDeleteAbort: AbortController | null = null
   private avatarCropAbort: AbortController | null = null
   private characterImageActionPending = false
   private librarySelectOnlyNonStarred = false
@@ -91,7 +92,7 @@ class StudioController {
   private nativeSavePending = false
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
-    if (this.root.querySelector<HTMLDialogElement>(".ss-avatar-crop")?.open) return
+    if (this.root.querySelector<HTMLDialogElement>(".ss-avatar-crop[open], .ss-confirm-folder[open]")?.open) return
     if (event.key !== "Escape") return
     const loraSortMenu = this.root.querySelector<HTMLElement>('[data-role="lora-sort-menu"]')
     if (loraSortMenu && !loraSortMenu.hidden) {
@@ -262,6 +263,7 @@ class StudioController {
     this.syncStudioProfile()
     this.disposed = true
     this.avatarCropAbort?.abort()
+    this.folderDeleteAbort?.abort()
     window.visualViewport?.removeEventListener("resize", this.updatePresetViewport)
     window.visualViewport?.removeEventListener("scroll", this.updatePresetViewport)
     window.removeEventListener("resize", this.updatePresetViewport)
@@ -1344,9 +1346,11 @@ are removed when CSS is applied.</pre>
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
               <button class="ss-button" data-action="use-as-init">Use as init image</button>
               <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
-              <span class="ss-set-as-label">Set as…</span>
-              <button class="ss-button" data-action="set-character-picture" disabled>Character picture</button>
-              <button class="ss-button" data-action="set-persona-picture" disabled>Persona picture</button>
+              <div class="ss-set-as-group" role="group" aria-labelledby="ss-set-as-heading">
+                <span class="ss-set-as-label" id="ss-set-as-heading">Set as picture</span>
+                <button class="ss-button" data-action="set-character-picture" disabled>Character</button>
+                <button class="ss-button" data-action="set-persona-picture" disabled>Persona</button>
+              </div>
               <button class="ss-button" data-action="send-character-gallery" disabled>Send to character gallery</button>
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
@@ -1887,7 +1891,7 @@ are removed when CSS is applied.</pre>
       if (action === "create-output-folder") this.openNewFolderModal()
       if (action === "close-new-folder") this.closeNewFolderModal()
       if (action === "confirm-new-folder") this.createOutputFolder()
-      if (action === "delete-output-folder") this.deleteSelectedOutputFolder()
+      if (action === "delete-output-folder") void this.deleteSelectedOutputFolder()
       if (action === "toggle-library-search") this.toggleLibrarySearch()
       if (action === "toggle-library-selection") this.toggleLibrarySelectionMode()
       if (action === "save-visual-profile") this.saveVisualProfile()
@@ -5946,13 +5950,38 @@ are removed when CSS is applied.</pre>
     if (this.libraryVisualMode === "look") this.renderLibraryLookEditor()
   }
 
-  private deleteSelectedOutputFolder(): void {
+  private async deleteSelectedOutputFolder(): Promise<void> {
+    if (this.folderDeleteAbort) return
     const folder = this.state.outputFolders.find((item) => item.id === this.libraryFolderId)
     if (folder?.id === FAVORITES_FOLDER_ID) {
       this.setRunStatus("Favorites is a built-in collection and cannot be deleted.", true)
       return
     }
-    if (!folder || !window.confirm(`Delete folder “${folder.name}”? Its images stay in Lumiverse.`)) return
+    if (!folder) return
+    const abort = this.folderDeleteAbort = new AbortController()
+    const dialog = document.createElement("dialog")
+    dialog.className = "ss-confirm-folder"
+    dialog.setAttribute("aria-labelledby", "ss-confirm-folder-title")
+    dialog.setAttribute("aria-describedby", "ss-confirm-folder-description")
+    dialog.innerHTML = `<h2 id="ss-confirm-folder-title">Delete folder?</h2><p class="ss-confirm-folder-name"></p><p id="ss-confirm-folder-description">This removes the folder and its organization. Its images stay in Lumiverse. This cannot be undone.</p><div class="ss-avatar-crop-actions"><button type="button" class="ss-button" data-confirm="cancel" autofocus>Cancel</button><button type="button" class="ss-button ss-button-danger" data-confirm="delete">Delete folder</button></div>`
+    dialog.querySelector(".ss-confirm-folder-name")!.textContent = folder.name
+    const previousFocus = document.activeElement as HTMLElement | null
+    const confirmed = await new Promise<boolean>(resolve => {
+      const finish = (accepted: boolean) => {
+        abort.signal.removeEventListener("abort", cancel)
+        dialog.close(); dialog.remove(); resolve(accepted)
+      }
+      const cancel = () => finish(false)
+      abort.signal.addEventListener("abort", cancel, { once: true })
+      dialog.addEventListener("cancel", event => { event.preventDefault(); cancel() })
+      dialog.querySelector('[data-confirm="cancel"]')!.addEventListener("click", cancel)
+      dialog.querySelector('[data-confirm="delete"]')!.addEventListener("click", () => finish(true))
+      this.root.append(dialog); dialog.showModal()
+    })
+    this.folderDeleteAbort = null
+    if (this.disposed) return
+    if (previousFocus?.isConnected) previousFocus.focus()
+    if (!confirmed || !this.state.outputFolders.some(item => item.id === folder.id)) return
     this.send("delete_output_folder", { folderId: folder.id })
     this.libraryFolderId = "__landing__"
     this.libraryPage = 0
