@@ -718,6 +718,7 @@ assert.equal(typeof frontendHandler, "function")
 assert.equal(macroDefinitions.get("last_genned").handler, "")
 assert.equal(macroDefinitions.has("swarm_image_protocol"), true)
 assert.equal(macroDefinitions.has("swarm_negative"), true)
+assert.equal(macroDefinitions.has("swarm_loras"), true)
 assert.equal(macroDefinitions.has("char_base"), true)
 assert.equal(macroDefinitions.has("persona_base"), true)
 assert.equal(macroDefinitions.has("char_tags"), false)
@@ -748,6 +749,9 @@ assert.match(animaCollisionPrompt, /The man on the left: short black hair, brown
 assert.match(animaCollisionPrompt, /The man on the right: blond hair, blue eyes; blue eyes, gray cable-knit sweater, holding chopsticks/)
 assert.equal((animaCollisionPrompt.match(/eating together at the same low table/g) || []).length, 1)
 assert.doesNotMatch(animaCollisionPrompt, /\bsolo\b|character 1|character 2/)
+assert.match(animaCollisionPrompt, /<region:0,0,0\.58,1,0\.85> The man on the left:/)
+assert.match(animaCollisionPrompt, /<region:0\.42,0,0\.58,1,0\.85> The man on the right:/)
+assert.match(animaCollisionPrompt, /<region:background> small Japanese restaurant, dishes and rice bowls/)
 const illustriousCollisionPrompt = backendModule.serializeScenePlan(
   collisionPlan,
   "illustrious",
@@ -755,8 +759,22 @@ const illustriousCollisionPrompt = backendModule.serializeScenePlan(
 )
 assert.notEqual(illustriousCollisionPrompt, animaCollisionPrompt)
 assert.match(illustriousCollisionPrompt, /2 men\nmedium two-shot, seated eye level/)
-assert.match(illustriousCollisionPrompt, /left man, short black hair, brown eyes, brown eyes, black shirt, eating rice/)
-assert.match(illustriousCollisionPrompt, /right man, blond hair, blue eyes, blue eyes, gray cable-knit sweater, holding chopsticks/)
+assert.match(illustriousCollisionPrompt, /left man: short black hair, brown eyes, brown eyes, black shirt, eating rice/)
+assert.match(illustriousCollisionPrompt, /right man: blond hair, blue eyes, blue eyes, gray cable-knit sweater, holding chopsticks/)
+assert.match(illustriousCollisionPrompt, /<region:0,0,0\.58,1,1> left man:/)
+assert.match(illustriousCollisionPrompt, /<region:0\.42,0,0\.58,1,1> right man:/)
+assert.match(illustriousCollisionPrompt, /<region:background> small Japanese restaurant, dishes and rice bowls/)
+
+const threeSubjectRegions = backendModule.resolveSubjectRegions([
+  { anchor: "left woman", details: "" },
+  { anchor: "center man", details: "" },
+  { anchor: "right woman", details: "" },
+], "illustrious")
+assert.deepEqual(threeSubjectRegions, [
+  { x: 0, y: 0, width: 0.46, height: 1, strength: 1 },
+  { x: 0.27, y: 0, width: 0.46, height: 1, strength: 1 },
+  { x: 0.54, y: 0, width: 0.46, height: 1, strength: 1 },
+])
 
 const povPlan = backendModule.parseImageScenePlan(`quality/meta: masterpiece, safe
 visible count: 2 people
@@ -774,6 +792,7 @@ const povPrompt = backendModule.serializeScenePlan(
 assert.match(povPrompt, /\n1 person\n/)
 assert.match(povPrompt, /looking at viewer, reaching toward viewer/)
 assert.doesNotMatch(povPrompt, /2 people|looking at the user|toward the persona/)
+assert.doesNotMatch(povPrompt, /<region:/)
 
 async function request(type, extra = {}) {
   const requestId = `${type}-${sent.length}`
@@ -986,6 +1005,7 @@ assert.equal(progress.payload.data.preview, "data:image/jpeg;base64,UFJFVklFVw==
 assert.equal(macroValues.get("last_genned"), "/api/v1/image-gen/results/image-1")
 assert.equal(macroValues.get("swarm_negative"), "blurry")
 assert.equal(macroValues.get("swarm_preset"), "<preset:Cinematic>")
+assert.equal(macroValues.get("swarm_loras"), "<lora:styles/ink.safetensors:0.75>")
 assert.equal(macroValues.get("char_base"), "1girl, long brown hair, pink dress")
 assert.equal(macroValues.get("char_profile"), "/api/v1/images/char-avatar?size=sm")
 assert.equal(macroValues.get("user_profile"), "/api/v1/images/user-avatar?size=sm")
@@ -1050,6 +1070,7 @@ assert.equal(tagConfig.data.promptFamily, "anima")
 assert.match(tagConfig.data.protocolPrompt, /SWARM STUDIO IMAGE REQUEST PROTOCOL/)
 assert.match(tagConfig.data.protocolPrompt, /\{\{swarm_dynamic_guidance\}\}/)
 assert.match(macroValues.get("swarm_image_protocol"), /between 2 and 4 complete <swarm-image> requests/)
+assert.match(macroValues.get("swarm_image_protocol"), /does not satisfy any required image count/)
 assert.match(macroValues.get("swarm_image_protocol"), /CHARACTER-ONLY \/ POV/)
 assert.doesNotMatch(macroValues.get("swarm_image_protocol"), /\{\{swarm_dynamic_guidance\}\}/)
 assert.match(macroValues.get("swarm_image_protocol"), /automatically bound/)
@@ -1438,6 +1459,8 @@ assert.match(source, /Default inline prose illustrations to 4:3/)
 assert.match(source, /aspect: cleanAspect\(attrs\.aspect\) \|\| "4:3"/)
 assert.match(source, /character="active"/)
 assert.match(source, /character="none" means the active chat character must not be visible/)
+assert.match(source, /character="active" selects the active character card as an available visual identity source/)
+assert.match(source, /One active card may resolve to multiple distinct NPC subjects/)
 assert.match(source, /const NO_CHARACTER_NEGATIVE = "people, person, character/)
 assert.match(source, /const includeCharacter = !\["none", "off", "false", "no", "0"\]\.includes\(characterMode\)/)
 assert.match(source, /excludedLoras: includeCharacter \|\| !automation\.stripUserOnlyLoraStack[\s\S]*?\? \[\][\s\S]*?: visualStack\.map\(\(item\) => item\.name\)/)
@@ -1447,6 +1470,11 @@ assert.match(source, /configured local SwarmUI installation and local hardware/)
 assert.match(source, /Never use a chat character's or persona's display name as a diffusion token/)
 assert.match(source, /ANIMA SUBJECT SERIALIZER/)
 assert.match(source, /ILLUSTRIOUS SUBJECT SERIALIZER/)
+assert.match(source, /<region:x,y,width,height,strength>/)
+assert.match(source, /resolveSubjectRegions/)
+assert.match(source, /<region:background>/)
+assert.match(source, /scenePlan\.subjects\.length === 1 && includeCharacter && !includePersona/)
+assert.match(source, /invisible observer still contributes no subject slot/)
 assert.match(source, /MULTI-CHARACTER \/ ENSEMBLE/)
 assert.match(source, /CHARACTER-ONLY \/ POV/)
 assert.match(source, /safe, sensitive, nsfw, or explicit/)
@@ -1621,6 +1649,7 @@ assert.equal(parserConfig.data.requestMode, "parser")
 assert.equal(parserConfig.data.parserConnectionId, "text-1")
 assert.equal(parserConfig.data.parserModel, "parser-override")
 assert.match(macroValues.get("swarm_image_protocol"), /request="parse"/)
+assert.match(macroValues.get("swarm_image_protocol"), /historical context only, never an output format/)
 assert.doesNotMatch(macroValues.get("swarm_image_protocol"), /request="generate"/)
 
 taggedMessages.push({
@@ -1663,3 +1692,28 @@ assert.equal(visualLore.data.entries[0].id, "lore-entry-1")
 assert.equal(visualLore.data.entries[0].activated, true)
 
 console.log("backend contract: ok")
+
+// Explicit render persistence stays independent from live profiles and stacks.
+const defaultsSaved = await request('save_studio_defaults', { defaults: { version: 1, width: 832, steps: 26, cfg: 0, seed: 42, prompt: 'temporary' } })
+assert.deepEqual(defaultsSaved.data.defaults, { version: 1, width: 832, steps: 26, cfg: 0 })
+assert.deepEqual((await request('bootstrap')).data.renderSettings.defaults, defaultsSaved.data.defaults)
+let renderSaved = await request('save_render_style', { style: { id: 'render-test', name: 'Soft', loraStackId: 'deleted-stack', recipe: { steps: 22, seed: 9 } } })
+assert.equal(renderSaved.data.styles[0].loraStackId, 'deleted-stack')
+assert.deepEqual(renderSaved.data.styles[0].recipe, { steps: 22 })
+renderSaved = await request('save_render_style', { style: { ...renderSaved.data.styles[0], name: 'Renamed' } })
+assert.equal(renderSaved.data.styles.length, 1)
+assert.equal(renderSaved.data.styles[0].name, 'Renamed')
+await request('save_render_style', { style: { ...renderSaved.data.styles[0], id: 'render-copy' } })
+assert.equal((await request('bootstrap')).data.renderSettings.styles.length, 2)
+assert.equal((await request('delete_render_style', { id: 'render-test' })).data.styles.length, 1)
+await request('delete_render_style', { id: 'render-copy' })
+assert.equal((await request('save_studio_defaults', { defaults: null })).data.defaults, null)
+userFiles.set('studio-render-styles.json', [null, { id: 'bad' }])
+userFiles.set('studio-defaults.json', 'invalid')
+assert.deepEqual((await request('bootstrap')).data.renderSettings, { defaults: null, styles: [] })
+console.log('render persistence contract: ok')
+
+await request("set_tag_automation", { config: { requestMode: "inline", injectProtocol: true, protocolPrompt: "CUSTOM LEGACY PROTOCOL" } })
+assert.match(macroValues.get("swarm_image_protocol"), /CUSTOM LEGACY PROTOCOL/)
+assert.match(macroValues.get("swarm_image_protocol"), /Do not copy, imitate, or emit those markers/)
+console.log("history-marker guidance survives saved custom protocols: ok")

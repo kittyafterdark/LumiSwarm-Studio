@@ -94,3 +94,14 @@ function applySwarmPresetTokens(prompt: string, titles: string[]): string {
     .replace(/^\s*,\s*|\s*,\s*$/g, "")
     .trim()
 }
+
+// Geometry only: generation data never participates in workspace migration.
+function normalizeWorkspaceState(value: unknown): any {
+  const old = value && typeof value === "object" ? value as any : {}
+  const sizes: Record<string, number> = {}
+  for (const [key, min, max] of [["generationWidth", 310, 360], ["historyWidth", 240, 300], ["libraryWidth", 220, 900], ["promptHeight", 220, 480]] as const) {
+    const value = old.sizes?.[key]
+    if (typeof value === "number" && Number.isFinite(value)) sizes[key] = clamp(value, min, max)
+  }
+  return { ...old, version: 2, sizes, collapsed: { generation: old.collapsed?.generation === true, history: old.collapsed?.history === true } }
+}

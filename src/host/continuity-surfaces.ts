@@ -58,7 +58,7 @@ class CharacterCanonHostController {
   }
 
   private field<T extends HTMLElement>(role: string): T | null {
-    return this.tab?.root?.querySelector<T>(`[data-role="${role}"]`) || null
+    return (this.tab?.root as HTMLElement | undefined)?.querySelector<T>(`[data-role="${role}"]`) || null
   }
 
   private render(): void {
