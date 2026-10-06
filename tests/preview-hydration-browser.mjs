@@ -24,6 +24,23 @@ try {
   browser = await chromium.launch({ headless: true })
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   const errors = []
+  const gallery=[]
+  let avatarUploads=0,personaUploads=0
+  await page.route('**/api/v1/personas/**',async route=>{
+    assert.match(route.request().postData(),/name="original_avatar"/)
+    personaUploads++
+    await route.fulfill({contentType:'application/json',body:'{"id":"persona"}'})
+  })
+  await page.route('**/api/v1/characters/**',async route=>{
+    const request=route.request(),url=request.url()
+    if(url.endsWith('/gallery/link'))gallery.push({image_id:request.postDataJSON().image_id})
+    if(url.endsWith('/avatar')) {
+      assert.match(request.postData(),/name="original_avatar"/)
+      avatarUploads++
+    }
+    await route.fulfill({contentType:'application/json',body:JSON.stringify(url.endsWith('/gallery')?gallery:{id:'char'})})
+  })
+  await page.route('**/api/v1/images/saved-*',route=>route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64')}))
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(`http://127.0.0.1:${server.address().port}`)
   await page.addStyleTag({ content: css })
@@ -165,13 +182,177 @@ try {
   await page.addStyleTag({content:css})
   await page.evaluate(async()=>{
     const {StudioController,defaultStudioBehavior}=await import('/frontend.js')
-    window.mobileController=new StudioController({sendToBackend(){}},{root:document.querySelector('#root')},()=>{},()=>{},defaultStudioBehavior(),()=>{})
+    window.testMessages=[]
+    window.mobileController=new StudioController({sendToBackend(message){testMessages.push(message)}},{root:document.querySelector('#root')},()=>{},()=>{},defaultStudioBehavior(),()=>{})
   })
   const initialMobile = await page.evaluate(()=>({
     tab:document.querySelector('.ss-shell').dataset.mobileTab,
     panes:[...new Set([...document.querySelectorAll('[data-mobile-pane]')].filter(node=>node.checkVisibility()).map(node=>node.dataset.mobilePane))],
   }))
   assert.deepEqual(initialMobile.panes,[initialMobile.tab],'Fresh mobile mount restores exactly one pane')
+  // Simulate the host's dialog reset: native UA margin defaults cannot be relied on.
+  await page.addStyleTag({content:'dialog { margin: 0; }'})
+  const assertCentered=async(selector)=>{
+    const box=await page.locator(selector).boundingBox(), viewport=page.viewportSize()
+    assert.ok(Math.abs(box.x+box.width/2-viewport.width/2)<2,`${selector} centered horizontally`)
+    assert.ok(Math.abs(box.y+box.height/2-viewport.height/2)<2,`${selector} centered vertically`)
+  }
+  // Exercise the character actions using controlled host API fixtures, never personal character data.
+  await page.evaluate(()=>{
+    mobileController.state.permissions={characters:true,personas:true,images:true}
+    mobileController.state.chatVisuals={activePersona:{id:'persona',name:'Fixture persona'}}
+    mobileController.state.activeChat={id:'chat',character_id:'char'}
+    mobileController.setCurrentImage({id:'saved-one',src:'/api/v1/images/saved-one',label:'Test output'})
+    mobileController.openInspector()
+  })
+  const avatarGroup=await page.locator('.ss-set-as-group').evaluate(node=>{
+    const group=node.getBoundingClientRect(), label=node.querySelector('.ss-set-as-label')
+    return {width:group.width,parentWidth:node.parentElement.getBoundingClientRect().width,fontSize:parseFloat(getComputedStyle(label).fontSize),labelY:label.getBoundingClientRect().bottom,buttonY:node.querySelector('button').getBoundingClientRect().top}
+  })
+  assert.ok(avatarGroup.width>=avatarGroup.parentWidth-2,'Set as group spans the action grid')
+  assert.ok(avatarGroup.fontSize>=14 && avatarGroup.labelY<avatarGroup.buttonY,'Readable label above both targets')
+  await page.locator('[data-action="set-character-picture"]').click()
+  await page.locator('[data-crop="apply"]').waitFor()
+  await assertCentered('.ss-avatar-crop')
+  await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
+  assert.equal(avatarUploads,0,'Opening the crop must not upload')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(()=>!mobileController.characterImageActionPending)
+  assert.equal(avatarUploads,0,'Escape cancels without modifying the avatar')
+  assert.equal(await page.locator('[data-action="set-character-picture"]').evaluate(node=>node===document.activeElement),true,'Cancel restores focus')
+  assert.equal(await page.locator('[data-role="inspector"]').isVisible(),true)
+  await page.locator('[data-action="set-character-picture"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
+  await page.locator('[data-crop="zoom"]').focus()
+  await page.keyboard.press('ArrowRight')
+  assert.ok(Number(await page.locator('[data-crop="zoom"]').inputValue())>1)
+  const canvasBox=await page.locator('.ss-avatar-crop canvas').boundingBox()
+  assert.ok(canvasBox.x>=0 && canvasBox.x+canvasBox.width<=360,'Mobile crop stays within viewport')
+  await page.mouse.move(canvasBox.x+canvasBox.width/2,canvasBox.y+canvasBox.height/2)
+  await page.mouse.down()
+  await page.mouse.move(canvasBox.x+canvasBox.width/2+30,canvasBox.y+canvasBox.height/2+20)
+  await page.mouse.up()
+  assert.notEqual(await page.locator('[data-crop="x"]').inputValue(),'0')
+  await page.locator('[data-crop="apply"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-role="run-status"]').textContent==='Active character picture updated.')
+  assert.equal(avatarUploads,1)
+  await page.setViewportSize({width:1440,height:1000})
+  await page.locator('[data-action="set-persona-picture"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
+  await assertCentered('.ss-avatar-crop')
+  await page.locator('[data-crop="cancel"]').click()
+  await page.waitForFunction(()=>!mobileController.characterImageActionPending)
+  assert.equal(personaUploads,0)
+  await page.locator('[data-action="set-persona-picture"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
+  await page.locator('[data-crop="apply"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-role="run-status"]').textContent==='Active persona picture updated.')
+  assert.equal(personaUploads,1)
+  await page.setViewportSize({width:360,height:850})
+  await page.locator('[data-action="send-character-gallery"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-role="run-status"]').textContent.includes('1 output(s) in the character gallery'))
+  assert.deepEqual(gallery,[{image_id:'saved-one'}])
+  await page.setViewportSize({width:1440,height:1000})
+  assert.equal(await page.locator('[data-action="set-character-picture"]').isEnabled(),true)
+  await page.locator('[data-action="send-character-gallery"]').click()
+  await page.waitForFunction(()=>!mobileController.characterImageActionPending)
+  assert.equal(gallery.length,1,'Desktop repeat send skips an existing gallery link')
+  await page.setViewportSize({width:360,height:850})
+  await page.evaluate(()=>{
+    mobileController.closeInspector()
+    mobileController.openOutputLibrary()
+    mobileController.libraryFolderId=''
+    mobileController.state.libraryOutputs=[{id:'saved-one',url:'/api/v1/images/saved-one'},{id:'saved-two',url:'/api/v1/images/saved-two'}]
+    mobileController.renderOutputLibrary()
+  })
+  await page.locator('[data-action="toggle-library-selection"]').click()
+  await page.locator('[data-action="select-library-page"]').click()
+  await page.locator('[data-action="bulk-send-character-gallery"]').click()
+  await page.waitForFunction(()=>!mobileController.characterImageActionPending)
+  assert.deepEqual(gallery,[{image_id:'saved-one'},{image_id:'saved-two'}])
+  assert.equal(await page.evaluate(()=>mobileController.librarySelection.size),0)
+  await page.evaluate(()=>{
+    mobileController.closeOutputLibrary()
+    mobileController.state.activeChat=null
+    mobileController.state.chatVisuals.activePersona=null
+    mobileController.updateAppendControls()
+    mobileController.openInspector()
+  })
+  assert.equal(await page.locator('[data-action="set-character-picture"]').isDisabled(),true)
+  assert.equal(await page.locator('[data-action="send-character-gallery"]').isDisabled(),true)
+  assert.equal(await page.locator('[data-action="set-persona-picture"]').isDisabled(),true)
+  await page.evaluate(()=>mobileController.closeInspector())
+  console.log('Character/persona crops: centered despite host reset, grouped targets, cancel focus, uploads and galleries: ok')
+  // Reproduce saving Default while the active character folder is bound to Head.
+  await page.setViewportSize({width:1440,height:1000})
+  await page.evaluate(()=>{
+    const item=(name,weight)=>({name,title:name,weight,enabled:true,useTrigger:false,sourceUrl:''})
+    mobileController.state.stackPresets=[{id:'head',name:'Head',items:[item('head-lora',1)],updatedAt:0},{id:'default',name:'Default',items:[item('default-lora',0.6)],updatedAt:0}]
+    mobileController.state.activeChat={id:'chat',character_id:'char'}
+    mobileController.state.outputFolders=[{id:'visual-folder',name:'Character visuals',imageIds:[],updatedAt:0,binding:{type:'character',characterId:'char',enabled:true,stackPresetId:'head',stackSnapshot:[],checkpoint:'',positivePrompt:'',negativePrompt:'',looks:[],activeLookId:''}}]
+    mobileController.hydratedVisualCharacterId=''
+    mobileController.renderStackPresets()
+    mobileController.hydrateActiveVisualStack()
+    mobileController.setStudioView('styles')
+  })
+  assert.equal(await page.locator('[data-role="stack-preset"]').inputValue(),'head','Initial character hydration still loads its bound stack')
+  await page.locator('[data-role="stack-preset"]').selectOption('default')
+  await page.locator('[data-action="load-stack"]').click()
+  for(let attempt=0;attempt<2;attempt++) {
+    page.once('dialog',dialog=>dialog.accept('Default'))
+    await page.locator('[data-action="save-stack"]').click()
+    const saved=await page.evaluate(()=>{
+      const message=testMessages.findLast(message=>message.type==='save_stack_preset')
+      const updated=[{...mobileController.state.stackPresets.find(preset=>preset.id==='default'),...message.preset},...mobileController.state.stackPresets.filter(preset=>preset.id!=='default')]
+      mobileController.onMessage({type:'stack_presets_result',requestId:message.requestId,data:updated})
+      return {id:message.preset.id,name:message.preset.name,items:message.preset.items,selected:document.querySelector('[data-role="stack-preset"]').value,mobileSelected:document.querySelector('[data-role="mobile-stack-preset"]').value,stack:mobileController.state.stack.map(item=>({name:item.lora.name,weight:item.weight}))}
+    })
+    assert.equal(saved.id,'default','Save targets Default, never the bound Head preset')
+    assert.equal(saved.name,'Default')
+    assert.equal(saved.selected,'default','Save response must not reset selection to Head')
+    assert.equal(saved.mobileSelected,'default','Both dropdowns preserve the saved selection')
+    assert.deepEqual(saved.stack,[{name:'default-lora',weight:0.6}],'Save must not reload another stack')
+  }
+  await page.evaluate(()=>mobileController.hydrateActiveVisualStack())
+  assert.equal(await page.locator('[data-role="stack-preset"]').inputValue(),'default','Repeated hydration must not overwrite a user selection')
+  await page.evaluate(()=>mobileController.hydrateActiveVisualStack(true))
+  assert.equal(await page.locator('[data-role="stack-preset"]').inputValue(),'head','Explicit profile hydration still loads Head')
+  console.log('Stack saving: Default stays selected across two saves and repeated hydration; explicit character profile load still works: ok')
+
+  await page.evaluate(()=>{
+    window.confirm=()=>{throw new Error('Native confirmation is unavailable in this host')}
+    mobileController.state.outputFolders=[{id:'test-folder',name:'Folder <b>with images</b>',imageIds:['saved-one','saved-two'],createdAt:0,updatedAt:0}]
+    mobileController.openOutputLibrary()
+    mobileController.libraryFolderId='test-folder'
+    mobileController.renderOutputLibrary()
+    testMessages.length=0
+  })
+  const deleteRequests=()=>page.evaluate(()=>testMessages.filter(message=>message.type==='delete_output_folder'))
+  await page.locator('[data-action="delete-output-folder"]').click()
+  await page.locator('.ss-confirm-folder').waitFor()
+  await assertCentered('.ss-confirm-folder')
+  assert.deepEqual(await deleteRequests(),[],'Opening confirmation does not delete')
+  assert.equal(await page.locator('.ss-confirm-folder-name').textContent(),'Folder <b>with images</b>')
+  assert.equal(await page.locator('.ss-confirm-folder-name b').count(),0,'Folder name is plain text')
+  assert.equal(await page.locator('[data-confirm="cancel"]').evaluate(node=>node===document.activeElement),true,'Safe action gets initial focus')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(()=>!mobileController.folderDeleteAbort)
+  assert.deepEqual(await deleteRequests(),[],'Escape does not delete')
+  await page.locator('[data-action="delete-output-folder"]').click()
+  await page.locator('[data-confirm="cancel"]').click()
+  await page.waitForFunction(()=>!mobileController.folderDeleteAbort)
+  assert.deepEqual(await deleteRequests(),[],'Cancel does not delete')
+  await page.setViewportSize({width:1440,height:1000})
+  await page.locator('[data-action="delete-output-folder"]').click()
+  await assertCentered('.ss-confirm-folder')
+  await page.locator('[data-confirm="delete"]').click()
+  await page.waitForFunction(()=>testMessages.some(message=>message.type==='delete_output_folder'))
+  const deletes=await deleteRequests()
+  assert.equal(deletes.length,1,'Explicit confirmation sends one deletion')
+  assert.equal(deletes[0].folderId,'test-folder')
+  assert.equal(await page.evaluate(()=>mobileController.state.libraryOutputs.length),2,'Images remain intact')
+  await page.evaluate(()=>mobileController.closeOutputLibrary())
+  console.log('Folder deletion: visible native dialog, safe focus, Escape/Cancel preserve folder, confirm sends exact captured ID: ok')
   // Simulate safe insets and a shortened VisualViewport; this is geometry coverage, not iPhone hardware QA.
   for (const geometry of [
     {width:390,height:844,visible:844,offset:0,safe:59,bottom:34},

@@ -61,6 +61,9 @@ class StudioController {
   private librarySelectionAnchorId = ""
   private librarySearchOpen = false
   private librarySelectionMode = false
+  private folderDeleteAbort: AbortController | null = null
+  private avatarCropAbort: AbortController | null = null
+  private characterImageActionPending = false
   private librarySelectOnlyNonStarred = false
   private libraryVisualMode: "profile" | "look" = "profile"
   private libraryLookId = ""
@@ -89,6 +92,7 @@ class StudioController {
   private nativeSavePending = false
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
+    if (this.root.querySelector<HTMLDialogElement>(".ss-avatar-crop[open], .ss-confirm-folder[open]")?.open) return
     if (event.key !== "Escape") return
     const loraSortMenu = this.root.querySelector<HTMLElement>('[data-role="lora-sort-menu"]')
     if (loraSortMenu && !loraSortMenu.hidden) {
@@ -258,6 +262,8 @@ class StudioController {
     this.persistWorkspaceState()
     this.syncStudioProfile()
     this.disposed = true
+    this.avatarCropAbort?.abort()
+    this.folderDeleteAbort?.abort()
     window.visualViewport?.removeEventListener("resize", this.updatePresetViewport)
     window.visualViewport?.removeEventListener("scroll", this.updatePresetViewport)
     window.removeEventListener("resize", this.updatePresetViewport)
@@ -1340,6 +1346,12 @@ are removed when CSS is applied.</pre>
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
               <button class="ss-button" data-action="use-as-init">Use as init image</button>
               <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
+              <div class="ss-set-as-group" role="group" aria-labelledby="ss-set-as-heading">
+                <span class="ss-set-as-label" id="ss-set-as-heading">Set as picture</span>
+                <button class="ss-button" data-action="set-character-picture" disabled>Character</button>
+                <button class="ss-button" data-action="set-persona-picture" disabled>Persona</button>
+              </div>
+              <button class="ss-button" data-action="send-character-gallery" disabled>Send to character gallery</button>
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
             </div>
@@ -1415,6 +1427,7 @@ are removed when CSS is applied.</pre>
               </label>
               <div class="ss-library-selection-actions" data-role="library-selection-actions" hidden>
                 <button class="ss-button ss-library-favorite-selected" data-action="bulk-favorite-outputs">${STAR_ICON}<span>Favorite</span></button>
+                <button class="ss-button" data-action="bulk-send-character-gallery" disabled>Send to character gallery</button>
                 <button class="ss-button" data-action="bulk-move-outputs">Move…</button>
                 <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs">Delete</button>
               </div>
@@ -1867,6 +1880,8 @@ are removed when CSS is applied.</pre>
       if (action === "download-output") this.downloadCurrent()
       if (action === "copy-output") void this.copyCurrentUrl()
       if (action === "append-to-chat") this.appendCurrentToChat()
+      if (action === "set-character-picture" || action === "set-persona-picture") void this.setAvatarPicture(action === "set-persona-picture" ? "persona" : "character")
+      if (action === "send-character-gallery" || action === "bulk-send-character-gallery") void this.sendCharacterImages(action)
       if (action === "inspect-output") this.openInspector()
       if (action === "close-inspector") this.closeInspector()
       if (action === "reuse-parameters") this.reuseCurrentParameters()
@@ -1876,7 +1891,7 @@ are removed when CSS is applied.</pre>
       if (action === "create-output-folder") this.openNewFolderModal()
       if (action === "close-new-folder") this.closeNewFolderModal()
       if (action === "confirm-new-folder") this.createOutputFolder()
-      if (action === "delete-output-folder") this.deleteSelectedOutputFolder()
+      if (action === "delete-output-folder") void this.deleteSelectedOutputFolder()
       if (action === "toggle-library-search") this.toggleLibrarySearch()
       if (action === "toggle-library-selection") this.toggleLibrarySelectionMode()
       if (action === "save-visual-profile") this.saveVisualProfile()
@@ -2097,6 +2112,7 @@ are removed when CSS is applied.</pre>
         this.updateActiveVisualPill()
         this.updateActivePersonaVisualPill()
         this.updateTriggerSummary()
+        this.updateAppendControls()
         break
       case "character_base_tags_result":
         this.acceptCharacterBaseTags(data)
@@ -2497,7 +2513,6 @@ are removed when CSS is applied.</pre>
       case "stack_presets_result":
         this.state.stackPresets = Array.isArray(data) ? data : []
         this.renderStackPresets()
-        this.hydrateActiveVisualStack()
         if (!this.get<HTMLElement>('[data-role="output-library"]').hidden) this.renderOutputLibrary()
         this.updateActiveVisualPill()
         this.setRunStatus("Saved LoRA stacks updated.")
@@ -5291,6 +5306,61 @@ are removed when CSS is applied.</pre>
     this.setRunStatus(`Deleting “${image.label}”…`)
   }
 
+  private async setAvatarPicture(kind: "character" | "persona"): Promise<void> {
+    const targetId = kind === "character" ? this.state.activeChat?.character_id : this.state.chatVisuals?.activePersona?.id
+    const imageId = this.state.currentImage?.id
+    if (!targetId || !imageId || !this.state.permissions[kind === "character" ? "characters" : "personas"] || !this.state.permissions.images || this.characterImageActionPending) return
+    const focusBeforeCrop = document.activeElement as HTMLElement | null
+    const abort = this.avatarCropAbort = new AbortController()
+    this.characterImageActionPending = true
+    this.updateAppendControls(); this.updateLibrarySelectionControls()
+    try {
+      const response = await fetch(`/api/v1/images/${encodeURIComponent(imageId)}`, { credentials: "same-origin", signal: abort.signal })
+      if (!response.ok) throw new Error("Could not load the saved output.")
+      const original = await response.blob()
+      if (!original.type.startsWith("image/")) throw new Error("The saved output is not an image.")
+      if (this.disposed) return
+      const crop = await studioCropAvatar(this.root, original, kind, abort.signal)
+      if (!crop || this.disposed) return
+      this.setRunStatus(`Setting the active ${kind} picture…`)
+      await studioUploadAvatar(kind, targetId, crop, original)
+      if (!this.disposed) this.setRunStatus(`Active ${kind} picture updated.`)
+    } catch (error) {
+      if (!this.disposed && !abort.signal.aborted) this.setRunStatus(error instanceof Error ? error.message : String(error), true)
+    } finally {
+      this.avatarCropAbort = null
+      this.characterImageActionPending = false
+      if (!this.disposed) {
+        this.updateAppendControls(); this.updateLibrarySelectionControls()
+        if (focusBeforeCrop?.isConnected) focusBeforeCrop.focus()
+      }
+    }
+  }
+
+  private async sendCharacterImages(action: string): Promise<void> {
+    const characterId = this.state.activeChat?.character_id
+    const ids = action === "bulk-send-character-gallery" ? [...this.librarySelection] : this.state.currentImage?.id ? [this.state.currentImage.id] : []
+    if (this.characterImageActionPending || !characterId || !ids.length || !this.state.permissions.characters || !this.state.permissions.images) return
+    this.characterImageActionPending = true
+    this.updateAppendControls()
+    this.updateLibrarySelectionControls()
+    this.setRunStatus(`Sending ${ids.length} output(s) to the active character gallery…`)
+    try {
+      const result = await studioCharacterImageAction(characterId, ids, "gallery")
+      if (this.disposed) return
+      if (action === "bulk-send-character-gallery") {
+        result.saved.forEach(id => this.librarySelection.delete(id))
+        this.syncVisibleLibrarySelection()
+      }
+      this.setRunStatus(`${result.saved.length} output(s) in the character gallery.${result.failed.length ? ` ${result.failed.length} could not be sent; retry the remaining selection.` : ""}`, result.failed.length > 0)
+    } catch (error) {
+      if (!this.disposed) this.setRunStatus(error instanceof Error ? error.message : String(error), true)
+    } finally {
+      this.characterImageActionPending = false
+      if (!this.disposed) { this.updateAppendControls(); this.updateLibrarySelectionControls() }
+    }
+  }
+
   private appendCurrentToChat(): void {
     const image = this.state.currentImage
     if (!image?.id || !this.state.activeChat?.id) return
@@ -5510,10 +5580,8 @@ are removed when CSS is applied.</pre>
     const folder = this.activeVisualFolder()
     const binding = folder?.binding
     if (!folder || !binding?.enabled || this.pendingDraftRestore) return false
-    if (!force && this.hydratedVisualCharacterId === binding.characterId) {
-      this.setStackPresetSelection(binding.stackPresetId)
-      return false
-    }
+    // Refreshing presets must not replace a stack the user selected or edited.
+    if (!force && this.hydratedVisualCharacterId === binding.characterId) return false
 
     let checkpointLoaded = !binding.checkpoint
     if (binding.checkpoint) {
@@ -5879,13 +5947,38 @@ are removed when CSS is applied.</pre>
     if (this.libraryVisualMode === "look") this.renderLibraryLookEditor()
   }
 
-  private deleteSelectedOutputFolder(): void {
+  private async deleteSelectedOutputFolder(): Promise<void> {
+    if (this.folderDeleteAbort) return
     const folder = this.state.outputFolders.find((item) => item.id === this.libraryFolderId)
     if (folder?.id === FAVORITES_FOLDER_ID) {
       this.setRunStatus("Favorites is a built-in collection and cannot be deleted.", true)
       return
     }
-    if (!folder || !window.confirm(`Delete folder “${folder.name}”? Its images stay in Lumiverse.`)) return
+    if (!folder) return
+    const abort = this.folderDeleteAbort = new AbortController()
+    const dialog = document.createElement("dialog")
+    dialog.className = "ss-confirm-folder"
+    dialog.setAttribute("aria-labelledby", "ss-confirm-folder-title")
+    dialog.setAttribute("aria-describedby", "ss-confirm-folder-description")
+    dialog.innerHTML = `<h2 id="ss-confirm-folder-title">Delete folder?</h2><p class="ss-confirm-folder-name"></p><p id="ss-confirm-folder-description">This removes the folder and its organization. Its images stay in Lumiverse. This cannot be undone.</p><div class="ss-avatar-crop-actions"><button type="button" class="ss-button" data-confirm="cancel" autofocus>Cancel</button><button type="button" class="ss-button ss-button-danger" data-confirm="delete">Delete folder</button></div>`
+    dialog.querySelector(".ss-confirm-folder-name")!.textContent = folder.name
+    const previousFocus = document.activeElement as HTMLElement | null
+    const confirmed = await new Promise<boolean>(resolve => {
+      const finish = (accepted: boolean) => {
+        abort.signal.removeEventListener("abort", cancel)
+        dialog.close(); dialog.remove(); resolve(accepted)
+      }
+      const cancel = () => finish(false)
+      abort.signal.addEventListener("abort", cancel, { once: true })
+      dialog.addEventListener("cancel", event => { event.preventDefault(); cancel() })
+      dialog.querySelector('[data-confirm="cancel"]')!.addEventListener("click", cancel)
+      dialog.querySelector('[data-confirm="delete"]')!.addEventListener("click", () => finish(true))
+      this.root.append(dialog); dialog.showModal()
+    })
+    this.folderDeleteAbort = null
+    if (this.disposed) return
+    if (previousFocus?.isConnected) previousFocus.focus()
+    if (!confirmed || !this.state.outputFolders.some(item => item.id === folder.id)) return
     this.send("delete_output_folder", { folderId: folder.id })
     this.libraryFolderId = "__landing__"
     this.libraryPage = 0
@@ -5951,6 +6044,7 @@ are removed when CSS is applied.</pre>
 
   private updateLibrarySelectionControls(): void {
     const selected = this.librarySelection.size
+    this.get<HTMLButtonElement>('[data-action="bulk-send-character-gallery"]').disabled = !selected || !this.state.activeChat?.character_id || !this.state.permissions.characters || !this.state.permissions.images || this.characterImageActionPending
     const library = this.get<HTMLElement>('[data-role="output-library"]')
     library.dataset.selectionMode = String(this.librarySelectionMode)
     this.get<HTMLElement>('[data-role="library-selectbar"]').hidden = !this.librarySelectionMode
@@ -6761,6 +6855,13 @@ are removed when CSS is applied.</pre>
   }
 
   private updateAppendControls(): void {
+    const personaButton = this.root.querySelector<HTMLButtonElement>('[data-action="set-persona-picture"]')
+    if (personaButton) personaButton.disabled = !this.state.currentImage?.id || !this.state.chatVisuals?.activePersona?.id || !this.state.permissions.personas || !this.state.permissions.images || this.characterImageActionPending
+    const canSend = Boolean(this.state.currentImage?.id && this.state.activeChat?.character_id && this.state.permissions.characters && this.state.permissions.images && !this.characterImageActionPending)
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="set-character-picture"], [data-action="send-character-gallery"]')) {
+      button.disabled = !canSend
+      button.title = canSend ? "Use this saved output for the active chat character" : "Requires a saved output, an active character, and Images / Characters permissions"
+    }
     const enabled = Boolean(
       this.state.currentImage?.id
       && this.state.activeChat?.id

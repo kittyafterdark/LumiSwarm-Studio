@@ -3975,6 +3975,22 @@ const STUDIO_V3_STYLES = `
     .ss-workflow-modal[data-role="save-preset-modal"] .ss-save-preset-fields { overscroll-behavior: contain; }
   }
 
+
+  .ss-avatar-crop, .ss-confirm-folder { position: fixed; inset: 0; margin: auto; height: fit-content; width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px); box-sizing: border-box; overflow: auto; padding: 20px; border: 1px solid var(--ss-border, #454550); border-radius: 12px; background: var(--lumiverse-bg, #171820); color: var(--lumiverse-text, #eee); }
+  .ss-avatar-crop::backdrop, .ss-confirm-folder::backdrop { background: #000a; }
+  .ss-avatar-crop h2, .ss-confirm-folder h2 { margin: 0 0 12px; font-size: 18px; }
+  .ss-avatar-crop canvas { display: block; width: 100%; aspect-ratio: 1; background: #111; touch-action: none; cursor: grab; }
+  .ss-avatar-crop label { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+  .ss-avatar-crop input { width: 100%; min-height: 32px; }
+  .ss-avatar-crop p { font-size: 13px; }
+  .ss-avatar-crop-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .ss-avatar-crop-actions button { min-height: 44px; }
+  .ss-set-as-group { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; border: 1px solid var(--lumiverse-border, #454550); border-radius: 8px; background: var(--lumiverse-bg, #171820); }
+  .ss-set-as-group .ss-set-as-label { grid-column: 1 / -1; color: var(--lumiverse-text, #eee); font-size: 14px; font-weight: 600; line-height: 1.4; }
+  .ss-set-as-group .ss-button { min-height: 40px; font-size: 14px; line-height: 1.4; }
+  .ss-confirm-folder p { margin: 14px 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .ss-confirm-folder .ss-confirm-folder-name { font-weight: 600; }
+  .ss-confirm-folder .ss-button-danger { color: #ff8585; border-color: #884343; }
 `;
 function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -4056,6 +4072,192 @@ async function upsertStudioNativePreset(input, fetcher = fetch) {
         id: String(preset.id),
         warnings: Array.isArray(data.errors) ? data.errors.map(String) : []
     };
+}
+async function studioCharacterImageAction(characterId, imageIds, action, fetcher = fetch) {
+    const ids = [
+        ...new Set(imageIds.filter((id)=>typeof id === "string" && id.trim()))
+    ];
+    if (!characterId || !ids.length) throw new Error("Choose an active character and saved outputs first.");
+    const base = `/api/v1/characters/${encodeURIComponent(characterId)}`;
+    const check = async (response, fallback)=>{
+        if (response.ok) return;
+        const data = await response.json().catch(()=>null);
+        throw new Error(String(data?.error || fallback));
+    };
+    if (action === "avatar") {
+        if (ids.length !== 1) throw new Error("Choose one output for the character picture.");
+        const image = await fetcher(`/api/v1/images/${encodeURIComponent(ids[0])}`, {
+            credentials: "same-origin"
+        });
+        await check(image, "Could not load the saved output.");
+        const blob = await image.blob();
+        if (!blob.type.startsWith("image/")) throw new Error("The saved output is not an image.");
+        const form = new FormData();
+        form.append("avatar", blob, `studio-output.${blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1] || "png"}`);
+        const response = await fetcher(`${base}/avatar`, {
+            method: "POST",
+            credentials: "same-origin",
+            body: form
+        });
+        await check(response, "Lumiverse could not set the character picture.");
+        return {
+            saved: ids,
+            failed: []
+        };
+    }
+    const existing = await fetcher(`${base}/gallery`, {
+        credentials: "same-origin"
+    });
+    await check(existing, "Character galleries are unavailable in this Lumiverse host.");
+    const items = await existing.json();
+    if (!Array.isArray(items)) throw new Error("Lumiverse returned an invalid gallery.");
+    const linked = new Set(items.map((item)=>String(item.image_id)));
+    const saved = [], failed = [];
+    for (const imageId of ids){
+        if (linked.has(imageId)) {
+            saved.push(imageId);
+            continue;
+        }
+        try {
+            const response = await fetcher(`${base}/gallery/link`, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    image_id: imageId
+                })
+            });
+            await check(response, "Lumiverse could not add the output to the gallery.");
+            saved.push(imageId);
+        } catch  {
+            failed.push(imageId);
+        }
+    }
+    return {
+        saved,
+        failed
+    };
+}
+function studioAvatarCropRect(width, height, zoom, x, y) {
+    const size = Math.min(width, height) / Math.max(1, zoom);
+    return {
+        x: (width - size) * (Math.max(-1, Math.min(1, x)) + 1) / 2,
+        y: (height - size) * (Math.max(-1, Math.min(1, y)) + 1) / 2,
+        size
+    };
+}
+async function studioUploadAvatar(kind, id, crop, original, fetcher = fetch) {
+    if (![
+        "character",
+        "persona"
+    ].includes(kind) || !id || !crop.type.startsWith("image/") || !original.type.startsWith("image/")) throw new Error("Choose a valid avatar image and target.");
+    const form = new FormData();
+    form.append("avatar", crop, "studio-crop.png");
+    form.append("original_avatar", original, `studio-original.${original.type === "image/jpeg" ? "jpg" : original.type.split("/")[1] || "png"}`);
+    const response = await fetcher(`/api/v1/${kind === "character" ? "characters" : "personas"}/${encodeURIComponent(id)}/avatar`, {
+        method: "POST",
+        credentials: "same-origin",
+        body: form
+    });
+    if (!response.ok) {
+        const data = await response.json().catch(()=>null);
+        throw new Error(String(data?.error || `Lumiverse could not set the ${kind} picture.`));
+    }
+}
+function studioCropAvatar(root, original, kind, signal) {
+    return new Promise((resolve, reject)=>{
+        const dialog = document.createElement("dialog");
+        dialog.className = "ss-avatar-crop";
+        dialog.setAttribute("aria-labelledby", "ss-avatar-crop-title");
+        dialog.innerHTML = `<h2 id="ss-avatar-crop-title">Crop for ${kind} picture</h2><canvas width="512" height="512" aria-label="Square avatar preview"></canvas><p>Drag the image or use the sliders to position the crop.</p><label>Zoom<input data-crop="zoom" type="range" min="1" max="4" step="0.01" value="1"></label><label>Horizontal position<input data-crop="x" type="range" min="-1" max="1" step="0.01" value="0"></label><label>Vertical position<input data-crop="y" type="range" min="-1" max="1" step="0.01" value="0"></label><p data-crop="status" role="status">Loading image…</p><div class="ss-avatar-crop-actions"><button type="button" class="ss-button" data-crop="cancel">Cancel</button><button type="button" class="ss-button" data-crop="apply" disabled>Set picture</button></div>`;
+        const source = new Image(), url = URL.createObjectURL(original);
+        const previousFocus = document.activeElement;
+        const canvas = dialog.querySelector("canvas");
+        const context = canvas.getContext("2d");
+        const controls = [
+            ...dialog.querySelectorAll("input")
+        ];
+        const apply = dialog.querySelector('[data-crop="apply"]');
+        const status = dialog.querySelector('[data-crop="status"]');
+        let settled = false, ready = false;
+        const finish = (blob, error)=>{
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener("abort", abort);
+            dialog.close();
+            dialog.remove();
+            URL.revokeObjectURL(url);
+            if (previousFocus?.isConnected) previousFocus.focus();
+            if (error) reject(error);
+            else resolve(blob);
+        };
+        const abort = ()=>finish(null);
+        const draw = ()=>{
+            if (!ready || settled) return;
+            const [zoom, x, y] = controls.map((control)=>Number(control.value));
+            const rect = studioAvatarCropRect(source.naturalWidth, source.naturalHeight, zoom, x, y);
+            context.clearRect(0, 0, 512, 512);
+            context.drawImage(source, rect.x, rect.y, rect.size, rect.size, 0, 0, 512, 512);
+        };
+        controls.forEach((control)=>control.addEventListener("input", draw));
+        let drag = null;
+        canvas.addEventListener("pointerdown", (event)=>{
+            if (!ready) return;
+            drag = {
+                id: event.pointerId,
+                x: event.clientX,
+                y: event.clientY,
+                cropX: Number(controls[1].value),
+                cropY: Number(controls[2].value)
+            };
+            canvas.setPointerCapture(event.pointerId);
+        });
+        canvas.addEventListener("pointermove", (event)=>{
+            if (!drag || drag.id !== event.pointerId) return;
+            const rect = studioAvatarCropRect(source.naturalWidth, source.naturalHeight, Number(controls[0].value), 0, 0);
+            const scale = rect.size / canvas.getBoundingClientRect().width;
+            controls[1].value = String(drag.cropX - (event.clientX - drag.x) * scale * 2 / (source.naturalWidth - rect.size || 1));
+            controls[2].value = String(drag.cropY - (event.clientY - drag.y) * scale * 2 / (source.naturalHeight - rect.size || 1));
+            draw();
+        });
+        canvas.addEventListener("lostpointercapture", ()=>{
+            drag = null;
+        });
+        canvas.addEventListener("pointerup", ()=>{
+            drag = null;
+        });
+        dialog.addEventListener("cancel", (event)=>{
+            event.preventDefault();
+            finish(null);
+        });
+        dialog.querySelector('[data-crop="cancel"]').addEventListener("click", ()=>finish(null));
+        apply.addEventListener("click", ()=>{
+            apply.disabled = true;
+            canvas.toBlob((blob)=>{
+                if (blob) finish(blob);
+                else finish(null, new Error("Could not create the avatar crop."));
+            }, "image/png");
+        });
+        root.append(dialog);
+        dialog.showModal();
+        signal.addEventListener("abort", abort, {
+            once: true
+        });
+        if (signal.aborted) {
+            abort();
+            return;
+        }
+        source.src = url;
+        void source.decode().then(()=>{
+            if (settled) return;
+            ready = true;
+            draw();
+            apply.disabled = false;
+            status.textContent = "The original image will also be preserved.";
+        }).catch(()=>finish(null, new Error("Could not decode this output for cropping.")));
+    });
 }
 function readMiniplayerPosition() {
     try {
@@ -5644,6 +5846,9 @@ class StudioController {
     librarySelectionAnchorId = "";
     librarySearchOpen = false;
     librarySelectionMode = false;
+    folderDeleteAbort = null;
+    avatarCropAbort = null;
+    characterImageActionPending = false;
     librarySelectOnlyNonStarred = false;
     libraryVisualMode = "profile";
     libraryLookId = "";
@@ -5672,6 +5877,7 @@ class StudioController {
     nativeSavePending = false;
     disposed = false;
     handleKeyDown = (event)=>{
+        if (this.root.querySelector(".ss-avatar-crop[open], .ss-confirm-folder[open]")?.open) return;
         if (event.key !== "Escape") return;
         const loraSortMenu = this.root.querySelector('[data-role="lora-sort-menu"]');
         if (loraSortMenu && !loraSortMenu.hidden) {
@@ -5838,6 +6044,8 @@ class StudioController {
         this.persistWorkspaceState();
         this.syncStudioProfile();
         this.disposed = true;
+        this.avatarCropAbort?.abort();
+        this.folderDeleteAbort?.abort();
         window.visualViewport?.removeEventListener("resize", this.updatePresetViewport);
         window.visualViewport?.removeEventListener("scroll", this.updatePresetViewport);
         window.removeEventListener("resize", this.updatePresetViewport);
@@ -6914,6 +7122,12 @@ are removed when CSS is applied.</pre>
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
               <button class="ss-button" data-action="use-as-init">Use as init image</button>
               <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
+              <div class="ss-set-as-group" role="group" aria-labelledby="ss-set-as-heading">
+                <span class="ss-set-as-label" id="ss-set-as-heading">Set as picture</span>
+                <button class="ss-button" data-action="set-character-picture" disabled>Character</button>
+                <button class="ss-button" data-action="set-persona-picture" disabled>Persona</button>
+              </div>
+              <button class="ss-button" data-action="send-character-gallery" disabled>Send to character gallery</button>
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
             </div>
@@ -6989,6 +7203,7 @@ are removed when CSS is applied.</pre>
               </label>
               <div class="ss-library-selection-actions" data-role="library-selection-actions" hidden>
                 <button class="ss-button ss-library-favorite-selected" data-action="bulk-favorite-outputs">${STAR_ICON}<span>Favorite</span></button>
+                <button class="ss-button" data-action="bulk-send-character-gallery" disabled>Send to character gallery</button>
                 <button class="ss-button" data-action="bulk-move-outputs">Move…</button>
                 <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs">Delete</button>
               </div>
@@ -7447,6 +7662,8 @@ are removed when CSS is applied.</pre>
             if (action === "download-output") this.downloadCurrent();
             if (action === "copy-output") void this.copyCurrentUrl();
             if (action === "append-to-chat") this.appendCurrentToChat();
+            if (action === "set-character-picture" || action === "set-persona-picture") void this.setAvatarPicture(action === "set-persona-picture" ? "persona" : "character");
+            if (action === "send-character-gallery" || action === "bulk-send-character-gallery") void this.sendCharacterImages(action);
             if (action === "inspect-output") this.openInspector();
             if (action === "close-inspector") this.closeInspector();
             if (action === "reuse-parameters") this.reuseCurrentParameters();
@@ -7456,7 +7673,7 @@ are removed when CSS is applied.</pre>
             if (action === "create-output-folder") this.openNewFolderModal();
             if (action === "close-new-folder") this.closeNewFolderModal();
             if (action === "confirm-new-folder") this.createOutputFolder();
-            if (action === "delete-output-folder") this.deleteSelectedOutputFolder();
+            if (action === "delete-output-folder") void this.deleteSelectedOutputFolder();
             if (action === "toggle-library-search") this.toggleLibrarySearch();
             if (action === "toggle-library-selection") this.toggleLibrarySelectionMode();
             if (action === "save-visual-profile") this.saveVisualProfile();
@@ -7653,6 +7870,7 @@ are removed when CSS is applied.</pre>
                 this.updateActiveVisualPill();
                 this.updateActivePersonaVisualPill();
                 this.updateTriggerSummary();
+                this.updateAppendControls();
                 break;
             case "character_base_tags_result":
                 this.acceptCharacterBaseTags(data);
@@ -8043,7 +8261,6 @@ are removed when CSS is applied.</pre>
             case "stack_presets_result":
                 this.state.stackPresets = Array.isArray(data) ? data : [];
                 this.renderStackPresets();
-                this.hydrateActiveVisualStack();
                 if (!this.get('[data-role="output-library"]').hidden) this.renderOutputLibrary();
                 this.updateActiveVisualPill();
                 this.setRunStatus("Saved LoRA stacks updated.");
@@ -10900,6 +11117,71 @@ are removed when CSS is applied.</pre>
         });
         this.setRunStatus(`Deleting “${image.label}”…`);
     }
+    async setAvatarPicture(kind) {
+        const targetId = kind === "character" ? this.state.activeChat?.character_id : this.state.chatVisuals?.activePersona?.id;
+        const imageId = this.state.currentImage?.id;
+        if (!targetId || !imageId || !this.state.permissions[kind === "character" ? "characters" : "personas"] || !this.state.permissions.images || this.characterImageActionPending) return;
+        const focusBeforeCrop = document.activeElement;
+        const abort = this.avatarCropAbort = new AbortController();
+        this.characterImageActionPending = true;
+        this.updateAppendControls();
+        this.updateLibrarySelectionControls();
+        try {
+            const response = await fetch(`/api/v1/images/${encodeURIComponent(imageId)}`, {
+                credentials: "same-origin",
+                signal: abort.signal
+            });
+            if (!response.ok) throw new Error("Could not load the saved output.");
+            const original = await response.blob();
+            if (!original.type.startsWith("image/")) throw new Error("The saved output is not an image.");
+            if (this.disposed) return;
+            const crop = await studioCropAvatar(this.root, original, kind, abort.signal);
+            if (!crop || this.disposed) return;
+            this.setRunStatus(`Setting the active ${kind} picture…`);
+            await studioUploadAvatar(kind, targetId, crop, original);
+            if (!this.disposed) this.setRunStatus(`Active ${kind} picture updated.`);
+        } catch (error) {
+            if (!this.disposed && !abort.signal.aborted) this.setRunStatus(error instanceof Error ? error.message : String(error), true);
+        } finally{
+            this.avatarCropAbort = null;
+            this.characterImageActionPending = false;
+            if (!this.disposed) {
+                this.updateAppendControls();
+                this.updateLibrarySelectionControls();
+                if (focusBeforeCrop?.isConnected) focusBeforeCrop.focus();
+            }
+        }
+    }
+    async sendCharacterImages(action) {
+        const characterId = this.state.activeChat?.character_id;
+        const ids = action === "bulk-send-character-gallery" ? [
+            ...this.librarySelection
+        ] : this.state.currentImage?.id ? [
+            this.state.currentImage.id
+        ] : [];
+        if (this.characterImageActionPending || !characterId || !ids.length || !this.state.permissions.characters || !this.state.permissions.images) return;
+        this.characterImageActionPending = true;
+        this.updateAppendControls();
+        this.updateLibrarySelectionControls();
+        this.setRunStatus(`Sending ${ids.length} output(s) to the active character gallery…`);
+        try {
+            const result = await studioCharacterImageAction(characterId, ids, "gallery");
+            if (this.disposed) return;
+            if (action === "bulk-send-character-gallery") {
+                result.saved.forEach((id)=>this.librarySelection.delete(id));
+                this.syncVisibleLibrarySelection();
+            }
+            this.setRunStatus(`${result.saved.length} output(s) in the character gallery.${result.failed.length ? ` ${result.failed.length} could not be sent; retry the remaining selection.` : ""}`, result.failed.length > 0);
+        } catch (error) {
+            if (!this.disposed) this.setRunStatus(error instanceof Error ? error.message : String(error), true);
+        } finally{
+            this.characterImageActionPending = false;
+            if (!this.disposed) {
+                this.updateAppendControls();
+                this.updateLibrarySelectionControls();
+            }
+        }
+    }
     appendCurrentToChat() {
         const image = this.state.currentImage;
         if (!image?.id || !this.state.activeChat?.id) return;
@@ -11106,10 +11388,7 @@ are removed when CSS is applied.</pre>
         const folder = this.activeVisualFolder();
         const binding = folder?.binding;
         if (!folder || !binding?.enabled || this.pendingDraftRestore) return false;
-        if (!force && this.hydratedVisualCharacterId === binding.characterId) {
-            this.setStackPresetSelection(binding.stackPresetId);
-            return false;
-        }
+        if (!force && this.hydratedVisualCharacterId === binding.characterId) return false;
         let checkpointLoaded = !binding.checkpoint;
         if (binding.checkpoint) {
             const modelSelect = this.get('[data-role="model"]');
@@ -11477,13 +11756,46 @@ are removed when CSS is applied.</pre>
         }
         if (this.libraryVisualMode === "look") this.renderLibraryLookEditor();
     }
-    deleteSelectedOutputFolder() {
+    async deleteSelectedOutputFolder() {
+        if (this.folderDeleteAbort) return;
         const folder = this.state.outputFolders.find((item)=>item.id === this.libraryFolderId);
         if (folder?.id === FAVORITES_FOLDER_ID) {
             this.setRunStatus("Favorites is a built-in collection and cannot be deleted.", true);
             return;
         }
-        if (!folder || !window.confirm(`Delete folder “${folder.name}”? Its images stay in Lumiverse.`)) return;
+        if (!folder) return;
+        const abort = this.folderDeleteAbort = new AbortController();
+        const dialog = document.createElement("dialog");
+        dialog.className = "ss-confirm-folder";
+        dialog.setAttribute("aria-labelledby", "ss-confirm-folder-title");
+        dialog.setAttribute("aria-describedby", "ss-confirm-folder-description");
+        dialog.innerHTML = `<h2 id="ss-confirm-folder-title">Delete folder?</h2><p class="ss-confirm-folder-name"></p><p id="ss-confirm-folder-description">This removes the folder and its organization. Its images stay in Lumiverse. This cannot be undone.</p><div class="ss-avatar-crop-actions"><button type="button" class="ss-button" data-confirm="cancel" autofocus>Cancel</button><button type="button" class="ss-button ss-button-danger" data-confirm="delete">Delete folder</button></div>`;
+        dialog.querySelector(".ss-confirm-folder-name").textContent = folder.name;
+        const previousFocus = document.activeElement;
+        const confirmed = await new Promise((resolve)=>{
+            const finish = (accepted)=>{
+                abort.signal.removeEventListener("abort", cancel);
+                dialog.close();
+                dialog.remove();
+                resolve(accepted);
+            };
+            const cancel = ()=>finish(false);
+            abort.signal.addEventListener("abort", cancel, {
+                once: true
+            });
+            dialog.addEventListener("cancel", (event)=>{
+                event.preventDefault();
+                cancel();
+            });
+            dialog.querySelector('[data-confirm="cancel"]').addEventListener("click", cancel);
+            dialog.querySelector('[data-confirm="delete"]').addEventListener("click", ()=>finish(true));
+            this.root.append(dialog);
+            dialog.showModal();
+        });
+        this.folderDeleteAbort = null;
+        if (this.disposed) return;
+        if (previousFocus?.isConnected) previousFocus.focus();
+        if (!confirmed || !this.state.outputFolders.some((item)=>item.id === folder.id)) return;
         this.send("delete_output_folder", {
             folderId: folder.id
         });
@@ -11539,6 +11851,7 @@ are removed when CSS is applied.</pre>
     }
     updateLibrarySelectionControls() {
         const selected = this.librarySelection.size;
+        this.get('[data-action="bulk-send-character-gallery"]').disabled = !selected || !this.state.activeChat?.character_id || !this.state.permissions.characters || !this.state.permissions.images || this.characterImageActionPending;
         const library = this.get('[data-role="output-library"]');
         library.dataset.selectionMode = String(this.librarySelectionMode);
         this.get('[data-role="library-selectbar"]').hidden = !this.librarySelectionMode;
@@ -12298,6 +12611,13 @@ are removed when CSS is applied.</pre>
         this.syncFavoriteControls();
     }
     updateAppendControls() {
+        const personaButton = this.root.querySelector('[data-action="set-persona-picture"]');
+        if (personaButton) personaButton.disabled = !this.state.currentImage?.id || !this.state.chatVisuals?.activePersona?.id || !this.state.permissions.personas || !this.state.permissions.images || this.characterImageActionPending;
+        const canSend = Boolean(this.state.currentImage?.id && this.state.activeChat?.character_id && this.state.permissions.characters && this.state.permissions.images && !this.characterImageActionPending);
+        for (const button of this.root.querySelectorAll('[data-action="set-character-picture"], [data-action="send-character-gallery"]')){
+            button.disabled = !canSend;
+            button.title = canSend ? "Use this saved output for the active chat character" : "Requires a saved output, an active character, and Images / Characters permissions";
+        }
         const enabled = Boolean(this.state.currentImage?.id && this.state.activeChat?.id && this.state.permissions.chatMutation);
         for (const button of this.root.querySelectorAll('[data-action="append-to-chat"]')){
             button.disabled = !enabled;
@@ -14504,4 +14824,4 @@ function setup(ctx) {
         removeStyle();
     };
 }
-export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };
+export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, studioUploadAvatar, studioAvatarCropRect, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };

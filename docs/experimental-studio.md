@@ -85,3 +85,9 @@ The mobile Save preset modal follows VisualViewport resize/scroll events and saf
 Native Lumi widgets now restore the last position through `initialPosition`, save `onDragEnd` coordinates, and flush their position on pagehide, backgrounding and teardown. Host placement retains responsibility for viewport clamping. The compatibility overlay retains its existing position storage.
 
 Injected protocols identify bracketed image-history summaries as application-generated context and prohibit emitting them for new illustrations. New images require complete tags in the configured request mode. This guidance applies to defaults, parser requests and existing saved custom protocols.
+
+## Character image actions
+
+Image inspection now offers Set as character picture and Send to character gallery for the active chat character. Output-library Select mode offers the same gallery transfer for selected saved outputs. These actions require Images and Characters permissions and a saved image; live previews are excluded. Gallery sends link existing image IDs, skip previously linked images and retain failed selections for retry. Avatar uploads use the saved full-size bitmap and Lumi's character-avatar API.
+
+Adapter tests cover invalid targets, duplicate links, partial failures, MIME checks and upload boundaries. Browser fixtures exercise inspector actions, Select / Select page / gallery transfer and disabled controls with no character. No real character or gallery was modified during verification. Extension pushes include the compiled entry files loaded by `spindle.json`. Run `npm run build` after source changes and commit the changed runtime output; the generated-artifact exclusion applies to Lumiverse core PRs and incidental output.
