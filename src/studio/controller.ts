@@ -2513,7 +2513,6 @@ are removed when CSS is applied.</pre>
       case "stack_presets_result":
         this.state.stackPresets = Array.isArray(data) ? data : []
         this.renderStackPresets()
-        this.hydrateActiveVisualStack()
         if (!this.get<HTMLElement>('[data-role="output-library"]').hidden) this.renderOutputLibrary()
         this.updateActiveVisualPill()
         this.setRunStatus("Saved LoRA stacks updated.")
@@ -5581,10 +5580,8 @@ are removed when CSS is applied.</pre>
     const folder = this.activeVisualFolder()
     const binding = folder?.binding
     if (!folder || !binding?.enabled || this.pendingDraftRestore) return false
-    if (!force && this.hydratedVisualCharacterId === binding.characterId) {
-      this.setStackPresetSelection(binding.stackPresetId)
-      return false
-    }
+    // Refreshing presets must not replace a stack the user selected or edited.
+    if (!force && this.hydratedVisualCharacterId === binding.characterId) return false
 
     let checkpointLoaded = !binding.checkpoint
     if (binding.checkpoint) {

@@ -283,6 +283,42 @@ try {
   assert.equal(await page.locator('[data-action="set-persona-picture"]').isDisabled(),true)
   await page.evaluate(()=>mobileController.closeInspector())
   console.log('Character/persona crops: centered despite host reset, grouped targets, cancel focus, uploads and galleries: ok')
+  // Reproduce saving Default while the active character folder is bound to Head.
+  await page.setViewportSize({width:1440,height:1000})
+  await page.evaluate(()=>{
+    const item=(name,weight)=>({name,title:name,weight,enabled:true,useTrigger:false,sourceUrl:''})
+    mobileController.state.stackPresets=[{id:'head',name:'Head',items:[item('head-lora',1)],updatedAt:0},{id:'default',name:'Default',items:[item('default-lora',0.6)],updatedAt:0}]
+    mobileController.state.activeChat={id:'chat',character_id:'char'}
+    mobileController.state.outputFolders=[{id:'visual-folder',name:'Character visuals',imageIds:[],updatedAt:0,binding:{type:'character',characterId:'char',enabled:true,stackPresetId:'head',stackSnapshot:[],checkpoint:'',positivePrompt:'',negativePrompt:'',looks:[],activeLookId:''}}]
+    mobileController.hydratedVisualCharacterId=''
+    mobileController.renderStackPresets()
+    mobileController.hydrateActiveVisualStack()
+    mobileController.setStudioView('styles')
+  })
+  assert.equal(await page.locator('[data-role="stack-preset"]').inputValue(),'head','Initial character hydration still loads its bound stack')
+  await page.locator('[data-role="stack-preset"]').selectOption('default')
+  await page.locator('[data-action="load-stack"]').click()
+  for(let attempt=0;attempt<2;attempt++) {
+    page.once('dialog',dialog=>dialog.accept('Default'))
+    await page.locator('[data-action="save-stack"]').click()
+    const saved=await page.evaluate(()=>{
+      const message=testMessages.findLast(message=>message.type==='save_stack_preset')
+      const updated=[{...mobileController.state.stackPresets.find(preset=>preset.id==='default'),...message.preset},...mobileController.state.stackPresets.filter(preset=>preset.id!=='default')]
+      mobileController.onMessage({type:'stack_presets_result',requestId:message.requestId,data:updated})
+      return {id:message.preset.id,name:message.preset.name,items:message.preset.items,selected:document.querySelector('[data-role="stack-preset"]').value,mobileSelected:document.querySelector('[data-role="mobile-stack-preset"]').value,stack:mobileController.state.stack.map(item=>({name:item.lora.name,weight:item.weight}))}
+    })
+    assert.equal(saved.id,'default','Save targets Default, never the bound Head preset')
+    assert.equal(saved.name,'Default')
+    assert.equal(saved.selected,'default','Save response must not reset selection to Head')
+    assert.equal(saved.mobileSelected,'default','Both dropdowns preserve the saved selection')
+    assert.deepEqual(saved.stack,[{name:'default-lora',weight:0.6}],'Save must not reload another stack')
+  }
+  await page.evaluate(()=>mobileController.hydrateActiveVisualStack())
+  assert.equal(await page.locator('[data-role="stack-preset"]').inputValue(),'default','Repeated hydration must not overwrite a user selection')
+  await page.evaluate(()=>mobileController.hydrateActiveVisualStack(true))
+  assert.equal(await page.locator('[data-role="stack-preset"]').inputValue(),'head','Explicit profile hydration still loads Head')
+  console.log('Stack saving: Default stays selected across two saves and repeated hydration; explicit character profile load still works: ok')
+
   await page.evaluate(()=>{
     window.confirm=()=>{throw new Error('Native confirmation is unavailable in this host')}
     mobileController.state.outputFolders=[{id:'test-folder',name:'Folder <b>with images</b>',imageIds:['saved-one','saved-two'],createdAt:0,updatedAt:0}]

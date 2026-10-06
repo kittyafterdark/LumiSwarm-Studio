@@ -8261,7 +8261,6 @@ are removed when CSS is applied.</pre>
             case "stack_presets_result":
                 this.state.stackPresets = Array.isArray(data) ? data : [];
                 this.renderStackPresets();
-                this.hydrateActiveVisualStack();
                 if (!this.get('[data-role="output-library"]').hidden) this.renderOutputLibrary();
                 this.updateActiveVisualPill();
                 this.setRunStatus("Saved LoRA stacks updated.");
@@ -11389,10 +11388,7 @@ are removed when CSS is applied.</pre>
         const folder = this.activeVisualFolder();
         const binding = folder?.binding;
         if (!folder || !binding?.enabled || this.pendingDraftRestore) return false;
-        if (!force && this.hydratedVisualCharacterId === binding.characterId) {
-            this.setStackPresetSelection(binding.stackPresetId);
-            return false;
-        }
+        if (!force && this.hydratedVisualCharacterId === binding.characterId) return false;
         let checkpointLoaded = !binding.checkpoint;
         if (binding.checkpoint) {
             const modelSelect = this.get('[data-role="model"]');
