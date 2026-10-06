@@ -61,6 +61,7 @@ class StudioController {
   private librarySelectionAnchorId = ""
   private librarySearchOpen = false
   private librarySelectionMode = false
+  private characterImageActionPending = false
   private librarySelectOnlyNonStarred = false
   private libraryVisualMode: "profile" | "look" = "profile"
   private libraryLookId = ""
@@ -1340,6 +1341,8 @@ are removed when CSS is applied.</pre>
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
               <button class="ss-button" data-action="use-as-init">Use as init image</button>
               <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
+              <button class="ss-button" data-action="set-character-picture" disabled>Set as character picture</button>
+              <button class="ss-button" data-action="send-character-gallery" disabled>Send to character gallery</button>
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
             </div>
@@ -1415,6 +1418,7 @@ are removed when CSS is applied.</pre>
               </label>
               <div class="ss-library-selection-actions" data-role="library-selection-actions" hidden>
                 <button class="ss-button ss-library-favorite-selected" data-action="bulk-favorite-outputs">${STAR_ICON}<span>Favorite</span></button>
+                <button class="ss-button" data-action="bulk-send-character-gallery" disabled>Send to character gallery</button>
                 <button class="ss-button" data-action="bulk-move-outputs">Move…</button>
                 <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs">Delete</button>
               </div>
@@ -1867,6 +1871,7 @@ are removed when CSS is applied.</pre>
       if (action === "download-output") this.downloadCurrent()
       if (action === "copy-output") void this.copyCurrentUrl()
       if (action === "append-to-chat") this.appendCurrentToChat()
+      if (action === "set-character-picture" || action === "send-character-gallery" || action === "bulk-send-character-gallery") void this.sendCharacterImages(action)
       if (action === "inspect-output") this.openInspector()
       if (action === "close-inspector") this.closeInspector()
       if (action === "reuse-parameters") this.reuseCurrentParameters()
@@ -5291,6 +5296,31 @@ are removed when CSS is applied.</pre>
     this.setRunStatus(`Deleting “${image.label}”…`)
   }
 
+  private async sendCharacterImages(action: string): Promise<void> {
+    const characterId = this.state.activeChat?.character_id
+    const ids = action === "bulk-send-character-gallery" ? [...this.librarySelection] : this.state.currentImage?.id ? [this.state.currentImage.id] : []
+    if (this.characterImageActionPending || !characterId || !ids.length || !this.state.permissions.characters || !this.state.permissions.images) return
+    this.characterImageActionPending = true
+    this.updateAppendControls()
+    this.updateLibrarySelectionControls()
+    const avatar = action === "set-character-picture"
+    this.setRunStatus(avatar ? "Setting the active character picture…" : `Sending ${ids.length} output(s) to the active character gallery…`)
+    try {
+      const result = await studioCharacterImageAction(characterId, ids, avatar ? "avatar" : "gallery")
+      if (this.disposed) return
+      if (action === "bulk-send-character-gallery") {
+        result.saved.forEach(id => this.librarySelection.delete(id))
+        this.syncVisibleLibrarySelection()
+      }
+      this.setRunStatus(avatar ? "Active character picture updated." : `${result.saved.length} output(s) in the character gallery.${result.failed.length ? ` ${result.failed.length} could not be sent; retry the remaining selection.` : ""}`, result.failed.length > 0)
+    } catch (error) {
+      if (!this.disposed) this.setRunStatus(error instanceof Error ? error.message : String(error), true)
+    } finally {
+      this.characterImageActionPending = false
+      if (!this.disposed) { this.updateAppendControls(); this.updateLibrarySelectionControls() }
+    }
+  }
+
   private appendCurrentToChat(): void {
     const image = this.state.currentImage
     if (!image?.id || !this.state.activeChat?.id) return
@@ -5951,6 +5981,7 @@ are removed when CSS is applied.</pre>
 
   private updateLibrarySelectionControls(): void {
     const selected = this.librarySelection.size
+    this.get<HTMLButtonElement>('[data-action="bulk-send-character-gallery"]').disabled = !selected || !this.state.activeChat?.character_id || !this.state.permissions.characters || !this.state.permissions.images || this.characterImageActionPending
     const library = this.get<HTMLElement>('[data-role="output-library"]')
     library.dataset.selectionMode = String(this.librarySelectionMode)
     this.get<HTMLElement>('[data-role="library-selectbar"]').hidden = !this.librarySelectionMode
@@ -6761,6 +6792,11 @@ are removed when CSS is applied.</pre>
   }
 
   private updateAppendControls(): void {
+    const canSend = Boolean(this.state.currentImage?.id && this.state.activeChat?.character_id && this.state.permissions.characters && this.state.permissions.images && !this.characterImageActionPending)
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="set-character-picture"], [data-action="send-character-gallery"]')) {
+      button.disabled = !canSend
+      button.title = canSend ? "Use this saved output for the active chat character" : "Requires a saved output, an active character, and Images / Characters permissions"
+    }
     const enabled = Boolean(
       this.state.currentImage?.id
       && this.state.activeChat?.id

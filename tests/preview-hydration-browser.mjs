@@ -24,6 +24,15 @@ try {
   browser = await chromium.launch({ headless: true })
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   const errors = []
+  const gallery=[]
+  let avatarUploads=0
+  await page.route('**/api/v1/characters/**',async route=>{
+    const request=route.request(),url=request.url()
+    if(url.endsWith('/gallery/link'))gallery.push({image_id:request.postDataJSON().image_id})
+    if(url.endsWith('/avatar'))avatarUploads++
+    await route.fulfill({contentType:'application/json',body:JSON.stringify(url.endsWith('/gallery')?gallery:{id:'char'})})
+  })
+  await page.route('**/api/v1/images/saved-*',route=>route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64')}))
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(`http://127.0.0.1:${server.address().port}`)
   await page.addStyleTag({ content: css })
@@ -172,6 +181,48 @@ try {
     panes:[...new Set([...document.querySelectorAll('[data-mobile-pane]')].filter(node=>node.checkVisibility()).map(node=>node.dataset.mobilePane))],
   }))
   assert.deepEqual(initialMobile.panes,[initialMobile.tab],'Fresh mobile mount restores exactly one pane')
+  // Exercise the character actions using controlled host API fixtures, never personal character data.
+  await page.evaluate(()=>{
+    mobileController.state.permissions={characters:true,images:true}
+    mobileController.state.activeChat={id:'chat',character_id:'char'}
+    mobileController.setCurrentImage({id:'saved-one',src:'/api/v1/images/saved-one',label:'Test output'})
+    mobileController.openInspector()
+  })
+  await page.locator('[data-action="set-character-picture"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-role="run-status"]').textContent==='Active character picture updated.')
+  assert.equal(avatarUploads,1)
+  await page.locator('[data-action="send-character-gallery"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-role="run-status"]').textContent.includes('1 output(s) in the character gallery'))
+  assert.deepEqual(gallery,[{image_id:'saved-one'}])
+  await page.setViewportSize({width:1440,height:1000})
+  assert.equal(await page.locator('[data-action="set-character-picture"]').isEnabled(),true)
+  await page.locator('[data-action="send-character-gallery"]').click()
+  await page.waitForFunction(()=>!mobileController.characterImageActionPending)
+  assert.equal(gallery.length,1,'Desktop repeat send skips an existing gallery link')
+  await page.setViewportSize({width:360,height:850})
+  await page.evaluate(()=>{
+    mobileController.closeInspector()
+    mobileController.openOutputLibrary()
+    mobileController.libraryFolderId=''
+    mobileController.state.libraryOutputs=[{id:'saved-one',url:'/api/v1/images/saved-one'},{id:'saved-two',url:'/api/v1/images/saved-two'}]
+    mobileController.renderOutputLibrary()
+  })
+  await page.locator('[data-action="toggle-library-selection"]').click()
+  await page.locator('[data-action="select-library-page"]').click()
+  await page.locator('[data-action="bulk-send-character-gallery"]').click()
+  await page.waitForFunction(()=>!mobileController.characterImageActionPending)
+  assert.deepEqual(gallery,[{image_id:'saved-one'},{image_id:'saved-two'}])
+  assert.equal(await page.evaluate(()=>mobileController.librarySelection.size),0)
+  await page.evaluate(()=>{
+    mobileController.closeOutputLibrary()
+    mobileController.state.activeChat=null
+    mobileController.updateAppendControls()
+    mobileController.openInspector()
+  })
+  assert.equal(await page.locator('[data-action="set-character-picture"]').isDisabled(),true)
+  assert.equal(await page.locator('[data-action="send-character-gallery"]').isDisabled(),true)
+  await page.evaluate(()=>mobileController.closeInspector())
+  console.log('Character actions: inspector avatar/gallery, selected outputs, duplicate skipping and missing character: ok')
   // Simulate safe insets and a shortened VisualViewport; this is geometry coverage, not iPhone hardware QA.
   for (const geometry of [
     {width:390,height:844,visible:844,offset:0,safe:59,bottom:34},

@@ -43,3 +43,41 @@ async function upsertStudioNativePreset(input: NativeStudioPresetInput, fetcher:
   }
   return { id: String(preset.id), warnings: Array.isArray(data.errors) ? data.errors.map(String) : [] }
 }
+
+async function studioCharacterImageAction(characterId: string, imageIds: string[], action: "avatar" | "gallery", fetcher: typeof fetch = fetch): Promise<{ saved: string[]; failed: string[] }> {
+  const ids = [...new Set(imageIds.filter(id => typeof id === "string" && id.trim()))]
+  if (!characterId || !ids.length) throw new Error("Choose an active character and saved outputs first.")
+  const base = `/api/v1/characters/${encodeURIComponent(characterId)}`
+  const check = async (response: Response, fallback: string) => {
+    if (response.ok) return
+    const data = await response.json().catch(() => null)
+    throw new Error(String(data?.error || fallback))
+  }
+  if (action === "avatar") {
+    if (ids.length !== 1) throw new Error("Choose one output for the character picture.")
+    const image = await fetcher(`/api/v1/images/${encodeURIComponent(ids[0])}`, { credentials: "same-origin" })
+    await check(image, "Could not load the saved output.")
+    const blob = await image.blob()
+    if (!blob.type.startsWith("image/")) throw new Error("The saved output is not an image.")
+    const form = new FormData()
+    form.append("avatar", blob, `studio-output.${blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1] || "png"}`)
+    const response = await fetcher(`${base}/avatar`, { method: "POST", credentials: "same-origin", body: form })
+    await check(response, "Lumiverse could not set the character picture.")
+    return { saved: ids, failed: [] }
+  }
+  const existing = await fetcher(`${base}/gallery`, { credentials: "same-origin" })
+  await check(existing, "Character galleries are unavailable in this Lumiverse host.")
+  const items = await existing.json()
+  if (!Array.isArray(items)) throw new Error("Lumiverse returned an invalid gallery.")
+  const linked = new Set(items.map(item => String(item.image_id)))
+  const saved: string[] = [], failed: string[] = []
+  for (const imageId of ids) {
+    if (linked.has(imageId)) { saved.push(imageId); continue }
+    try {
+      const response = await fetcher(`${base}/gallery/link`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_id: imageId }) })
+      await check(response, "Lumiverse could not add the output to the gallery.")
+      saved.push(imageId)
+    } catch { failed.push(imageId) }
+  }
+  return { saved, failed }
+}

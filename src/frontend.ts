@@ -2,7 +2,7 @@
 // The build concatenates the ordered source modules into the single Spindle entry artifact.
 export {
   defaultStudioBehavior,
-  studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset,
+  studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction,
   sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters,
   normalizeWorkspaceState,
   StudioController,
