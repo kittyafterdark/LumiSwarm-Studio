@@ -61,6 +61,7 @@ class StudioController {
   private librarySelectionAnchorId = ""
   private librarySearchOpen = false
   private librarySelectionMode = false
+  private avatarCropAbort: AbortController | null = null
   private characterImageActionPending = false
   private librarySelectOnlyNonStarred = false
   private libraryVisualMode: "profile" | "look" = "profile"
@@ -90,6 +91,7 @@ class StudioController {
   private nativeSavePending = false
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
+    if (this.root.querySelector<HTMLDialogElement>(".ss-avatar-crop")?.open) return
     if (event.key !== "Escape") return
     const loraSortMenu = this.root.querySelector<HTMLElement>('[data-role="lora-sort-menu"]')
     if (loraSortMenu && !loraSortMenu.hidden) {
@@ -259,6 +261,7 @@ class StudioController {
     this.persistWorkspaceState()
     this.syncStudioProfile()
     this.disposed = true
+    this.avatarCropAbort?.abort()
     window.visualViewport?.removeEventListener("resize", this.updatePresetViewport)
     window.visualViewport?.removeEventListener("scroll", this.updatePresetViewport)
     window.removeEventListener("resize", this.updatePresetViewport)
@@ -1341,7 +1344,9 @@ are removed when CSS is applied.</pre>
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
               <button class="ss-button" data-action="use-as-init">Use as init image</button>
               <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
-              <button class="ss-button" data-action="set-character-picture" disabled>Set as character picture</button>
+              <span class="ss-set-as-label">Set as…</span>
+              <button class="ss-button" data-action="set-character-picture" disabled>Character picture</button>
+              <button class="ss-button" data-action="set-persona-picture" disabled>Persona picture</button>
               <button class="ss-button" data-action="send-character-gallery" disabled>Send to character gallery</button>
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
@@ -1871,7 +1876,8 @@ are removed when CSS is applied.</pre>
       if (action === "download-output") this.downloadCurrent()
       if (action === "copy-output") void this.copyCurrentUrl()
       if (action === "append-to-chat") this.appendCurrentToChat()
-      if (action === "set-character-picture" || action === "send-character-gallery" || action === "bulk-send-character-gallery") void this.sendCharacterImages(action)
+      if (action === "set-character-picture" || action === "set-persona-picture") void this.setAvatarPicture(action === "set-persona-picture" ? "persona" : "character")
+      if (action === "send-character-gallery" || action === "bulk-send-character-gallery") void this.sendCharacterImages(action)
       if (action === "inspect-output") this.openInspector()
       if (action === "close-inspector") this.closeInspector()
       if (action === "reuse-parameters") this.reuseCurrentParameters()
@@ -2102,6 +2108,7 @@ are removed when CSS is applied.</pre>
         this.updateActiveVisualPill()
         this.updateActivePersonaVisualPill()
         this.updateTriggerSummary()
+        this.updateAppendControls()
         break
       case "character_base_tags_result":
         this.acceptCharacterBaseTags(data)
@@ -5296,6 +5303,37 @@ are removed when CSS is applied.</pre>
     this.setRunStatus(`Deleting “${image.label}”…`)
   }
 
+  private async setAvatarPicture(kind: "character" | "persona"): Promise<void> {
+    const targetId = kind === "character" ? this.state.activeChat?.character_id : this.state.chatVisuals?.activePersona?.id
+    const imageId = this.state.currentImage?.id
+    if (!targetId || !imageId || !this.state.permissions[kind === "character" ? "characters" : "personas"] || !this.state.permissions.images || this.characterImageActionPending) return
+    const focusBeforeCrop = document.activeElement as HTMLElement | null
+    const abort = this.avatarCropAbort = new AbortController()
+    this.characterImageActionPending = true
+    this.updateAppendControls(); this.updateLibrarySelectionControls()
+    try {
+      const response = await fetch(`/api/v1/images/${encodeURIComponent(imageId)}`, { credentials: "same-origin", signal: abort.signal })
+      if (!response.ok) throw new Error("Could not load the saved output.")
+      const original = await response.blob()
+      if (!original.type.startsWith("image/")) throw new Error("The saved output is not an image.")
+      if (this.disposed) return
+      const crop = await studioCropAvatar(this.root, original, kind, abort.signal)
+      if (!crop || this.disposed) return
+      this.setRunStatus(`Setting the active ${kind} picture…`)
+      await studioUploadAvatar(kind, targetId, crop, original)
+      if (!this.disposed) this.setRunStatus(`Active ${kind} picture updated.`)
+    } catch (error) {
+      if (!this.disposed && !abort.signal.aborted) this.setRunStatus(error instanceof Error ? error.message : String(error), true)
+    } finally {
+      this.avatarCropAbort = null
+      this.characterImageActionPending = false
+      if (!this.disposed) {
+        this.updateAppendControls(); this.updateLibrarySelectionControls()
+        if (focusBeforeCrop?.isConnected) focusBeforeCrop.focus()
+      }
+    }
+  }
+
   private async sendCharacterImages(action: string): Promise<void> {
     const characterId = this.state.activeChat?.character_id
     const ids = action === "bulk-send-character-gallery" ? [...this.librarySelection] : this.state.currentImage?.id ? [this.state.currentImage.id] : []
@@ -5303,16 +5341,15 @@ are removed when CSS is applied.</pre>
     this.characterImageActionPending = true
     this.updateAppendControls()
     this.updateLibrarySelectionControls()
-    const avatar = action === "set-character-picture"
-    this.setRunStatus(avatar ? "Setting the active character picture…" : `Sending ${ids.length} output(s) to the active character gallery…`)
+    this.setRunStatus(`Sending ${ids.length} output(s) to the active character gallery…`)
     try {
-      const result = await studioCharacterImageAction(characterId, ids, avatar ? "avatar" : "gallery")
+      const result = await studioCharacterImageAction(characterId, ids, "gallery")
       if (this.disposed) return
       if (action === "bulk-send-character-gallery") {
         result.saved.forEach(id => this.librarySelection.delete(id))
         this.syncVisibleLibrarySelection()
       }
-      this.setRunStatus(avatar ? "Active character picture updated." : `${result.saved.length} output(s) in the character gallery.${result.failed.length ? ` ${result.failed.length} could not be sent; retry the remaining selection.` : ""}`, result.failed.length > 0)
+      this.setRunStatus(`${result.saved.length} output(s) in the character gallery.${result.failed.length ? ` ${result.failed.length} could not be sent; retry the remaining selection.` : ""}`, result.failed.length > 0)
     } catch (error) {
       if (!this.disposed) this.setRunStatus(error instanceof Error ? error.message : String(error), true)
     } finally {
@@ -6792,6 +6829,8 @@ are removed when CSS is applied.</pre>
   }
 
   private updateAppendControls(): void {
+    const personaButton = this.root.querySelector<HTMLButtonElement>('[data-action="set-persona-picture"]')
+    if (personaButton) personaButton.disabled = !this.state.currentImage?.id || !this.state.chatVisuals?.activePersona?.id || !this.state.permissions.personas || !this.state.permissions.images || this.characterImageActionPending
     const canSend = Boolean(this.state.currentImage?.id && this.state.activeChat?.character_id && this.state.permissions.characters && this.state.permissions.images && !this.characterImageActionPending)
     for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="set-character-picture"], [data-action="send-character-gallery"]')) {
       button.disabled = !canSend

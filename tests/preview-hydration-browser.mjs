@@ -25,11 +25,19 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   const errors = []
   const gallery=[]
-  let avatarUploads=0
+  let avatarUploads=0,personaUploads=0
+  await page.route('**/api/v1/personas/**',async route=>{
+    assert.match(route.request().postData(),/name="original_avatar"/)
+    personaUploads++
+    await route.fulfill({contentType:'application/json',body:'{"id":"persona"}'})
+  })
   await page.route('**/api/v1/characters/**',async route=>{
     const request=route.request(),url=request.url()
     if(url.endsWith('/gallery/link'))gallery.push({image_id:request.postDataJSON().image_id})
-    if(url.endsWith('/avatar'))avatarUploads++
+    if(url.endsWith('/avatar')) {
+      assert.match(request.postData(),/name="original_avatar"/)
+      avatarUploads++
+    }
     await route.fulfill({contentType:'application/json',body:JSON.stringify(url.endsWith('/gallery')?gallery:{id:'char'})})
   })
   await page.route('**/api/v1/images/saved-*',route=>route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64')}))
@@ -183,14 +191,48 @@ try {
   assert.deepEqual(initialMobile.panes,[initialMobile.tab],'Fresh mobile mount restores exactly one pane')
   // Exercise the character actions using controlled host API fixtures, never personal character data.
   await page.evaluate(()=>{
-    mobileController.state.permissions={characters:true,images:true}
+    mobileController.state.permissions={characters:true,personas:true,images:true}
+    mobileController.state.chatVisuals={activePersona:{id:'persona',name:'Fixture persona'}}
     mobileController.state.activeChat={id:'chat',character_id:'char'}
     mobileController.setCurrentImage({id:'saved-one',src:'/api/v1/images/saved-one',label:'Test output'})
     mobileController.openInspector()
   })
   await page.locator('[data-action="set-character-picture"]').click()
+  await page.locator('[data-crop="apply"]').waitFor()
+  await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
+  assert.equal(avatarUploads,0,'Opening the crop must not upload')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(()=>!mobileController.characterImageActionPending)
+  assert.equal(avatarUploads,0,'Escape cancels without modifying the avatar')
+  assert.equal(await page.locator('[data-action="set-character-picture"]').evaluate(node=>node===document.activeElement),true,'Cancel restores focus')
+  assert.equal(await page.locator('[data-role="inspector"]').isVisible(),true)
+  await page.locator('[data-action="set-character-picture"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
+  await page.locator('[data-crop="zoom"]').focus()
+  await page.keyboard.press('ArrowRight')
+  assert.ok(Number(await page.locator('[data-crop="zoom"]').inputValue())>1)
+  const canvasBox=await page.locator('.ss-avatar-crop canvas').boundingBox()
+  assert.ok(canvasBox.x>=0 && canvasBox.x+canvasBox.width<=360,'Mobile crop stays within viewport')
+  await page.mouse.move(canvasBox.x+canvasBox.width/2,canvasBox.y+canvasBox.height/2)
+  await page.mouse.down()
+  await page.mouse.move(canvasBox.x+canvasBox.width/2+30,canvasBox.y+canvasBox.height/2+20)
+  await page.mouse.up()
+  assert.notEqual(await page.locator('[data-crop="x"]').inputValue(),'0')
+  await page.locator('[data-crop="apply"]').click()
   await page.waitForFunction(()=>document.querySelector('[data-role="run-status"]').textContent==='Active character picture updated.')
   assert.equal(avatarUploads,1)
+  await page.setViewportSize({width:1440,height:1000})
+  await page.locator('[data-action="set-persona-picture"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
+  await page.locator('[data-crop="cancel"]').click()
+  await page.waitForFunction(()=>!mobileController.characterImageActionPending)
+  assert.equal(personaUploads,0)
+  await page.locator('[data-action="set-persona-picture"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-crop="apply"]')?.disabled === false)
+  await page.locator('[data-crop="apply"]').click()
+  await page.waitForFunction(()=>document.querySelector('[data-role="run-status"]').textContent==='Active persona picture updated.')
+  assert.equal(personaUploads,1)
+  await page.setViewportSize({width:360,height:850})
   await page.locator('[data-action="send-character-gallery"]').click()
   await page.waitForFunction(()=>document.querySelector('[data-role="run-status"]').textContent.includes('1 output(s) in the character gallery'))
   assert.deepEqual(gallery,[{image_id:'saved-one'}])
@@ -216,11 +258,13 @@ try {
   await page.evaluate(()=>{
     mobileController.closeOutputLibrary()
     mobileController.state.activeChat=null
+    mobileController.state.chatVisuals.activePersona=null
     mobileController.updateAppendControls()
     mobileController.openInspector()
   })
   assert.equal(await page.locator('[data-action="set-character-picture"]').isDisabled(),true)
   assert.equal(await page.locator('[data-action="send-character-gallery"]').isDisabled(),true)
+  assert.equal(await page.locator('[data-action="set-persona-picture"]').isDisabled(),true)
   await page.evaluate(()=>mobileController.closeInspector())
   console.log('Character actions: inspector avatar/gallery, selected outputs, duplicate skipping and missing character: ok')
   // Simulate safe insets and a shortened VisualViewport; this is geometry coverage, not iPhone hardware QA.

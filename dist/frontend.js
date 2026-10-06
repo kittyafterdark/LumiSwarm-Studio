@@ -3975,6 +3975,17 @@ const STUDIO_V3_STYLES = `
     .ss-workflow-modal[data-role="save-preset-modal"] .ss-save-preset-fields { overscroll-behavior: contain; }
   }
 
+
+  .ss-avatar-crop { width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px); box-sizing: border-box; overflow: auto; padding: 20px; border: 1px solid var(--ss-border, #454550); border-radius: 12px; background: var(--lumiverse-bg, #171820); color: var(--lumiverse-text, #eee); }
+  .ss-avatar-crop::backdrop { background: #000a; }
+  .ss-avatar-crop h2 { margin: 0 0 12px; font-size: 18px; }
+  .ss-avatar-crop canvas { display: block; width: 100%; aspect-ratio: 1; background: #111; touch-action: none; cursor: grab; }
+  .ss-avatar-crop label { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+  .ss-avatar-crop input { width: 100%; min-height: 32px; }
+  .ss-avatar-crop p { font-size: 13px; }
+  .ss-avatar-crop-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .ss-avatar-crop-actions button { min-height: 44px; }
+  .ss-set-as-label { align-self: center; font-size: 12px; }
 `;
 function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -4123,6 +4134,125 @@ async function studioCharacterImageAction(characterId, imageIds, action, fetcher
         saved,
         failed
     };
+}
+function studioAvatarCropRect(width, height, zoom, x, y) {
+    const size = Math.min(width, height) / Math.max(1, zoom);
+    return {
+        x: (width - size) * (Math.max(-1, Math.min(1, x)) + 1) / 2,
+        y: (height - size) * (Math.max(-1, Math.min(1, y)) + 1) / 2,
+        size
+    };
+}
+async function studioUploadAvatar(kind, id, crop, original, fetcher = fetch) {
+    if (![
+        "character",
+        "persona"
+    ].includes(kind) || !id || !crop.type.startsWith("image/") || !original.type.startsWith("image/")) throw new Error("Choose a valid avatar image and target.");
+    const form = new FormData();
+    form.append("avatar", crop, "studio-crop.png");
+    form.append("original_avatar", original, `studio-original.${original.type === "image/jpeg" ? "jpg" : original.type.split("/")[1] || "png"}`);
+    const response = await fetcher(`/api/v1/${kind === "character" ? "characters" : "personas"}/${encodeURIComponent(id)}/avatar`, {
+        method: "POST",
+        credentials: "same-origin",
+        body: form
+    });
+    if (!response.ok) {
+        const data = await response.json().catch(()=>null);
+        throw new Error(String(data?.error || `Lumiverse could not set the ${kind} picture.`));
+    }
+}
+function studioCropAvatar(root, original, kind, signal) {
+    return new Promise((resolve, reject)=>{
+        const dialog = document.createElement("dialog");
+        dialog.className = "ss-avatar-crop";
+        dialog.setAttribute("aria-labelledby", "ss-avatar-crop-title");
+        dialog.innerHTML = `<h2 id="ss-avatar-crop-title">Crop for ${kind} picture</h2><canvas width="512" height="512" aria-label="Square avatar preview"></canvas><p>Drag the image or use the sliders to position the crop.</p><label>Zoom<input data-crop="zoom" type="range" min="1" max="4" step="0.01" value="1"></label><label>Horizontal position<input data-crop="x" type="range" min="-1" max="1" step="0.01" value="0"></label><label>Vertical position<input data-crop="y" type="range" min="-1" max="1" step="0.01" value="0"></label><p data-crop="status" role="status">Loading image…</p><div class="ss-avatar-crop-actions"><button type="button" class="ss-button" data-crop="cancel">Cancel</button><button type="button" class="ss-button" data-crop="apply" disabled>Set picture</button></div>`;
+        const source = new Image(), url = URL.createObjectURL(original);
+        const previousFocus = document.activeElement;
+        const canvas = dialog.querySelector("canvas");
+        const context = canvas.getContext("2d");
+        const controls = [
+            ...dialog.querySelectorAll("input")
+        ];
+        const apply = dialog.querySelector('[data-crop="apply"]');
+        const status = dialog.querySelector('[data-crop="status"]');
+        let settled = false, ready = false;
+        const finish = (blob, error)=>{
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener("abort", abort);
+            dialog.close();
+            dialog.remove();
+            URL.revokeObjectURL(url);
+            if (previousFocus?.isConnected) previousFocus.focus();
+            if (error) reject(error);
+            else resolve(blob);
+        };
+        const abort = ()=>finish(null);
+        const draw = ()=>{
+            if (!ready || settled) return;
+            const [zoom, x, y] = controls.map((control)=>Number(control.value));
+            const rect = studioAvatarCropRect(source.naturalWidth, source.naturalHeight, zoom, x, y);
+            context.clearRect(0, 0, 512, 512);
+            context.drawImage(source, rect.x, rect.y, rect.size, rect.size, 0, 0, 512, 512);
+        };
+        controls.forEach((control)=>control.addEventListener("input", draw));
+        let drag = null;
+        canvas.addEventListener("pointerdown", (event)=>{
+            if (!ready) return;
+            drag = {
+                id: event.pointerId,
+                x: event.clientX,
+                y: event.clientY,
+                cropX: Number(controls[1].value),
+                cropY: Number(controls[2].value)
+            };
+            canvas.setPointerCapture(event.pointerId);
+        });
+        canvas.addEventListener("pointermove", (event)=>{
+            if (!drag || drag.id !== event.pointerId) return;
+            const rect = studioAvatarCropRect(source.naturalWidth, source.naturalHeight, Number(controls[0].value), 0, 0);
+            const scale = rect.size / canvas.getBoundingClientRect().width;
+            controls[1].value = String(drag.cropX - (event.clientX - drag.x) * scale * 2 / (source.naturalWidth - rect.size || 1));
+            controls[2].value = String(drag.cropY - (event.clientY - drag.y) * scale * 2 / (source.naturalHeight - rect.size || 1));
+            draw();
+        });
+        canvas.addEventListener("lostpointercapture", ()=>{
+            drag = null;
+        });
+        canvas.addEventListener("pointerup", ()=>{
+            drag = null;
+        });
+        dialog.addEventListener("cancel", (event)=>{
+            event.preventDefault();
+            finish(null);
+        });
+        dialog.querySelector('[data-crop="cancel"]').addEventListener("click", ()=>finish(null));
+        apply.addEventListener("click", ()=>{
+            apply.disabled = true;
+            canvas.toBlob((blob)=>{
+                if (blob) finish(blob);
+                else finish(null, new Error("Could not create the avatar crop."));
+            }, "image/png");
+        });
+        root.append(dialog);
+        dialog.showModal();
+        signal.addEventListener("abort", abort, {
+            once: true
+        });
+        if (signal.aborted) {
+            abort();
+            return;
+        }
+        source.src = url;
+        void source.decode().then(()=>{
+            if (settled) return;
+            ready = true;
+            draw();
+            apply.disabled = false;
+            status.textContent = "The original image will also be preserved.";
+        }).catch(()=>finish(null, new Error("Could not decode this output for cropping.")));
+    });
 }
 function readMiniplayerPosition() {
     try {
@@ -5711,6 +5841,7 @@ class StudioController {
     librarySelectionAnchorId = "";
     librarySearchOpen = false;
     librarySelectionMode = false;
+    avatarCropAbort = null;
     characterImageActionPending = false;
     librarySelectOnlyNonStarred = false;
     libraryVisualMode = "profile";
@@ -5740,6 +5871,7 @@ class StudioController {
     nativeSavePending = false;
     disposed = false;
     handleKeyDown = (event)=>{
+        if (this.root.querySelector(".ss-avatar-crop")?.open) return;
         if (event.key !== "Escape") return;
         const loraSortMenu = this.root.querySelector('[data-role="lora-sort-menu"]');
         if (loraSortMenu && !loraSortMenu.hidden) {
@@ -5906,6 +6038,7 @@ class StudioController {
         this.persistWorkspaceState();
         this.syncStudioProfile();
         this.disposed = true;
+        this.avatarCropAbort?.abort();
         window.visualViewport?.removeEventListener("resize", this.updatePresetViewport);
         window.visualViewport?.removeEventListener("scroll", this.updatePresetViewport);
         window.removeEventListener("resize", this.updatePresetViewport);
@@ -6982,7 +7115,9 @@ are removed when CSS is applied.</pre>
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
               <button class="ss-button" data-action="use-as-init">Use as init image</button>
               <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
-              <button class="ss-button" data-action="set-character-picture" disabled>Set as character picture</button>
+              <span class="ss-set-as-label">Set as…</span>
+              <button class="ss-button" data-action="set-character-picture" disabled>Character picture</button>
+              <button class="ss-button" data-action="set-persona-picture" disabled>Persona picture</button>
               <button class="ss-button" data-action="send-character-gallery" disabled>Send to character gallery</button>
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
@@ -7518,7 +7653,8 @@ are removed when CSS is applied.</pre>
             if (action === "download-output") this.downloadCurrent();
             if (action === "copy-output") void this.copyCurrentUrl();
             if (action === "append-to-chat") this.appendCurrentToChat();
-            if (action === "set-character-picture" || action === "send-character-gallery" || action === "bulk-send-character-gallery") void this.sendCharacterImages(action);
+            if (action === "set-character-picture" || action === "set-persona-picture") void this.setAvatarPicture(action === "set-persona-picture" ? "persona" : "character");
+            if (action === "send-character-gallery" || action === "bulk-send-character-gallery") void this.sendCharacterImages(action);
             if (action === "inspect-output") this.openInspector();
             if (action === "close-inspector") this.closeInspector();
             if (action === "reuse-parameters") this.reuseCurrentParameters();
@@ -7725,6 +7861,7 @@ are removed when CSS is applied.</pre>
                 this.updateActiveVisualPill();
                 this.updateActivePersonaVisualPill();
                 this.updateTriggerSummary();
+                this.updateAppendControls();
                 break;
             case "character_base_tags_result":
                 this.acceptCharacterBaseTags(data);
@@ -10972,6 +11109,41 @@ are removed when CSS is applied.</pre>
         });
         this.setRunStatus(`Deleting “${image.label}”…`);
     }
+    async setAvatarPicture(kind) {
+        const targetId = kind === "character" ? this.state.activeChat?.character_id : this.state.chatVisuals?.activePersona?.id;
+        const imageId = this.state.currentImage?.id;
+        if (!targetId || !imageId || !this.state.permissions[kind === "character" ? "characters" : "personas"] || !this.state.permissions.images || this.characterImageActionPending) return;
+        const focusBeforeCrop = document.activeElement;
+        const abort = this.avatarCropAbort = new AbortController();
+        this.characterImageActionPending = true;
+        this.updateAppendControls();
+        this.updateLibrarySelectionControls();
+        try {
+            const response = await fetch(`/api/v1/images/${encodeURIComponent(imageId)}`, {
+                credentials: "same-origin",
+                signal: abort.signal
+            });
+            if (!response.ok) throw new Error("Could not load the saved output.");
+            const original = await response.blob();
+            if (!original.type.startsWith("image/")) throw new Error("The saved output is not an image.");
+            if (this.disposed) return;
+            const crop = await studioCropAvatar(this.root, original, kind, abort.signal);
+            if (!crop || this.disposed) return;
+            this.setRunStatus(`Setting the active ${kind} picture…`);
+            await studioUploadAvatar(kind, targetId, crop, original);
+            if (!this.disposed) this.setRunStatus(`Active ${kind} picture updated.`);
+        } catch (error) {
+            if (!this.disposed && !abort.signal.aborted) this.setRunStatus(error instanceof Error ? error.message : String(error), true);
+        } finally{
+            this.avatarCropAbort = null;
+            this.characterImageActionPending = false;
+            if (!this.disposed) {
+                this.updateAppendControls();
+                this.updateLibrarySelectionControls();
+                if (focusBeforeCrop?.isConnected) focusBeforeCrop.focus();
+            }
+        }
+    }
     async sendCharacterImages(action) {
         const characterId = this.state.activeChat?.character_id;
         const ids = action === "bulk-send-character-gallery" ? [
@@ -10983,16 +11155,15 @@ are removed when CSS is applied.</pre>
         this.characterImageActionPending = true;
         this.updateAppendControls();
         this.updateLibrarySelectionControls();
-        const avatar = action === "set-character-picture";
-        this.setRunStatus(avatar ? "Setting the active character picture…" : `Sending ${ids.length} output(s) to the active character gallery…`);
+        this.setRunStatus(`Sending ${ids.length} output(s) to the active character gallery…`);
         try {
-            const result = await studioCharacterImageAction(characterId, ids, avatar ? "avatar" : "gallery");
+            const result = await studioCharacterImageAction(characterId, ids, "gallery");
             if (this.disposed) return;
             if (action === "bulk-send-character-gallery") {
                 result.saved.forEach((id)=>this.librarySelection.delete(id));
                 this.syncVisibleLibrarySelection();
             }
-            this.setRunStatus(avatar ? "Active character picture updated." : `${result.saved.length} output(s) in the character gallery.${result.failed.length ? ` ${result.failed.length} could not be sent; retry the remaining selection.` : ""}`, result.failed.length > 0);
+            this.setRunStatus(`${result.saved.length} output(s) in the character gallery.${result.failed.length ? ` ${result.failed.length} could not be sent; retry the remaining selection.` : ""}`, result.failed.length > 0);
         } catch (error) {
             if (!this.disposed) this.setRunStatus(error instanceof Error ? error.message : String(error), true);
         } finally{
@@ -12402,6 +12573,8 @@ are removed when CSS is applied.</pre>
         this.syncFavoriteControls();
     }
     updateAppendControls() {
+        const personaButton = this.root.querySelector('[data-action="set-persona-picture"]');
+        if (personaButton) personaButton.disabled = !this.state.currentImage?.id || !this.state.chatVisuals?.activePersona?.id || !this.state.permissions.personas || !this.state.permissions.images || this.characterImageActionPending;
         const canSend = Boolean(this.state.currentImage?.id && this.state.activeChat?.character_id && this.state.permissions.characters && this.state.permissions.images && !this.characterImageActionPending);
         for (const button of this.root.querySelectorAll('[data-action="set-character-picture"], [data-action="send-character-gallery"]')){
             button.disabled = !canSend;
@@ -14613,4 +14786,4 @@ function setup(ctx) {
         removeStyle();
     };
 }
-export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };
+export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, studioUploadAvatar, studioAvatarCropRect, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };
