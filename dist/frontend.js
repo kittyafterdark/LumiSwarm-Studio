@@ -4057,6 +4057,73 @@ async function upsertStudioNativePreset(input, fetcher = fetch) {
         warnings: Array.isArray(data.errors) ? data.errors.map(String) : []
     };
 }
+async function studioCharacterImageAction(characterId, imageIds, action, fetcher = fetch) {
+    const ids = [
+        ...new Set(imageIds.filter((id)=>typeof id === "string" && id.trim()))
+    ];
+    if (!characterId || !ids.length) throw new Error("Choose an active character and saved outputs first.");
+    const base = `/api/v1/characters/${encodeURIComponent(characterId)}`;
+    const check = async (response, fallback)=>{
+        if (response.ok) return;
+        const data = await response.json().catch(()=>null);
+        throw new Error(String(data?.error || fallback));
+    };
+    if (action === "avatar") {
+        if (ids.length !== 1) throw new Error("Choose one output for the character picture.");
+        const image = await fetcher(`/api/v1/images/${encodeURIComponent(ids[0])}`, {
+            credentials: "same-origin"
+        });
+        await check(image, "Could not load the saved output.");
+        const blob = await image.blob();
+        if (!blob.type.startsWith("image/")) throw new Error("The saved output is not an image.");
+        const form = new FormData();
+        form.append("avatar", blob, `studio-output.${blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1] || "png"}`);
+        const response = await fetcher(`${base}/avatar`, {
+            method: "POST",
+            credentials: "same-origin",
+            body: form
+        });
+        await check(response, "Lumiverse could not set the character picture.");
+        return {
+            saved: ids,
+            failed: []
+        };
+    }
+    const existing = await fetcher(`${base}/gallery`, {
+        credentials: "same-origin"
+    });
+    await check(existing, "Character galleries are unavailable in this Lumiverse host.");
+    const items = await existing.json();
+    if (!Array.isArray(items)) throw new Error("Lumiverse returned an invalid gallery.");
+    const linked = new Set(items.map((item)=>String(item.image_id)));
+    const saved = [], failed = [];
+    for (const imageId of ids){
+        if (linked.has(imageId)) {
+            saved.push(imageId);
+            continue;
+        }
+        try {
+            const response = await fetcher(`${base}/gallery/link`, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    image_id: imageId
+                })
+            });
+            await check(response, "Lumiverse could not add the output to the gallery.");
+            saved.push(imageId);
+        } catch  {
+            failed.push(imageId);
+        }
+    }
+    return {
+        saved,
+        failed
+    };
+}
 function readMiniplayerPosition() {
     try {
         const saved = JSON.parse(window.localStorage.getItem(MINIPLAYER_POSITION_STORAGE_KEY) || "null");
@@ -5644,6 +5711,7 @@ class StudioController {
     librarySelectionAnchorId = "";
     librarySearchOpen = false;
     librarySelectionMode = false;
+    characterImageActionPending = false;
     librarySelectOnlyNonStarred = false;
     libraryVisualMode = "profile";
     libraryLookId = "";
@@ -6914,6 +6982,8 @@ are removed when CSS is applied.</pre>
               <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
               <button class="ss-button" data-action="use-as-init">Use as init image</button>
               <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
+              <button class="ss-button" data-action="set-character-picture" disabled>Set as character picture</button>
+              <button class="ss-button" data-action="send-character-gallery" disabled>Send to character gallery</button>
               <button class="ss-button" data-action="open-output-library">Output library</button>
               <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
             </div>
@@ -6989,6 +7059,7 @@ are removed when CSS is applied.</pre>
               </label>
               <div class="ss-library-selection-actions" data-role="library-selection-actions" hidden>
                 <button class="ss-button ss-library-favorite-selected" data-action="bulk-favorite-outputs">${STAR_ICON}<span>Favorite</span></button>
+                <button class="ss-button" data-action="bulk-send-character-gallery" disabled>Send to character gallery</button>
                 <button class="ss-button" data-action="bulk-move-outputs">Move…</button>
                 <button class="ss-button ss-button-danger" data-action="bulk-delete-outputs">Delete</button>
               </div>
@@ -7447,6 +7518,7 @@ are removed when CSS is applied.</pre>
             if (action === "download-output") this.downloadCurrent();
             if (action === "copy-output") void this.copyCurrentUrl();
             if (action === "append-to-chat") this.appendCurrentToChat();
+            if (action === "set-character-picture" || action === "send-character-gallery" || action === "bulk-send-character-gallery") void this.sendCharacterImages(action);
             if (action === "inspect-output") this.openInspector();
             if (action === "close-inspector") this.closeInspector();
             if (action === "reuse-parameters") this.reuseCurrentParameters();
@@ -10900,6 +10972,37 @@ are removed when CSS is applied.</pre>
         });
         this.setRunStatus(`Deleting “${image.label}”…`);
     }
+    async sendCharacterImages(action) {
+        const characterId = this.state.activeChat?.character_id;
+        const ids = action === "bulk-send-character-gallery" ? [
+            ...this.librarySelection
+        ] : this.state.currentImage?.id ? [
+            this.state.currentImage.id
+        ] : [];
+        if (this.characterImageActionPending || !characterId || !ids.length || !this.state.permissions.characters || !this.state.permissions.images) return;
+        this.characterImageActionPending = true;
+        this.updateAppendControls();
+        this.updateLibrarySelectionControls();
+        const avatar = action === "set-character-picture";
+        this.setRunStatus(avatar ? "Setting the active character picture…" : `Sending ${ids.length} output(s) to the active character gallery…`);
+        try {
+            const result = await studioCharacterImageAction(characterId, ids, avatar ? "avatar" : "gallery");
+            if (this.disposed) return;
+            if (action === "bulk-send-character-gallery") {
+                result.saved.forEach((id)=>this.librarySelection.delete(id));
+                this.syncVisibleLibrarySelection();
+            }
+            this.setRunStatus(avatar ? "Active character picture updated." : `${result.saved.length} output(s) in the character gallery.${result.failed.length ? ` ${result.failed.length} could not be sent; retry the remaining selection.` : ""}`, result.failed.length > 0);
+        } catch (error) {
+            if (!this.disposed) this.setRunStatus(error instanceof Error ? error.message : String(error), true);
+        } finally{
+            this.characterImageActionPending = false;
+            if (!this.disposed) {
+                this.updateAppendControls();
+                this.updateLibrarySelectionControls();
+            }
+        }
+    }
     appendCurrentToChat() {
         const image = this.state.currentImage;
         if (!image?.id || !this.state.activeChat?.id) return;
@@ -11539,6 +11642,7 @@ are removed when CSS is applied.</pre>
     }
     updateLibrarySelectionControls() {
         const selected = this.librarySelection.size;
+        this.get('[data-action="bulk-send-character-gallery"]').disabled = !selected || !this.state.activeChat?.character_id || !this.state.permissions.characters || !this.state.permissions.images || this.characterImageActionPending;
         const library = this.get('[data-role="output-library"]');
         library.dataset.selectionMode = String(this.librarySelectionMode);
         this.get('[data-role="library-selectbar"]').hidden = !this.librarySelectionMode;
@@ -12298,6 +12402,11 @@ are removed when CSS is applied.</pre>
         this.syncFavoriteControls();
     }
     updateAppendControls() {
+        const canSend = Boolean(this.state.currentImage?.id && this.state.activeChat?.character_id && this.state.permissions.characters && this.state.permissions.images && !this.characterImageActionPending);
+        for (const button of this.root.querySelectorAll('[data-action="set-character-picture"], [data-action="send-character-gallery"]')){
+            button.disabled = !canSend;
+            button.title = canSend ? "Use this saved output for the active chat character" : "Requires a saved output, an active character, and Images / Characters permissions";
+        }
         const enabled = Boolean(this.state.currentImage?.id && this.state.activeChat?.id && this.state.permissions.chatMutation);
         for (const button of this.root.querySelectorAll('[data-action="append-to-chat"]')){
             button.disabled = !enabled;
@@ -14504,4 +14613,4 @@ function setup(ctx) {
         removeStyle();
     };
 }
-export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };
+export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };
