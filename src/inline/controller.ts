@@ -243,6 +243,10 @@ class TaggedImageController {
     }
     if (payload?.type === "tagged_image_jobs_result") {
       const jobs = Array.isArray(payload.data) ? payload.data as TaggedImageJobView[] : []
+      const savedIds = new Set(jobs.map(job => job.id))
+      for (const [id, known] of this.jobs) {
+        if (!id.startsWith("pending-") && !savedIds.has(id)) { this.remove(known); this.jobs.delete(id) }
+      }
       for (const incoming of jobs) {
         if (!incoming?.id || !incoming?.messageId) continue
         const known = this.jobs.get(incoming.id)
@@ -385,6 +389,10 @@ class TaggedImageController {
     if (!["http:", "https:"].includes(url.protocol)) return
     const html = `<style>:root{color-scheme:dark;font-family:system-ui,sans-serif}body{margin:0;background:transparent;color:var(--lumiverse-text,#eee)}button{min-height:40px;margin-top:8px;padding:8px 12px;border:1px solid var(--lumiverse-border,#454550);border-radius:8px;background:var(--lumiverse-fill-subtle,#191820);color:inherit;font:inherit}</style><div><img src="${widgetEscape(url.href)}" alt="${widgetEscape(job.alt || "Generated illustration")}" style="display:block;max-width:100%;height:auto;border-radius:8px"><button type="button" id="image-options">Image options</button></div><script>document.getElementById('image-options').addEventListener('click',()=>window.spindleSandbox.postMessage({type:'menu'}))</script>`
     this.cleanups.set(widgetId, this.ctx.messages.renderWidget({ messageId: job.messageId, widgetId, html }, () => { void this.showJobMenu(job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2)) }))
+    this.watchNativeImage(job)
+  }
+
+  private watchNativeImage(job: TaggedImageJobView): void {
     this.recoveredJobs.add(job.id)
     if (!this.recoveredObserver) {
       this.recoveredObserver = new MutationObserver(() => {
@@ -461,7 +469,7 @@ class TaggedImageController {
   }
 
   private render(job: TaggedImageJobView): void {
-    if (!this.shouldRenderPlaceholder(job)) {
+    if (this.inlineFigureForJob(job.id) || !this.shouldRenderPlaceholder(job)) {
       this.remove(job)
       return
     }
@@ -522,6 +530,7 @@ class TaggedImageController {
       void this.handleWidgetAction(job, String(message?.type || ""))
     })
     this.cleanups.set(widgetId, cleanup)
+    this.watchNativeImage(job)
   }
 
   private async handleWidgetAction(job: TaggedImageJobView, action: string): Promise<void> {

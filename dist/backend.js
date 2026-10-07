@@ -1983,58 +1983,68 @@ async function loadLatestSwarmGenerationMetadata(connection, token, input, total
         resolvedSeed: metadataNumber(inputParameters, "seed")
     };
     if (!spindle.permissions.has("cors_proxy")) return fallback;
+    let metadataTimer;
     try {
-        const baseUrl = normalizeBaseUrl(connection.api_url);
-        const sessionId = await getSession(connection, token, userId);
-        const listing = await corsJson(`${baseUrl}/API/ListImages`, {
-            session_id: sessionId,
-            path: "",
-            depth: 5,
-            sortBy: "Date",
-            sortReverse: false
-        }, token, "generation metadata request");
-        const files = Array.isArray(listing.files) ? listing.files.slice(0, 24) : [];
-        const parsed = files.flatMap((raw)=>{
-            const file = asRecord(raw);
-            const metadata = parseSwarmImageMetadata(file.metadata);
-            return metadata ? [
-                {
-                    file,
-                    metadata
-                }
-            ] : [];
-        });
-        if (!parsed.length) return fallback;
-        const requestedPrompt = asString(input.prompt).trim();
-        const matched = parsed.find(({ metadata })=>{
-            const params = asRecord(metadata.sui_image_params);
-            const extra = asRecord(metadata.sui_extra_data);
-            return [
-                metadataString(params, "original_prompt", "originalprompt"),
-                metadataString(params, "prompt"),
-                metadataString(extra, "original_prompt", "originalprompt")
-            ].some((prompt)=>requestedPrompt && prompt === requestedPrompt);
-        });
-        if (!matched) return fallback;
-        const params = asRecord(matched.metadata.sui_image_params);
-        const extra = asRecord(matched.metadata.sui_extra_data);
-        const presetValue = extra.presets_used ?? extra.presetsused;
-        const presets = Array.isArray(presetValue) ? stringList(presetValue, 20) : typeof presetValue === "string" ? presetValue.split(/[,|]+/).map((item)=>item.trim()).filter(Boolean).slice(0, 20) : [];
-        return {
-            totalMs,
-            prep: metadataString(extra, "prep_time", "preptime"),
-            generation: metadataString(extra, "generation_time", "generationtime") || fallback.generation,
-            source: "swarm",
-            resolvedPrompt: metadataString(params, "prompt") || metadataString(params, "original_prompt", "originalprompt") || metadataString(extra, "original_prompt", "originalprompt") || fallback.resolvedPrompt,
-            resolvedNegativePrompt: metadataString(params, "negativeprompt", "negative_prompt") || metadataString(params, "original_negativeprompt", "original_negative_prompt", "originalnegativeprompt") || metadataString(extra, "original_negative_prompt", "originalnegativeprompt") || fallback.resolvedNegativePrompt,
-            presets,
-            swarmPath: asString(matched.file.src),
-            swarmPathVerified: Boolean(asString(matched.file.src)),
-            resolvedSeed: metadataNumber(params, "seed") ?? fallback.resolvedSeed
-        };
+        return await Promise.race([
+            (async ()=>{
+                const baseUrl = normalizeBaseUrl(connection.api_url);
+                const sessionId = await getSession(connection, token, userId);
+                const listing = await corsJson(`${baseUrl}/API/ListImages`, {
+                    session_id: sessionId,
+                    path: "",
+                    depth: 5,
+                    sortBy: "Date",
+                    sortReverse: false
+                }, token, "generation metadata request");
+                const files = Array.isArray(listing.files) ? listing.files.slice(0, 24) : [];
+                const parsed = files.flatMap((raw)=>{
+                    const file = asRecord(raw);
+                    const metadata = parseSwarmImageMetadata(file.metadata);
+                    return metadata ? [
+                        {
+                            file,
+                            metadata
+                        }
+                    ] : [];
+                });
+                if (!parsed.length) return fallback;
+                const requestedPrompt = asString(input.prompt).trim();
+                const matched = parsed.find(({ metadata })=>{
+                    const params = asRecord(metadata.sui_image_params);
+                    const extra = asRecord(metadata.sui_extra_data);
+                    return [
+                        metadataString(params, "original_prompt", "originalprompt"),
+                        metadataString(params, "prompt"),
+                        metadataString(extra, "original_prompt", "originalprompt")
+                    ].some((prompt)=>requestedPrompt && prompt === requestedPrompt);
+                });
+                if (!matched) return fallback;
+                const params = asRecord(matched.metadata.sui_image_params);
+                const extra = asRecord(matched.metadata.sui_extra_data);
+                const presetValue = extra.presets_used ?? extra.presetsused;
+                const presets = Array.isArray(presetValue) ? stringList(presetValue, 20) : typeof presetValue === "string" ? presetValue.split(/[,|]+/).map((item)=>item.trim()).filter(Boolean).slice(0, 20) : [];
+                return {
+                    totalMs,
+                    prep: metadataString(extra, "prep_time", "preptime"),
+                    generation: metadataString(extra, "generation_time", "generationtime") || fallback.generation,
+                    source: "swarm",
+                    resolvedPrompt: metadataString(params, "prompt") || metadataString(params, "original_prompt", "originalprompt") || metadataString(extra, "original_prompt", "originalprompt") || fallback.resolvedPrompt,
+                    resolvedNegativePrompt: metadataString(params, "negativeprompt", "negative_prompt") || metadataString(params, "original_negativeprompt", "original_negative_prompt", "originalnegativeprompt") || metadataString(extra, "original_negative_prompt", "originalnegativeprompt") || fallback.resolvedNegativePrompt,
+                    presets,
+                    swarmPath: asString(matched.file.src),
+                    swarmPathVerified: Boolean(asString(matched.file.src)),
+                    resolvedSeed: metadataNumber(params, "seed") ?? fallback.resolvedSeed
+                };
+            })(),
+            new Promise((resolve)=>{
+                metadataTimer = setTimeout(()=>resolve(fallback), 8000);
+            })
+        ]);
     } catch (error) {
         spindle.log.warn(`Could not read SwarmUI generation metadata: ${error instanceof Error ? error.message : String(error)}`);
         return fallback;
+    } finally{
+        if (metadataTimer !== undefined) clearTimeout(metadataTimer);
     }
 }
 async function loadSwarmPathGenerationMetadata(connection, token, swarmPath, userId) {
@@ -2208,6 +2218,7 @@ async function generateWithProgress(input, controller, clientJobId, userId) {
         const resultCandidate = Object.keys(nestedResult).length ? nestedResult : Object.keys(dataResult).length ? dataResult : /done|complete|result/i.test(asString(chunk.type)) ? Object.keys(chunkData).length ? chunkData : chunk : {};
         if (typeof resultCandidate.imageDataUrl === "string" || typeof resultCandidate.imageUrl === "string" || typeof resultCandidate.imageId === "string") {
             streamedResult = resultCandidate;
+            if (asString(chunk.type) === "done") return streamedResult;
         }
         const step = metadataNumber(chunk, "step") ?? metadataNumber(chunkData, "step") ?? lastStep;
         const totalSteps = metadataNumber(chunk, "totalSteps", "total_steps") ?? metadataNumber(chunkData, "totalSteps", "total_steps") ?? lastTotalSteps;
@@ -3764,6 +3775,8 @@ function replaceTaggedImagePrompt(fullMatch, prompt) {
 async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}) {
     if (runningTaggedJobs.has(job.id)) return;
     runningTaggedJobs.add(job.id);
+    let controller;
+    let controllerKey = "";
     try {
         const storedProfile = await loadStudioGenerationProfile(userId);
         const profile = useOriginalProfile && job.generationInput ? sanitizeStudioProfile({
@@ -3883,33 +3896,28 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         job.status = "generating";
         job.error = "";
         job.inserted = false;
-        const controller = new AbortController();
-        const controllerKey = generationKey(userId, job.clientJobId);
+        controller = new AbortController();
+        controllerKey = generationKey(userId, job.clientJobId);
         generationControllers.set(controllerKey, {
             controller,
             nativeStream: typeof spindle.imageGen?.generateStream === "function"
         });
         const startedAt = Date.now();
-        let result;
-        try {
-            await awaitGenerationTask(controller.signal, ()=>upsertTaggedImageJob(job, userId));
-            sendTaggedJobState(job, userId);
-            result = await generateWithProgress({
-                ...input,
-                owner_chat_id: job.chatId,
-                owner_character_id: characterLayer.characterId || undefined,
-                userId
-            }, controller, job.clientJobId, userId);
-        } finally{
-            if (generationControllers.get(controllerKey)?.controller === controller) {
-                generationControllers.delete(controllerKey);
-            }
-        }
-        const timing = await loadLatestSwarmGenerationMetadata(connection, spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null, input, Date.now() - startedAt, userId);
-        const record = await saveGenerationRecord(result, input, {
-            ...asRecord(profile?.recordHints),
-            source: "message-tag"
-        }, timing, userId);
+        const signal = controller.signal;
+        await awaitGenerationTask(signal, ()=>upsertTaggedImageJob(job, userId));
+        sendTaggedJobState(job, userId);
+        const result = await generateWithProgress({
+            ...input,
+            owner_chat_id: job.chatId,
+            owner_character_id: characterLayer.characterId || undefined,
+            userId
+        }, controller, job.clientJobId, userId);
+        const timing = await awaitGenerationTask(signal, async ()=>loadLatestSwarmGenerationMetadata(connection, spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null, input, Date.now() - startedAt, userId));
+        const record = await awaitGenerationTask(signal, ()=>saveGenerationRecord(result, input, {
+                ...asRecord(profile?.recordHints),
+                source: "message-tag"
+            }, timing, userId));
+        signal.throwIfAborted();
         job.imageId = record.imageId || asString(result.imageId);
         job.imageUrl = record.imageUrl || asString(result.imageUrl);
         if (!job.imageUrl && job.imageId) job.imageUrl = `/api/v1/image-gen/results/${encodeURIComponent(job.imageId)}`;
@@ -3951,6 +3959,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         await upsertTaggedImageJob(job, userId);
         sendTaggedJobState(job, userId);
     } finally{
+        if (controller && generationControllers.get(controllerKey)?.controller === controller) generationControllers.delete(controllerKey);
         runningTaggedJobs.delete(job.id);
     }
 }
@@ -4604,10 +4613,19 @@ async function handleMessage(payload, userId) {
                 }
             case "list_tagged_jobs":
                 {
+                    const jobs = await loadTaggedImageJobs(userId);
+                    for (const job of jobs){
+                        if ((job.status === "queued" || job.status === "generating") && (!runningTaggedJobs.has(job.id) || stoppedGenerationKeys.has(generationKey(userId, job.clientJobId)))) {
+                            const stopped = stoppedGenerationKeys.has(generationKey(userId, job.clientJobId));
+                            job.status = stopped ? "cancelled" : "failed";
+                            job.error = stopped ? "Generation wait stopped. SwarmUI cancellation is not confirmed." : "The generation worker is no longer running. Retry to generate this illustration again.";
+                            await upsertTaggedImageJob(job, userId);
+                        }
+                    }
                     spindle.sendToFrontend({
                         type: "tagged_image_jobs_result",
                         requestId,
-                        data: (await loadTaggedImageJobs(userId)).map(taggedJobPublic)
+                        data: jobs.map(taggedJobPublic)
                     }, userId);
                     return;
                 }
@@ -4957,6 +4975,13 @@ async function handleMessage(payload, userId) {
                             waitingStopped: true
                         }
                     }, userId);
+                    for (const job of (await loadTaggedImageJobs(userId))){
+                        if (job.clientJobId !== clientJobId || job.status !== "queued" && job.status !== "generating") continue;
+                        job.status = "cancelled";
+                        job.error = "Generation wait stopped. SwarmUI cancellation is not confirmed.";
+                        await upsertTaggedImageJob(job, userId);
+                        sendTaggedJobState(job, userId);
+                    }
                     const connectionId = asString(payload?.connectionId);
                     if (connectionId && controllerEntry && !controllerEntry.nativeStream) {
                         const connection = await getConnection(connectionId, userId);

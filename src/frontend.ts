@@ -5,7 +5,7 @@ export {
   studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, studioUploadAvatar, studioAvatarCropRect,
   sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters,
   normalizeWorkspaceState,
-  StudioController, StudioRecoveryController, TaggedImageController,
+  StudioController, StudioRecoveryController, TaggedImageController, MiniPlayerController,
   applyPresetPrompt,
   applyPresetStackPrompts,
   applySwarmPresetTokens,

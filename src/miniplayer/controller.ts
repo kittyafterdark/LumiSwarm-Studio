@@ -467,7 +467,7 @@ class MiniPlayerController {
     this.snapshotValue.active = false
     this.snapshotValue.jobId = ""
     this.snapshotValue.connectionId = ""
-    this.snapshotValue.status = "Finalizing message illustration…"
+    this.snapshotValue.status = "Message illustration finished"
     this.state = "done"
     this.render()
   }
@@ -513,6 +513,15 @@ class MiniPlayerController {
         ) {
           this.activeTaggedAttempts.set(taggedJobId, jobId)
         }
+      }
+      for (const job of jobs) {
+        if (job?.status === "ready" || job?.status === "failed" || job?.status === "cancelled") {
+          this.settleTaggedJob(String(job.clientJobId || ""), String(job.id || ""))
+        }
+      }
+      if (this.currentActivitySource === "tagged" && this.snapshotValue.jobId
+        && ![...this.activeTaggedAttempts.values()].includes(this.snapshotValue.jobId)) {
+        this.settleTaggedJob(this.snapshotValue.jobId)
       }
       const active = jobs.find((job: any) =>
         (job?.status === "queued" || job?.status === "generating")

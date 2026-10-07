@@ -1749,3 +1749,54 @@ await frontendHandler({type:'generate',requestId:'early-request',input:{connecti
 assert.ok(sent.slice(beforeEarly).some(entry=>entry.payload.type==='generation_interrupted'))
 assert.ok(!sent.slice(beforeEarly).some(entry=>entry.payload.type==='generation_started'),'Reordered Stop prevents preparation from starting')
 console.log('stop during preparation, stalled stream creation/read, legacy generation and reordered requests: ok')
+
+// Stop is durable even when the original controller has gone away.
+const savedFixture=structuredClone(userFiles.get('tagged-image-jobs.json').find(job=>job.status==='ready'))
+assert.ok(savedFixture)
+const stoppedFixture={...savedFixture,id:'durable-stop',key:'durable-stop',clientJobId:'durable-attempt',status:'generating',inserted:false,imageId:'',imageUrl:''}
+userFiles.get('tagged-image-jobs.json').push(stoppedFixture)
+await request('interrupt_generation',{clientJobId:'durable-attempt'})
+for(let i=0;i<2;i++){const snapshot=await request('list_tagged_jobs');assert.equal(snapshot.data.find(job=>job.id==='durable-stop').status,'cancelled','Leave/return does not revive a stopped job')}
+const orphan={...stoppedFixture,id:'orphan',key:'orphan',clientJobId:'orphan-attempt',status:'generating'}
+userFiles.get('tagged-image-jobs.json').push(orphan)
+const recoveredJobs=await request('list_tagged_jobs')
+assert.equal(recoveredJobs.data.find(job=>job.id==='orphan').status,'failed','Lost worker is recoverable failure rather than eternal loading')
+assert.equal(recoveredJobs.data.find(job=>job.id===savedFixture.id).status,'ready','Completed images survive reconciliation')
+// A public terminal stream event is enough, even if a subsequent read would stall.
+let reads=0
+spindle.imageGen.generateStream=()=>({next(){reads++;return reads===1?Promise.resolve({done:false,value:{type:'done',result:{imageId:'terminal-result',imageUrl:'/api/v1/image-gen/results/terminal-result'}}}):new Promise(()=>{})}})
+await bounded(frontendHandler({type:'generate',requestId:'terminal-stream',input:{connection_id:'swarm-1',clientJobId:'terminal-stream',model:'base.safetensors',prompt:'fixture',parameters:{}}},'user-1'))
+assert.equal(reads,1,'No read after terminal stream event')
+assert.ok(sent.some(entry=>entry.payload.type==='generation_result' && entry.payload.clientJobId==='terminal-stream'))
+spindle.imageGen.generateStream=originalStream
+console.log('persistent Stop, orphaned job reconciliation and terminal stream events: ok')
+
+// Stop after the bitmap completes, while optional metadata is still pending.
+const savedCors=spindle.cors,metadataEntered=deferred(),metadataLate=deferred()
+spindle.cors=async(url,...args)=>{if(String(url).endsWith('/API/ListImages')){metadataEntered.resolve();await metadataLate.promise}return savedCors.call(spindle,url,...args)}
+spindle.imageGen.generateStream=()=>({next:async()=>({done:true,value:{imageId:'metadata-stopped',imageUrl:'/api/v1/image-gen/results/metadata-stopped'}})})
+const metadataRun=frontendHandler({type:'tag_generate',requestId:'metadata-race',force:true,chatId:'chat-1',messageId:taggedMessage.id,fullMatch:'<swarm-image request="generate" slot="metadata-race">fixture</swarm-image>',attrs:{request:'generate',slot:'metadata-race',aspect:'4:3'},content:'fixture'},'user-1')
+await bounded(metadataEntered.promise)
+const metadataJob=userFiles.get('tagged-image-jobs.json').find(job=>job.slot==='metadata-race')
+const activeSnapshot=await request('list_tagged_jobs')
+assert.equal(activeSnapshot.data.find(job=>job.id===metadataJob.id).status,'generating','Recovery preserves a live worker')
+const metadataAck=await request('interrupt_generation',{clientJobId:metadataJob.clientJobId})
+assert.equal(metadataAck.data.interrupted,true,'Abort controller remains registered through postprocessing')
+await bounded(metadataRun)
+metadataLate.resolve();await new Promise(resolve=>setTimeout(resolve,0))
+const cancelledSnapshot=await request('list_tagged_jobs')
+assert.equal(cancelledSnapshot.data.find(job=>job.id===metadataJob.id).status,'cancelled','Late metadata cannot revive cancelled job')
+assert.ok(!sent.some(entry=>entry.payload.type==='tagged_generation_result' && entry.payload.clientJobId===metadataJob.clientJobId))
+spindle.cors=savedCors;spindle.imageGen.generateStream=originalStream
+console.log('post-bitmap metadata Stop and late completion race: ok')
+
+// Optional metadata cannot hold an otherwise finished generation indefinitely.
+const normalTimeout=globalThis.setTimeout,timeoutCors=spindle.cors
+globalThis.setTimeout=(callback,delay,...args)=>normalTimeout(callback,delay===8000?0:delay,...args)
+spindle.cors=(url,...args)=>String(url).endsWith('/API/ListImages')?new Promise(()=>{}):timeoutCors.call(spindle,url,...args)
+spindle.imageGen.generateStream=()=>({next:async()=>({done:true,value:{imageId:'metadata-timeout',imageUrl:'/api/v1/image-gen/results/metadata-timeout'}})})
+try {
+ await bounded(frontendHandler({type:'generate',requestId:'metadata-timeout',input:{connection_id:'swarm-1',clientJobId:'metadata-timeout',model:'base.safetensors',prompt:'fixture',parameters:{}}},'user-1'))
+ assert.ok(sent.some(entry=>entry.payload.type==='generation_result' && entry.payload.clientJobId==='metadata-timeout'),'Metadata timeout uses safe measured fallback')
+} finally {globalThis.setTimeout=normalTimeout;spindle.cors=timeoutCors;spindle.imageGen.generateStream=originalStream}
+console.log('optional metadata deadline preserves final image: ok')

@@ -451,6 +451,38 @@ try {
   await page.evaluate(()=>{resumeController.destroy();inlineResume.destroy();document.querySelector('#mock-chat').remove();window.dispatchEvent(new Event('online'))})
   assert.equal(await page.evaluate(()=>resumeRequests.length),1,'Unload prevents resumed work')
   console.log('Foreground inline recovery: missed completion, native image replacement, named keyboard control and cleanup: ok')
+  // Real mini-player controls and inline strips across completion, Stop and remount.
+  for (const width of [390,1440]) {
+    await page.setViewportSize({width,height:844})
+    await page.evaluate(async()=>{
+      const {MiniPlayerController,TaggedImageController,defaultStudioBehavior}=await import('/frontend.js')
+      const host=document.createElement('section');host.id='lifecycle-host';document.body.append(host)
+      window.lifecycleSaved={id:'lifecycle-job',clientJobId:'lifecycle-attempt',chatId:'chat',messageId:'message',slot:'one',status:'generating',inserted:false,imageUrl:''}
+      window.lifecycleCtx={sendToBackend(message){if(message.type==='interrupt_generation'){lifecycleSaved={...lifecycleSaved,status:'cancelled'};lifecycleMini.onMessage({type:'generation_interrupt_requested',clientJobId:message.clientJobId,data:{waitingStopped:true}})}},messages:{renderWidget({widgetId,html}){const frame=document.createElement('iframe');frame.title='Inline lifecycle';frame.dataset.widget=widgetId;frame.srcdoc='<script>window.spindleSandbox={postMessage:()=>{}}</script>'+html;host.append(frame);return()=>frame.remove()}}}
+      window.mountLifecycleMini=()=>{const root=document.createElement('div');root.id='lifecycle-mini';host.append(root);const mini=new MiniPlayerController(lifecycleCtx,{root,destroy(){root.remove()}},()=>{},()=>{},()=>null,{...defaultStudioBehavior(),widgetEnabled:true,mobileQuickCreate:true},()=>{});mini.setCollapsed(false);return mini}
+      window.lifecycleMini=mountLifecycleMini()
+      window.lifecycleInline=new TaggedImageController(lifecycleCtx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+      lifecycleMini.onMessage({type:'tagged_image_jobs_result',data:[lifecycleSaved]})
+    })
+    const mini=page.locator('#lifecycle-mini')
+    await mini.getByRole('button',{name:'Stop generation',exact:true}).waitFor()
+    await page.evaluate(()=>{lifecycleSaved={...lifecycleSaved,status:'ready',imageUrl:'/api/v1/images/saved-one'};lifecycleMini.onMessage({type:'tagged_image_jobs_result',data:[lifecycleSaved]});lifecycleInline.onMessage({type:'tagged_image_jobs_result',data:[lifecycleSaved]})})
+    assert.equal(await mini.locator('[data-role="miniplayer"]').getAttribute('data-indeterminate'),'false')
+    const strip=page.frameLocator('iframe[title="Inline lifecycle"]')
+    await strip.getByRole('button',{name:'Attach image',exact:true}).waitFor()
+    await page.evaluate(()=>{const figure=document.createElement('figure');figure.dataset.swarmStudioImage='true';figure.dataset.swarmStudioJobId='lifecycle-job';document.querySelector('#lifecycle-host').append(figure)})
+    await page.waitForFunction(()=>!document.querySelector('iframe[title="Inline lifecycle"]'))
+    await page.evaluate(()=>lifecycleInline.onMessage({type:'tagged_image_jobs_result',data:[lifecycleSaved]}))
+    assert.equal(await page.locator('iframe[title="Inline lifecycle"]').count(),0,'Resume keeps the native image without a duplicate strip')
+    await page.evaluate(()=>{lifecycleSaved={...lifecycleSaved,clientJobId:'stop-attempt',status:'generating',imageUrl:''};lifecycleMini.onMessage({type:'tagged_image_jobs_result',data:[lifecycleSaved]})})
+    await mini.getByRole('button',{name:'Stop generation',exact:true}).focus();await page.keyboard.press('Enter')
+    assert.equal(await page.evaluate(()=>lifecycleMini.snapshotValue.active),false)
+    await page.evaluate(()=>{lifecycleMini.destroy();lifecycleInline.destroy();lifecycleMini=mountLifecycleMini();lifecycleMini.onMessage({type:'tagged_image_jobs_result',data:[lifecycleSaved]})})
+    assert.equal(await page.evaluate(()=>lifecycleMini.snapshotValue.active),false,'Full frontend remount does not revive persisted cancellation')
+    assert.equal(await mini.locator('[data-role="miniplayer"]').getAttribute('data-indeterminate'),'false')
+    await page.evaluate(()=>{lifecycleMini.destroy();document.querySelector('#lifecycle-host').remove()})
+  }
+  console.log('Desktop/mobile: missed terminal snapshot, late native image retires strip, keyboard Stop and full remount: ok')
   assert.deepEqual(errors, [])
   console.log('Chromium: 60 delayed decoded previews, zero card disconnects, zero library renders, stable geometry, opaque folders: ok')
 } finally {

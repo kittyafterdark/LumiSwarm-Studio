@@ -5288,7 +5288,7 @@ class MiniPlayerController {
         this.snapshotValue.active = false;
         this.snapshotValue.jobId = "";
         this.snapshotValue.connectionId = "";
-        this.snapshotValue.status = "Finalizing message illustration…";
+        this.snapshotValue.status = "Message illustration finished";
         this.state = "done";
         this.render();
     }
@@ -5321,6 +5321,16 @@ class MiniPlayerController {
                 if (taggedJobId && jobId && (job?.status === "queued" || job?.status === "generating") && !this.settledGenerationJobIds.has(jobId) && !this.settledTaggedJobIds.has(jobId)) {
                     this.activeTaggedAttempts.set(taggedJobId, jobId);
                 }
+            }
+            for (const job of jobs){
+                if (job?.status === "ready" || job?.status === "failed" || job?.status === "cancelled") {
+                    this.settleTaggedJob(String(job.clientJobId || ""), String(job.id || ""));
+                }
+            }
+            if (this.currentActivitySource === "tagged" && this.snapshotValue.jobId && ![
+                ...this.activeTaggedAttempts.values()
+            ].includes(this.snapshotValue.jobId)) {
+                this.settleTaggedJob(this.snapshotValue.jobId);
             }
             const active = jobs.find((job)=>(job?.status === "queued" || job?.status === "generating") && String(job?.clientJobId || "") && !this.settledGenerationJobIds.has(String(job.clientJobId)) && !this.settledTaggedJobIds.has(String(job.clientJobId)));
             if (active && (!this.snapshotValue.active || this.snapshotValue.jobId === String(active.clientJobId))) {
@@ -12932,6 +12942,13 @@ class TaggedImageController {
         }
         if (payload?.type === "tagged_image_jobs_result") {
             const jobs = Array.isArray(payload.data) ? payload.data : [];
+            const savedIds = new Set(jobs.map((job)=>job.id));
+            for (const [id, known] of this.jobs){
+                if (!id.startsWith("pending-") && !savedIds.has(id)) {
+                    this.remove(known);
+                    this.jobs.delete(id);
+                }
+            }
             for (const incoming of jobs){
                 if (!incoming?.id || !incoming?.messageId) continue;
                 const known = this.jobs.get(incoming.id);
@@ -13085,6 +13102,9 @@ class TaggedImageController {
         }, ()=>{
             void this.showJobMenu(job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
         }));
+        this.watchNativeImage(job);
+    }
+    watchNativeImage(job) {
         this.recoveredJobs.add(job.id);
         if (!this.recoveredObserver) {
             this.recoveredObserver = new MutationObserver(()=>{
@@ -13159,7 +13179,7 @@ class TaggedImageController {
         }).catch(()=>{});
     }
     render(job) {
-        if (!this.shouldRenderPlaceholder(job)) {
+        if (this.inlineFigureForJob(job.id) || !this.shouldRenderPlaceholder(job)) {
             this.remove(job);
             return;
         }
@@ -13218,6 +13238,7 @@ class TaggedImageController {
             void this.handleWidgetAction(job, String(message?.type || ""));
         });
         this.cleanups.set(widgetId, cleanup);
+        this.watchNativeImage(job);
     }
     async handleWidgetAction(job, action) {
         if (action === "generate" || action === "retry") {
@@ -15023,4 +15044,4 @@ function setup(ctx) {
         removeStyle();
     };
 }
-export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, studioUploadAvatar, studioAvatarCropRect, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, StudioRecoveryController, TaggedImageController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };
+export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, studioUploadAvatar, studioAvatarCropRect, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, StudioRecoveryController, TaggedImageController, MiniPlayerController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };

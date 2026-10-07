@@ -65,3 +65,36 @@ const pending=controller.loadParserModels();controller.disposed=true;resolveOld(
 assert.deepEqual(controller.state.parserModels,[])
 dom.window.close()
 console.log('foreground retries, cleanup, saved inline image recovery and live parser model discovery: ok')
+
+// Snapshot reconciliation must settle the mini-player even without live completion events.
+const {MiniPlayerController}=await import('../dist/frontend.js')
+function mini(active=true,source='tagged') {
+ const player=Object.create(MiniPlayerController.prototype)
+ Object.assign(player,{snapshotValue:{active,jobId:active?'attempt':''},currentActivitySource:source,activeTaggedAttempts:new Map(),settledGenerationJobIds:new Set(),settledTaggedJobIds:new Set()})
+ player.render=()=>{}
+ player.begin=(id)=>{player.snapshotValue.active=true;player.snapshotValue.jobId=id;player.currentActivitySource='tagged'}
+ return player
+}
+for(const status of ['ready','cancelled','failed']) {
+ const p=mini();p.onMessage({type:'tagged_image_jobs_result',data:[{id:'tag',clientJobId:'attempt',status}]})
+ assert.equal(p.snapshotValue.active,false,status+' snapshot clears loading')
+ p.onMessage({type:'tagged_image_job',data:{id:'tag',clientJobId:'attempt',status:'generating'}})
+ assert.equal(p.snapshotValue.active,false,'Delayed active event cannot revive terminal attempt')
+}
+const missing=mini();missing.onMessage({type:'tagged_image_jobs_result',data:[]});assert.equal(missing.snapshotValue.active,false)
+const manual=mini(true,'manual');manual.onMessage({type:'tagged_image_jobs_result',data:[]});assert.equal(manual.snapshotValue.active,true,'Tagged snapshots preserve manual generation')
+const concurrent=mini();concurrent.onMessage({type:'tagged_image_jobs_result',data:[{id:'done',clientJobId:'attempt',status:'ready'},{id:'live',clientJobId:'next',status:'generating'}]});assert.equal(concurrent.snapshotValue.jobId,'next');assert.equal(concurrent.snapshotValue.active,true)
+// A ready/remount strip retires as soon as the native figure mounts, including late mounting.
+const stripDom=new JSDOM('<main></main>',{url:'https://studio.test'})
+for(const name of ['window','document','HTMLElement','MutationObserver'])globalThis[name]=stripDom.window[name]
+const strips=new Map()
+const strip=new TaggedImageController({sendToBackend(){},messages:{renderWidget({widgetId,html}){strips.set(widgetId,html);return()=>strips.delete(widgetId)}}},defaultStudioBehavior(),()=>{},()=>false,()=>{})
+const unattached={...job,id:'strip',inserted:false}
+strip.onMessage({type:'tagged_image_jobs_result',data:[unattached]});assert.equal(strips.size,1)
+const mounted=document.createElement('figure');mounted.dataset.swarmStudioImage='true';mounted.dataset.swarmStudioJobId='strip';document.body.append(mounted)
+await new Promise(resolve=>originalTimeout(resolve,0));assert.equal(strips.size,0,'Native image replaces Attach image strip')
+strip.onMessage({type:'tagged_image_jobs_result',data:[unattached]});assert.equal(strips.size,0,'Resume cannot duplicate a native image')
+mounted.remove();strip.onMessage({type:'tagged_image_jobs_result',data:[unattached]});assert.equal(strips.size,1)
+strip.onMessage({type:'tagged_image_jobs_result',data:[]});assert.equal(strips.size,0,'Removed saved jobs retire their strips')
+strip.destroy();stripDom.window.close()
+console.log('terminal snapshots, concurrent attempts, late native image mounts and removed strips: ok')
