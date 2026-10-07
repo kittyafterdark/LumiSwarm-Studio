@@ -2134,6 +2134,42 @@ async function loadSwarmPathGenerationMetadata(connection, token, swarmPath, use
 function generationKey(userId, clientJobId) {
     return `${userId || "scoped"}\0${clientJobId}`;
 }
+function awaitGenerationTask(signal, task) {
+    return new Promise((resolve, reject)=>{
+        const abort = ()=>{
+            const error = new Error("Generation wait stopped.");
+            error.name = "AbortError";
+            reject(error);
+        };
+        if (signal.aborted) {
+            abort();
+            return;
+        }
+        signal.addEventListener("abort", abort, {
+            once: true
+        });
+        Promise.resolve().then(()=>{
+            if (signal.aborted) {
+                const error = new Error("Generation wait stopped.");
+                error.name = "AbortError";
+                throw error;
+            }
+            return task();
+        }).then((value)=>{
+            signal.removeEventListener("abort", abort);
+            if (signal.aborted) abort();
+            else resolve(value);
+        }, (error)=>{
+            signal.removeEventListener("abort", abort);
+            reject(error);
+        });
+    });
+}
+const stoppedGenerationKeys = new Set();
+function rememberStoppedGeneration(key) {
+    stoppedGenerationKeys.add(key);
+    if (stoppedGenerationKeys.size > 128) stoppedGenerationKeys.delete(stoppedGenerationKeys.values().next().value);
+}
 function isAbortError(error) {
     return error instanceof Error && (error.name === "AbortError" || /abort|interrupt|cancel/i.test(error.message));
 }
@@ -2144,13 +2180,13 @@ async function generateWithProgress(input, controller, clientJobId, userId) {
             legacyGenerationFallbackLogged = true;
             spindle.log.warn("[Swarm Studio] Lumiverse imageGen.generateStream is unavailable; using legacy generation without AbortSignal.");
         }
-        return asRecord(await spindle.imageGen.generate(input));
+        return asRecord(await awaitGenerationTask(controller.signal, ()=>spindle.imageGen.generate(input)));
     }
     const generationInput = {
         ...input,
         signal: controller.signal
     };
-    const iterator = await streamFactory.call(spindle.imageGen, generationInput);
+    const iterator = await awaitGenerationTask(controller.signal, ()=>streamFactory.call(spindle.imageGen, generationInput));
     if (!iterator || typeof iterator.next !== "function") {
         throw new Error("Lumiverse returned an invalid image generation stream.");
     }
@@ -2158,7 +2194,7 @@ async function generateWithProgress(input, controller, clientJobId, userId) {
     let lastTotalSteps = 0;
     let streamedResult = null;
     while(true){
-        const next = await iterator.next();
+        const next = await awaitGenerationTask(controller.signal, ()=>iterator.next());
         if (next.done) {
             const returned = asRecord(next.value);
             if (Object.keys(returned).length) return returned;
@@ -3847,8 +3883,6 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         job.status = "generating";
         job.error = "";
         job.inserted = false;
-        await upsertTaggedImageJob(job, userId);
-        sendTaggedJobState(job, userId);
         const controller = new AbortController();
         const controllerKey = generationKey(userId, job.clientJobId);
         generationControllers.set(controllerKey, {
@@ -3858,6 +3892,8 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         const startedAt = Date.now();
         let result;
         try {
+            await awaitGenerationTask(controller.signal, ()=>upsertTaggedImageJob(job, userId));
+            sendTaggedJobState(job, userId);
             result = await generateWithProgress({
                 ...input,
                 owner_chat_id: job.chatId,
@@ -4815,10 +4851,6 @@ async function handleMessage(payload, userId) {
                         throw new Error("Grant the Image Generation permission to generate.");
                     }
                     const input = asRecord(payload?.input);
-                    await saveStudioGenerationProfile(Object.keys(asRecord(payload?.profileInput)).length ? payload.profileInput : input, payload?.recordHints, userId);
-                    const activeChat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null;
-                    const connection = await getConnection(asString(input.connection_id), userId);
-                    const token = spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null;
                     const clientJobId = asString(input.clientJobId).trim() || crypto.randomUUID();
                     const controllerKey = generationKey(userId, clientJobId);
                     const controller = new AbortController();
@@ -4827,24 +4859,73 @@ async function handleMessage(payload, userId) {
                         nativeStream: typeof spindle.imageGen?.generateStream === "function"
                     };
                     generationControllers.set(controllerKey, controllerEntry);
-                    spindle.sendToFrontend({
-                        type: "generation_started",
-                        clientJobId,
-                        data: {
-                            connectionId: connection.id,
-                            model: asString(input.model) || connection.model
-                        }
-                    }, userId);
-                    const startedAt = Date.now();
-                    let result;
+                    if (stoppedGenerationKeys.has(controllerKey)) controller.abort("Stopped before preparation");
                     try {
-                        result = await generateWithProgress({
-                            ...input,
+                        await awaitGenerationTask(controller.signal, ()=>saveStudioGenerationProfile(Object.keys(asRecord(payload?.profileInput)).length ? payload.profileInput : input, payload?.recordHints, userId));
+                        const activeChat = spindle.permissions.has("chats") ? await awaitGenerationTask(controller.signal, ()=>spindle.chats.getActive(userId)) : null;
+                        const connection = await awaitGenerationTask(controller.signal, ()=>getConnection(asString(input.connection_id), userId));
+                        const token = spindle.permissions.has("cors_proxy") ? await awaitGenerationTask(controller.signal, ()=>getMetadataToken(connection.id, userId)) : null;
+                        spindle.sendToFrontend({
+                            type: "generation_started",
                             clientJobId,
-                            owner_chat_id: activeChat?.id || undefined,
-                            owner_character_id: activeChat?.character_id || undefined,
-                            userId
-                        }, controller, clientJobId, userId);
+                            data: {
+                                connectionId: connection.id,
+                                model: asString(input.model) || connection.model
+                            }
+                        }, userId);
+                        const startedAt = Date.now();
+                        let result;
+                        try {
+                            result = await generateWithProgress({
+                                ...input,
+                                clientJobId,
+                                owner_chat_id: activeChat?.id || undefined,
+                                owner_character_id: activeChat?.character_id || undefined,
+                                userId
+                            }, controller, clientJobId, userId);
+                        } catch (error) {
+                            if (isAbortError(error) || controller.signal.aborted) {
+                                spindle.sendToFrontend({
+                                    type: "generation_interrupted",
+                                    requestId,
+                                    clientJobId
+                                }, userId);
+                                return;
+                            }
+                            throw error;
+                        }
+                        const totalMs = Date.now() - startedAt;
+                        const timing = await awaitGenerationTask(controller.signal, ()=>loadLatestSwarmGenerationMetadata(connection, token, input, totalMs, userId));
+                        let record = null;
+                        try {
+                            record = await saveGenerationRecord(result, input, asRecord(payload?.recordHints), timing, userId);
+                        } catch (error) {
+                            spindle.log.warn(`Could not persist Swarm Studio generation details: ${error instanceof Error ? error.message : String(error)}`);
+                        }
+                        if (record?.imageId && activeChat?.character_id) {
+                            const characterId = asString(activeChat.character_id);
+                            const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.characterId === characterId && folder.binding.enabled);
+                            if (visualFolder) await moveOutputToFolder(record.imageId, visualFolder.id, userId);
+                        }
+                        const outputPage = await listOutputs(userId, activeChat);
+                        controller.signal.throwIfAborted();
+                        spindle.sendToFrontend({
+                            type: "generation_result",
+                            requestId,
+                            clientJobId,
+                            data: {
+                                result,
+                                record,
+                                outputFolders: await loadOutputFolders(userId),
+                                ...outputPage
+                            }
+                        }, userId);
+                        const latestUrl = record?.imageUrl || asString(result.imageUrl);
+                        if (latestUrl) spindle.updateMacroValue("last_genned", latestUrl);
+                        if (payload?.showCompletionToast === true && typeof spindle.toast?.success === "function") {
+                            spindle.toast.success(`Swarm Studio finished ${record?.model || asString(result.model) || "your image"}.`);
+                        }
+                        return;
                     } catch (error) {
                         if (isAbortError(error) || controller.signal.aborted) {
                             spindle.sendToFrontend({
@@ -4856,62 +4937,32 @@ async function handleMessage(payload, userId) {
                         }
                         throw error;
                     } finally{
-                        if (generationControllers.get(controllerKey)?.controller === controller) {
-                            generationControllers.delete(controllerKey);
-                        }
+                        if (generationControllers.get(controllerKey)?.controller === controller) generationControllers.delete(controllerKey);
                     }
-                    const totalMs = Date.now() - startedAt;
-                    const timing = await loadLatestSwarmGenerationMetadata(connection, token, input, totalMs, userId);
-                    let record = null;
-                    try {
-                        record = await saveGenerationRecord(result, input, asRecord(payload?.recordHints), timing, userId);
-                    } catch (error) {
-                        spindle.log.warn(`Could not persist Swarm Studio generation details: ${error instanceof Error ? error.message : String(error)}`);
-                    }
-                    if (record?.imageId && activeChat?.character_id) {
-                        const characterId = asString(activeChat.character_id);
-                        const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.characterId === characterId && folder.binding.enabled);
-                        if (visualFolder) await moveOutputToFolder(record.imageId, visualFolder.id, userId);
-                    }
-                    const outputPage = await listOutputs(userId, activeChat);
-                    spindle.sendToFrontend({
-                        type: "generation_result",
-                        requestId,
-                        clientJobId,
-                        data: {
-                            result,
-                            record,
-                            outputFolders: await loadOutputFolders(userId),
-                            ...outputPage
-                        }
-                    }, userId);
-                    const latestUrl = record?.imageUrl || asString(result.imageUrl);
-                    if (latestUrl) spindle.updateMacroValue("last_genned", latestUrl);
-                    if (payload?.showCompletionToast === true && typeof spindle.toast?.success === "function") {
-                        spindle.toast.success(`Swarm Studio finished ${record?.model || asString(result.model) || "your image"}.`);
-                    }
-                    return;
                 }
             case "interrupt_generation":
                 {
                     const clientJobId = asString(payload?.clientJobId).trim();
                     if (!clientJobId) throw new Error("No active generation was supplied.");
-                    const controllerEntry = generationControllers.get(generationKey(userId, clientJobId));
+                    const key = generationKey(userId, clientJobId);
+                    rememberStoppedGeneration(key);
+                    const controllerEntry = generationControllers.get(key);
                     controllerEntry?.controller.abort("Interrupted from Swarm Studio");
-                    const connectionId = asString(payload?.connectionId);
-                    if (connectionId && !controllerEntry?.nativeStream) {
-                        const connection = await getConnection(connectionId, userId);
-                        const token = spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null;
-                        await interruptSwarmGeneration(connection, token, userId);
-                    }
                     spindle.sendToFrontend({
                         type: "generation_interrupt_requested",
                         requestId,
                         clientJobId,
                         data: {
-                            interrupted: Boolean(controllerEntry)
+                            interrupted: Boolean(controllerEntry),
+                            waitingStopped: true
                         }
                     }, userId);
+                    const connectionId = asString(payload?.connectionId);
+                    if (connectionId && controllerEntry && !controllerEntry.nativeStream) {
+                        const connection = await getConnection(connectionId, userId);
+                        const token = spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null;
+                        await interruptSwarmGeneration(connection, token, userId);
+                    }
                     return;
                 }
             case "add_swarm_preset":

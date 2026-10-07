@@ -2552,6 +2552,26 @@ function generationKey(userId: string | undefined, clientJobId: string): string 
   return `${userId || "scoped"}\0${clientJobId}`
 }
 
+// An upstream promise may ignore AbortSignal. Stop must still release our waiter,
+// consume late settlement safely, and prevent a cancelled result from advancing.
+function awaitGenerationTask<T>(signal: AbortSignal, task: () => PromiseLike<T> | T): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => { const error = new Error("Generation wait stopped."); error.name = "AbortError"; reject(error) }
+    if (signal.aborted) { abort(); return }
+    signal.addEventListener("abort", abort, { once: true })
+    Promise.resolve().then(() => {
+      if (signal.aborted) { const error = new Error("Generation wait stopped."); error.name = "AbortError"; throw error }
+      return task()
+    }).then(value => { signal.removeEventListener("abort", abort); if (signal.aborted) abort(); else resolve(value) }, error => { signal.removeEventListener("abort", abort); reject(error) })
+  })
+}
+
+const stoppedGenerationKeys = new Set<string>()
+function rememberStoppedGeneration(key: string): void {
+  stoppedGenerationKeys.add(key)
+  if (stoppedGenerationKeys.size > 128) stoppedGenerationKeys.delete(stoppedGenerationKeys.values().next().value!)
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error
     && (error.name === "AbortError" || /abort|interrupt|cancel/i.test(error.message))
@@ -2573,14 +2593,14 @@ async function generateWithProgress(
     }
     // AbortSignal cannot cross the Bun/Spindle structured-clone boundary used
     // by the legacy generate API. Only the streaming API accepts it.
-    return asRecord(await spindle.imageGen.generate(input))
+    return asRecord(await awaitGenerationTask(controller.signal, () => spindle.imageGen.generate(input)))
   }
 
   const generationInput = {
     ...input,
     signal: controller.signal,
   }
-  const iterator = await streamFactory.call(spindle.imageGen, generationInput)
+  const iterator: any = await awaitGenerationTask(controller.signal, () => streamFactory.call(spindle.imageGen, generationInput))
   if (!iterator || typeof iterator.next !== "function") {
     throw new Error("Lumiverse returned an invalid image generation stream.")
   }
@@ -2589,7 +2609,7 @@ async function generateWithProgress(
   let lastTotalSteps = 0
   let streamedResult: JsonObject | null = null
   while (true) {
-    const next = await iterator.next()
+    const next = await awaitGenerationTask<any>(controller.signal, () => iterator.next())
     if (next.done) {
       const returned = asRecord(next.value)
       if (Object.keys(returned).length) return returned
@@ -4407,9 +4427,6 @@ async function runTaggedImageJob(
     job.status = "generating"
     job.error = ""
     job.inserted = false
-    await upsertTaggedImageJob(job, userId)
-    sendTaggedJobState(job, userId)
-
     const controller = new AbortController()
     const controllerKey = generationKey(userId, job.clientJobId)
     generationControllers.set(controllerKey, {
@@ -4419,6 +4436,8 @@ async function runTaggedImageJob(
     const startedAt = Date.now()
     let result: JsonObject
     try {
+      await awaitGenerationTask(controller.signal, () => upsertTaggedImageJob(job, userId))
+      sendTaggedJobState(job, userId)
       result = await generateWithProgress({
         ...input,
         owner_chat_id: job.chatId,
@@ -5409,18 +5428,6 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           throw new Error("Grant the Image Generation permission to generate.")
         }
         const input = asRecord(payload?.input)
-        await saveStudioGenerationProfile(
-          Object.keys(asRecord(payload?.profileInput)).length ? payload.profileInput : input,
-          payload?.recordHints,
-          userId,
-        )
-        const activeChat = spindle.permissions.has("chats")
-          ? await spindle.chats.getActive(userId)
-          : null
-        const connection = await getConnection(asString(input.connection_id), userId)
-        const token = spindle.permissions.has("cors_proxy")
-          ? await getMetadataToken(connection.id, userId)
-          : null
         const clientJobId = asString(input.clientJobId).trim() || crypto.randomUUID()
         const controllerKey = generationKey(userId, clientJobId)
         const controller = new AbortController()
@@ -5429,6 +5436,20 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           nativeStream: typeof spindle.imageGen?.generateStream === "function",
         }
         generationControllers.set(controllerKey, controllerEntry)
+        if (stoppedGenerationKeys.has(controllerKey)) controller.abort("Stopped before preparation")
+        try {
+        await awaitGenerationTask(controller.signal, () => saveStudioGenerationProfile(
+          Object.keys(asRecord(payload?.profileInput)).length ? payload.profileInput : input,
+          payload?.recordHints,
+          userId,
+        ))
+        const activeChat = spindle.permissions.has("chats")
+          ? await awaitGenerationTask(controller.signal, () => spindle.chats.getActive(userId))
+          : null
+        const connection = await awaitGenerationTask(controller.signal, () => getConnection(asString(input.connection_id), userId))
+        const token = spindle.permissions.has("cors_proxy")
+          ? await awaitGenerationTask(controller.signal, () => getMetadataToken(connection.id, userId))
+          : null
         spindle.sendToFrontend({
           type: "generation_started",
           clientJobId,
@@ -5457,19 +5478,15 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
             return
           }
           throw error
-        } finally {
-          if (generationControllers.get(controllerKey)?.controller === controller) {
-            generationControllers.delete(controllerKey)
-          }
         }
         const totalMs = Date.now() - startedAt
-        const timing = await loadLatestSwarmGenerationMetadata(
+        const timing = await awaitGenerationTask(controller.signal, () => loadLatestSwarmGenerationMetadata(
           connection,
           token,
           input,
           totalMs,
           userId,
-        )
+        ))
         let record: GenerationRecord | null = null
         try {
           record = await saveGenerationRecord(
@@ -5490,6 +5507,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           if (visualFolder) await moveOutputToFolder(record.imageId, visualFolder.id, userId)
         }
         const outputPage = await listOutputs(userId, activeChat)
+        controller.signal.throwIfAborted()
         spindle.sendToFrontend({
           type: "generation_result",
           requestId,
@@ -5509,26 +5527,37 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           spindle.toast.success(`Swarm Studio finished ${record?.model || asString(result.model) || "your image"}.`)
         }
         return
+        } catch (error) {
+          if (isAbortError(error) || controller.signal.aborted) {
+            spindle.sendToFrontend({ type: "generation_interrupted", requestId, clientJobId }, userId)
+            return
+          }
+          throw error
+        } finally {
+          if (generationControllers.get(controllerKey)?.controller === controller) generationControllers.delete(controllerKey)
+        }
       }
       case "interrupt_generation": {
         const clientJobId = asString(payload?.clientJobId).trim()
         if (!clientJobId) throw new Error("No active generation was supplied.")
-        const controllerEntry = generationControllers.get(generationKey(userId, clientJobId))
+        const key = generationKey(userId, clientJobId)
+        rememberStoppedGeneration(key)
+        const controllerEntry = generationControllers.get(key)
         controllerEntry?.controller.abort("Interrupted from Swarm Studio")
+        // Acknowledge our waiter before any remote interrupt HTTP request, which
+        // may itself hang. This is not a claim that SwarmUI confirmed cancellation.
+        spindle.sendToFrontend({
+          type: "generation_interrupt_requested", requestId, clientJobId,
+          data: { interrupted: Boolean(controllerEntry), waitingStopped: true },
+        }, userId)
         const connectionId = asString(payload?.connectionId)
-        if (connectionId && !controllerEntry?.nativeStream) {
+        if (connectionId && controllerEntry && !controllerEntry.nativeStream) {
           const connection = await getConnection(connectionId, userId)
           const token = spindle.permissions.has("cors_proxy")
             ? await getMetadataToken(connection.id, userId)
             : null
           await interruptSwarmGeneration(connection, token, userId)
         }
-        spindle.sendToFrontend({
-          type: "generation_interrupt_requested",
-          requestId,
-          clientJobId,
-          data: { interrupted: Boolean(controllerEntry) },
-        }, userId)
         return
       }
       case "add_swarm_preset": {

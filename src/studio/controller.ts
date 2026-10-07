@@ -2349,6 +2349,7 @@ are removed when CSS is applied.</pre>
         this.setRunStatus(payload.type === "token_saved" ? "Metadata token saved and library refreshed." : "Metadata token cleared.")
         break
       case "generation_result":
+        if (payload.clientJobId && this.settledGenerationJobIds.has(String(payload.clientJobId))) break
         this.rememberSettledGenerationJob(String(payload.clientJobId || this.currentJobId))
         this.generating = false
         this.currentJobId = ""
@@ -2409,7 +2410,10 @@ are removed when CSS is applied.</pre>
       }
       case "generation_interrupt_requested":
         if (payload.clientJobId === this.currentJobId) {
-          this.setRunStatus("Interrupt requested — stopping SwarmUI…")
+          if (data.waitingStopped === true || data.interrupted === false) {
+            this.onMessage({ type: "generation_interrupted", clientJobId: payload.clientJobId })
+            this.setRunStatus("Stopped waiting. SwarmUI cancellation is not confirmed; your previous output is safe.")
+          } else this.setRunStatus("Interrupt requested — stopping SwarmUI…")
         }
         break
       case "generation_interrupted":
@@ -2424,7 +2428,7 @@ are removed when CSS is applied.</pre>
           if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
           else this.clearCurrentImage()
           this.preGenerationImage = null
-          this.setRunStatus("Generation interrupted. Your previous output is still safe.")
+          this.setRunStatus("Generation wait stopped. Previous output kept; SwarmUI stop is not confirmed.")
         }
         break
       case "swarm_preset_added":

@@ -197,6 +197,36 @@ try {
     assert.ok(Math.abs(box.x+box.width/2-viewport.width/2)<2,`${selector} centered horizontally`)
     assert.ok(Math.abs(box.y+box.height/2-viewport.height/2)<2,`${selector} centered vertically`)
   }
+  // Exercise Stop against a preparing job and a backend acknowledgement with no controller.
+  for(const width of [360,1440]) {
+    await page.setViewportSize({width,height:1000})
+    await page.evaluate(()=>{
+      mobileController.state.connection={id:'mock'}
+      mobileController.state.permissions={imageGen:true}
+      mobileController.setStudioView('generate')
+      mobileController.setMobileTab('create')
+      const previous={src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',label:'Previous output'}
+      mobileController.setCurrentImage(previous)
+      mobileController.preGenerationImage=previous
+      mobileController.generating=true
+      mobileController.currentJobId=`stuck-${window.innerWidth}`
+      mobileController.currentJobConnectionId='mock'
+      mobileController.setGenerating(true)
+    })
+    await page.getByRole('button',{name:'Interrupt generation',exact:true}).filter({visible:true}).first().click()
+    await page.evaluate(()=>{
+      const id=mobileController.currentJobId
+      mobileController.onMessage({type:'generation_interrupt_requested',clientJobId:id,data:{interrupted:false,waitingStopped:true}})
+      mobileController.onMessage({type:'generation_result',clientJobId:id,data:{result:{imageDataUrl:'late',model:'late-result'}}})
+    })
+    assert.equal(await page.locator('[data-role="preview-loading"]').getAttribute('data-visible'),'false')
+    assert.equal(await page.evaluate(()=>mobileController.generating),false)
+    assert.equal(await page.evaluate(()=>mobileController.state.currentImage.label),'Previous output','Cancelled late result cannot replace the previous output')
+    assert.equal(await page.getByRole('button',{name:'Generate image',exact:true}).filter({visible:true}).first().isEnabled(),true)
+    assert.match(await page.locator('[data-role="run-status"]').textContent(),/cancellation is not confirmed/)
+  }
+  await page.setViewportSize({width:360,height:850})
+  console.log('Stop UI: mobile/desktop preparing state exits on acknowledgement, prior output preserved and late result ignored: ok')
   // Exercise the character actions using controlled host API fixtures, never personal character data.
   await page.evaluate(()=>{
     mobileController.state.permissions={characters:true,personas:true,images:true}
@@ -293,6 +323,7 @@ try {
     mobileController.hydratedVisualCharacterId=''
     mobileController.renderStackPresets()
     mobileController.hydrateActiveVisualStack()
+    mobileController.setMobileTab('stack')
     mobileController.setStudioView('styles')
   })
   assert.equal(await page.locator('[data-role="stack-preset"]').inputValue(),'head','Initial character hydration still loads its bound stack')

@@ -594,12 +594,16 @@ class MiniPlayerController {
       return
     }
     if (payload?.type === "generation_interrupt_requested" && payload.clientJobId === this.snapshotValue.jobId) {
-      this.snapshotValue.status = "Interrupt requested…"
-      this.render()
+      if (data.waitingStopped === true || data.interrupted === false) {
+        this.fail(String(payload.clientJobId || ""), "Stopped waiting · SwarmUI stop not confirmed")
+      } else {
+        this.snapshotValue.status = "Interrupt requested…"
+        this.render()
+      }
       return
     }
     if (payload?.type === "generation_interrupted") {
-      this.fail(String(payload.clientJobId || ""), "Generation interrupted · previous output kept")
+      this.fail(String(payload.clientJobId || ""), "Generation wait stopped · SwarmUI stop not confirmed")
       return
     }
     if (payload?.type === "studio_error" && payload.operation === "generate") {

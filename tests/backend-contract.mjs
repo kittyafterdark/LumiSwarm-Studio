@@ -1525,7 +1525,7 @@ const interrupted = await request("interrupt_generation", {
   clientJobId: "already-finished-job",
 })
 assert.equal(interrupted.data.interrupted, false)
-assert.equal(interruptRequested, true)
+assert.equal(interruptRequested, false, "Unknown jobs must not interrupt unrelated SwarmUI sessions")
 
 const page = await request("refresh_outputs", { offset: 12, limit: 12 })
 assert.equal(page.data.offset, 12)
@@ -1717,3 +1717,35 @@ await request("set_tag_automation", { config: { requestMode: "inline", injectPro
 assert.match(macroValues.get("swarm_image_protocol"), /CUSTOM LEGACY PROTOCOL/)
 assert.match(macroValues.get("swarm_image_protocol"), /Do not copy, imitate, or emit those markers/)
 console.log("history-marker guidance survives saved custom protocols: ok")
+
+// Stop must finish our wait even when preparation or the provider ignores abort.
+const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve}}
+const bounded=async promise=>{let timeout;try{return await Promise.race([promise,new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error('Cancellation did not release the waiter')),1000)})])}finally{clearTimeout(timeout)}}
+const originalStream=spindle.imageGen.generateStream,originalGenerate=spindle.imageGen.generate,originalSetJson=spindle.userStorage.setJson
+for(const phase of ['prepare','factory','next','legacy']) {
+  const entered=deferred(),late=deferred(),id=`stop-${phase}`
+  let calls=0
+  spindle.imageGen.generateStream=()=>{calls++;if(phase==='factory'){entered.resolve();return late.promise}return {next(){entered.resolve();return late.promise}}}
+  spindle.userStorage.setJson=async(file,...args)=>{if(phase==='prepare' && file==='studio-generation-profile.json'){entered.resolve();await late.promise}return originalSetJson.call(spindle.userStorage,file,...args)}
+  if(phase==='legacy'){delete spindle.imageGen.generateStream;spindle.imageGen.generate=()=>{calls++;entered.resolve();return late.promise}}
+  const running=frontendHandler({type:'generate',requestId:`request-${id}`,input:{connection_id:'swarm-1',clientJobId:id,model:'base.safetensors',prompt:'cancellation fixture',parameters:{}}},'user-1')
+  await bounded(entered.promise)
+  const ack=await request('interrupt_generation',{clientJobId:id,connectionId:'swarm-1'})
+  assert.equal(ack.data.waitingStopped,true)
+  assert.equal(ack.data.interrupted,true)
+  await bounded(running)
+  assert.ok(sent.some(entry=>entry.payload.type==='generation_interrupted' && entry.payload.clientJobId===id))
+  const count=sent.filter(entry=>entry.payload.type==='generation_result' && entry.payload.clientJobId===id).length
+  late.resolve(phase==='factory'?{next:async()=>({done:true,value:{imageId:'too-late'}})}:{done:true,value:{imageId:'too-late'}})
+  await new Promise(resolve=>setTimeout(resolve,0))
+  assert.equal(sent.filter(entry=>entry.payload.type==='generation_result' && entry.payload.clientJobId===id).length,count,'Late result must not complete a stopped job')
+  if(phase==='prepare')assert.equal(calls,0,'A stopped preparation must never begin generation')
+  spindle.imageGen.generateStream=originalStream;spindle.imageGen.generate=originalGenerate;spindle.userStorage.setJson=originalSetJson
+}
+const earlyId='stop-before-start'
+await request('interrupt_generation',{clientJobId:earlyId,connectionId:'swarm-1'})
+const beforeEarly=sent.length
+await frontendHandler({type:'generate',requestId:'early-request',input:{connection_id:'swarm-1',clientJobId:earlyId,model:'base.safetensors',prompt:'fixture',parameters:{}}},'user-1')
+assert.ok(sent.slice(beforeEarly).some(entry=>entry.payload.type==='generation_interrupted'))
+assert.ok(!sent.slice(beforeEarly).some(entry=>entry.payload.type==='generation_started'),'Reordered Stop prevents preparation from starting')
+console.log('stop during preparation, stalled stream creation/read, legacy generation and reordered requests: ok')
