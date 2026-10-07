@@ -402,12 +402,40 @@ class StudioController {
     }
   }
 
-  private loadParserModels(): void {
+  private async loadParserModels(): Promise<void> {
     const connectionId = this.selectedParserConnectionId()
+    this.parserModelRequestId = createRequestId()
     this.state.parserModels = []
     this.renderParserModels()
     if (!connectionId || !this.state.permissions.generation) return
-    this.parserModelRequestId = this.send("list_parser_models", { connectionId })
+    if (typeof this.ctx.connections?.models !== "function") {
+      this.parserModelRequestId = this.send("list_parser_models", { connectionId })
+      return
+    }
+    const requestId = this.parserModelRequestId = createRequestId()
+    const summary = this.root.querySelector<HTMLElement>('[data-role="parser-connection-summary"]')
+    if (summary) summary.textContent = "Discovering models…"
+    try {
+      const result = await this.ctx.connections.models(connectionId)
+      if (this.disposed || requestId !== this.parserModelRequestId || connectionId !== this.selectedParserConnectionId()) return
+      if (result?.error) throw new Error(String(result.error))
+      this.state.parserModels = [...new Set<string>(Array.isArray(result?.models) ? result.models.filter((id: any) => typeof id === "string" && id.trim()) : [])].map(id => ({ id, label: String(result?.model_labels?.[id] || id) }))
+      this.renderParserModels()
+      if (summary) summary.textContent = this.state.parserModels.length ? `${this.state.parserModels.length} models discovered. The override affects only parser calls.` : "No models discovered. You can still enter a model ID manually."
+    } catch (error) {
+      if (this.disposed || requestId !== this.parserModelRequestId || connectionId !== this.selectedParserConnectionId()) return
+      if (summary) summary.textContent = `Model discovery failed: ${error instanceof Error ? error.message : String(error)}. You can enter a model ID manually.`
+    }
+  }
+
+  refreshAfterResume(): void {
+    if (this.disposed) return
+    // Refresh server-owned outputs only; bootstrap would rehydrate bindings and
+    // connection defaults over the user's currently edited prompt/LoRA draft.
+    this.refreshOutputs()
+    void this.loadParserModels()
+    this.send("get_lora_download_status")
+    if (!this.get<HTMLElement>('[data-role="output-library"]').hidden) this.send("list_library_outputs")
   }
 
   exportDraft(): StudioDraft | null {
@@ -664,7 +692,7 @@ class StudioController {
                             <input class="ss-input" data-role="parser-model" list="ss-parser-model-options" value="${this.behavior.parserModel.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" placeholder="Use the connection's selected model" autocomplete="off" />
                             <datalist id="ss-parser-model-options" data-role="parser-model-options"></datalist>
                           </label>
-                          <p class="ss-muted ss-tiny" data-role="parser-connection-summary">Loading Lumiverse text connections…</p>
+                          <p class="ss-muted ss-tiny" data-role="parser-connection-summary" role="status">Loading Lumiverse text connections…</p>
                           <p class="ss-muted ss-tiny">The override changes only parser calls. Chat replies continue using the model selected by Lumiverse for the active conversation.</p>
                         </div>
                       </section>

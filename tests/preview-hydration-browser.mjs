@@ -386,6 +386,40 @@ try {
     assert.ok(bounds.scrollable,'Preset fields scroll while close/save controls remain visible')
   }
   console.log('Preset modal simulated safe-area/keyboard/landscape geometry: ok (no physical iPhone test)')
+  // Resume missed an inserted image event; recover via the public widget surface.
+  await page.setViewportSize({width:390,height:844})
+  await page.evaluate(async()=>{
+    const {StudioRecoveryController,TaggedImageController,defaultStudioBehavior}=await import('/frontend.js')
+    const host=document.createElement('section');host.id='mock-chat';document.body.append(host)
+    window.resumeRequests=[]
+    const ctx={sendToBackend(message){resumeRequests.push(message);if(message.type==='list_tagged_jobs')setTimeout(()=>{
+      const reply={type:'tagged_image_jobs_result',requestId:message.requestId,data:[{id:'recovered',chatId:'chat',messageId:'message',slot:'one',status:'ready',inserted:true,imageUrl:'/api/v1/images/saved-one',alt:'Recovered scene'}]}
+      inlineResume.onMessage(reply);resumeController.onMessage(reply)
+    },20)},messages:{renderWidget({widgetId,html},handler){
+      const frame=document.createElement('iframe');frame.title='Recovered illustration';frame.dataset.widget=widgetId
+      frame.srcdoc='<script>window.spindleSandbox={postMessage:()=>{}}</script>'+html;host.append(frame)
+      return ()=>frame.remove()
+    }}}
+    window.inlineResume=new TaggedImageController(ctx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+    window.resumeController=new StudioRecoveryController(ctx,()=>{})
+    let visible='hidden'
+    Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>visible})
+    document.dispatchEvent(new Event('visibilitychange'));visible='visible';document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new Event('focus'));window.dispatchEvent(new Event('pageshow'))
+  })
+  const recovered=page.frameLocator('iframe[title="Recovered illustration"]')
+  await recovered.getByRole('img',{name:'Recovered scene'}).waitFor()
+  assert.equal(await recovered.getByRole('button',{name:'Image options'}).count(),1)
+  await recovered.getByRole('button',{name:'Image options'}).focus()
+  await page.keyboard.press('Enter')
+  assert.equal(await page.evaluate(()=>resumeRequests.length),1,'Foreground events coalesce to one snapshot request')
+  await page.evaluate(()=>{
+    const native=document.createElement('figure');native.dataset.swarmStudioImage='true';native.dataset.swarmStudioJobId='recovered';document.querySelector('#mock-chat').append(native)
+  })
+  await page.waitForFunction(()=>!document.querySelector('iframe[data-widget]'))
+  await page.evaluate(()=>{resumeController.destroy();inlineResume.destroy();document.querySelector('#mock-chat').remove();window.dispatchEvent(new Event('online'))})
+  assert.equal(await page.evaluate(()=>resumeRequests.length),1,'Unload prevents resumed work')
+  console.log('Foreground inline recovery: missed completion, native image replacement, named keyboard control and cleanup: ok')
   assert.deepEqual(errors, [])
   console.log('Chromium: 60 delayed decoded previews, zero card disconnects, zero library renders, stable geometry, opaque folders: ok')
 } finally {

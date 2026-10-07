@@ -270,6 +270,9 @@ function setup(ctx: FrontendContext): () => void {
       : null
   const removeActionClick =
     typeof inputAction?.onClick === "function" ? inputAction.onClick(() => openStudio("studio")) : () => {}
+  const recovery = new StudioRecoveryController(ctx, () => {
+    activeStudio?.refreshAfterResume()
+  })
   const unsubscribeMessages = ctx.onBackendMessage((payload: any) => {
     const backendError =
       payload?.error
@@ -286,15 +289,12 @@ function setup(ctx: FrontendContext): () => void {
     if (payload?.type === "tag_automation_result") {
       applyBehaviorState(behaviorFromServer(payload.data))
     }
+    recovery.onMessage(payload)
     miniplayer?.onMessage(payload)
     activeStudio?.onMessage(payload)
     taggedImages?.onMessage(payload)
     chatVisuals?.onMessage(payload)
     characterCanonHost?.onMessage(payload)
-  })
-  ctx.sendToBackend({
-    type: "list_tagged_jobs",
-    requestId: createRequestId(),
   })
   const subscribeToImageEvent = (eventName: string, handler: (payload: any) => void): (() => void) => {
     if (typeof ctx.events?.on !== "function") return () => {}
@@ -326,6 +326,7 @@ function setup(ctx: FrontendContext): () => void {
   miniplayer?.bootstrap()
 
   return () => {
+    recovery.destroy()
     activeStudio?.dispose()
     activeModal?.dismiss()
     activeStudio = null

@@ -5,7 +5,7 @@ export {
   studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, studioUploadAvatar, studioAvatarCropRect,
   sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters,
   normalizeWorkspaceState,
-  StudioController,
+  StudioController, StudioRecoveryController, TaggedImageController,
   applyPresetPrompt,
   applyPresetStackPrompts,
   applySwarmPresetTokens,

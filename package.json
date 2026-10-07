@@ -6,7 +6,7 @@
   "description": "Metadata-aware SwarmUI studio for Lumiverse",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node tests/backend-contract.mjs && node tests/frontend-contract.mjs && node tests/safety-scan.mjs && node tests/workspace-contract.mjs && node tests/recipes-contract.mjs && node tests/native-image-gen-contract.mjs && node tests/studio-dom-contract.mjs && node tests/widget-position-contract.mjs && node tests/character-image-actions-contract.mjs",
+    "test": "node tests/backend-contract.mjs && node tests/frontend-contract.mjs && node tests/safety-scan.mjs && node tests/workspace-contract.mjs && node tests/recipes-contract.mjs && node tests/native-image-gen-contract.mjs && node tests/studio-dom-contract.mjs && node tests/widget-position-contract.mjs && node tests/character-image-actions-contract.mjs && node tests/resume-contract.mjs",
     "typecheck": "node scripts/check-types.mjs",
     "test:browser": "node tests/preview-hydration-browser.mjs"
   },

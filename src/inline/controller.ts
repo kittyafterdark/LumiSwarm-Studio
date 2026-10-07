@@ -14,6 +14,7 @@ interface TaggedImageJobView {
   imageId: string
   imageUrl: string
   inserted: boolean
+  updatedAt?: number
   error: string
 }
 
@@ -53,6 +54,8 @@ class TaggedImageController {
   private readonly settledMessageTargets = new Map<string, string>()
   private readonly cleanups = new Map<string, () => void>()
   private readonly reconciliationQueues = new Map<string, Promise<void>>()
+  private recoveredObserver: MutationObserver | null = null
+  private readonly recoveredJobs = new Set<string>()
   private destroyed = false
 
   private eventClosest<T extends HTMLElement>(
@@ -229,6 +232,7 @@ class TaggedImageController {
   }
 
   onMessage(payload: any): void {
+    if (this.destroyed) return
     if (payload?.type === "tagged_image_removed") {
       this.reconcileMessage({ ...payload.data, removed: true })
       return
@@ -239,12 +243,22 @@ class TaggedImageController {
     }
     if (payload?.type === "tagged_image_jobs_result") {
       const jobs = Array.isArray(payload.data) ? payload.data as TaggedImageJobView[] : []
-      for (const job of jobs) {
-        if (!job?.id || !job?.messageId) continue
+      for (const incoming of jobs) {
+        if (!incoming?.id || !incoming?.messageId) continue
+        const known = this.jobs.get(incoming.id)
+        const job = Number(known?.updatedAt || 0) > Number(incoming.updatedAt || 0) ? known! : incoming
+        for (const [id, candidate] of this.jobs) {
+          if (id.startsWith("pending-") && this.lookupKey(candidate.chatId, candidate.messageId, candidate.slot) === this.lookupKey(job.chatId, job.messageId, job.slot)) {
+            this.remove(candidate); this.jobs.delete(id)
+          }
+        }
         this.jobs.set(job.id, job)
+        this.settledAttachmentRequests.delete(job.id)
         this.retrySettledAttachment(job)
         if (!job.inserted && !this.inlineFigureForJob(job.id) && this.shouldRenderPlaceholder(job)) {
           this.render(job)
+        } else if (job.inserted && job.status === "ready" && job.imageUrl && !this.inlineFigureForJob(job.id)) {
+          this.renderRecoveredImage(job)
         } else {
           this.remove(job)
         }
@@ -261,6 +275,7 @@ class TaggedImageController {
         }
       }
       const previous = this.jobs.get(job.id)
+      if (Number(previous?.updatedAt || 0) > Number(job.updatedAt || 0)) return
       const next = { ...previous, ...job }
       this.jobs.set(job.id, next)
       if (next.inserted) {
@@ -273,6 +288,8 @@ class TaggedImageController {
       if (inlineFigure) {
         inlineFigure.dataset.state = next.inserted ? "ready" : next.status
         this.remove(next)
+      } else if (next.inserted && next.status === "ready" && next.imageUrl) {
+        this.renderRecoveredImage(next)
       } else if (this.shouldRenderPlaceholder(next)) {
         this.render(next)
       } else {
@@ -284,6 +301,9 @@ class TaggedImageController {
 
   destroy(): void {
     this.destroyed = true
+    this.recoveredObserver?.disconnect()
+    this.recoveredObserver = null
+    this.recoveredJobs.clear()
     window.removeEventListener("click", this.handleInlineClick, true)
     window.removeEventListener("contextmenu", this.handleInlineContextMenu, true)
     window.removeEventListener("keydown", this.handleInlineKeyDown, true)
@@ -355,7 +375,31 @@ class TaggedImageController {
     }
   }
 
+  private renderRecoveredImage(job: TaggedImageJobView): void {
+    // A public message widget recovers the saved bitmap without writing stale
+    // message content back to the server or starting another generation.
+    this.remove(job)
+    const widgetId = this.widgetId(job)
+    let url: URL
+    try { url = new URL(job.imageUrl, window.location.href) } catch { return }
+    if (!["http:", "https:"].includes(url.protocol)) return
+    const html = `<style>:root{color-scheme:dark;font-family:system-ui,sans-serif}body{margin:0;background:transparent;color:var(--lumiverse-text,#eee)}button{min-height:40px;margin-top:8px;padding:8px 12px;border:1px solid var(--lumiverse-border,#454550);border-radius:8px;background:var(--lumiverse-fill-subtle,#191820);color:inherit;font:inherit}</style><div><img src="${widgetEscape(url.href)}" alt="${widgetEscape(job.alt || "Generated illustration")}" style="display:block;max-width:100%;height:auto;border-radius:8px"><button type="button" id="image-options">Image options</button></div><script>document.getElementById('image-options').addEventListener('click',()=>window.spindleSandbox.postMessage({type:'menu'}))</script>`
+    this.cleanups.set(widgetId, this.ctx.messages.renderWidget({ messageId: job.messageId, widgetId, html }, () => { void this.showJobMenu(job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2)) }))
+    this.recoveredJobs.add(job.id)
+    if (!this.recoveredObserver) {
+      this.recoveredObserver = new MutationObserver(() => {
+        for (const id of this.recoveredJobs) {
+          const current = this.jobs.get(id)
+          if (current && this.inlineFigureForJob(id)) this.remove(current)
+        }
+      })
+      this.recoveredObserver.observe(document.body, { childList: true, subtree: true })
+    }
+  }
+
   private remove(job: TaggedImageJobView): void {
+    this.recoveredJobs.delete(job.id)
+    if (!this.recoveredJobs.size) { this.recoveredObserver?.disconnect(); this.recoveredObserver = null }
     const id = this.widgetId(job)
     this.cleanups.get(id)?.()
     this.cleanups.delete(id)

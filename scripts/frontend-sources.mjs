@@ -24,6 +24,7 @@ export const frontendSources = [
   "src/inline/controller.ts",
   "src/visuals/controller.ts",
   "src/host/continuity-surfaces.ts",
+  "src/host/recovery.ts",
   "src/host/setup.ts",
   "src/frontend.ts",
 ]
