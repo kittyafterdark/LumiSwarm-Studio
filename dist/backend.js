@@ -3271,7 +3271,7 @@ export function serializeScenePlan(plan, family, identityPrompts, forceSingleVis
         plan.environment
     ].filter(Boolean).join("\n");
 }
-async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, includePersona = false, automation = cleanTagAutomationConfig(null), requestedLook = "", userId) {
+async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true, includePersona = false, automation = cleanTagAutomationConfig(null), requestedLook = "", userId, inheritWorkspaceStyle = true) {
     const chat = spindle.permissions.has("chats") ? await spindle.chats.get(chatId, userId) : null;
     const characterId = asString(chat?.character_id);
     const visualFolder = (await loadOutputFolders(userId)).find((folder)=>folder.binding?.type === "character" && folder.binding.characterId === characterId && folder.binding.enabled);
@@ -3291,7 +3291,7 @@ async function applyCharacterLayer(chatId, scenePrompt, includeCharacter = true,
     };
     const activeLook = includeCharacter ? looks.find(matchesLook) || looks.find((look)=>look.id === visualFolder?.binding?.activeLookId) || looks.find((look)=>look.id === "default") || null : null;
     const renderSettings = await loadRenderSettings(userId);
-    const liveProfile = await loadStudioGenerationProfile(userId);
+    const liveProfile = inheritWorkspaceStyle ? await loadStudioGenerationProfile(userId) : null;
     const style = renderSettings.styles.find((item)=>item.id === ((includeCharacter ? activeLook?.styleId || visualFolder?.binding?.styleId : "") || asString(liveProfile?.recordHints?.styleId)));
     const generationRecipe = resolveGenerationConfig({
         style,
@@ -5293,6 +5293,53 @@ async function handleMessage(payload, userId) {
             error: error instanceof Error ? error.message : String(error)
         }, userId);
     }
+}
+if (typeof spindle.registerMacroInterceptor === "function") {
+    spindle.registerMacroInterceptor(async (ctx)=>{
+        const match = /^\{\{swarm_visual_request::([^{}]+)\}\}$/.exec(ctx.template);
+        if (!match) return;
+        const request = asRecord(JSON.parse(decodeURIComponent(match[1])));
+        const chatId = asString(request.chatId).slice(0, 180);
+        const scene = asString(request.scene).slice(0, 12000);
+        if (!chatId || !scene || chatId.startsWith("_freeform_")) throw new Error("Studio visual requests need a roleplay chat and a fresh scene.");
+        const chat = await spindle.chats.get(chatId, ctx.userId);
+        if (!chat || asString(chat.character_id) !== asString(request.characterId)) throw new Error("The Studio visual request's character changed.");
+        const includeCharacter = request.purpose === "scene" || request.purpose === "character";
+        const includePersona = request.purpose === "persona";
+        const layer = await applyCharacterLayer(chatId, scene, includeCharacter, includePersona, await loadTagAutomationConfig(ctx.userId), "", ctx.userId, false);
+        const profile = await loadStudioGenerationProfile(ctx.userId);
+        const connection = await connectionForTaggedProfile(profile, ctx.userId);
+        const render = await loadRenderSettings(ctx.userId);
+        const recipe = resolveGenerationConfig({
+            studioDefaults: render.defaults,
+            job: layer.generationRecipe
+        });
+        const parameters = recipeParameters(recipe);
+        if (layer.preferredAspect) applyAspectToParameters(parameters, layer.preferredAspect);
+        const stack = layer.stack.filter((item)=>item.enabled !== false);
+        parameters.loras = stack.map((item)=>item.name);
+        parameters.loraWeights = stack.map((item)=>item.weight);
+        parameters.loratencweights = stack.map((item)=>item.weight);
+        if (layer.referenceImageId || layer.referenceImageUrl) {
+            const reference = await resolveVisualReferenceImage(layer.referenceImageId, layer.referenceImageUrl, ctx.userId);
+            if (!reference) throw new Error("The bound Studio reference image is unavailable.");
+            parameters.referenceImages = [
+                reference
+            ];
+            parameters.denoise = .6;
+        }
+        const input = asRecord(profile?.input);
+        return encodeURIComponent(JSON.stringify({
+            version: 1,
+            chatId,
+            characterId: asString(chat.character_id),
+            prompt: layer.prompt,
+            negativePrompt: layer.negativePrompt,
+            model: layer.checkpoint || render.defaults?.checkpoint || asString(input.model) || connection.model,
+            connectionId: connection.id,
+            parameters
+        }));
+    }, 85);
 }
 spindle.onFrontendMessage(handleMessage);
 for (const macro of [

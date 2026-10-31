@@ -34,6 +34,7 @@ const macroDefinitions = new Map()
 const macroValues = new Map()
 const eventHandlers = new Map()
 let interceptorHandler = null
+let visualMacroHandler = null
 let completionToast = ""
 let downloadedSwarmUrl = ""
 const relayedLoraRequests = []
@@ -116,6 +117,7 @@ class MockSwarmDownloadSocket extends EventTarget {
 globalThis.WebSocket = MockSwarmDownloadSocket
 
 globalThis.spindle = {
+  registerMacroInterceptor(handler) { visualMacroHandler = handler },
   registerMacro(definition) {
     macroDefinitions.set(definition.name, definition)
   },
@@ -1255,6 +1257,19 @@ assert.equal(customCharacterVisuals.data.characterFolder.binding.negativePrompt,
 assert.equal(customCharacterVisuals.data.characterFolder.binding.checkpoint, "base.safetensors")
 assert.equal(customCharacterVisuals.data.characterFolder.binding.sourcePresetId, "lumi-character-preset-1")
 
+assert.equal(typeof visualMacroHandler, "function")
+const composePocket = async (scene, purpose="scene", characterId="char-1") => JSON.parse(decodeURIComponent(await visualMacroHandler({template:`{{swarm_visual_request::${encodeURIComponent(JSON.stringify({chatId:"chat-1",characterId,scene,purpose}))}}}`,userId:"user-1"})))
+const resolvedPocket=await composePocket("A fresh scene by the window")
+assert.match(resolvedPocket.prompt,/fresh scene by the window/)
+assert.match(resolvedPocket.prompt,/black hair, red eyes/)
+assert.equal(resolvedPocket.model,"base.safetensors")
+assert.deepEqual(resolvedPocket.parameters.loras,["styles/ink.safetensors"])
+assert.deepEqual(resolvedPocket.parameters.loraWeights,[0.61])
+const isolatedPocket=await composePocket("A fresh cartoon sticker","message")
+assert.doesNotMatch(isolatedPocket.prompt,/black hair, red eyes/)
+assert.deepEqual(isolatedPocket.parameters.loras,[])
+await assert.rejects(()=>composePocket("scene","scene","wrong-character"),/character changed/)
+
 const savedFormalLook = await request("save_character_look", {
   characterId: "char-1",
   activate: true,
@@ -1283,6 +1298,17 @@ assert.equal(savedFormalLook.data.activeLookId, formalLook.id)
 assert.deepEqual(formalLook.aliases, ["evening wear", "black tie"])
 assert.equal(formalLook.stackSnapshot[0].weight, 0.72)
 assert.match(savedFormalLook.data.badge, /2 looks/)
+const previousPocketImageGet=spindle.images.get
+spindle.images.get=async(id,options)=>{if(id==="formal-reference"){assert.equal(options.userId,"user-1");assert.equal(options.onlyOwned,true);return {url:"data:image/png;base64,aGVsbG8="}}return previousPocketImageGet(id,options)}
+let resolvedLookPocket
+try{resolvedLookPocket=await composePocket("A fresh evening portrait")}finally{spindle.images.get=previousPocketImageGet}
+assert.deepEqual(resolvedLookPocket.parameters.referenceImages,[{data:"aGVsbG8=",mimeType:"image/png"}])
+
+assert.equal(resolvedLookPocket.model,"formal-portrait.safetensors")
+assert.match(resolvedLookPocket.prompt,/tailored black tuxedo/)
+assert.ok(resolvedLookPocket.parameters.loras.includes("wardrobe/formal.safetensors"))
+assert.doesNotMatch(resolvedLookPocket.prompt,/old sticker prompt/)
+
 
 const selectedDefaultLook = await request("select_character_look", {
   characterId: "char-1",
