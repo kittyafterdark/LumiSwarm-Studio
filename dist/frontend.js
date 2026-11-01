@@ -7680,6 +7680,7 @@ are removed when CSS is applied.</pre>
             if (action === "clear-stack") {
                 this.state.stack = [];
                 this.renderStack();
+                this.scheduleStudioProfileSync();
             }
             if (action === "save-stack") this.saveStackPreset();
             if (action === "load-stack") this.loadStackPreset();
@@ -10144,6 +10145,7 @@ are removed when CSS is applied.</pre>
         });
         this.setStackPresetSelection(preset.id);
         this.renderStack();
+        this.scheduleStudioProfileSync();
         if (announce) this.setRunStatus(`Loaded LoRA stack “${preset.name}”.`);
     }
     stackName() {
@@ -10306,6 +10308,7 @@ are removed when CSS is applied.</pre>
             });
             this.missingLoras = imported.items.filter((item)=>!this.installedLora(item.name));
             this.renderStack();
+            this.scheduleStudioProfileSync();
             this.setRunStatus(`Imported “${imported.name}” with ${imported.items.length} LoRA${imported.items.length === 1 ? "" : "s"}.`);
             if (this.missingLoras.length) this.showMissingLoras();
         } catch (error) {
@@ -11145,6 +11148,7 @@ are removed when CSS is applied.</pre>
         this.renderStack();
         this.renderPresetStack();
         this.updateContextControls();
+        this.scheduleStudioProfileSync();
         if (closeOverlays) {
             this.closeInspector();
             this.closeOutputLibrary();
@@ -11441,6 +11445,7 @@ are removed when CSS is applied.</pre>
         if (!folder || !binding?.enabled || this.pendingDraftRestore) return false;
         if (!force && this.hydratedVisualCharacterId === binding.characterId) return false;
         let checkpointLoaded = !binding.checkpoint;
+        let profileChanged = false;
         if (binding.checkpoint) {
             const modelSelect = this.get('[data-role="model"]');
             const normalized = normalizeModelName(binding.checkpoint);
@@ -11451,6 +11456,7 @@ are removed when CSS is applied.</pre>
                 return candidate === normalized || candidate.endsWith(normalized) || normalized.endsWith(candidate);
             });
             if (matchingOption) {
+                if (modelSelect.value !== matchingOption.value) profileChanged = true;
                 modelSelect.value = matchingOption.value;
                 checkpointLoaded = true;
                 this.updateFamilyChip();
@@ -11461,6 +11467,7 @@ are removed when CSS is applied.</pre>
         const preset = this.state.stackPresets.find((candidate)=>candidate.id === binding.stackPresetId);
         const items = preset?.items?.length ? preset.items : binding.stackSnapshot || [];
         if (items.length) {
+            profileChanged = true;
             this.state.stack = items.map((item)=>{
                 const lora = this.installedLora(item.name) || manualLora(item.name, item.title, item.sourceUrl);
                 return {
@@ -11474,6 +11481,7 @@ are removed when CSS is applied.</pre>
             this.renderStack();
         }
         if (!checkpointLoaded) {
+            if (profileChanged) this.scheduleStudioProfileSync();
             if (this.state.models.length) {
                 this.setRunStatus(`“${binding.checkpoint}” from ${folder.name} is not available on this SwarmUI connection.`, true);
             }
@@ -11487,6 +11495,7 @@ are removed when CSS is applied.</pre>
         if (loadedParts.length) {
             this.setRunStatus(`Loaded ${loadedParts.join(" and ")} from ${folder.name} visuals.`);
         }
+        if (profileChanged) this.scheduleStudioProfileSync();
         return loadedParts.length > 0;
     }
     saveVisualProfile() {

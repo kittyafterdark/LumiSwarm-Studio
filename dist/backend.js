@@ -5304,38 +5304,91 @@ if (typeof spindle.registerMacroInterceptor === "function") {
         if (!chatId || !scene || chatId.startsWith("_freeform_")) throw new Error("Studio visual requests need a roleplay chat and a fresh scene.");
         const chat = await spindle.chats.get(chatId, ctx.userId);
         if (!chat || asString(chat.character_id) !== asString(request.characterId)) throw new Error("The Studio visual request's character changed.");
-        const includeCharacter = request.purpose === "scene" || request.purpose === "character";
-        const includePersona = request.purpose === "persona";
-        const layer = await applyCharacterLayer(chatId, scene, includeCharacter, includePersona, await loadTagAutomationConfig(ctx.userId), "", ctx.userId, false);
         const profile = await loadStudioGenerationProfile(ctx.userId);
         const connection = await connectionForTaggedProfile(profile, ctx.userId);
+        const profileInput = asRecord(profile?.input);
+        const input = {
+            ...profileInput,
+            connection_id: connection.id,
+            model: asString(profileInput.model) || connection.model,
+            parameters: {
+                ...asRecord(connection.default_parameters),
+                ...asRecord(profileInput.parameters)
+            }
+        };
         const render = await loadRenderSettings(ctx.userId);
-        const recipe = resolveGenerationConfig({
+        const parameters = asRecord(input.parameters);
+        Object.assign(parameters, recipeParameters(resolveGenerationConfig({
+            provider: connection.default_parameters,
             studioDefaults: render.defaults,
-            job: layer.generationRecipe
-        });
-        const parameters = recipeParameters(recipe);
+            liveProfile: profileInput.parameters
+        })));
+        if (!asString(profileInput.model) && render.defaults?.checkpoint) input.model = render.defaults.checkpoint;
+        removeTaggedPresetOverride(parameters);
+        parameters.seed = -1;
+        for (const key of [
+            "loras",
+            "loraWeights",
+            "loraweights",
+            "loratencweights"
+        ])delete parameters[key];
+        parameters.loras = [];
+        parameters.loraWeights = [];
+        const includeCharacter = request.purpose === "scene" || request.purpose === "character";
+        const includePersona = request.purpose === "persona";
+        const presetPrompt = applyStudioPresetLayer(scene, profile);
+        const layer = await applyCharacterLayer(chatId, presetPrompt, includeCharacter, includePersona, await loadTagAutomationConfig(ctx.userId), "", ctx.userId);
         if (layer.preferredAspect) applyAspectToParameters(parameters, layer.preferredAspect);
-        const stack = layer.stack.filter((item)=>item.enabled !== false);
-        parameters.loras = stack.map((item)=>item.name);
-        parameters.loraWeights = stack.map((item)=>item.weight);
-        parameters.loratencweights = stack.map((item)=>item.weight);
+        Object.assign(parameters, recipeParameters(layer.generationRecipe));
+        if (layer.checkpoint) input.model = layer.checkpoint;
         if (layer.referenceImageId || layer.referenceImageUrl) {
             const reference = await resolveVisualReferenceImage(layer.referenceImageId, layer.referenceImageUrl, ctx.userId);
             if (!reference) throw new Error("The bound Studio reference image is unavailable.");
             parameters.referenceImages = [
                 reference
             ];
-            parameters.denoise = .6;
+            if (!Number.isFinite(Number(parameters.denoise))) parameters.denoise = .6;
         }
-        const input = asRecord(profile?.input);
+        const profileNegative = asString(profileInput.negativePrompt).trim();
+        const visualNegative = layer.negativePrompt.trim();
+        input.prompt = layer.prompt;
+        input.negativePrompt = visualNegative && !profileNegative.toLowerCase().includes(visualNegative.toLowerCase()) ? [
+            visualNegative,
+            profileNegative
+        ].filter(Boolean).join(", ") : profileNegative;
+        if (layer.stack.length || layer.excludedLoras.length) {
+            const existingNames = stringList(parameters.loras, 128);
+            const existingWeights = Array.isArray(parameters.loraWeights) ? parameters.loraWeights.map(Number) : [];
+            const excluded = new Set(layer.excludedLoras.map((name)=>name.toLowerCase()));
+            const merged = new Map();
+            for (const item of layer.stack.filter((item)=>item.enabled !== false)){
+                merged.set(item.name.toLowerCase(), {
+                    name: item.name,
+                    weight: item.weight
+                });
+            }
+            existingNames.forEach((name, index)=>{
+                if (excluded.has(name.toLowerCase())) return;
+                merged.set(name.toLowerCase(), {
+                    name,
+                    weight: Number.isFinite(existingWeights[index]) ? existingWeights[index] : 1
+                });
+            });
+            parameters.loras = [
+                ...merged.values()
+            ].map((item)=>item.name);
+            parameters.loraWeights = [
+                ...merged.values()
+            ].map((item)=>item.weight);
+        }
+        input.parameters = parameters;
         return encodeURIComponent(JSON.stringify({
             version: 1,
             chatId,
             characterId: asString(chat.character_id),
-            prompt: layer.prompt,
-            negativePrompt: layer.negativePrompt,
-            model: layer.checkpoint || render.defaults?.checkpoint || asString(input.model) || connection.model,
+            prompt: asString(input.prompt),
+            negativePrompt: asString(input.negativePrompt),
+            model: asString(input.model),
             connectionId: connection.id,
             parameters
         }));

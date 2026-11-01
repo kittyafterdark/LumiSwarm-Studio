@@ -2,7 +2,7 @@
 
 Pocket and Studio must both include this integration. No Lumiverse core patch is required.
 
-Studio exposes a context-aware macro interceptor for `{{swarm_visual_request::<encoded request>}}`. The request is URI-encoded JSON containing `chatId`, `characterId`, `scene`, and `purpose`. Pocket resolves it through `spindle.macros.resolve` with the authenticated user and matching chat context, using `commit: false`.
+Studio exposes a context-aware macro interceptor for `{{swarm_visual_request::<encoded request>}}`. The request is URI-encoded JSON containing `chatId`, `characterId`, `scene`, `purpose`, and optional `includeCharacterPositive`. Pocket resolves it through `spindle.macros.resolve` with the authenticated user and matching chat context, using `commit: false`. When `includeCharacterPositive` is supplied, it overrides Studio's character-positive auto-print behavior for that request only and never mutates Studio's saved automation setting.
 
 The version 1 response is URI-encoded JSON containing `version`, `chatId`, `characterId`, `prompt`, `negativePrompt`, `connectionId`, `model`, and `parameters`. Studio resolves the current character binding, active or scene-matched look, render style, generation recipe, reference conditioning, and LoRA stack at request time. It never copies the last workspace prompt, prompt preset tokens, or workspace LoRA selection. Bound model/recipe choices inherit Studio defaults and its current connection where unspecified.
 

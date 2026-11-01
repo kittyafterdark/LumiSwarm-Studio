@@ -50,6 +50,13 @@
 - Inspector reuse and init-image actions resolve exact embedded generation
   metadata using the verified Swarm output path before applying parameters.
 
+### Fixed
+
+- Programmatic LoRA-stack changes now resync Studio's saved generation profile.
+  Character visual hydration, saved-stack loading, imports, clear-stack, and
+  reused generation details can no longer leave the backend profile carrying a
+  stale LoRA list that gets merged with the freshly resolved character stack.
+
 ## 1.0.15
 
 ### Added

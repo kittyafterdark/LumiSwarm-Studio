@@ -1,0 +1,17 @@
+{
+  "patch": "Pocket authoritative Studio visual bridge",
+  "appliedAt": "2026-11-01T13:56:03.557Z",
+  "backupDir": "patches\\pocket-visual-bridge-backup-2026-11-01_13-56-03-540",
+  "files": {
+    "src/backend.ts": {
+      "before": "864e703374f6cade2ba7750c95e209b4532a519241de313eb8d8d70d1dbe50ad",
+      "after": "a9f74e91e54e0d79c5ad7626948dc0eb24b4c4f4d9fd578a3cec213a694932f9",
+      "eol": "CRLF"
+    },
+    "spindle.json": {
+      "before": "de61a3d82daacc621ac6d48e3c73524d8eb81ab104c8cec29d08445a725e7ae9",
+      "after": "de61a3d82daacc621ac6d48e3c73524d8eb81ab104c8cec29d08445a725e7ae9",
+      "eol": "LF"
+    }
+  }
+}
