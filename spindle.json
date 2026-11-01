@@ -1,5 +1,5 @@
 {
-  "version": "1.0.16",
+  "version": "1.0.15",
   "name": "Swarm Studio",
   "identifier": "swarm_studio",
   "author": "kittyafterdark",
@@ -12,10 +12,10 @@
     "images",
     "chats",
     "characters",
-    "world_books",
     "personas",
     "chat_mutation",
     "interceptor",
+    "macro_interceptor",
     "generation",
     "ui_panels",
     "app_manipulation"

@@ -1,0 +1,1 @@
+de61a3d82daacc621ac6d48e3c73524d8eb81ab104c8cec29d08445a725e7ae9  spindle.json
