@@ -506,6 +506,7 @@ try {
       const content=source.replace(fullMatch,saved.imageUrl)
       for(const status of ['queued','generating','ready'])controller.onMessage({type:'tagged_image_job',data:{...saved,status,inserted:false}})
       controller.onMessage({type:'tagged_image_job',data:saved})
+      host.innerHTML=content // Canonical host MESSAGE_EDITED projection.
       controller.onMessage({type:'tagged_message_reconciled',data:{jobId:saved.id,chatId:'chat',messageId:'url-message',content}})
       await new Promise(resolve=>setTimeout(resolve,0))
       controller.onMessage({type:'tagged_image_jobs_result',data:[saved]})
@@ -532,6 +533,66 @@ try {
     await page.evaluate(()=>{urlContractController.destroy();document.querySelector('#url-contract-host').remove()})
   }
   console.log('Desktop/mobile URL contract: authored layout, named image/link, streaming deduplication, reconciliation and remount without Studio framing: ok')
+
+  // Selection changes use the public host event/source contracts. Chromium
+  // exercises the real sandbox controls and native touch cancellation.
+  for (const width of [390,1440]) {
+    await page.setViewportSize({width,height:844})
+    await page.evaluate(async()=>{
+      const {TaggedImageController,defaultStudioBehavior}=await import('/frontend.js')
+      const host=document.createElement('section');host.id='strip-sweep';host.style.cssText='width:100%;max-width:600px;min-height:180px';document.body.prepend(host);window.scrollTo(0,0)
+      window.stripSweep={menus:0,requests:[],handlers:new Map(),mounts:0,chatId:'chat'}
+      const tag='<swarm-image request="generate" output="url" slot="quiet">harbor</swarm-image>'
+      stripSweep.message={id:'sweep-message',chat_id:'chat',swipe_id:0,swipes:[tag,'Alternative without image'],content:tag}
+      stripSweep.job={id:'sweep-job',chatId:'chat',messageId:'sweep-message',slot:'quiet',swipeId:0,tagFingerprint:'1qjubnl',alt:'Harbor',status:'requested',output:'url',inserted:false,error:'',clientJobId:''}
+      const ctx={getActiveChat:()=>({chatId:stripSweep.chatId}),events:{on(name,handler){stripSweep.handlers.set(name,handler);return()=>stripSweep.handlers.delete(name)}},sendToBackend:message=>stripSweep.requests.push(message),ui:{async showContextMenu(){stripSweep.menus++;return {}}},messages:{getRecent:()=>[stripSweep.message],getContent:()=>stripSweep.message.content,renderWidget({widgetId,html},handler){
+        stripSweep.mounts++
+        const frame=document.createElement('iframe');frame.title='Strip sweep';frame.dataset.widget=widgetId;frame.style.cssText='width:100%;height:170px;border:0'
+        frame.srcdoc='<script>window.spindleSandbox={postMessage:message=>parent.postMessage({stripSweepAction:message},"*")}</script>'+html
+        const listener=event=>{if(event.source===frame.contentWindow && event.data?.stripSweepAction)handler(event.data.stripSweepAction)}
+        window.addEventListener('message',listener);host.append(frame)
+        return()=>{window.removeEventListener('message',listener);frame.remove()}
+      }}}
+      stripSweep.controller=new TaggedImageController(ctx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+      stripSweep.controller.onMessage({type:'tagged_image_job',data:{...stripSweep.job}})
+    })
+    const frame=page.frameLocator('iframe[title="Strip sweep"]')
+    const menu=frame.getByRole('button',{name:'Illustration actions for Harbor',exact:true})
+    await menu.waitFor()
+    await menu.focus()
+    await page.evaluate(()=>stripSweep.controller.onMessage({type:'tagged_image_jobs_result',data:[{...stripSweep.job}]}))
+    assert.equal(await menu.evaluate(button=>button===document.activeElement),true,'Repeated snapshots retain keyboard focus in the same frame')
+    assert.equal(await page.evaluate(()=>stripSweep.mounts),1)
+    const copyBounds=await frame.locator('.copy').boundingBox()
+    const cdp=await page.context().newCDPSession(page)
+    await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2})
+    const point={x:Math.round(copyBounds.x+10),y:Math.round(copyBounds.y+10)}
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point]})
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]})
+    await page.waitForTimeout(580)
+    assert.equal(await page.evaluate(()=>stripSweep.menus),0,'Native touch cancellation cannot fire a delayed menu')
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point]})
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:point.x+65,y:point.y+2}]})
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]})
+    await page.waitForTimeout(580)
+    assert.equal(await page.evaluate(()=>stripSweep.menus),0,'A horizontal drag does not become a long press')
+    await cdp.detach()
+    await menu.focus();await page.keyboard.press('Enter')
+    await page.waitForFunction(()=>stripSweep.menus===1)
+    await page.evaluate(()=>{
+      const s=stripSweep;s.message={...s.message,swipe_id:1,content:s.message.swipes[1]};s.handlers.get('MESSAGE_SWIPED')({chatId:'chat',message:s.message})
+      s.controller.onMessage({type:'tagged_image_job',data:{...s.job,status:'failed',error:'Late error on swipe zero'}})
+    })
+    assert.equal(await page.locator('iframe[title="Strip sweep"]').count(),0,'Swipe-away and late results leave the selected alternative clear')
+    await page.evaluate(()=>{const s=stripSweep;s.message={...s.message,swipe_id:0,content:s.message.swipes[0]};s.handlers.get('MESSAGE_SWIPED')({chatId:'chat',message:s.message})})
+    const retry=page.frameLocator('iframe[title="Strip sweep"]').getByRole('button',{name:'Retry',exact:true})
+    await retry.focus();await page.keyboard.press('Enter')
+    await page.waitForFunction(()=>stripSweep.requests.some(message=>message.type==='retry_tagged_job' && message.jobId==='sweep-job'))
+    assert.equal(await page.locator('iframe[title="Strip sweep"]').count(),0,'Keyboard retry retires its strip immediately')
+    await page.evaluate(()=>{stripSweep.controller.destroy();document.querySelector('#strip-sweep').remove()})
+    assert.equal(await page.evaluate(()=>stripSweep.handlers.size),0)
+  }
+  console.log('Desktop/mobile strip sweep: native touch cancel/drag, preserved frame focus, named keyboard actions, swipe-away/return, late failure and unload: ok')
   assert.deepEqual(errors, [])
   console.log('Chromium: 60 delayed decoded previews, zero card disconnects, zero library renders, stable geometry, opaque folders: ok')
 } finally {

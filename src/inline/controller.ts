@@ -1,4 +1,5 @@
 interface TaggedImageJobView {
+  swipeId?: number
   output?: "inline" | "url"
   id: string
   key: string
@@ -54,7 +55,14 @@ class TaggedImageController {
   private readonly settledAttachmentRequests = new Set<string>()
   private readonly settledMessageTargets = new Map<string, string>()
   private readonly cleanups = new Map<string, () => void>()
-  private readonly reconciliationQueues = new Map<string, Promise<void>>()
+  private readonly removedJobs = new Set<string>()
+  private readonly jobRequests = new Map<string, string>()
+  private readonly retiredAttempts = new Map<string, Set<string>>()
+  private readonly widgetHtml = new Map<string, string>()
+  private readonly selectedMessages = new Map<string, any>()
+  private sourceSnapshot: any[] | null = null
+  private readonly selectionCleanups: Array<() => void> = []
+  private selectedChatId: string | null | undefined
   private recoveredObserver: MutationObserver | null = null
   private readonly recoveredJobs = new Set<string>()
   private destroyed = false
@@ -161,6 +169,12 @@ class TaggedImageController {
     window.addEventListener("click", this.handleInlineClick, true)
     window.addEventListener("contextmenu", this.handleInlineContextMenu, true)
     window.addEventListener("keydown", this.handleInlineKeyDown, true)
+    for (const name of ["MESSAGE_SWIPED", "SWIPE_EDITED", "MESSAGE_EDITED", "MESSAGE_DELETED", "CHAT_SWITCHED", "CHARACTER_MESSAGE_RENDERED"]) {
+      try {
+        const cleanup = this.ctx.events?.on?.(name, (payload: any) => this.onSelectionEvent(name, payload))
+        if (typeof cleanup === "function") this.selectionCleanups.push(cleanup)
+      } catch { /* Older hosts may not expose all selection events. */ }
+    }
   }
 
   setBehavior(behavior: StudioBehavior): void {
@@ -169,12 +183,19 @@ class TaggedImageController {
 
   handleTag(payload: any): void {
     if (this.destroyed || !payload?.chatId || !payload?.messageId || payload?.isUser) return
+    this.sourceSnapshot = null
     const slot = String(payload?.attrs?.slot || `image-${widgetKeyHash(String(payload.fullMatch || payload.content)).slice(0, 6)}`)
       .replace(/[^a-z0-9_-]+/gi, "-")
       .slice(0, 80)
-    const lookup = this.lookupKey(String(payload.chatId), String(payload.messageId), slot)
-    this.tagPayloads.set(lookup, { ...payload, slot })
     const fingerprint = widgetKeyHash(String(payload.fullMatch || payload.content || ""))
+    const selected = this.selectedMessage(String(payload.chatId), String(payload.messageId))
+    const selectedKnown = [...this.jobs.values()].find(job => job.chatId === String(payload.chatId)
+      && job.messageId === String(payload.messageId) && job.tagFingerprint === fingerprint && this.isSelected(job))
+    if (payload.isStreaming === true && selectedKnown?.inserted) return
+    const swipeId = payload.isStreaming !== true && (selectedKnown || String(selected?.content || "").includes(String(payload.fullMatch)))
+      ? this.swipeIndex(selected?.swipe_id) : undefined
+    const lookup = this.lookupKey(String(payload.chatId), String(payload.messageId), slot, swipeId)
+    this.tagPayloads.set(lookup, { ...payload, slot, swipeId })
     // The interceptor sees the same tag while the assistant is streaming and
     // again after Lumiverse commits the finished message. Generation may beat
     // that commit, so treat the non-streaming pass as the attachment boundary.
@@ -182,33 +203,39 @@ class TaggedImageController {
       this.settledTagLookups.add(lookup)
       const content = String(payload.content || "").trim()
       const existing = [...this.jobs.values()].find((job) =>
-        this.lookupKey(job.chatId, job.messageId, job.slot) === lookup,
+        this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId) === lookup
+        && (job.tagFingerprint === fingerprint || job.prompt === content),
       ) || [...this.jobs.values()].find((job) =>
         job.chatId === String(payload.chatId)
         && job.slot === slot
+        && !this.selectedMessage(job.chatId, job.messageId)?.content
+        && (swipeId === undefined || job.swipeId === undefined || swipeId === job.swipeId)
         && (job.tagFingerprint === fingerprint || job.prompt === content)
         && !job.inserted,
       )
       if (existing) {
         this.settledMessageTargets.set(existing.id, String(payload.messageId))
+        if (swipeId !== undefined && existing.swipeId === undefined) existing.swipeId = swipeId
         this.retrySettledAttachment(existing)
       }
     }
     if (this.tagFingerprints.get(lookup) === fingerprint) return
     this.tagFingerprints.set(lookup, fingerprint)
     const known = [...this.jobs.values()].find((job) =>
-      this.lookupKey(job.chatId, job.messageId, job.slot) === lookup
+      this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId) === lookup
       && job.tagFingerprint === fingerprint,
     )
     if (known) return
     for (const [id, existing] of this.jobs) {
-      if (this.lookupKey(existing.chatId, existing.messageId, existing.slot) !== lookup) continue
+      if (this.lookupKey(existing.chatId, existing.messageId, existing.slot, existing.swipeId) !== lookup) continue
       this.remove(existing)
       this.jobs.delete(id)
     }
     const optimistic: TaggedImageJobView = {
       id: `pending-${widgetKeyHash(`${lookup}:${fingerprint}`)}`,
       key: lookup,
+      swipeId,
+      tagFingerprint: fingerprint,
       chatId: String(payload.chatId),
       messageId: String(payload.messageId),
       slot,
@@ -227,12 +254,13 @@ class TaggedImageController {
       error: "",
     }
     this.jobs.set(optimistic.id, optimistic)
-    this.ctx.sendToBackend({
+    this.sendJobRequest(optimistic, {
       type: "tag_generate",
       requestId: createRequestId(),
       chatId: payload.chatId,
       messageId: payload.messageId,
       fullMatch: payload.fullMatch,
+      swipeId,
       attrs: payload.attrs,
       content: payload.content,
       isStreaming: payload.isStreaming === true,
@@ -241,6 +269,18 @@ class TaggedImageController {
 
   onMessage(payload: any): void {
     if (this.destroyed) return
+    this.sourceSnapshot = null
+    if (payload?.type === "studio_error" && this.jobRequests.has(String(payload.requestId))) {
+      const requestId = String(payload.requestId)
+      const job = this.jobs.get(this.jobRequests.get(requestId)!)
+      this.jobRequests.delete(requestId)
+      if (job && !this.removedJobs.has(job.id)) {
+        job.status = "failed"
+        job.error = String(payload.error || "The image request could not be started.")
+        this.refreshJobWidget(job)
+      }
+      return
+    }
     if (payload?.type === "tagged_image_removed") {
       this.reconcileMessage({ ...payload.data, removed: true })
       return
@@ -253,38 +293,42 @@ class TaggedImageController {
       const jobs = Array.isArray(payload.data) ? payload.data as TaggedImageJobView[] : []
       const savedIds = new Set(jobs.map(job => job.id))
       for (const [id, known] of this.jobs) {
-        if (!id.startsWith("pending-") && !savedIds.has(id)) { this.remove(known); this.jobs.delete(id) }
+        const predatesSnapshot = typeof payload.snapshotAt !== "number" || Number(known.updatedAt || 0) < payload.snapshotAt
+        if (!id.startsWith("pending-") && !savedIds.has(id) && predatesSnapshot) {
+          this.remove(known); this.jobs.delete(id); this.acknowledgeJob(id)
+        }
       }
       for (const incoming of jobs) {
-        if (!incoming?.id || !incoming?.messageId) continue
+        if (!incoming?.id || !incoming?.messageId || this.removedJobs.has(incoming.id)) continue
         const job = this.latestJobState(incoming)
         for (const [id, candidate] of this.jobs) {
-          if (id.startsWith("pending-") && this.lookupKey(candidate.chatId, candidate.messageId, candidate.slot) === this.lookupKey(job.chatId, job.messageId, job.slot)) {
-            this.remove(candidate); this.jobs.delete(id)
+          if (id.startsWith("pending-") && candidate.chatId === job.chatId && candidate.messageId === job.messageId
+            && candidate.slot === job.slot && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId)
+            && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint)) {
+            this.remove(candidate); this.jobs.delete(id); this.acknowledgeJob(id)
           }
         }
         this.jobs.set(job.id, job)
+        this.acknowledgeJob(job.id)
         this.settledAttachmentRequests.delete(job.id)
         this.retrySettledAttachment(job)
-        if (!job.inserted && !this.inlineFigureForJob(job.id) && this.shouldRenderPlaceholder(job)) {
-          this.render(job)
-        } else if (job.inserted && job.status === "ready" && job.imageUrl && !this.inlineFigureForJob(job.id)) {
-          this.renderRecoveredImage(job)
-        } else {
-          this.remove(job)
-        }
+        this.refreshJobWidget(job)
       }
       return
     }
     if (payload?.type === "tagged_image_job") {
       const job = payload.data as TaggedImageJobView
-      if (!job?.id || !job?.messageId) return
+      if (!job?.id || !job?.messageId || this.removedJobs.has(job.id)) return
       for (const [id, candidate] of this.jobs) {
-        if (id.startsWith("pending-") && this.lookupKey(candidate.chatId, candidate.messageId, candidate.slot) === this.lookupKey(job.chatId, job.messageId, job.slot)) {
+        if (id.startsWith("pending-") && candidate.chatId === job.chatId && candidate.messageId === job.messageId
+            && candidate.slot === job.slot && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId)
+            && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint)) {
           this.remove(candidate)
           this.jobs.delete(id)
+          this.acknowledgeJob(id)
         }
       }
+      this.acknowledgeJob(job.id)
       const previous = this.jobs.get(job.id)
       if (Number(previous?.updatedAt || 0) > Number(job.updatedAt || 0)) return
       const next = { ...previous, ...this.latestJobState(job) }
@@ -295,17 +339,7 @@ class TaggedImageController {
       } else {
         this.retrySettledAttachment(next)
       }
-      const inlineFigure = this.inlineFigureForJob(next.id)
-      if (inlineFigure) {
-        inlineFigure.dataset.state = next.inserted ? "ready" : next.status
-        this.remove(next)
-      } else if (next.inserted && next.status === "ready" && next.imageUrl) {
-        this.renderRecoveredImage(next)
-      } else if (this.shouldRenderPlaceholder(next)) {
-        this.render(next)
-      } else {
-        this.remove(next)
-      }
+      this.refreshJobWidget(next)
       return
     }
   }
@@ -326,13 +360,19 @@ class TaggedImageController {
     this.settledTagLookups.clear()
     this.settledAttachmentRequests.clear()
     this.settledMessageTargets.clear()
-    this.reconciliationQueues.clear()
+    for (const cleanup of this.selectionCleanups) cleanup()
+    this.selectionCleanups.length = 0
+    this.jobRequests.clear()
+    this.widgetHtml.clear()
+    this.selectedMessages.clear()
+    this.removedJobs.clear()
+    this.retiredAttempts.clear()
   }
 
   private retrySettledAttachment(job: TaggedImageJobView): void {
     if (job.status !== "ready" || job.inserted || !job.id) return
     const messageId = this.settledMessageTargets.get(job.id) || job.messageId
-    const lookup = this.lookupKey(job.chatId, messageId, job.slot)
+    const lookup = this.lookupKey(job.chatId, messageId, job.slot, job.swipeId)
     if (!this.settledTagLookups.has(lookup) || this.settledAttachmentRequests.has(job.id)) return
     this.settledAttachmentRequests.add(job.id)
     this.ctx.sendToBackend({
@@ -340,15 +380,16 @@ class TaggedImageController {
       requestId: createRequestId(),
       jobId: job.id,
       messageId,
+      swipeId: job.swipeId,
     })
   }
 
-  private lookupKey(chatId: string, messageId: string, slot: string): string {
-    return `${chatId}:${messageId}:${slot}`
+  private lookupKey(chatId: string, messageId: string, slot: string, swipeId?: number): string {
+    return `${chatId}:${messageId}:${slot}:${swipeId ?? ""}`
   }
 
   private widgetId(job: TaggedImageJobView): string {
-    return `swarm-studio-image-${widgetKeyHash(this.lookupKey(job.chatId, job.messageId, job.slot))}`
+    return `swarm-studio-image-${widgetKeyHash(`${job.chatId}:${job.messageId}:${job.id}`)}`
   }
 
   private inlineFigureForJob(jobId: string): HTMLElement | null {
@@ -389,24 +430,22 @@ class TaggedImageController {
   private renderRecoveredImage(job: TaggedImageJobView): void {
     // A public message widget recovers the saved bitmap without writing stale
     // message content back to the server or starting another generation.
-    this.remove(job)
-    if (job.output === "url") return
+    if (job.output === "url" || !this.isSelected(job)) { this.remove(job); return }
     const widgetId = this.widgetId(job)
     let url: URL
     try { url = new URL(job.imageUrl, window.location.href) } catch { return }
     if (!["http:", "https:"].includes(url.protocol)) return
     const html = `<style>:root{color-scheme:dark;font-family:system-ui,sans-serif}body{margin:0;background:transparent;color:var(--lumiverse-text,#eee)}button{min-height:40px;margin-top:8px;padding:8px 12px;border:1px solid var(--lumiverse-border,#454550);border-radius:8px;background:var(--lumiverse-fill-subtle,#191820);color:inherit;font:inherit}</style><div><img src="${widgetEscape(url.href)}" alt="${widgetEscape(job.alt || "Generated illustration")}" style="display:block;max-width:100%;height:auto;border-radius:8px"><button type="button" id="image-options">Image options</button></div><script>document.getElementById('image-options').addEventListener('click',()=>window.spindleSandbox.postMessage({type:'menu'}))</script>`
-    this.cleanups.set(widgetId, this.ctx.messages.renderWidget({ messageId: job.messageId, widgetId, html }, () => { void this.showJobMenu(job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2)) }))
-    this.watchNativeImage(job)
+    this.upsertWidget(job, html, () => { void this.showJobMenu(this.jobs.get(job.id) || job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2)) })
   }
 
   private watchNativeImage(job: TaggedImageJobView): void {
     this.recoveredJobs.add(job.id)
     if (!this.recoveredObserver) {
       this.recoveredObserver = new MutationObserver(() => {
-        for (const id of this.recoveredJobs) {
+        for (const id of [...this.recoveredJobs]) {
           const current = this.jobs.get(id)
-          if (current && this.inlineFigureForJob(id)) this.remove(current)
+          if (current && (this.inlineFigureForJob(id) || !this.isSelected(current))) this.remove(current)
         }
       })
       this.recoveredObserver.observe(document.body, { childList: true, subtree: true })
@@ -419,13 +458,20 @@ class TaggedImageController {
     const id = this.widgetId(job)
     this.cleanups.get(id)?.()
     this.cleanups.delete(id)
+    this.widgetHtml.delete(id)
   }
 
   private latestJobState(incoming: TaggedImageJobView): TaggedImageJobView {
     const known = this.jobs.get(incoming.id)
     if (!known) return incoming
     if (Number(known.updatedAt || 0) > Number(incoming.updatedAt || 0)) return known
+    if (incoming.clientJobId && this.retiredAttempts.get(incoming.id)?.has(incoming.clientJobId)) return known
     const sameAttempt = !incoming.clientJobId || incoming.clientJobId === known.clientJobId
+    if (!sameAttempt && known.clientJobId) {
+      const retired = this.retiredAttempts.get(incoming.id) || new Set<string>()
+      retired.add(known.clientJobId)
+      this.retiredAttempts.set(incoming.id, retired)
+    }
     if (sameAttempt && ((known.inserted && !incoming.inserted)
       || (known.status === "ready" && ["requested", "queued", "generating"].includes(incoming.status)))) return known
     return incoming
@@ -441,59 +487,117 @@ class TaggedImageController {
 
   private reconcileMessage(value: any): void {
     const jobId = String(value?.jobId || "")
-    const chatId = String(value?.chatId || "")
-    const messageId = String(value?.messageId || "")
-    const hasContent = typeof value?.content === "string"
-    const content = hasContent ? value.content : ""
-    const removed = value?.removed === true
-    if (!jobId || !chatId || !messageId || !hasContent) return
+    const job = this.jobs.get(jobId)
+    if (!jobId || this.destroyed) return
+    if (value?.removed === true) {
+      this.removedJobs.add(jobId)
+      this.acknowledgeJob(jobId)
+      if (job) this.remove(job)
+      this.jobs.delete(jobId)
+      this.settledAttachmentRequests.delete(jobId)
+      this.settledMessageTargets.delete(jobId)
+      return
+    }
+    if (!job || this.removedJobs.has(jobId)) return
+    if (value?.clientJobId && value.clientJobId !== job.clientJobId) return
+    // The backend has already committed the mutation. Lumiverse's native
+    // MESSAGE_EDITED event refreshes the view; re-saving this snapshot here
+    // could overwrite a newer swipe or a user edit.
+    job.inserted = true
+    job.error = ""
+    this.refreshJobWidget(job)
+  }
 
-    const key = `${chatId}:${messageId}`
-    const previous = this.reconciliationQueues.get(key) || Promise.resolve()
-    const task = previous.catch(() => {}).then(async () => {
-      if (this.destroyed) return
-      const job = this.jobs.get(jobId)
-      try {
-        if (typeof this.ctx.chats?.updateMessage !== "function") {
-          throw new Error("This Lumiverse build does not expose live message refresh.")
-        }
-        await this.ctx.chats.updateMessage(chatId, messageId, { content })
-        if (this.destroyed) return
-        if (removed) {
-          if (job) this.remove(job)
-          this.jobs.delete(jobId)
-          this.settledAttachmentRequests.delete(jobId)
-          this.settledMessageTargets.delete(jobId)
-          return
-        }
-        if (job) {
-          job.inserted = true
-          job.error = ""
-          this.remove(job)
-        }
-      } catch (error) {
-        if (this.destroyed || !job) return
-        if (removed) return
-        job.inserted = false
-        job.error = error instanceof Error
-          ? `The image is saved, but this chat view could not refresh: ${error.message}`
-          : "The image is saved, but this chat view could not refresh."
-        this.render(job)
-      }
-    })
-    this.reconciliationQueues.set(key, task)
-    void task.finally(() => {
-      if (this.reconciliationQueues.get(key) === task) this.reconciliationQueues.delete(key)
-    }).catch(() => {})
+  private acknowledgeJob(jobId: string): void {
+    for (const [requestId, id] of this.jobRequests) if (id === jobId) this.jobRequests.delete(requestId)
+  }
+
+  private sendJobRequest(job: TaggedImageJobView, payload: any): void {
+    const requestId = String(payload.requestId || createRequestId())
+    this.jobRequests.set(requestId, job.id)
+    try { this.ctx.sendToBackend({ ...payload, requestId }) }
+    catch (error) {
+      this.onMessage({ type: "studio_error", requestId, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  private swipeIndex(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined
+  }
+
+  private selectedMessage(chatId: string, messageId: string): any {
+    const cached = this.selectedMessages.get(`${chatId}:${messageId}`)
+    if (cached?.content === null) return cached
+    if (this.sourceSnapshot === null) {
+      const messages = this.ctx.messages?.getRecent?.(200)
+      this.sourceSnapshot = Array.isArray(messages) ? messages : []
+    }
+    const message = this.sourceSnapshot.find((item: any) => item.id === messageId && (!item.chat_id || item.chat_id === chatId))
+    if (message) return message
+    if (typeof this.ctx.messages?.getContent === "function") return { content: this.ctx.messages.getContent(messageId) }
+    return cached
+  }
+
+  private isSelected(job: TaggedImageJobView): boolean {
+    if (this.destroyed || this.removedJobs.has(job.id)) return false
+    const active = this.selectedChatId !== undefined ? this.selectedChatId : this.ctx.getActiveChat?.()?.chatId
+    if (active !== undefined && active !== job.chatId) return false
+    const message = this.selectedMessage(job.chatId, job.messageId)
+    if (!message) return true // Compatibility with hosts without public source reads.
+    if (job.swipeId !== undefined && this.swipeIndex(message.swipe_id) !== undefined && job.swipeId !== message.swipe_id) return false
+    const source = typeof message.content === "string" ? message.content : ""
+    if (source.includes(`data-swarm-studio-job-id="${job.id}"`)) return true
+    if (job.output === "url" && job.inserted && job.imageUrl && source.includes(job.imageUrl)) return true
+    for (const match of source.matchAll(/<swarm-image\b[^>]*>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi)) {
+      if (job.tagFingerprint && widgetKeyHash(match[0]) === job.tagFingerprint) return true
+    }
+    return false
+  }
+
+  private onSelectionEvent(name: string, payload: any): void {
+    if (this.destroyed) return
+    this.sourceSnapshot = null
+    if (name === "CHAT_SWITCHED") {
+      this.selectedChatId = typeof payload?.chatId === "string" ? payload.chatId : null
+      this.selectedMessages.clear()
+    }
+    const message = payload?.message
+    const chatId = String(payload?.chatId || message?.chat_id || "")
+    const messageId = String(message?.id || payload?.messageId || "")
+    if (chatId && messageId) {
+      if (name === "MESSAGE_DELETED") this.selectedMessages.set(`${chatId}:${messageId}`, { content: null })
+      else if (message && typeof message.content === "string") this.selectedMessages.set(`${chatId}:${messageId}`, message)
+      else this.selectedMessages.delete(`${chatId}:${messageId}`)
+    }
+    for (const job of this.jobs.values()) this.refreshJobWidget(job)
+  }
+
+  private refreshJobWidget(job: TaggedImageJobView): void {
+    if (!this.isSelected(job)) { this.remove(job); return }
+    const figure = this.inlineFigureForJob(job.id)
+    if (figure) { figure.dataset.state = job.inserted ? "ready" : job.status; this.remove(job) }
+    else if (job.inserted && job.status === "ready" && job.imageUrl) this.renderRecoveredImage(job)
+    else if (this.shouldRenderPlaceholder(job)) this.render(job)
+    else this.remove(job)
+  }
+
+  private upsertWidget(job: TaggedImageJobView, html: string, handler: (message: any) => void): void {
+    const widgetId = this.widgetId(job)
+    if (this.widgetHtml.get(widgetId) === html && this.cleanups.has(widgetId)) return
+    this.cleanups.get(widgetId)?.()
+    this.widgetHtml.set(widgetId, html)
+    this.cleanups.set(widgetId, this.ctx.messages.renderWidget({ messageId: job.messageId, widgetId, html }, (message: any) => {
+      if (!this.destroyed && !this.removedJobs.has(job.id) && this.isSelected(this.jobs.get(job.id) || job)) handler(message)
+    }))
+    this.watchNativeImage(job)
   }
 
   private render(job: TaggedImageJobView): void {
-    if (this.inlineFigureForJob(job.id) || !this.shouldRenderPlaceholder(job)) {
+    if (!this.isSelected(job) || this.inlineFigureForJob(job.id) || !this.shouldRenderPlaceholder(job)) {
       this.remove(job)
       return
     }
     const widgetId = this.widgetId(job)
-    this.cleanups.get(widgetId)?.()
     const labels: Record<TaggedImageJobView["status"], string> = {
       requested: "Illustration requested",
       queued: "Queued for SwarmUI",
@@ -531,36 +635,44 @@ class TaggedImageController {
         @media (max-width: 520px) { .card { grid-template-columns: auto minmax(0, 1fr); gap: 9px 11px; min-height: 112px; padding: 11px; } .emblem { width: 38px; height: 38px; grid-row: 1 / span 2; } .actions { grid-column: 2; justify-content: flex-start; } button { min-height: 29px; } }
       </style>
       <div class="card" id="card">
-        <div class="emblem">${FRAME_WALL_ICON}</div>
+        <div class="emblem" aria-hidden="true">${FRAME_WALL_ICON}</div>
         <div class="copy"><strong>${widgetEscape(labels[job.status])}</strong><p class="description">${widgetEscape(job.alt || job.prompt || job.slot)}</p>${error}</div>
-        <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions">⋯</button></div>
+        <div class="actions">${action}<button class="menu" data-action="menu" aria-label="Illustration actions for ${widgetEscape(job.alt || job.slot)}">⋯</button></div>
       </div>
       <script>
         const send = (type) => window.spindleSandbox.postMessage({ type })
-        document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => send(button.dataset.action)))
         const card = document.getElementById('card')
-        card.addEventListener('contextmenu', (event) => { event.preventDefault(); send('menu') })
-        let timer = null
-        card.addEventListener('touchstart', () => { timer = setTimeout(() => send('menu'), 520) }, { passive: true })
-        card.addEventListener('touchmove', () => { clearTimeout(timer); timer = null }, { passive: true })
-        card.addEventListener('touchend', () => { clearTimeout(timer); timer = null })
+        let timer = null, menuAt = 0
+        const cancel = () => { clearTimeout(timer); timer = null }
+        const menu = () => { cancel(); if (Date.now() - menuAt < 700) return; menuAt = Date.now(); send('menu') }
+        document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => { cancel(); button.dataset.action === 'menu' ? menu() : send(button.dataset.action) }))
+        card.addEventListener('contextmenu', (event) => { event.preventDefault(); const button = event.target.closest('button'); if (!button || button.dataset.action === 'menu') menu() })
+        card.addEventListener('touchstart', (event) => {
+          cancel()
+          if (event.touches.length !== 1 || event.target.closest('button')) return
+          timer = setTimeout(menu, 520)
+        }, { passive: true })
+        card.addEventListener('touchmove', cancel, { passive: true })
+        card.addEventListener('touchend', cancel)
+        card.addEventListener('touchcancel', cancel)
+        window.addEventListener('pagehide', cancel)
       </script>`
-    const cleanup = this.ctx.messages.renderWidget({ messageId: job.messageId, widgetId, html }, (message: any) => {
-      void this.handleWidgetAction(job, String(message?.type || ""))
+    this.upsertWidget(job, html, (message: any) => {
+      void this.handleWidgetAction(this.jobs.get(job.id) || job, String(message?.type || ""))
     })
-    this.cleanups.set(widgetId, cleanup)
-    this.watchNativeImage(job)
   }
 
   private async handleWidgetAction(job: TaggedImageJobView, action: string): Promise<void> {
-    if (action === "generate" || action === "retry") {
+    this.sourceSnapshot = null
+    if (this.destroyed || !this.isSelected(job)) return
+    if ((action === "generate" && job.status === "requested") || (action === "retry" && ["failed", "cancelled"].includes(job.status))) {
       this.retry(job, "current")
       return
     }
-    if (action === "attach") {
+    if (action === "attach" && job.status === "ready" && !job.inserted && job.error) {
       job.error = ""
       this.render(job)
-      this.ctx.sendToBackend({
+      this.sendJobRequest(job, {
         type: "retry_tagged_attachment",
         requestId: createRequestId(),
         jobId: job.id,
@@ -572,12 +684,13 @@ class TaggedImageController {
   }
 
   private async showJobMenu(job: TaggedImageJobView, x: number, y: number): Promise<void> {
+    if (this.destroyed || !this.isSelected(job)) return
     const result = await this.ctx.ui.showContextMenu({
       position: { x: Math.max(8, Math.round(x)), y: Math.max(8, Math.round(y)) },
       items: [
         { key: "retry-current", label: job.inserted ? "Regenerate with current Studio settings" : job.status === "requested" ? "Generate with current Studio settings" : "Retry with current Studio settings" },
         { key: "retry-original", label: "Retry with original settings", disabled: !job.clientJobId },
-        { key: "edit", label: "Edit prompt in Quick Create", disabled: !job.prompt && !this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot)) },
+        { key: "edit", label: "Edit prompt in Quick Create", disabled: !job.prompt && !this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId)) },
         { key: "divider", label: "", type: "divider" },
         { key: "studio", label: "Open Swarm Studio" },
         { key: "library", label: "Open output library" },
@@ -585,10 +698,13 @@ class TaggedImageController {
         { key: "remove-chat", label: "Remove from chat (keeps Library copy)", disabled: !job.inserted },
       ],
     })
+    this.sourceSnapshot = null
+    if (this.destroyed || !this.isSelected(job)) return
+    job = this.jobs.get(job.id) || job
     if (result.selectedKey === "retry-current") this.retry(job, "current")
     if (result.selectedKey === "retry-original") this.retry(job, "original")
     if (result.selectedKey === "edit") {
-      const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot))
+      const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId))
       const prompt = String(tag?.content || job.prompt)
       const opened = this.openQuickCreateWithPrompt(prompt, job.negativePrompt, (editedPrompt, editedNegative) => {
         this.retry(job, "current", {
@@ -614,14 +730,15 @@ class TaggedImageController {
     retryMode: "current" | "original",
     overrides?: { prompt: string; negativePrompt: string },
   ): void {
-    const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot))
+    if (this.destroyed || !this.isSelected(job) || ["queued", "generating"].includes(job.status)) return
+    const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId))
     job.status = "queued"
     job.error = ""
     const inlineFigure = this.inlineFigureForJob(job.id)
     if (inlineFigure) inlineFigure.dataset.state = "queued"
     this.remove(job)
     if (overrides) {
-      this.ctx.sendToBackend({
+      this.sendJobRequest(job, {
         type: "retry_tagged_job",
         requestId: createRequestId(),
         jobId: job.id,
@@ -631,13 +748,14 @@ class TaggedImageController {
       })
       return
     }
-    if (tag) {
-      this.ctx.sendToBackend({
+    if (tag && job.id.startsWith("pending-")) {
+      this.sendJobRequest(job, {
         type: "tag_generate",
         requestId: createRequestId(),
         chatId: tag.chatId,
         messageId: tag.messageId,
         fullMatch: tag.fullMatch,
+        swipeId: tag.swipeId,
         attrs: tag.attrs,
         content: tag.content,
         force: true,
@@ -645,7 +763,7 @@ class TaggedImageController {
       })
       return
     }
-    this.ctx.sendToBackend({
+    this.sendJobRequest(job, {
       type: "retry_tagged_job",
       requestId: createRequestId(),
       jobId: job.id,

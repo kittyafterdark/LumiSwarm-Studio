@@ -362,8 +362,9 @@ train platform, waving, <preset:composition></swarm-image>`,
       const target = taggedMessages.find((message) => message.id === messageId)
       assert.ok(target)
       await new Promise((resolve) => setTimeout(resolve, 1))
-      target.content = patch.content
-      target.metadata = patch.metadata
+      if (patch.content !== undefined) target.content = patch.content
+      if (patch.swipes !== undefined) { target.swipes = [...patch.swipes]; target.content = target.swipes[target.swipe_id] }
+      if (patch.metadata !== undefined) target.metadata = patch.metadata
     },
   },
   images: {
@@ -1976,3 +1977,106 @@ try {
 } finally {queuedRelease.resolve();spindle.userStorage.setJson=beforeQueuedSet}
 spindle.imageGen.generateStream=originalStream
 console.log('URL output: authored HTML, plain URL, Markdown, parser, retry, duplicate delivery, persistence, remapping and removal: ok')
+
+// A message can be swiped while its image or quiet parser is still running.
+await request('set_tag_automation',{config:{autoGenerate:true,requestMode:'inline'}})
+const beforeSwipeStream=spindle.imageGen.generateStream
+let swipeSequence=0,swipeEntered=deferred(),swipeRelease=deferred(),holdSwipe=true
+spindle.imageGen.generateStream=async function* () {
+ if(holdSwipe){swipeEntered.resolve();await swipeRelease.promise}
+ const imageId=`swipe-result-${++swipeSequence}`
+ return {imageId,imageUrl:`/api/v1/image-gen/results/${imageId}`}
+}
+const swipeTag=urlTag.replace('slot="broadcast"','slot="swipe-source"')
+const otherSwipe='Alternative answer: no illustration requested.'
+const swipeMessage={id:'swipe-background',role:'assistant',content:swipeTag,swipe_id:0,swipes:[swipeTag,otherSwipe],metadata:{unrelated:true}}
+taggedMessages.push(swipeMessage)
+const swipeRun=submitUrl(swipeMessage,swipeTag)
+await bounded(swipeEntered.promise)
+swipeMessage.swipe_id=1;swipeMessage.content=otherSwipe
+swipeRelease.resolve()
+const swipeJob=await bounded(swipeRun)
+assert.equal(swipeJob.swipeId,0)
+assert.equal(swipeJob.inserted,true)
+assert.equal(swipeMessage.content,otherSwipe,'Background completion never moves or overwrites the selected swipe')
+assert.equal(swipeMessage.swipes[0],swipeJob.imageUrl,'The image is saved on its owning alternative')
+assert.equal(swipeMessage.swipe_id,1)
+assert.equal(swipeMessage.metadata.unrelated,true)
+await request('remove_tagged_image_from_chat',{jobId:swipeJob.id})
+assert.equal(swipeMessage.swipes[0],'')
+assert.equal(swipeMessage.content,otherSwipe,'Removal also preserves the selected alternative')
+
+// Identical requests on two alternatives must own separate jobs and images.
+holdSwipe=false
+const twinMessage={id:'swipe-twins',role:'assistant',content:swipeTag,swipe_id:0,swipes:[swipeTag,swipeTag],metadata:{}}
+taggedMessages.push(twinMessage)
+const twinA=await submitUrl(twinMessage,swipeTag,{swipeId:0})
+twinMessage.swipe_id=1;twinMessage.content=twinMessage.swipes[1]
+const twinB=await submitUrl(twinMessage,swipeTag,{swipeId:1})
+assert.notEqual(twinA.id,twinB.id)
+assert.notEqual(twinA.imageUrl,twinB.imageUrl)
+assert.deepEqual(twinMessage.swipes,[twinA.imageUrl,twinB.imageUrl])
+
+// Editing away a request must not redirect its late bitmap to another message
+// or to a newly authored request which happens to reuse the same slot.
+const deletedTag=swipeTag.replace('slot="swipe-source"','slot="edited-source"')
+const editedMessage={id:'edited-background',role:'assistant',content:deletedTag,metadata:{}}
+taggedMessages.push(editedMessage)
+swipeEntered=deferred();swipeRelease=deferred();holdSwipe=true
+const editedRun=submitUrl(editedMessage,deletedTag)
+await bounded(swipeEntered.promise)
+const changedTag=deletedTag.replace('harbor at dusk','a different scene')
+editedMessage.content=changedTag
+const copiedMessage={id:'copied-source',role:'assistant',content:deletedTag,metadata:{}}
+taggedMessages.push(copiedMessage)
+const swipeTimeout=globalThis.setTimeout
+globalThis.setTimeout=(fn,delay,...args)=>swipeTimeout(fn,delay>=250 && delay!==1000?0:delay,...args)
+swipeRelease.resolve()
+try {
+ const editedJob=await bounded(editedRun)
+ assert.equal(editedJob.inserted,false)
+ assert.match(editedJob.error,/attachment|attach/)
+ assert.equal(editedMessage.content,changedTag,'Changed requests stay untouched')
+ assert.equal(copiedMessage.content,deletedTag,'Another matching message cannot steal the result')
+} finally {globalThis.setTimeout=swipeTimeout;holdSwipe=false}
+
+// Quiet parser completion performs the same source-bound merge.
+await request('set_tag_automation',{config:{requestMode:'parser',injectProtocol:true,autoGenerate:true}})
+const beforeQuiet=spindle.generate.quiet,quietSwipeEntered=deferred(),quietSwipeRelease=deferred()
+spindle.generate.quiet=async()=>{quietSwipeEntered.resolve();await quietSwipeRelease.promise;return {content:swipeTag}}
+const quietTag=swipeTag.replace('request="generate"','request="parse"')
+const quietMessage={id:'parser-swipe-background',role:'assistant',content:quietTag,swipe_id:0,swipes:[quietTag,otherSwipe],metadata:{}}
+taggedMessages.push(quietMessage)
+eventHandlers.get('GENERATION_ENDED')({generationId:'parser-swipe',chatId:'chat-1',messageId:quietMessage.id,content:quietTag},'user-1')
+await bounded(quietSwipeEntered.promise)
+quietMessage.swipe_id=1;quietMessage.content=otherSwipe
+quietSwipeRelease.resolve()
+for(let i=0;i<200 && !quietMessage.swipes[0].startsWith('/api/');i++)await new Promise(resolve=>setTimeout(resolve,2))
+assert.match(quietMessage.swipes[0],/^\/api\/v1\/image-gen\/results\/swipe-result-/)
+assert.equal(quietMessage.content,otherSwipe)
+assert.equal(quietMessage.swipe_id,1)
+spindle.generate.quiet=beforeQuiet
+// A bitmap can beat the text commit; only a saved reply may bind its swipe.
+const streamedTag=swipeTag.replace('slot="swipe-source"','slot="streamed-source"')
+const streamedMessage={id:'streamed-background',role:'assistant',content:otherSwipe,swipe_id:0,swipes:[otherSwipe,streamedTag],metadata:{}}
+taggedMessages.push(streamedMessage)
+const streamedRun=submitUrl(streamedMessage,streamedTag,{isStreaming:true})
+let streamedReady
+for(let i=0;i<200;i++) {
+ streamedReady=userFiles.get('tagged-image-jobs.json').find(job=>job.messageId===streamedMessage.id && job.status==='ready')
+ if(streamedReady)break
+ await new Promise(resolve=>setTimeout(resolve,2))
+}
+assert.ok(streamedReady)
+assert.equal(streamedMessage.swipes[1],streamedTag,'Fast image completion waits for the saved text source')
+eventHandlers.get('GENERATION_ENDED')({generationId:'streamed-source-done',chatId:'chat-1',messageId:streamedMessage.id,content:streamedTag},'user-1')
+const streamedJob=await bounded(streamedRun)
+assert.equal(streamedJob.swipeId,1)
+assert.equal(streamedJob.inserted,true)
+assert.equal(streamedMessage.content,otherSwipe)
+assert.equal(streamedMessage.swipes[1],streamedJob.imageUrl)
+const beforeStreamedReplay=swipeSequence
+await submitUrl(streamedMessage,streamedTag,{force:false})
+assert.equal(swipeSequence,beforeStreamedReplay,'Replaying a completed swipe request without a visible source tag never regenerates')
+spindle.imageGen.generateStream=beforeSwipeStream
+console.log('swipe ownership: background generation/parser/removal, identical alternatives, edited requests, and ambiguous message remapping: ok')

@@ -281,6 +281,8 @@ interface LoraDownloadJob {
 type TaggedImageJobStatus = "requested" | "queued" | "generating" | "ready" | "failed" | "cancelled"
 
 interface TaggedImageJob {
+  swipeId?: number
+  awaitingSource?: boolean
   output: "inline" | "url"
   id: string
   key: string
@@ -363,6 +365,8 @@ const generationControllers = new Map<string, {
 let legacyGenerationFallbackLogged = false
 const runningTaggedJobs = new Set<string>()
 const pendingTaggedJobs = new Set<string>()
+const removedTaggedJobs = new Set<string>()
+const settledTaggedSources = new Map<string, { messageId: string; swipeId?: number }>()
 const runningParserCompletions = new Set<string>()
 const taggedMessageFinalizeLocks = new Map<string, Promise<void>>()
 const taggedFinalizeRetries = new Map<string, Promise<boolean>>()
@@ -2936,6 +2940,10 @@ function cleanTagSlot(value: unknown): string {
   return asString(value).trim().replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80)
 }
 
+function cleanTaggedSwipeId(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined
+}
+
 function cleanTaggedImageOutput(value: unknown): "inline" | "url" {
   return asString(value).trim().toLowerCase() === "url" ? "url" : "inline"
 }
@@ -2962,6 +2970,8 @@ function cleanTaggedImageJob(value: unknown): TaggedImageJob | null {
     aspect: cleanAspect(record.aspect) || "4:3",
     alt: asString(record.alt).slice(0, 300),
     fullMatch: asString(record.fullMatch).slice(0, 24_000),
+    swipeId: cleanTaggedSwipeId(record.swipeId),
+    awaitingSource: record.awaitingSource === true,
     output: cleanTaggedImageOutput(record.output ?? parseSwarmImageTags(asString(record.fullMatch))[0]?.attrs.output),
     status,
     clientJobId: asString(record.clientJobId).slice(0, 120),
@@ -2995,6 +3005,8 @@ async function persistTaggedImageJobs(jobs: TaggedImageJob[], userId?: string): 
 }
 
 async function upsertTaggedImageJob(job: TaggedImageJob, userId?: string): Promise<TaggedImageJob> {
+  const settled = settledTaggedSources.get(job.id)
+  if (settled) { job.awaitingSource = false; job.messageId = settled.messageId; job.swipeId = settled.swipeId }
   job.updatedAt = Date.now()
   const jobs = (await loadTaggedImageJobs(userId)).filter((candidate) => candidate.id !== job.id)
   jobs.unshift(job)
@@ -3442,13 +3454,22 @@ ${completed.content.trim()}</swarm-image>`
       completedContent = completedContent.replace(request.fullMatch, replacement)
     }
 
-    await spindle.chat.updateMessage(chatId, messageId, { content: completedContent }, userId)
+    const sourceSwipeId = await withTaggedMessageFinalizeLock(`${userId || "default"}:${chatId}:${messageId}`, async () => {
+      const current = (await spindle.chat.getMessages(chatId)).find((message: any) => asString(message.id) === messageId)
+      const matches = taggedMessageSources(current, cleanTaggedSwipeId(payload?.swipeId))
+        .filter((message: any) => asString(message?.content) === content)
+      if (matches.length !== 1) return null
+      await spindle.chat.updateMessage(chatId, messageId, taggedMessagePatch(matches[0], completedContent), userId)
+      return { swipeId: cleanTaggedSwipeId(matches[0].studioSwipeId) }
+    })
+    if (!sourceSwipeId) return
     const generatedTags = parseSwarmImageTags(completedContent)
     for (const tag of generatedTags) {
       await requestTaggedImageGeneration({
         chatId,
         messageId,
         fullMatch: tag.fullMatch,
+        swipeId: sourceSwipeId.swipeId,
         attrs: tag.attrs,
         content: tag.content,
         isStreaming: false,
@@ -4060,6 +4081,8 @@ function taggedJobPublic(job: TaggedImageJob): JsonObject {
     id: job.id,
     key: job.key,
     tagFingerprint: stableTextHash(job.fullMatch),
+    swipeId: job.swipeId,
+    awaitingSource: job.awaitingSource,
     output: job.output,
     chatId: job.chatId,
     messageId: job.messageId,
@@ -4089,6 +4112,8 @@ function sendTaggedMessageReconciliation(job: TaggedImageJob, content: string, u
     type: "tagged_message_reconciled",
     data: {
       jobId: job.id,
+      clientJobId: job.clientJobId,
+      swipeId: job.swipeId,
       chatId: job.chatId,
       messageId: job.messageId,
       content,
@@ -4133,7 +4158,7 @@ function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, mar
   const tagPattern = /<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi
   let match: RegExpExecArray | null
   while ((match = tagPattern.exec(content))) {
-    if (cleanTagSlot(parseTagAttributes(match[1]).slot) !== job.slot) continue
+    if (stableTextHash(match[0]) !== stableTextHash(job.fullMatch)) continue
     return {
       content: `${content.slice(0, match.index)}${markup}${content.slice(match.index + match[0].length)}`,
       replaced: true,
@@ -4162,8 +4187,27 @@ function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, mar
   return { content, replaced: false }
 }
 
-function normalizedTaggedPrompt(value: string): string {
-  return value.replace(/\s+/g, " ").trim()
+function taggedMessageSources(message: any, swipeId?: number): any[] {
+  const swipes = Array.isArray(message?.swipes) ? message.swipes : []
+  const active = cleanTaggedSwipeId(message?.swipe_id)
+  if (!swipes.length) return swipeId === undefined ? [message] : []
+  const indices = swipeId !== undefined ? [swipeId]
+    : [...new Set([active, ...swipes.map((_item: unknown, index: number) => index)])]
+  return indices.flatMap((index) => {
+    if (index === undefined || index >= swipes.length) return []
+    const content = index === active ? asString(message.content) : asString(swipes[index])
+    return [{ ...message, content, studioSwipeId: index }]
+  })
+}
+
+function taggedMessagePatch(target: any, content: string): JsonObject {
+  const index = cleanTaggedSwipeId(target?.studioSwipeId)
+  if (index === undefined || !Array.isArray(target?.swipes)) return { content }
+  const swipes = [...target.swipes]
+  swipes[index] = content
+  // The host projects content from its current selection. Do not write content
+  // or swipe_id here: the user may have navigated since our read.
+  return { swipes }
 }
 
 function taggedMessageMatchScore(message: any, job: TaggedImageJob): number {
@@ -4177,31 +4221,16 @@ function taggedMessageMatchScore(message: any, job: TaggedImageJob): number {
   }
   if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) return 4
   if (job.fullMatch && content.includes(job.fullMatch)) return 3
-
-  const sourceTag = parseSwarmImageTags(job.fullMatch)[0]
-  const sourcePrompt = normalizedTaggedPrompt(sourceTag?.content || "")
-  if (!sourcePrompt) return 0
-  for (const tag of parseSwarmImageTags(content)) {
-    if (cleanTagSlot(tag.attrs.slot) !== job.slot) continue
-    if (normalizedTaggedPrompt(tag.content) === sourcePrompt) return 2
-  }
   return 0
 }
 
 function findTaggedMessageTarget(messages: any[], job: TaggedImageJob): any | null {
   const direct = messages.find((message: any) => asString(message?.id) === job.messageId)
-  if (direct && taggedMessageMatchScore(direct, job) > 0) return direct
-
-  let best: any | null = null
-  let bestScore = 0
-  for (const message of messages) {
-    const score = taggedMessageMatchScore(message, job)
-    if (score >= bestScore && score > 0) {
-      best = message
-      bestScore = score
-    }
-  }
-  return best
+  const sources = (direct ? [direct] : messages).flatMap((message: any) => taggedMessageSources(message, job.swipeId))
+  const matches = sources.filter((message: any) => taggedMessageMatchScore(message, job) > 0)
+  // Remapping a transient streaming ID must prove one destination. A copied
+  // prompt elsewhere in the chat must not steal a completed image.
+  return matches.length === 1 ? matches[0] : null
 }
 
 async function removeTaggedImageFromChat(
@@ -4243,12 +4272,15 @@ async function removeTaggedImageFromChat(
       ? metadata.swarm_studio_tagged_images.filter((item: any) => asString(item?.jobId) !== job.id)
       : []
     await spindle.chat.updateMessage(job.chatId, messageId, {
-      content: nextContent,
+      ...taggedMessagePatch(target, nextContent),
       metadata: {
         ...metadata,
         swarm_studio_tagged_images: taggedImages,
       },
     })
+    removedTaggedJobs.add(job.id)
+    settledTaggedSources.delete(job.id)
+    job.status = "cancelled"
     await persistTaggedImageJobs(
       (await loadTaggedImageJobs(userId)).filter((candidate) => candidate.id !== job.id),
       userId,
@@ -4260,7 +4292,9 @@ async function removeTaggedImageFromChat(
 }
 
 async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Promise<boolean> {
-  if (!job.imageUrl || !spindle.permissions.has("chat_mutation")) return false
+  const settled = settledTaggedSources.get(job.id)
+  if (settled) { job.awaitingSource = false; job.messageId = settled.messageId; job.swipeId = settled.swipeId }
+  if (job.awaitingSource || removedTaggedJobs.has(job.id) || !job.imageUrl || !spindle.permissions.has("chat_mutation")) return false
   const initialMessages = await spindle.chat.getMessages(job.chatId)
   const initialTarget = findTaggedMessageTarget(initialMessages, job)
   if (!initialTarget) return false
@@ -4280,9 +4314,10 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Pro
       job.key = `${job.chatId}:${job.messageId}:${job.slot}`
     }
     const content = asString(target?.content)
-    if (!target || !job.messageId) return false
+    if (!target || !job.messageId || removedTaggedJobs.has(job.id)) return false
+    job.swipeId = cleanTaggedSwipeId(target.studioSwipeId)
     const alt = job.alt || `Generated illustration for ${job.slot}`
-    const markup = job.output === "url" ? job.imageUrl : `<figure data-swarm-studio-image="true" data-swarm-studio-job-id="${escapeHtmlAttribute(job.id)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" tabindex="0" style="position:relative;display:block;width:100%;height:100%;margin:0;"><img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" data-swarm-studio-fit="cover" loading="lazy" style="display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center;"><span data-swarm-studio-inline-action="true" tabindex="0" role="button" aria-label="Illustration actions">↻</span></figure>`
+    const markup = job.output === "url" ? job.imageUrl : `<figure data-swarm-studio-image="true" data-swarm-studio-job-id="${escapeHtmlAttribute(job.id)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" tabindex="0" style="position:relative;display:block;width:100%;height:100%;margin:0;"><img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" data-swarm-studio-fit="cover" loading="lazy" style="display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center;"><span data-swarm-studio-inline-action="true" tabindex="0" role="button" aria-label="Illustration actions for ${escapeHtmlAttribute(alt)}">↻</span></figure>`
     const replacement = replaceTaggedImagePlaceholder(content, job, markup, asString(taggedImageAttachment(target, job).imageUrl))
     if (!replacement.replaced) {
       if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) {
@@ -4300,11 +4335,12 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Pro
       ? metadata.swarm_studio_tagged_images.filter((item: any) => asString(item?.jobId) !== job.id)
       : []
     await spindle.chat.updateMessage(job.chatId, job.messageId, {
-      content: replacement.content,
+      ...taggedMessagePatch(target, replacement.content),
       metadata: {
         ...metadata,
         swarm_studio_tagged_images: [...previous, {
           jobId: job.id,
+          swipeId: job.swipeId,
           output: job.output,
           slot: job.slot,
           prompt: job.prompt,
@@ -4335,7 +4371,7 @@ async function finalizeTaggedImageJobWithRetry(job: TaggedImageJob, userId?: str
       if (delayMs > 0) {
         await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
       }
-      if (job.status !== "ready" || !job.imageUrl) return false
+      if (removedTaggedJobs.has(job.id) || job.status !== "ready" || !job.imageUrl) return false
       try {
         const targetMessageId = taggedFinalizeMessageTargets.get(job.id)
         if (targetMessageId && targetMessageId !== job.messageId) {
@@ -4351,6 +4387,7 @@ async function finalizeTaggedImageJobWithRetry(job: TaggedImageJob, userId?: str
       }
     }
 
+    if (removedTaggedJobs.has(job.id)) return false
     job.inserted = false
     job.error = lastError
       ? `Image generated, but Lumiverse could not attach it to the chat yet: ${lastError}`
@@ -4584,16 +4621,36 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
     throw new Error("The Swarm image tag is missing its chat, message, or prompt content.")
   }
   const slot = cleanTagSlot(attrs.slot) || `image-${stableTextHash(fullMatch).slice(0, 6)}`
-  const key = `${chatId}:${messageId}:${slot}:${stableTextHash(fullMatch)}`
+  let swipeId = cleanTaggedSwipeId(payload?.swipeId)
+  let sourceMatches = 0
+  if (swipeId === undefined && payload?.isStreaming !== true) {
+    const message = (await spindle.chat.getMessages(chatId)).find((item: any) => asString(item.id) === messageId)
+    const matches = taggedMessageSources(message).filter((item) => asString(item?.content).includes(fullMatch))
+    sourceMatches = matches.length
+    if (matches.length === 1) swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
+  }
   const force = payload?.force === true
   const useOriginalProfile = asString(payload?.retryMode) === "original"
   const config = await loadTagAutomationConfig(userId)
   const jobs = await loadTaggedImageJobs(userId)
-  let job = jobs.find((candidate) => candidate.key === key
-    || (candidate.chatId === chatId && candidate.messageId === messageId
-      && candidate.slot === slot && candidate.fullMatch === fullMatch))
+  if (swipeId === undefined && sourceMatches === 0 && payload?.isStreaming !== true) {
+    const existing = jobs.filter(candidate => candidate.chatId === chatId && candidate.messageId === messageId
+      && candidate.slot === slot && candidate.fullMatch === fullMatch && !removedTaggedJobs.has(candidate.id))
+    if (existing.length === 1) swipeId = existing[0].swipeId
+  }
+  const key = `${chatId}:${messageId}:${slot}:${stableTextHash(fullMatch)}:${swipeId ?? ""}`
+  let job = jobs.find((candidate) => !removedTaggedJobs.has(candidate.id)
+    && (candidate.swipeId === swipeId || candidate.swipeId === undefined)
+    && (candidate.key === key || (candidate.chatId === chatId && candidate.messageId === messageId
+      && candidate.slot === slot && candidate.fullMatch === fullMatch)))
   if (job) {
     job.fullMatch = fullMatch
+    if (payload?.isStreaming !== true) {
+      settledTaggedSources.set(job.id, { messageId, swipeId })
+      job.awaitingSource = false
+      if (swipeId !== undefined) job.swipeId = swipeId
+      await upsertTaggedImageJob(job, userId)
+    }
     if (job.status === "ready") await finalizeTaggedImageJobWithRetry(job, userId)
     if (!force || job.status === "generating") {
       sendTaggedJobState(job, userId)
@@ -4612,6 +4669,8 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
       messageId,
       slot,
       prompt: scenePrompt,
+      swipeId,
+      awaitingSource: payload?.isStreaming === true,
       output: cleanTaggedImageOutput(attrs.output),
       negativePrompt: "",
       aspect: cleanAspect(attrs.aspect) || "4:3",
@@ -5245,6 +5304,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         return
       }
       case "list_tagged_jobs": {
+        const snapshotAt = Date.now()
         const jobs = await loadTaggedImageJobs(userId)
         for (const job of jobs) {
           if ((job.status === "queued" || job.status === "generating")
@@ -5260,6 +5320,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         spindle.sendToFrontend({
           type: "tagged_image_jobs_result",
           requestId,
+          snapshotAt,
           data: jobs.map(taggedJobPublic),
         }, userId)
         for (const job of jobs) {
@@ -5297,6 +5358,19 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         }
         const finalMessageId = asString(payload?.messageId).trim()
         if (finalMessageId && finalMessageId !== job.messageId) {
+          const messages = await spindle.chat.getMessages(job.chatId)
+          const original = messages.find((message: any) => asString(message.id) === job.messageId)
+          if (original && findTaggedMessageTarget([original], job)) {
+            throw new Error("That illustration still belongs to its original chat message.")
+          }
+        }
+        if (finalMessageId) {
+          const swipeId = cleanTaggedSwipeId(payload?.swipeId) ?? job.swipeId
+          settledTaggedSources.set(job.id, { messageId: finalMessageId, swipeId })
+          job.awaitingSource = false
+          job.swipeId = swipeId
+        }
+        if (finalMessageId && finalMessageId !== job.messageId) {
           taggedFinalizeMessageTargets.set(job.id, finalMessageId)
           job.messageId = finalMessageId
           job.key = `${job.chatId}:${job.messageId}:${job.slot}`
@@ -5315,6 +5389,8 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           requestId,
           data: {
             jobId: job.id,
+            clientJobId: job.clientJobId,
+            swipeId: job.swipeId,
             chatId: job.chatId,
             messageId: removed.messageId,
             content: removed.content,
@@ -6134,8 +6210,31 @@ for (const macro of [
 
 spindle.registerInterceptor(taggedImagePromptInterceptor, 90)
 
+async function settleTaggedImageSources(payload: any, userId?: string): Promise<void> {
+  const chatId = asString(payload?.chatId)
+  const messageId = asString(payload?.messageId)
+  const content = asString(payload?.content)
+  if (!chatId || !messageId || !content) return
+  const pending = (await loadTaggedImageJobs(userId)).filter(job => job.chatId === chatId && job.awaitingSource && content.includes(job.fullMatch))
+  if (!pending.length) return
+  const messages = await spindle.chat.getMessages(chatId)
+  const jobs = pending.filter(job => job.messageId === messageId || !messages.some((item: any) => asString(item.id) === job.messageId))
+  const message = messages.find((item: any) => asString(item.id) === messageId)
+  const matches = taggedMessageSources(message).filter(item => asString(item?.content) === content)
+  if (matches.length !== 1) return
+  const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
+  for (const job of jobs) {
+    if (removedTaggedJobs.has(job.id)) continue
+    if (job.messageId !== messageId && jobs.filter(candidate => candidate.fullMatch === job.fullMatch).length !== 1) continue
+    settledTaggedSources.set(job.id, { messageId, swipeId })
+    await upsertTaggedImageJob(job, userId)
+    if (job.status === "ready") void finalizeTaggedImageJobWithRetry(job, userId).catch(error => reportBackendError("Attaching saved reply image", error))
+  }
+}
+
 if (spindle.permissions.has("generation")) {
   spindle.on("GENERATION_ENDED", (payload: any, userId?: string) => {
+    void settleTaggedImageSources(payload, userId).catch(error => reportBackendError("Resolving image source swipe", error))
     void completeParserImageRequests(payload, userId)
   })
 }
