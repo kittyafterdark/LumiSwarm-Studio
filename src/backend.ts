@@ -362,6 +362,7 @@ const generationControllers = new Map<string, {
 }>()
 let legacyGenerationFallbackLogged = false
 const runningTaggedJobs = new Set<string>()
+const pendingTaggedJobs = new Set<string>()
 const runningParserCompletions = new Set<string>()
 const taggedMessageFinalizeLocks = new Map<string, Promise<void>>()
 const taggedFinalizeRetries = new Map<string, Promise<boolean>>()
@@ -4586,8 +4587,11 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
   const key = `${chatId}:${messageId}:${slot}:${stableTextHash(fullMatch)}`
   const force = payload?.force === true
   const useOriginalProfile = asString(payload?.retryMode) === "original"
+  const config = await loadTagAutomationConfig(userId)
   const jobs = await loadTaggedImageJobs(userId)
-  let job = jobs.find((candidate) => candidate.key === key)
+  let job = jobs.find((candidate) => candidate.key === key
+    || (candidate.chatId === chatId && candidate.messageId === messageId
+      && candidate.slot === slot && candidate.fullMatch === fullMatch))
   if (job) {
     job.fullMatch = fullMatch
     if (job.status === "ready") await finalizeTaggedImageJobWithRetry(job, userId)
@@ -4600,7 +4604,6 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
     job.imageId = ""
     job.imageUrl = ""
     job.inserted = false
-    await upsertTaggedImageJob(job, userId)
   } else {
     job = {
       id: crypto.randomUUID(),
@@ -4614,7 +4617,7 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
       aspect: cleanAspect(attrs.aspect) || "4:3",
       alt: asString(attrs.alt).trim().slice(0, 300),
       fullMatch,
-      status: "requested",
+      status: config.autoGenerate || force ? "queued" : "requested",
       clientJobId: "",
       imageId: "",
       imageUrl: "",
@@ -4624,12 +4627,16 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
-    await upsertTaggedImageJob(job, userId)
   }
-  sendTaggedJobState(job, userId)
-  const config = await loadTagAutomationConfig(userId)
-  if (config.autoGenerate || force) await runTaggedImageJob(job, useOriginalProfile, userId)
-  return job
+  pendingTaggedJobs.add(job.id)
+  try {
+    await upsertTaggedImageJob(job, userId)
+    sendTaggedJobState(job, userId)
+    if (config.autoGenerate || force) await runTaggedImageJob(job, useOriginalProfile, userId)
+    return job
+  } finally {
+    pendingTaggedJobs.delete(job.id)
+  }
 }
 
 async function retryTaggedImageGeneration(
@@ -5241,7 +5248,8 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         const jobs = await loadTaggedImageJobs(userId)
         for (const job of jobs) {
           if ((job.status === "queued" || job.status === "generating")
-            && (!runningTaggedJobs.has(job.id) || stoppedGenerationKeys.has(generationKey(userId, job.clientJobId)))) {
+            && ((!runningTaggedJobs.has(job.id) && !pendingTaggedJobs.has(job.id))
+              || stoppedGenerationKeys.has(generationKey(userId, job.clientJobId)))) {
             const stopped = stoppedGenerationKeys.has(generationKey(userId, job.clientJobId))
             job.status = stopped ? "cancelled" : "failed"
             job.error = stopped ? "Generation wait stopped. SwarmUI cancellation is not confirmed."
@@ -5254,6 +5262,14 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           requestId,
           data: jobs.map(taggedJobPublic),
         }, userId)
+        for (const job of jobs) {
+          if (job.status === "ready" && !job.inserted && job.imageUrl && !job.error
+            && !runningTaggedJobs.has(job.id)) {
+            void finalizeTaggedImageJobWithRetry(job, userId).catch((error) => {
+              reportBackendError("Resuming image attachment", error, { jobId: job.id })
+            })
+          }
+        }
         return
       }
       case "retry_tagged_job": {

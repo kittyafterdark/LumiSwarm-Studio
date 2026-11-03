@@ -468,6 +468,8 @@ try {
     await mini.getByRole('button',{name:'Stop generation',exact:true}).waitFor()
     await page.evaluate(()=>{lifecycleSaved={...lifecycleSaved,status:'ready',imageUrl:'/api/v1/images/saved-one'};lifecycleMini.onMessage({type:'tagged_image_jobs_result',data:[lifecycleSaved]});lifecycleInline.onMessage({type:'tagged_image_jobs_result',data:[lifecycleSaved]})})
     assert.equal(await mini.locator('[data-role="miniplayer"]').getAttribute('data-indeterminate'),'false')
+    assert.equal(await page.locator('iframe[title="Inline lifecycle"]').count(),0,'Ready image attaches in the background without a banner')
+    await page.evaluate(()=>{lifecycleSaved={...lifecycleSaved,error:'Attachment retries exhausted'};lifecycleInline.onMessage({type:'tagged_image_job',data:lifecycleSaved})})
     const strip=page.frameLocator('iframe[title="Inline lifecycle"]')
     await strip.getByRole('button',{name:'Attach image',exact:true}).waitFor()
     await page.evaluate(()=>{const figure=document.createElement('figure');figure.dataset.swarmStudioImage='true';figure.dataset.swarmStudioJobId='lifecycle-job';document.querySelector('#lifecycle-host').append(figure)})
@@ -491,7 +493,8 @@ try {
       const {TaggedImageController,defaultStudioBehavior}=await import('/frontend.js')
       const host=document.createElement('section');host.id='url-contract-host';document.body.append(host)
       window.urlContractSends=[]
-      const ctx={sendToBackend:message=>urlContractSends.push(message),chats:{async updateMessage(chatId,messageId,{content}){host.innerHTML=content}},messages:{renderWidget({widgetId,html}){const frame=document.createElement('iframe');frame.dataset.widget=widgetId;frame.title='URL contract fallback';frame.srcdoc=html;host.append(frame);return()=>frame.remove()}}}
+      window.urlContractWidgetMounts=0
+      const ctx={sendToBackend:message=>urlContractSends.push(message),chats:{async updateMessage(chatId,messageId,{content}){host.innerHTML=content}},messages:{renderWidget({widgetId,html}){urlContractWidgetMounts++;const frame=document.createElement('iframe');frame.dataset.widget=widgetId;frame.title='URL contract fallback';frame.srcdoc=html;host.append(frame);return()=>frame.remove()}}}
       const mount=()=>new TaggedImageController(ctx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
       const controller=mount()
       const fullMatch='<swarm-image request="generate" output="url" slot="harbor">harbor at dusk</swarm-image>'
@@ -499,8 +502,9 @@ try {
       const payload={chatId:'chat',messageId:'url-message',fullMatch,content:'harbor at dusk',attrs:{request:'generate',output:'url',slot:'harbor'}}
       controller.handleTag({...payload,isStreaming:true})
       controller.handleTag({...payload,isStreaming:false})
-      const saved={id:'url-contract',key:'chat:url-message:harbor',chatId:'chat',messageId:'url-message',slot:'harbor',output:'url',status:'ready',inserted:true,imageUrl:'/api/v1/images/saved-url',alt:'Harbor at dusk'}
+      const saved={id:'url-contract',key:'chat:url-message:harbor',chatId:'chat',messageId:'url-message',slot:'harbor',output:'url',tagFingerprint:'4yds2d',clientJobId:'url-attempt',status:'ready',inserted:true,imageUrl:'/api/v1/images/saved-url',alt:'Harbor at dusk'}
       const content=source.replace(fullMatch,saved.imageUrl)
+      for(const status of ['queued','generating','ready'])controller.onMessage({type:'tagged_image_job',data:{...saved,status,inserted:false}})
       controller.onMessage({type:'tagged_image_job',data:saved})
       controller.onMessage({type:'tagged_message_reconciled',data:{jobId:saved.id,chatId:'chat',messageId:'url-message',content}})
       await new Promise(resolve=>setTimeout(resolve,0))
@@ -509,6 +513,8 @@ try {
       const restored=mount()
       restored.onMessage({type:'tagged_image_jobs_result',data:[saved]})
       restored.onMessage({type:'tagged_image_job',data:saved})
+      restored.handleTag({...payload,isStreaming:false})
+      restored.onMessage({type:'tagged_image_jobs_result',data:[{...saved,status:'requested',clientJobId:'',inserted:false}]})
       window.urlContractController=restored
     })
     const host=page.locator('#url-contract-host')
@@ -521,7 +527,8 @@ try {
     assert.equal(await host.locator('figure,iframe,[data-swarm-studio-inline-action]').count(),0,'URL completion and remount add no Studio framing')
     await host.getByRole('link',{name:'Open harbor image',exact:true}).focus()
     assert.equal(await host.getByRole('link',{name:'Open harbor image',exact:true}).evaluate(link=>link===document.activeElement),true)
-    assert.equal(await page.evaluate(()=>urlContractSends.filter(message=>message.type==='tag_generate').length),1,'Streaming/settled delivery generates only once')
+    assert.equal(await page.evaluate(()=>urlContractSends.filter(message=>message.type==='tag_generate').length),1,'Streaming, settled and remounted tag replay generate only once')
+    assert.equal(await page.evaluate(()=>urlContractWidgetMounts),0,'No transient banner ever mounts during generation, attachment, replay or stale snapshots')
     await page.evaluate(()=>{urlContractController.destroy();document.querySelector('#url-contract-host').remove()})
   }
   console.log('Desktop/mobile URL contract: authored layout, named image/link, streaming deduplication, reconciliation and remount without Studio framing: ok')

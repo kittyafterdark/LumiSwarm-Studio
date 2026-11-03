@@ -168,7 +168,7 @@ class TaggedImageController {
   }
 
   handleTag(payload: any): void {
-    if (!payload?.chatId || !payload?.messageId || payload?.isUser) return
+    if (this.destroyed || !payload?.chatId || !payload?.messageId || payload?.isUser) return
     const slot = String(payload?.attrs?.slot || `image-${widgetKeyHash(String(payload.fullMatch || payload.content)).slice(0, 6)}`)
       .replace(/[^a-z0-9_-]+/gi, "-")
       .slice(0, 80)
@@ -196,6 +196,11 @@ class TaggedImageController {
     }
     if (this.tagFingerprints.get(lookup) === fingerprint) return
     this.tagFingerprints.set(lookup, fingerprint)
+    const known = [...this.jobs.values()].find((job) =>
+      this.lookupKey(job.chatId, job.messageId, job.slot) === lookup
+      && job.tagFingerprint === fingerprint,
+    )
+    if (known) return
     for (const [id, existing] of this.jobs) {
       if (this.lookupKey(existing.chatId, existing.messageId, existing.slot) !== lookup) continue
       this.remove(existing)
@@ -212,7 +217,9 @@ class TaggedImageController {
       negativePrompt: "",
       aspect: String(payload?.attrs?.aspect || ""),
       alt: String(payload?.attrs?.alt || ""),
-      status: this.behavior.tagAutoGenerate ? "queued" : "requested",
+      // The backend owns automation policy. A stale local preference must not
+      // flash a manual Generate card before its authoritative reply arrives.
+      status: "queued",
       clientJobId: "",
       imageId: "",
       imageUrl: "",
@@ -220,7 +227,6 @@ class TaggedImageController {
       error: "",
     }
     this.jobs.set(optimistic.id, optimistic)
-    if (this.shouldRenderPlaceholder(optimistic)) this.render(optimistic)
     this.ctx.sendToBackend({
       type: "tag_generate",
       requestId: createRequestId(),
@@ -251,8 +257,7 @@ class TaggedImageController {
       }
       for (const incoming of jobs) {
         if (!incoming?.id || !incoming?.messageId) continue
-        const known = this.jobs.get(incoming.id)
-        const job = Number(known?.updatedAt || 0) > Number(incoming.updatedAt || 0) ? known! : incoming
+        const job = this.latestJobState(incoming)
         for (const [id, candidate] of this.jobs) {
           if (id.startsWith("pending-") && this.lookupKey(candidate.chatId, candidate.messageId, candidate.slot) === this.lookupKey(job.chatId, job.messageId, job.slot)) {
             this.remove(candidate); this.jobs.delete(id)
@@ -282,7 +287,7 @@ class TaggedImageController {
       }
       const previous = this.jobs.get(job.id)
       if (Number(previous?.updatedAt || 0) > Number(job.updatedAt || 0)) return
-      const next = { ...previous, ...job }
+      const next = { ...previous, ...this.latestJobState(job) }
       this.jobs.set(job.id, next)
       if (next.inserted) {
         this.settledAttachmentRequests.delete(next.id)
@@ -416,11 +421,22 @@ class TaggedImageController {
     this.cleanups.delete(id)
   }
 
+  private latestJobState(incoming: TaggedImageJobView): TaggedImageJobView {
+    const known = this.jobs.get(incoming.id)
+    if (!known) return incoming
+    if (Number(known.updatedAt || 0) > Number(incoming.updatedAt || 0)) return known
+    const sameAttempt = !incoming.clientJobId || incoming.clientJobId === known.clientJobId
+    if (sameAttempt && ((known.inserted && !incoming.inserted)
+      || (known.status === "ready" && ["requested", "queued", "generating"].includes(incoming.status)))) return known
+    return incoming
+  }
+
   private shouldRenderPlaceholder(job: TaggedImageJobView): boolean {
+    if (job.inserted) return false
     return job.status === "requested"
       || job.status === "failed"
       || job.status === "cancelled"
-      || (job.status === "ready" && !job.inserted)
+      || (job.status === "ready" && Boolean(job.error))
   }
 
   private reconcileMessage(value: any): void {

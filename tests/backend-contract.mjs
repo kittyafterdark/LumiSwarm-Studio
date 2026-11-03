@@ -1211,6 +1211,9 @@ const taggedReadyState = sent.find((entry) =>
   && entry.payload.data?.status === "ready"
 )
 assert.ok(taggedReadyState)
+const firstTaggedStates = sent.filter(entry => entry.payload.type === "tagged_image_job" && entry.payload.data?.id === taggedResult.payload.data.taggedJob.id)
+assert.equal(firstTaggedStates[0].payload.data.status, "queued", "Automatic requests never advertise a manual Generate action")
+assert.equal(firstTaggedStates.some(entry => entry.payload.data.status === "requested"), false)
 assert.ok(sent.indexOf(taggedReadyState) < sent.indexOf(taggedResult))
 assert.equal(taggedResult.payload.data.record.imageId, "image-tag-1")
 assert.equal(taggedResult.payload.data.taggedJob.status, "ready")
@@ -1458,6 +1461,8 @@ const remappedJobState = sent.filter((entry) =>
 ).at(-1)
 assert.ok(remappedJobState)
 assert.match(remappedJobState.payload.data.tagFingerprint, /^[a-z0-9]+$/)
+await frontendHandler({type:"tag_generate",requestId:"remapped-tag-replay",chatId:"chat-1",messageId:remappedTaggedMessage.id,fullMatch:remappedMatch[0],attrs:{request:"generate",slot:"remapped",aspect:"4:3",alt:"Remapped attachment"},content:remappedMatch[2]}, "user-1")
+assert.equal(taggedGenerationCount, 6, "Replaying a tag after message-ID remapping reuses its completed job")
 
 const removedInlineImage = await request("remove_tagged_image_from_chat", {
   jobId: remappedJobState.payload.data.id,
@@ -1922,5 +1927,52 @@ assert.equal(parsedUrlJob?.status,'ready')
 assert.equal(parsedUrlJob.output,'url')
 assert.equal(parserUrlMessage.content,authoredPrefix+parsedUrlJob.imageUrl+authoredSuffix)
 assert.match(quietParserCalls.at(-1).messages[0].content,/alt, and output attributes exactly/)
+// Automatic generation disabled: only the server requests manual approval.
+await request('set_tag_automation',{config:{autoGenerate:false}})
+const manualTag=urlTag.replace('slot="broadcast"','slot="manual-background"')
+const manualMessage={id:'manual-background',role:'assistant',content:manualTag,metadata:{}}
+taggedMessages.push(manualMessage)
+const beforeManual=urlSequence
+let manualJob=await submitUrl(manualMessage,manualTag,{force:false})
+assert.equal(manualJob.status,'requested')
+assert.equal(urlSequence,beforeManual,'Manual requests do not spend generation work')
+const forceStart=sent.length
+manualJob=await submitUrl(manualMessage,manualTag)
+assert.equal(manualJob.status,'ready')
+assert.equal(manualJob.inserted,true)
+assert.equal(sent.slice(forceStart).some(entry=>entry.payload.type==='tagged_image_job' && entry.payload.data?.status==='requested'),false,'Explicit Generate runs quietly after approval')
+// A restarted backend resumes a saved ready job without generating it again.
+const resumedFixture=structuredClone(manualJob)
+resumedFixture.inserted=false
+resumedFixture.error=''
+manualMessage.content=manualTag
+manualMessage.metadata={}
+userFiles.set('tagged-image-jobs.json',userFiles.get('tagged-image-jobs.json').map(job=>job.id===resumedFixture.id?resumedFixture:job))
+const beforeResume=urlSequence
+await request('list_tagged_jobs')
+for(let i=0;i<100 && manualMessage.content.includes('<swarm-image');i++)await new Promise(resolve=>setTimeout(resolve,2))
+assert.equal(manualMessage.content,resumedFixture.imageUrl,'Foreground recovery resumes background attachment')
+assert.equal(urlSequence,beforeResume,'Attachment recovery never regenerates the bitmap')
+// Foreground recovery can arrive while a queued job is still being persisted.
+const queuedEntered=deferred(),queuedRelease=deferred(),beforeQueuedSet=spindle.userStorage.setJson
+const queuedTag=urlTag.replace('slot="broadcast"','slot="queued-background"')
+const queuedMessage={id:'queued-background',role:'assistant',content:queuedTag,metadata:{}}
+taggedMessages.push(queuedMessage)
+let heldQueued=false
+spindle.userStorage.setJson=async(file,value,...args)=> {
+ const result=await beforeQueuedSet.call(spindle.userStorage,file,value,...args)
+ if(!heldQueued && file==='tagged-image-jobs.json' && value.some(job=>job.slot==='queued-background' && job.status==='queued')) {
+  heldQueued=true;queuedEntered.resolve();await queuedRelease.promise
+ }
+ return result
+}
+try {
+ const queuedRun=submitUrl(queuedMessage,queuedTag)
+ await bounded(queuedEntered.promise)
+ const queuedSnapshot=await request('list_tagged_jobs')
+ assert.equal(queuedSnapshot.data.find(job=>job.slot==='queued-background').status,'queued','An in-flight request is not mistaken for a lost worker')
+ queuedRelease.resolve()
+ assert.equal((await bounded(queuedRun)).inserted,true)
+} finally {queuedRelease.resolve();spindle.userStorage.setJson=beforeQueuedSet}
 spindle.imageGen.generateStream=originalStream
 console.log('URL output: authored HTML, plain URL, Markdown, parser, retry, duplicate delivery, persistence, remapping and removal: ok')

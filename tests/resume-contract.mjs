@@ -89,7 +89,7 @@ const stripDom=new JSDOM('<main></main>',{url:'https://studio.test'})
 for(const name of ['window','document','HTMLElement','MutationObserver'])globalThis[name]=stripDom.window[name]
 const strips=new Map()
 const strip=new TaggedImageController({sendToBackend(){},messages:{renderWidget({widgetId,html}){strips.set(widgetId,html);return()=>strips.delete(widgetId)}}},defaultStudioBehavior(),()=>{},()=>false,()=>{})
-const unattached={...job,id:'strip',inserted:false}
+const unattached={...job,id:'strip',inserted:false,error:'Background attachment needs recovery'}
 strip.onMessage({type:'tagged_image_jobs_result',data:[unattached]});assert.equal(strips.size,1)
 const mounted=document.createElement('figure');mounted.dataset.swarmStudioImage='true';mounted.dataset.swarmStudioJobId='strip';document.body.append(mounted)
 await new Promise(resolve=>originalTimeout(resolve,0));assert.equal(strips.size,0,'Native image replaces Attach image strip')
@@ -118,3 +118,51 @@ for(let mount=0;mount<2;mount++) {
 assert.equal(urlSent.length,0,'URL recovery neither regenerates nor rewrites the saved message')
 urlDom.window.close()
 console.log('URL-only recovery, late completion and full remount: ok')
+
+// No optimistic manual card, ready/attaching card, or stale replay after completion.
+const quietDom=new JSDOM('<main><img alt="Harbor" src="/api/v1/images/quiet"></main>',{url:'https://studio.test'})
+for(const name of ['window','document','HTMLElement','MutationObserver'])globalThis[name]=quietDom.window[name]
+const quietTag='<swarm-image request="generate" output="url" slot="quiet">harbor</swarm-image>'
+const quietPayload={chatId:'chat',messageId:'quiet-message',fullMatch:quietTag,content:'harbor',attrs:{request:'generate',output:'url',slot:'quiet'}}
+const quietSaved={id:'quiet-job',chatId:'chat',messageId:'quiet-message',slot:'quiet',output:'url',tagFingerprint:'1qjubnl',clientJobId:'quiet-attempt',status:'ready',inserted:true,imageUrl:'/api/v1/images/quiet',error:''}
+const quietWidgets=new Map(),quietSends=[]
+let quietMounts=0
+const quietCtx={sendToBackend:message=>quietSends.push(message),messages:{renderWidget({widgetId,html}){quietMounts++;quietWidgets.set(widgetId,html);return()=>quietWidgets.delete(widgetId)}}}
+let quiet=new TaggedImageController(quietCtx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+quiet.handleTag({...quietPayload,isStreaming:true})
+quiet.handleTag({...quietPayload,isStreaming:false})
+assert.equal(quietMounts,0,'A stale local auto-generation preference must not flash a Generate card')
+for(const status of ['queued','generating','ready'])quiet.onMessage({type:'tagged_image_job',data:{...quietSaved,status,inserted:false}})
+assert.equal(quietMounts,0,'Generation and normal attachment stay in the background')
+quiet.onMessage({type:'tagged_image_job',data:{...quietSaved}})
+quiet.destroy()
+quiet=new TaggedImageController(quietCtx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+quiet.onMessage({type:'tagged_image_jobs_result',data:[{...quietSaved}]})
+quiet.handleTag({...quietPayload,isStreaming:false})
+assert.equal(quietSends.filter(message=>message.type==='tag_generate').length,1,'Replaying a hydrated completed tag never starts a new request')
+for(const type of ['tagged_image_job','tagged_image_jobs_result']) {
+ const stale={...quietSaved,status:'requested',inserted:false,clientJobId:'',updatedAt:0}
+ quiet.onMessage({type,...(type.endsWith('_result')?{data:[stale]}:{data:stale})})
+}
+assert.equal(quietMounts,0,'Reordered states cannot resurrect a banner beside a completed URL image')
+const editedPayload={...quietPayload,fullMatch:quietTag.replace('>harbor<','>new harbor<'),content:'new harbor'}
+quiet.handleTag({...editedPayload,isStreaming:false})
+assert.equal(quietSends.filter(message=>message.type==='tag_generate').length,2,'A genuinely changed prompt is still submitted')
+quiet.onMessage({type:'tagged_image_job',data:{...quietSaved,clientJobId:'new-attempt',status:'generating',inserted:false}})
+quiet.onMessage({type:'tagged_image_job',data:{...quietSaved,clientJobId:'new-attempt',status:'failed',inserted:false,error:'Provider unavailable'}})
+assert.match([...quietWidgets.values()][0],/>Retry<\/button>/,'A new attempt can fail without being hidden by an older completion')
+quiet.destroy()
+const manualInline=new TaggedImageController(quietCtx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+manualInline.handleTag(quietPayload)
+assert.equal(quietWidgets.size,0,'Manual approval also waits for the authoritative server state')
+manualInline.onMessage({type:'tagged_image_job',data:{...quietSaved,status:'requested',inserted:false,clientJobId:''}})
+assert.match([...quietWidgets.values()][0],/>Generate image<\/button>/)
+manualInline.onMessage({type:'tagged_image_job',data:{...quietSaved,status:'ready',inserted:false,error:''}})
+assert.equal(quietWidgets.size,0,'Ready images do not advertise Attach while the backend is attaching')
+manualInline.onMessage({type:'tagged_image_job',data:{...quietSaved,status:'ready',inserted:false,error:'Attachment retries exhausted'}})
+assert.match([...quietWidgets.values()][0],/>Attach image<\/button>/,'Exhausted attachment still offers recovery')
+manualInline.destroy()
+manualInline.handleTag(quietPayload)
+assert.equal(quietWidgets.size,0,'Disposed controllers cannot remount banners')
+quietDom.window.close()
+console.log('background image lifecycle: no optimistic/attachment/replayed banners; manual generation and failure recovery preserved: ok')
