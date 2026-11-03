@@ -1517,7 +1517,7 @@ assert.match(source, /TAGGED_FINALIZE_RETRY_DELAYS_MS/)
 assert.match(source, /withTaggedMessageFinalizeLock\(lockKey/)
 assert.match(source, /finalizeTaggedImageJobWithRetry\(job, userId\)/)
 assert.match(source, /type: "tagged_message_reconciled"/)
-assert.match(source, /replaceTaggedImagePlaceholder\(content, job, markup\)/)
+assert.match(source, /replaceTaggedImagePlaceholder\(content, job, markup,/)
 assert.match(source, /data-swarm-studio-image="true"/)
 assert.match(source, /data-swarm-studio-inline-action="true"/)
 assert.match(source, /case "list_tagged_jobs"/)
@@ -1745,6 +1745,7 @@ console.log('render persistence contract: ok')
 
 await request("set_tag_automation", { config: { requestMode: "inline", injectProtocol: true, protocolPrompt: "CUSTOM LEGACY PROTOCOL" } })
 assert.match(macroValues.get("swarm_image_protocol"), /CUSTOM LEGACY PROTOCOL/)
+assert.match(macroValues.get("swarm_image_protocol"), /output="url"/, "Saved custom protocols also expose the output contract")
 assert.match(macroValues.get("swarm_image_protocol"), /Do not copy, imitate, or emit those markers/)
 console.log("history-marker guidance survives saved custom protocols: ok")
 
@@ -1830,3 +1831,96 @@ try {
  assert.ok(sent.some(entry=>entry.payload.type==='generation_result' && entry.payload.clientJobId==='metadata-timeout'),'Metadata timeout uses safe measured fallback')
 } finally {globalThis.setTimeout=normalTimeout;spindle.cors=timeoutCors;spindle.imageGen.generateStream=originalStream}
 console.log('optional metadata deadline preserves final image: ok')
+
+// URL-only output owns the generated URL; the caller owns all presentation.
+await request('set_tag_automation', {config:{autoGenerate:true,requestMode:'inline',injectProtocol:true,protocolPrompt:''}})
+assert.match(macroValues.get('swarm_image_protocol'), /output="url"/)
+const urlInputs=[]
+let urlSequence=0
+spindle.imageGen.generateStream=async function* (input) {
+  urlInputs.push(structuredClone({...input,signal:undefined}))
+  const imageId=`url-result-${++urlSequence}`
+  return {imageId,imageUrl:`/api/v1/image-gen/results/${imageId}`}
+}
+const urlTag='<swarm-image request="generate" output="url" slot="broadcast" aspect="16:9" alt="Harbor">harbor at dusk</swarm-image>'
+const inlineTag='<swarm-image request="generate" slot="ordinary" aspect="4:3">ordinary portrait</swarm-image>'
+const authoredPrefix='<section class="television"><header>Evening news</header><img class="photo" alt="Harbor" src=\''
+const authoredSuffix='\'><footer>Live</footer></section>'
+const urlMessage={id:'url-authored',role:'assistant',content:authoredPrefix+urlTag+authoredSuffix+inlineTag,metadata:{caller:'preserved'}}
+taggedMessages.push(urlMessage)
+const submitUrl=async(message,fullMatch=urlTag,extra={})=> {
+  const attrs=Object.fromEntries([...fullMatch.matchAll(/([\w-]+)="([^"]*)"/g)].map(match=>[match[1],match[2]]))
+  const content=fullMatch.slice(fullMatch.indexOf('>')+1,fullMatch.lastIndexOf('</swarm-image>'))
+  await frontendHandler({type:'tag_generate',requestId:`url-request-${sent.length}`,force:true,chatId:'chat-1',messageId:message.id,fullMatch,attrs,content,...extra},'user-1')
+  return userFiles.get('tagged-image-jobs.json').find(job=>job.fullMatch===fullMatch && job.messageId===message.id)
+}
+let urlJob=await submitUrl(urlMessage)
+assert.equal(urlJob.status,'ready')
+assert.equal(urlJob.output,'url')
+assert.equal(urlJob.inserted,true)
+assert.equal(urlMessage.content,authoredPrefix+urlJob.imageUrl+authoredSuffix+inlineTag)
+assert.equal(urlMessage.metadata.caller,'preserved')
+assert.equal(urlMessage.metadata.swarm_studio_tagged_images[0].output,'url')
+assert.doesNotMatch(urlMessage.content, /<figure|data-swarm-studio|style=/)
+assert.equal(urlInputs[0].parameters.width > urlInputs[0].parameters.height,true)
+const inlineJob=await submitUrl(urlMessage,inlineTag)
+assert.equal(inlineJob.output,'inline','Existing requests retain Studio rendering')
+assert.ok(urlMessage.content.startsWith(authoredPrefix+urlJob.imageUrl+authoredSuffix+'<figure'))
+assert.equal(urlMessage.metadata.swarm_studio_tagged_images.length,2)
+const beforeDuplicate=urlSequence
+await submitUrl(urlMessage,urlTag,{force:false})
+assert.equal(urlSequence,beforeDuplicate,'Repeated deliveries attach the same URL without regenerating')
+assert.equal((urlMessage.content.match(/class="photo"/g)||[]).length,1)
+const oldUrl=urlJob.imageUrl
+await frontendHandler({type:'retry_tagged_job',requestId:'url-retry',jobId:urlJob.id,retryMode:'original'},'user-1')
+urlJob=userFiles.get('tagged-image-jobs.json').find(job=>job.id===urlJob.id)
+assert.equal(urlJob.output,'url')
+assert.notEqual(urlJob.imageUrl,oldUrl)
+assert.ok(urlMessage.content.startsWith(authoredPrefix+urlJob.imageUrl+authoredSuffix+'<figure'))
+assert.equal(urlMessage.content.includes(oldUrl),false,'Retry replaces the previous URL instead of appending another image')
+const restoredUrlJob=(await request('list_tagged_jobs')).data.find(job=>job.id===urlJob.id)
+assert.equal(restoredUrlJob.output,'url','Persisted/public jobs retain their output contract')
+const removedUrl=await request('remove_tagged_image_from_chat',{jobId:urlJob.id})
+assert.ok(removedUrl.data.content.startsWith(authoredPrefix+authoredSuffix+'<figure'))
+assert.equal(urlMessage.metadata.swarm_studio_tagged_images.length,1)
+assert.equal(urlMessage.metadata.swarm_studio_tagged_images[0].jobId,inlineJob.id)
+
+// Plain URLs, Markdown destinations, remapped message IDs, and safe removal.
+for (const [id,prefix,suffix] of [['url-plain','',''],['url-markdown','![Harbor](',')']]) {
+  const message={id,role:'assistant',content:prefix+urlTag+suffix,metadata:{}}
+  taggedMessages.push(message)
+  const job=await submitUrl(message,urlTag,{messageId:`streaming-${id}`})
+  const saved=userFiles.get('tagged-image-jobs.json').find(item=>item.slot==='broadcast' && item.messageId===id)
+  assert.ok(saved)
+  assert.equal(saved.output,'url')
+  assert.equal(message.content,prefix+saved.imageUrl+suffix)
+  if(id==='url-plain') {
+    message.content+=` ${saved.imageUrl}`
+    const unchanged=message.content
+    const requestId='ambiguous-url-removal'
+    await frontendHandler({type:'remove_tagged_image_from_chat',requestId,jobId:saved.id},'user-1')
+    assert.equal(sent.find(entry=>entry.payload.requestId===requestId).payload.type,'studio_error')
+    assert.equal(message.content,unchanged,'Ambiguous URLs must not remove another image')
+    message.content=`${saved.imageUrl}-edited`
+    await frontendHandler({type:'remove_tagged_image_from_chat',requestId:'edited-url-removal',jobId:saved.id},'user-1')
+    assert.equal(sent.find(entry=>entry.payload.requestId==='edited-url-removal').payload.type,'studio_error')
+    assert.equal(message.content,`${saved.imageUrl}-edited`,'A saved URL must not match only the prefix of an edited URL')
+  }
+}
+
+// Parser output attributes are owned by the original request, even if the model omits them.
+await request('set_tag_automation',{config:{requestMode:'parser',injectProtocol:true,autoGenerate:true}})
+assert.match(macroValues.get('swarm_image_protocol'),/output="url"/)
+assert.doesNotMatch(macroValues.get('swarm_image_protocol'),/request="generate"/)
+const parserUrlTag=urlTag.replace('request="generate"','request="parse"')
+const parserUrlMessage={id:'url-parser',role:'assistant',content:authoredPrefix+parserUrlTag+authoredSuffix,metadata:{}}
+taggedMessages.push(parserUrlMessage)
+eventHandlers.get('GENERATION_ENDED')({generationId:'url-parser-generation',chatId:'chat-1',messageId:parserUrlMessage.id,content:parserUrlMessage.content},'user-1')
+for(let i=0;i<200 && !parserUrlMessage.metadata?.swarm_studio_tagged_images?.length;i++)await new Promise(resolve=>setTimeout(resolve,2))
+const parsedUrlJob=userFiles.get('tagged-image-jobs.json').find(job=>job.messageId===parserUrlMessage.id)
+assert.equal(parsedUrlJob?.status,'ready')
+assert.equal(parsedUrlJob.output,'url')
+assert.equal(parserUrlMessage.content,authoredPrefix+parsedUrlJob.imageUrl+authoredSuffix)
+assert.match(quietParserCalls.at(-1).messages[0].content,/alt, and output attributes exactly/)
+spindle.imageGen.generateStream=originalStream
+console.log('URL output: authored HTML, plain URL, Markdown, parser, retry, duplicate delivery, persistence, remapping and removal: ok')

@@ -281,6 +281,7 @@ interface LoraDownloadJob {
 type TaggedImageJobStatus = "requested" | "queued" | "generating" | "ready" | "failed" | "cancelled"
 
 interface TaggedImageJob {
+  output: "inline" | "url"
   id: string
   key: string
   chatId: string
@@ -367,6 +368,9 @@ const taggedFinalizeRetries = new Map<string, Promise<boolean>>()
 const taggedFinalizeMessageTargets = new Map<string, string>()
 const swarmProtocolContexts = new Map<string, SwarmProtocolContext>()
 
+const SWARM_IMAGE_OUTPUT_PROTOCOL = `OUTPUT CONTRACT
+Omit output or use output="inline" for a normal Studio illustration with its image actions. Use output="url" when the caller wants only a generated image URL or supplies its own HTML, CSS, or Markdown presentation. Studio replaces the complete request tag with only the permanent Lumiverse image URL, with no figure, styles, or action controls. Preserve the caller's surrounding markup. For an HTML image source, put the request inside a single-quoted src attribute and use double quotes for the request attributes, for example: <img alt="Harbor" src='<swarm-image request="generate" output="url" slot="harbor" character="none">harbor at dusk</swarm-image>'>. Give authored images meaningful alt text. Use distinct slots for distinct images. Never invent a result URL or use the global last_genned macro as a saved image reference.`
+
 const SWARM_IMAGE_PROTOCOL_BASE = `SWARM STUDIO IMAGE REQUEST PROTOCOL
 
 HISTORY IMAGE MARKERS
@@ -383,6 +387,8 @@ Place this exact XML-like request wherever an illustration selected under the im
   alt="brief accessible description"
 >
 scene-specific SwarmUI prompt</swarm-image>
+${SWARM_IMAGE_OUTPUT_PROTOCOL}
+
 The request="generate" marker is required. Emit the tag only as an actual image request: never quote it, explain it, demonstrate it in visible prose, or emit an empty/partial opening tag. The tag body is a diffusion prompt, not prose for the user and not an HTML shell. Do not nest another <swarm-image> tag inside it.
 
 LOCAL GENERATION
@@ -419,6 +425,8 @@ When an illustration should appear in the reply, place this exact lightweight XM
   alt="brief accessible description"
 >
 brief visual intent grounded in the current scene</swarm-image>
+
+${SWARM_IMAGE_OUTPUT_PROTOCOL.replace(/request="generate"/g, 'request="parse"')}
 
 The request="parse" marker is required. The tag body is a concise visual brief for a separate local parser model, not a finished diffusion prompt and not prose for the user. Include the visible subjects, action, expression, framing, environment, and lighting without copying biographies, mannerisms, lore, or display names into the body. The local parser receives the active Studio identities, presets, checkpoint guidance, and negative prompt separately and expands this request after the reply finishes.
 
@@ -2927,6 +2935,10 @@ function cleanTagSlot(value: unknown): string {
   return asString(value).trim().replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80)
 }
 
+function cleanTaggedImageOutput(value: unknown): "inline" | "url" {
+  return asString(value).trim().toLowerCase() === "url" ? "url" : "inline"
+}
+
 function cleanTaggedImageJob(value: unknown): TaggedImageJob | null {
   const record = asRecord(value)
   const id = asString(record.id).trim()
@@ -2949,6 +2961,7 @@ function cleanTaggedImageJob(value: unknown): TaggedImageJob | null {
     aspect: cleanAspect(record.aspect) || "4:3",
     alt: asString(record.alt).slice(0, 300),
     fullMatch: asString(record.fullMatch).slice(0, 24_000),
+    output: cleanTaggedImageOutput(record.output ?? parseSwarmImageTags(asString(record.fullMatch))[0]?.attrs.output),
     status,
     clientJobId: asString(record.clientJobId).slice(0, 120),
     imageId: asString(record.imageId).slice(0, 200),
@@ -3180,9 +3193,13 @@ function buildInjectedSwarmProtocol(
   context: SwarmProtocolContext | null = null,
   automation: TagAutomationConfig = cleanTagAutomationConfig(null),
 ): string {
-  const protocol = automation.requestMode === "parser"
+  const template = automation.requestMode === "parser"
     ? buildSwarmParserRequestProtocol(automation)
     : buildSwarmImageProtocol(profile, context, automation)
+  const outputProtocol = automation.requestMode === "parser"
+    ? SWARM_IMAGE_OUTPUT_PROTOCOL.replace(/request="generate"/g, 'request="parse"')
+    : SWARM_IMAGE_OUTPUT_PROTOCOL
+  const protocol = template.includes("OUTPUT CONTRACT") ? template : `${template}\n\n${outputProtocol}`
   return protocol.includes("HISTORY IMAGE MARKERS") ? protocol : `HISTORY IMAGE MARKERS
 Bracketed summaries such as [Generated illustration: ...], [Illustration requested: ...], and [Embedded generated image omitted] are application-authored descriptions of earlier images in chat history. They are historical context only, never an output format or an image request. Do not copy, imitate, or emit those markers in a new reply. To request a new illustration, emit a complete <swarm-image> tag using the request mode and attributes specified below, at the point where the image belongs. A bracketed caption, Markdown image placeholder, or prose saying an image was generated cannot trigger generation and does not satisfy any required image count.
 
@@ -3347,7 +3364,7 @@ function parserCompletionInstruction(
 ): string {
   return `You are Swarm Studio's local image-request parser. Convert every request="parse" tag in the user message into exactly one complete request="generate" tag.
 
-Return only the completed tags, in the same order, with no prose or Markdown fences. Preserve each tag's slot, aspect, character, look, persona, and alt attributes exactly. Expand only the body into a compact, checkpoint-appropriate diffusion prompt. Do not copy biographies, personality, backstory, or conversational display names. Do not invent additional images or omit an input request.
+Return only the completed tags, in the same order, with no prose or Markdown fences. Preserve each tag's slot, aspect, character, look, persona, alt, and output attributes exactly. Expand only the body into a compact, checkpoint-appropriate diffusion prompt. Do not copy biographies, personality, backstory, or conversational display names. Do not invent additional images or omit an input request.
 
 The completed tags must follow this Studio protocol and its live identity/preset guidance:
 
@@ -3412,6 +3429,7 @@ async function completeParserImageRequests(payload: any, userId?: string): Promi
       completed.attrs.alt = asString(request.attrs.alt)
       const replacement = `<swarm-image
   request="generate"
+  output="${cleanTaggedImageOutput(request.attrs.output)}"
   slot="${completed.attrs.slot.replace(/"/g, "&quot;")}"
   aspect="${(cleanAspect(completed.attrs.aspect) || "4:3").replace(/"/g, "")}"
   character="${completed.attrs.character === "none" ? "none" : "active"}"
@@ -4041,6 +4059,7 @@ function taggedJobPublic(job: TaggedImageJob): JsonObject {
     id: job.id,
     key: job.key,
     tagFingerprint: stableTextHash(job.fullMatch),
+    output: job.output,
     chatId: job.chatId,
     messageId: job.messageId,
     slot: job.slot,
@@ -4099,9 +4118,16 @@ async function withTaggedMessageFinalizeLock<T>(key: string, task: () => Promise
   }
 }
 
-function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, markup: string): { content: string; replaced: boolean } {
+function taggedImageAttachment(message: any, job: TaggedImageJob): JsonObject {
+  const attachments = asRecord(message?.metadata).swarm_studio_tagged_images
+  return asRecord(Array.isArray(attachments)
+    ? attachments.find((item: any) => asString(item?.jobId) === job.id)
+    : null)
+}
+
+function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, markup: string, previousImageUrl = ""): { content: string; replaced: boolean } {
   if (job.fullMatch && content.includes(job.fullMatch)) {
-    return { content: content.replace(job.fullMatch, markup), replaced: true }
+    return { content: content.replace(job.fullMatch, () => markup), replaced: true }
   }
   const tagPattern = /<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi
   let match: RegExpExecArray | null
@@ -4111,6 +4137,19 @@ function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, mar
       content: `${content.slice(0, match.index)}${markup}${content.slice(match.index + match[0].length)}`,
       replaced: true,
     }
+  }
+  if (job.output === "url") {
+    // URL outputs have no DOM marker. The message metadata owns the previous
+    // result; refuse ambiguous matches rather than changing another image.
+    const index = previousImageUrl ? content.indexOf(previousImageUrl) : -1
+    const before = index > 0 ? content[index - 1] : ""
+    const after = index >= 0 ? content[index + previousImageUrl.length] || "" : ""
+    if (index >= 0 && content.split(previousImageUrl).length === 2
+      && (!before || /[\s"'`<>()\[\]=]/.test(before))
+      && (!after || /[\s"'`<>()\[\]]/.test(after))) {
+      return { content: content.replace(previousImageUrl, () => markup), replaced: true }
+    }
+    return { content, replaced: false }
   }
   const existingFigure = new RegExp(
     `<figure\\b[^>]*data-swarm-studio-job-id="${escapeRegex(job.id)}"[^>]*>[\\s\\S]*?<\\/figure>`,
@@ -4131,6 +4170,10 @@ function taggedMessageMatchScore(message: any, job: TaggedImageJob): number {
   if (role && role !== "assistant") return 0
   const content = asString(message?.content)
   if (!content) return 0
+  if (job.output === "url") {
+    const previousImageUrl = asString(taggedImageAttachment(message, job).imageUrl)
+    if (previousImageUrl && content.includes(previousImageUrl)) return 4
+  }
   if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) return 4
   if (job.fullMatch && content.includes(job.fullMatch)) return 3
 
@@ -4187,10 +4230,13 @@ async function removeTaggedImageFromChat(
       `<figure\\b(?=[^>]*data-swarm-studio-job-id=(?:"${escapedJobId}"|'${escapedJobId}'))[^>]*>[\\s\\S]*?<\\/figure>`,
       "i",
     )
-    if (!figurePattern.test(content)) {
+    const urlReplacement = job.output === "url"
+      ? replaceTaggedImagePlaceholder(content, job, "", asString(taggedImageAttachment(target, job).imageUrl))
+      : null
+    if (urlReplacement ? !urlReplacement.replaced : !figurePattern.test(content)) {
       throw new Error("That inline image is no longer attached to the chat message.")
     }
-    const nextContent = content.replace(figurePattern, "")
+    const nextContent = urlReplacement ? urlReplacement.content : content.replace(figurePattern, "")
     const metadata = asRecord(target.metadata)
     const taggedImages = Array.isArray(metadata.swarm_studio_tagged_images)
       ? metadata.swarm_studio_tagged_images.filter((item: any) => asString(item?.jobId) !== job.id)
@@ -4235,8 +4281,8 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Pro
     const content = asString(target?.content)
     if (!target || !job.messageId) return false
     const alt = job.alt || `Generated illustration for ${job.slot}`
-    const markup = `<figure data-swarm-studio-image="true" data-swarm-studio-job-id="${escapeHtmlAttribute(job.id)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" tabindex="0" style="position:relative;display:block;width:100%;height:100%;margin:0;"><img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" data-swarm-studio-fit="cover" loading="lazy" style="display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center;"><span data-swarm-studio-inline-action="true" tabindex="0" role="button" aria-label="Illustration actions">↻</span></figure>`
-    const replacement = replaceTaggedImagePlaceholder(content, job, markup)
+    const markup = job.output === "url" ? job.imageUrl : `<figure data-swarm-studio-image="true" data-swarm-studio-job-id="${escapeHtmlAttribute(job.id)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" tabindex="0" style="position:relative;display:block;width:100%;height:100%;margin:0;"><img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" data-swarm-studio-fit="cover" loading="lazy" style="display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center;"><span data-swarm-studio-inline-action="true" tabindex="0" role="button" aria-label="Illustration actions">↻</span></figure>`
+    const replacement = replaceTaggedImagePlaceholder(content, job, markup, asString(taggedImageAttachment(target, job).imageUrl))
     if (!replacement.replaced) {
       if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) {
         job.inserted = true
@@ -4258,6 +4304,7 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Pro
         ...metadata,
         swarm_studio_tagged_images: [...previous, {
           jobId: job.id,
+          output: job.output,
           slot: job.slot,
           prompt: job.prompt,
           negativePrompt: job.negativePrompt,
@@ -4562,6 +4609,7 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
       messageId,
       slot,
       prompt: scenePrompt,
+      output: cleanTaggedImageOutput(attrs.output),
       negativePrompt: "",
       aspect: cleanAspect(attrs.aspect) || "4:3",
       alt: asString(attrs.alt).trim().slice(0, 300),

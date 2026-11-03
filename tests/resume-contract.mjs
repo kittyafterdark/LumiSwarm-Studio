@@ -98,3 +98,23 @@ mounted.remove();strip.onMessage({type:'tagged_image_jobs_result',data:[unattach
 strip.onMessage({type:'tagged_image_jobs_result',data:[]});assert.equal(strips.size,0,'Removed saved jobs retire their strips')
 strip.destroy();stripDom.window.close()
 console.log('terminal snapshots, concurrent attempts, late native image mounts and removed strips: ok')
+
+// A completed URL contract never acquires a recovered Studio image widget.
+const urlDom=new JSDOM('<main><img alt="Authored harbor" src="/api/v1/images/saved-url"></main>',{url:'https://studio.test'})
+for(const name of ['window','document','HTMLElement','MutationObserver'])globalThis[name]=urlDom.window[name]
+const urlWidgets=new Map(),urlSent=[]
+const urlCtx={sendToBackend:message=>urlSent.push(message),messages:{renderWidget({widgetId,html}){urlWidgets.set(widgetId,html);return()=>urlWidgets.delete(widgetId)}}}
+const urlSaved={...job,id:'saved-url',output:'url',imageUrl:'/api/v1/images/saved-url'}
+for(let mount=0;mount<2;mount++) {
+ const urlInline=new TaggedImageController(urlCtx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+ urlInline.onMessage({type:'tagged_image_jobs_result',data:[urlSaved]})
+ urlInline.onMessage({type:'tagged_image_job',data:urlSaved})
+ assert.equal(urlWidgets.size,0,'Recovery and live completion preserve URL-only output')
+ assert.equal(document.querySelectorAll('img').length,1)
+ assert.equal(document.querySelector('img').alt,'Authored harbor')
+ urlInline.destroy()
+ assert.equal(urlWidgets.size,0)
+}
+assert.equal(urlSent.length,0,'URL recovery neither regenerates nor rewrites the saved message')
+urlDom.window.close()
+console.log('URL-only recovery, late completion and full remount: ok')

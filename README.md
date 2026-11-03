@@ -206,6 +206,32 @@ Profile macros resolve to raw values so authored HTML and display regexes remain
 
 The macro reference is collapsed beneath the editable protocol in **Studio settings → Generation**. Character, persona, and lore visuals live on the drawer's unified **Visuals** page, with character output organization still backed by Output Library.
 
+### URL-only output for authored layouts
+
+Add `output="url"` to a generation request to replace that entire tag with only
+its permanent Lumiverse image URL. Studio still uses the configured generation
+profile and saves the output in the Library. It adds no figure, inline styling,
+action overlay, or recovered-image widget. Omitting `output` (or using
+`output="inline"`) preserves the normal Studio illustration.
+
+For a plain URL, emit the request on its own. For an authored HTML layout, put it
+in the image source using single quotes around `src` and double quotes inside
+the request:
+
+```html
+<img class="broadcast-photo" alt="Harbor at dusk" src='<swarm-image request="generate" output="url" slot="harbor" aspect="16:9" character="none">harbor, dusk, telephoto photograph</swarm-image>'>
+```
+
+After generation, only the request becomes `/api/v1/image-gen/results/...`;
+the surrounding image, accessible description, classes, and layout stay yours.
+The same contract works inside a Markdown image destination. Use a distinct
+slot for each image. In Parser model mode, use `request="parse" output="url"`;
+the parser expands the visual brief while preserving URL-only output. Successful
+URL requests remain URL-only after reload, navigation, and extension remount.
+Retries replace the previously attached URL using saved message metadata; an
+ambiguous repeated URL is left untouched. Removing a URL output clears its
+request/URL while preserving the caller's surrounding markup.
+
 ## Metadata behavior
 
 When a LoRA is added, Swarm Studio inherits `lora_default_weight`. Metadata

@@ -1,4 +1,5 @@
 interface TaggedImageJobView {
+  output?: "inline" | "url"
   id: string
   key: string
   tagFingerprint?: string
@@ -207,6 +208,7 @@ class TaggedImageController {
       messageId: String(payload.messageId),
       slot,
       prompt: String(payload.content || "").trim(),
+      output: String(payload?.attrs?.output || "").trim().toLowerCase() === "url" ? "url" : "inline",
       negativePrompt: "",
       aspect: String(payload?.attrs?.aspect || ""),
       alt: String(payload?.attrs?.alt || ""),
@@ -383,6 +385,7 @@ class TaggedImageController {
     // A public message widget recovers the saved bitmap without writing stale
     // message content back to the server or starting another generation.
     this.remove(job)
+    if (job.output === "url") return
     const widgetId = this.widgetId(job)
     let url: URL
     try { url = new URL(job.imageUrl, window.location.href) } catch { return }

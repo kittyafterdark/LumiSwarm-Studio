@@ -60,6 +60,9 @@ Place this exact XML-like request wherever an illustration selected under the im
   alt="brief accessible description"
 >
 scene-specific SwarmUI prompt</swarm-image>
+OUTPUT CONTRACT
+Omit output or use output="inline" for a normal Studio illustration with its image actions. Use output="url" when the caller wants only a generated image URL or supplies its own HTML, CSS, or Markdown presentation. Studio replaces the complete request tag with only the permanent Lumiverse image URL, with no figure, styles, or action controls. Preserve the caller's surrounding markup. For an HTML image source, put the request inside a single-quoted src attribute and use double quotes for the request attributes, for example: <img alt="Harbor" src='<swarm-image request="generate" output="url" slot="harbor" character="none">harbor at dusk</swarm-image>'>. Give authored images meaningful alt text. Use distinct slots for distinct images. Never invent a result URL or use the global last_genned macro as a saved image reference.
+
 The request="generate" marker is required. Emit the tag only as an actual image request: never quote it, explain it, demonstrate it in visible prose, or emit an empty/partial opening tag. The tag body is a diffusion prompt, not prose for the user and not an HTML shell. Do not nest another <swarm-image> tag inside it.
 
 LOCAL GENERATION

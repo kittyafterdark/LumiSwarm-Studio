@@ -483,6 +483,48 @@ try {
     await page.evaluate(()=>{lifecycleMini.destroy();document.querySelector('#lifecycle-host').remove()})
   }
   console.log('Desktop/mobile: missed terminal snapshot, late native image retires strip, keyboard Stop and full remount: ok')
+
+  // Authored media keep their own layout and semantics after URL completion.
+  for (const width of [390,1440]) {
+    await page.setViewportSize({width,height:844})
+    await page.evaluate(async()=>{
+      const {TaggedImageController,defaultStudioBehavior}=await import('/frontend.js')
+      const host=document.createElement('section');host.id='url-contract-host';document.body.append(host)
+      window.urlContractSends=[]
+      const ctx={sendToBackend:message=>urlContractSends.push(message),chats:{async updateMessage(chatId,messageId,{content}){host.innerHTML=content}},messages:{renderWidget({widgetId,html}){const frame=document.createElement('iframe');frame.dataset.widget=widgetId;frame.title='URL contract fallback';frame.srcdoc=html;host.append(frame);return()=>frame.remove()}}}
+      const mount=()=>new TaggedImageController(ctx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+      const controller=mount()
+      const fullMatch='<swarm-image request="generate" output="url" slot="harbor">harbor at dusk</swarm-image>'
+      const source=`<article class="authored-media"><h2>Harbor broadcast</h2><img alt="Harbor at dusk" style="width:160px;height:90px;object-fit:contain" src='${fullMatch}'><a href="/api/v1/images/saved-url">Open harbor image</a></article>`
+      const payload={chatId:'chat',messageId:'url-message',fullMatch,content:'harbor at dusk',attrs:{request:'generate',output:'url',slot:'harbor'}}
+      controller.handleTag({...payload,isStreaming:true})
+      controller.handleTag({...payload,isStreaming:false})
+      const saved={id:'url-contract',key:'chat:url-message:harbor',chatId:'chat',messageId:'url-message',slot:'harbor',output:'url',status:'ready',inserted:true,imageUrl:'/api/v1/images/saved-url',alt:'Harbor at dusk'}
+      const content=source.replace(fullMatch,saved.imageUrl)
+      controller.onMessage({type:'tagged_image_job',data:saved})
+      controller.onMessage({type:'tagged_message_reconciled',data:{jobId:saved.id,chatId:'chat',messageId:'url-message',content}})
+      await new Promise(resolve=>setTimeout(resolve,0))
+      controller.onMessage({type:'tagged_image_jobs_result',data:[saved]})
+      controller.destroy()
+      const restored=mount()
+      restored.onMessage({type:'tagged_image_jobs_result',data:[saved]})
+      restored.onMessage({type:'tagged_image_job',data:saved})
+      window.urlContractController=restored
+    })
+    const host=page.locator('#url-contract-host')
+    const authoredImage=host.getByRole('img',{name:'Harbor at dusk',exact:true})
+    await authoredImage.waitFor()
+    await page.waitForFunction(()=>document.querySelector('#url-contract-host img')?.naturalWidth>0)
+    assert.equal(await authoredImage.getAttribute('src'),'/api/v1/images/saved-url')
+    assert.equal(await authoredImage.evaluate(image=>getComputedStyle(image).objectFit),'contain')
+    assert.equal(await host.locator('img').count(),1)
+    assert.equal(await host.locator('figure,iframe,[data-swarm-studio-inline-action]').count(),0,'URL completion and remount add no Studio framing')
+    await host.getByRole('link',{name:'Open harbor image',exact:true}).focus()
+    assert.equal(await host.getByRole('link',{name:'Open harbor image',exact:true}).evaluate(link=>link===document.activeElement),true)
+    assert.equal(await page.evaluate(()=>urlContractSends.filter(message=>message.type==='tag_generate').length),1,'Streaming/settled delivery generates only once')
+    await page.evaluate(()=>{urlContractController.destroy();document.querySelector('#url-contract-host').remove()})
+  }
+  console.log('Desktop/mobile URL contract: authored layout, named image/link, streaming deduplication, reconciliation and remount without Studio framing: ok')
   assert.deepEqual(errors, [])
   console.log('Chromium: 60 delayed decoded previews, zero card disconnects, zero library renders, stable geometry, opaque folders: ok')
 } finally {
