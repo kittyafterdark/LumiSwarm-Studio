@@ -1,9 +1,15 @@
 let fallbackRequestIdCounter = 0
+let hostRequestUuid: (() => string) | undefined
+
+function bindRequestUuid(ctx: FrontendContext): () => void {
+  const uuid = ctx.uuid as { v4(): string } | undefined
+  const generate = uuid ? () => uuid.v4() : undefined
+  hostRequestUuid = generate
+  return () => { if (hostRequestUuid === generate) hostRequestUuid = undefined }
+}
 
 function createRequestId(cryptoApi: Crypto | null | undefined = globalThis.crypto): string {
-  if (typeof cryptoApi?.randomUUID === "function") {
-    return cryptoApi.randomUUID()
-  }
+  if (hostRequestUuid) return hostRequestUuid()
 
   if (typeof cryptoApi?.getRandomValues === "function") {
     const bytes = cryptoApi.getRandomValues(new Uint8Array(16))

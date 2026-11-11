@@ -101,6 +101,16 @@ function recipeParameters(recipe) {
         } : {}
     };
 }
+function localBackendUuid() {
+    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = bytes[6] & 0x0f | 0x40;
+    bytes[8] = bytes[8] & 0x3f | 0x80;
+    const hex = Array.from(bytes, (byte)=>byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+async function backendUuid() {
+    return spindle.uuid ? await spindle.uuid.v4() : localBackendUuid();
+}
 const SESSION_TTL_MS = 20 * 60 * 1000;
 const SESSION_CACHE_LIMIT = 64;
 const PREVIEW_CACHE_LIMIT = 64;
@@ -753,7 +763,8 @@ async function runLoraDownloadJob(job) {
         job.socket = null;
     }
 }
-function startLoraDownloadJob(payload, requestId, userId) {
+async function startLoraDownloadJob(payload, requestId, userId) {
+    const jobId = await backendUuid();
     const key = loraDownloadJobKey(userId);
     const existing = loraDownloadJobs.get(key);
     if (existing && ![
@@ -766,7 +777,7 @@ function startLoraDownloadJob(payload, requestId, userId) {
     const connectionId = asString(payload?.connectionId).trim();
     if (!connectionId) throw new Error("Choose a SwarmUI connection first.");
     const job = {
-        id: crypto.randomUUID(),
+        id: jobId,
         requestId,
         userId,
         connectionId,
@@ -1081,13 +1092,13 @@ function cleanStackPresetItems(value, allowEmpty = true) {
         };
     });
 }
-function cleanStackPreset(value, existingId = "") {
+function cleanStackPreset(value, id) {
     const input = asRecord(value);
     const name = asString(input.name).trim().slice(0, 80);
     if (!name) throw new Error("Give this LoRA stack a name.");
     const items = cleanStackPresetItems(input.items, false);
     return {
-        id: existingId || crypto.randomUUID(),
+        id,
         name,
         items,
         updatedAt: Date.now()
@@ -1098,7 +1109,7 @@ async function saveStackPreset(value, userId) {
     const requestedId = asString(input.id).trim();
     const presets = await loadStackPresets(userId);
     const existingIndex = requestedId ? presets.findIndex((preset)=>preset.id === requestedId) : presets.findIndex((preset)=>preset.name.toLowerCase() === asString(input.name).trim().toLowerCase());
-    const preset = cleanStackPreset(input, existingIndex >= 0 ? presets[existingIndex].id : "");
+    const preset = cleanStackPreset(input, existingIndex >= 0 ? presets[existingIndex].id : await backendUuid());
     if (existingIndex >= 0) presets.splice(existingIndex, 1);
     presets.unshift(preset);
     await spindle.userStorage.setJson(STACK_PRESETS_FILE, presets.slice(0, STACK_PRESET_LIMIT), {
@@ -1149,7 +1160,7 @@ async function savePersonaVisualPreset(value, userId) {
     const presets = await loadPersonaVisualPresets(userId);
     const existingIndex = requestedId ? presets.findIndex((preset)=>preset.id === requestedId) : presets.findIndex((preset)=>preset.name.toLowerCase() === name.toLowerCase());
     const preset = {
-        id: existingIndex >= 0 ? presets[existingIndex].id : requestedId || crypto.randomUUID(),
+        id: existingIndex >= 0 ? presets[existingIndex].id : requestedId || await backendUuid(),
         name,
         positivePrompt: asString(input.positivePrompt).trim().slice(0, 12_000),
         sourcePresetId: asString(input.sourcePresetId).trim().slice(0, 200),
@@ -1350,7 +1361,7 @@ function cleanCharacterLooks(value) {
         const requestedId = asString(item.id).trim().slice(0, 120);
         const name = asString(item.name).trim().slice(0, 80);
         if (!name) return [];
-        const id = requestedId || (name.toLowerCase() === "default" ? "default" : crypto.randomUUID());
+        const id = requestedId || (name.toLowerCase() === "default" ? "default" : localBackendUuid());
         if (seen.has(id)) return [];
         seen.add(id);
         return [
@@ -1563,7 +1574,7 @@ async function createOutputFolder(name, bindingType, userId) {
         throw new Error(`An output folder named “${cleanName}” already exists.`);
     }
     folders.unshift({
-        id: binding ? `character:${binding.characterId}` : crypto.randomUUID(),
+        id: binding ? `character:${binding.characterId}` : await backendUuid(),
         name: cleanName,
         imageIds: [],
         binding,
@@ -1608,7 +1619,7 @@ async function saveCharacterLook(folderId, value, activate, userId) {
     const name = asString(input.name).trim().slice(0, 80);
     if (!name) throw new Error("Give this character look a name.");
     const existingIndex = requestedId ? folder.binding.looks.findIndex((look)=>look.id === requestedId) : folder.binding.looks.findIndex((look)=>look.name.toLowerCase() === name.toLowerCase());
-    const id = existingIndex >= 0 ? folder.binding.looks[existingIndex].id : requestedId || (name.toLowerCase() === "default" ? "default" : crypto.randomUUID());
+    const id = existingIndex >= 0 ? folder.binding.looks[existingIndex].id : requestedId || (name.toLowerCase() === "default" ? "default" : await backendUuid());
     const stackPresetId = asString(input.stackPresetId).trim().slice(0, 200);
     const stackPreset = stackPresetId ? (await loadStackPresets(userId)).find((preset)=>preset.id === stackPresetId) : null;
     if (stackPresetId && !stackPreset) throw new Error("That saved LoRA stack no longer exists.");
@@ -3982,7 +3993,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
             ].map((item)=>item.weight);
         }
         input.parameters = parameters;
-        input.clientJobId = crypto.randomUUID();
+        input.clientJobId = await backendUuid();
         job.prompt = characterLayer.prompt;
         job.negativePrompt = asString(input.negativePrompt);
         job.ownerCharacterId = characterLayer.characterId;
@@ -4091,6 +4102,7 @@ async function requestTaggedImageGeneration(payload, userId) {
     const force = payload?.force === true;
     const useOriginalProfile = asString(payload?.retryMode) === "original";
     const config = await loadTagAutomationConfig(userId);
+    const newJobId = await backendUuid();
     const jobs = await loadTaggedImageJobs(userId);
     if (swipeId === undefined && sourceMatches === 0 && payload?.isStreaming !== true) {
         const existing = jobs.filter((candidate)=>candidate.chatId === chatId && candidate.messageId === messageId && candidate.slot === slot && candidate.fullMatch === fullMatch && !removedTaggedJobs.has(candidate.id));
@@ -4121,7 +4133,7 @@ async function requestTaggedImageGeneration(payload, userId) {
         job.inserted = false;
     } else {
         job = {
-            id: crypto.randomUUID(),
+            id: newJobId,
             key,
             chatId,
             messageId,
@@ -4870,7 +4882,7 @@ async function handleMessage(payload, userId) {
                 }
             case "start_lora_download":
                 {
-                    startLoraDownloadJob(payload, requestId, userId);
+                    await startLoraDownloadJob(payload, requestId, userId);
                     return;
                 }
             case "get_lora_download_status":
@@ -5028,7 +5040,7 @@ async function handleMessage(payload, userId) {
                         throw new Error("Grant the Image Generation permission to generate.");
                     }
                     const input = asRecord(payload?.input);
-                    const clientJobId = asString(input.clientJobId).trim() || crypto.randomUUID();
+                    const clientJobId = asString(input.clientJobId).trim() || await backendUuid();
                     const controllerKey = generationKey(userId, clientJobId);
                     const controller = new AbortController();
                     const controllerEntry = {

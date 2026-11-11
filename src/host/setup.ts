@@ -2,6 +2,20 @@ let activeStudio: StudioController | null = null
 let activeModal: any | null = null
 
 function setup(ctx: FrontendContext): () => void {
+  const unbindUuid = bindRequestUuid(ctx)
+  try {
+    const teardown = setupStudio(ctx)
+    return () => {
+      unbindUuid()
+      teardown()
+    }
+  } catch (error) {
+    unbindUuid()
+    throw error
+  }
+}
+
+function setupStudio(ctx: FrontendContext): () => void {
   const removeStyle = ctx.dom.addStyle(`${STYLES}\n${STUDIO_V3_STYLES}`)
   let currentTheme = storedStudioTheme()
   let appearance = storedStudioAppearance()

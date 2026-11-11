@@ -1,5 +1,18 @@
 declare const spindle: any
 
+// Older hosts and synchronous saved-look normalization use local entropy.
+function localBackendUuid(): string {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+async function backendUuid(): Promise<string> {
+  return spindle.uuid ? await spindle.uuid.v4() : localBackendUuid()
+}
+
 type JsonObject = Record<string, unknown>
 
 interface SwarmConnection {
@@ -1000,7 +1013,8 @@ async function runLoraDownloadJob(job: LoraDownloadJob): Promise<void> {
   }
 }
 
-function startLoraDownloadJob(payload: any, requestId: string, userId?: string): LoraDownloadJob {
+async function startLoraDownloadJob(payload: any, requestId: string, userId?: string): Promise<LoraDownloadJob> {
+  const jobId = await backendUuid()
   const key = loraDownloadJobKey(userId)
   const existing = loraDownloadJobs.get(key)
   if (existing && !["complete", "failed", "cancelled"].includes(existing.status)) {
@@ -1009,7 +1023,7 @@ function startLoraDownloadJob(payload: any, requestId: string, userId?: string):
   const connectionId = asString(payload?.connectionId).trim()
   if (!connectionId) throw new Error("Choose a SwarmUI connection first.")
   const job: LoraDownloadJob = {
-    id: crypto.randomUUID(),
+    id: jobId,
     requestId,
     userId,
     connectionId,
@@ -1414,13 +1428,13 @@ function cleanStackPresetItems(value: unknown, allowEmpty = true): StackPresetIt
   })
 }
 
-function cleanStackPreset(value: unknown, existingId = ""): StackPreset {
+function cleanStackPreset(value: unknown, id: string): StackPreset {
   const input = asRecord(value)
   const name = asString(input.name).trim().slice(0, 80)
   if (!name) throw new Error("Give this LoRA stack a name.")
   const items = cleanStackPresetItems(input.items, false)
   return {
-    id: existingId || crypto.randomUUID(),
+    id,
     name,
     items,
     updatedAt: Date.now(),
@@ -1434,7 +1448,7 @@ async function saveStackPreset(value: unknown, userId?: string): Promise<StackPr
   const existingIndex = requestedId
     ? presets.findIndex((preset) => preset.id === requestedId)
     : presets.findIndex((preset) => preset.name.toLowerCase() === asString(input.name).trim().toLowerCase())
-  const preset = cleanStackPreset(input, existingIndex >= 0 ? presets[existingIndex].id : "")
+  const preset = cleanStackPreset(input, existingIndex >= 0 ? presets[existingIndex].id : await backendUuid())
   if (existingIndex >= 0) presets.splice(existingIndex, 1)
   presets.unshift(preset)
   await spindle.userStorage.setJson(STACK_PRESETS_FILE, presets.slice(0, STACK_PRESET_LIMIT), {
@@ -1486,7 +1500,7 @@ async function savePersonaVisualPreset(value: unknown, userId?: string): Promise
     ? presets.findIndex((preset) => preset.id === requestedId)
     : presets.findIndex((preset) => preset.name.toLowerCase() === name.toLowerCase())
   const preset: PersonaVisualPreset = {
-    id: existingIndex >= 0 ? presets[existingIndex].id : requestedId || crypto.randomUUID(),
+    id: existingIndex >= 0 ? presets[existingIndex].id : requestedId || await backendUuid(),
     name,
     positivePrompt: asString(input.positivePrompt).trim().slice(0, 12_000),
     sourcePresetId: asString(input.sourcePresetId).trim().slice(0, 200),
@@ -1691,7 +1705,7 @@ function cleanCharacterLooks(value: unknown): CharacterVisualLook[] {
     const requestedId = asString(item.id).trim().slice(0, 120)
     const name = asString(item.name).trim().slice(0, 80)
     if (!name) return []
-    const id = requestedId || (name.toLowerCase() === "default" ? "default" : crypto.randomUUID())
+    const id = requestedId || (name.toLowerCase() === "default" ? "default" : localBackendUuid())
     if (seen.has(id)) return []
     seen.add(id)
     return [{
@@ -1908,7 +1922,7 @@ async function createOutputFolder(name: string, bindingType: string, userId?: st
     throw new Error(`An output folder named “${cleanName}” already exists.`)
   }
   folders.unshift({
-    id: binding ? `character:${binding.characterId}` : crypto.randomUUID(),
+    id: binding ? `character:${binding.characterId}` : await backendUuid(),
     name: cleanName,
     imageIds: [],
     binding,
@@ -1974,7 +1988,7 @@ async function saveCharacterLook(
     : folder.binding.looks.findIndex((look) => look.name.toLowerCase() === name.toLowerCase())
   const id = existingIndex >= 0
     ? folder.binding.looks[existingIndex].id
-    : requestedId || (name.toLowerCase() === "default" ? "default" : crypto.randomUUID())
+    : requestedId || (name.toLowerCase() === "default" ? "default" : await backendUuid())
   const stackPresetId = asString(input.stackPresetId).trim().slice(0, 200)
   const stackPreset = stackPresetId
     ? (await loadStackPresets(userId)).find((preset) => preset.id === stackPresetId)
@@ -4516,7 +4530,7 @@ async function runTaggedImageJob(
       parameters.loraWeights = [...merged.values()].map((item) => item.weight)
     }
     input.parameters = parameters
-    input.clientJobId = crypto.randomUUID()
+    input.clientJobId = await backendUuid()
     job.prompt = characterLayer.prompt
     job.negativePrompt = asString(input.negativePrompt)
     job.ownerCharacterId = characterLayer.characterId
@@ -4632,6 +4646,7 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
   const force = payload?.force === true
   const useOriginalProfile = asString(payload?.retryMode) === "original"
   const config = await loadTagAutomationConfig(userId)
+  const newJobId = await backendUuid()
   const jobs = await loadTaggedImageJobs(userId)
   if (swipeId === undefined && sourceMatches === 0 && payload?.isStreaming !== true) {
     const existing = jobs.filter(candidate => candidate.chatId === chatId && candidate.messageId === messageId
@@ -4663,7 +4678,7 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
     job.inserted = false
   } else {
     job = {
-      id: crypto.randomUUID(),
+      id: newJobId,
       key,
       chatId,
       messageId,
@@ -5429,7 +5444,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         return
       }
       case "start_lora_download": {
-        startLoraDownloadJob(payload, requestId, userId)
+        await startLoraDownloadJob(payload, requestId, userId)
         return
       }
       case "get_lora_download_status": {
@@ -5589,7 +5604,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           throw new Error("Grant the Image Generation permission to generate.")
         }
         const input = asRecord(payload?.input)
-        const clientJobId = asString(input.clientJobId).trim() || crypto.randomUUID()
+        const clientJobId = asString(input.clientJobId).trim() || await backendUuid()
         const controllerKey = generationKey(userId, clientJobId)
         const controller = new AbortController()
         const controllerEntry = {

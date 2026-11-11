@@ -102,10 +102,17 @@ function recipeParameters(recipe) {
     };
 }
 let fallbackRequestIdCounter = 0;
+let hostRequestUuid;
+function bindRequestUuid(ctx) {
+    const uuid = ctx.uuid;
+    const generate = uuid ? ()=>uuid.v4() : undefined;
+    hostRequestUuid = generate;
+    return ()=>{
+        if (hostRequestUuid === generate) hostRequestUuid = undefined;
+    };
+}
 function createRequestId(cryptoApi = globalThis.crypto) {
-    if (typeof cryptoApi?.randomUUID === "function") {
-        return cryptoApi.randomUUID();
-    }
+    if (hostRequestUuid) return hostRequestUuid();
     if (typeof cryptoApi?.getRandomValues === "function") {
         const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
         bytes[6] = bytes[6] & 0x0f | 0x40;
@@ -14904,6 +14911,19 @@ class StudioRecoveryController {
 let activeStudio = null;
 let activeModal = null;
 function setup(ctx) {
+    const unbindUuid = bindRequestUuid(ctx);
+    try {
+        const teardown = setupStudio(ctx);
+        return ()=>{
+            unbindUuid();
+            teardown();
+        };
+    } catch (error) {
+        unbindUuid();
+        throw error;
+    }
+}
+function setupStudio(ctx) {
     const removeStyle = ctx.dom.addStyle(`${STYLES}\n${STUDIO_V3_STYLES}`);
     let currentTheme = storedStudioTheme();
     let appearance = storedStudioAppearance();
@@ -15205,4 +15225,4 @@ function setup(ctx) {
         removeStyle();
     };
 }
-export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, studioUploadAvatar, studioAvatarCropRect, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, StudioRecoveryController, TaggedImageController, MiniPlayerController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };
+export { defaultStudioBehavior, studioNativePreset, nativeImageGenAvailable, upsertStudioNativePreset, studioCharacterImageAction, studioUploadAvatar, studioAvatarCropRect, sanitizeGenerationRecipe, sanitizeStudioDefaults, sanitizeRenderStyles, resolveGenerationConfig, recipeParameters, normalizeWorkspaceState, StudioController, StudioRecoveryController, TaggedImageController, MiniPlayerController, applyPresetPrompt, applyPresetStackPrompts, applySwarmPresetTokens, createRequestId, bindRequestUuid, dimensionsForAspect, fitAspectWithin, inferModelFamily, inheritQuickGenerationParameters, isWorkflowCoreParameter, loraFolderPath, lorasFromSwarmPreset, matchesKeywordQuery, modelSignalsCompatible, normalizeRequiredImageRange, outputLibraryPageSize, setOutputLibraryView, quickGenerationParameters, reportStudioError, sanitizeCustomCss, serializeSwarmPresetList, swarmImageProtocolExample, setup,  };

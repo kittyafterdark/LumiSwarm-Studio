@@ -117,6 +117,7 @@ class MockSwarmDownloadSocket extends EventTarget {
 globalThis.WebSocket = MockSwarmDownloadSocket
 
 globalThis.spindle = {
+  uuid: { v4: async () => crypto.randomUUID() },
   registerMacroInterceptor(handler) { visualMacroHandler = handler },
   registerMacro(definition) {
     macroDefinitions.set(definition.name, definition)

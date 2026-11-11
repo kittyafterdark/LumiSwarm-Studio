@@ -60,10 +60,9 @@ unavailable newer API cannot remove the entire extension UI.
 Lumiverse builds without `messages.registerTagInterceptor()` can still use
 Studio normally; only automatic in-message `<swarm-image>` interception is
 disabled, with a compatibility warning written to the browser console. Remote
-phones may access Lumiverse over plain HTTP without losing the drawer: request
-correlation IDs fall back to `crypto.getRandomValues()` when the secure-context
-only `crypto.randomUUID()` API is unavailable. HTTPS remains recommended for
-the host application and any authenticated remote access.
+phones may access Lumiverse over plain HTTP. Studio uses `ctx.uuid.v4()` for
+frontend IDs when available and `crypto.getRandomValues()` on older hosts.
+HTTPS remains recommended for the host application and authenticated remote access.
 
 ## Install
 

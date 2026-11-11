@@ -10,6 +10,7 @@ export {
   applyPresetStackPrompts,
   applySwarmPresetTokens,
   createRequestId,
+  bindRequestUuid,
   dimensionsForAspect,
   fitAspectWithin,
   inferModelFamily,

@@ -7,6 +7,7 @@ const {
   applyPresetStackPrompts,
   applySwarmPresetTokens,
   createRequestId,
+  bindRequestUuid,
   dimensionsForAspect,
   fitAspectWithin,
   inferModelFamily,
@@ -40,7 +41,12 @@ assert.equal(capturedConsoleErrors[0][1], "complete SwarmUI parameter failure")
 assert.equal(capturedConsoleErrors[0][2] instanceof Error, true)
 assert.deepEqual(capturedConsoleErrors[0][3], { operation: "generate" })
 
-assert.equal(createRequestId({ randomUUID: () => "native-request-id" }), "native-request-id")
+const releaseUuid = bindRequestUuid({ uuid: { v4: () => "host-request-id" } })
+try {
+  assert.equal(createRequestId(null), "host-request-id")
+} finally {
+  releaseUuid()
+}
 assert.equal(
   createRequestId({
     getRandomValues(bytes) {
