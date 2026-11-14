@@ -21,8 +21,12 @@ class MiniPlayerController {
   private readonly onBehaviorChange: (behavior: StudioBehavior) => void
   private behavior: StudioBehavior
   private studioOpen = false
-  private collapsed = false
-  private expanded = true
+  private collapsed = true
+  private expanded = false
+  private quickView: "rail" | "composer" = "rail"
+  private quickDraftTouched = false
+  private negativeExpanded = true
+  private characterAvatarUrl = ""
   private expectedWidth = 318
   private expectedHeight = 94
   private sizeObserver: ResizeObserver | null = null
@@ -32,7 +36,9 @@ class MiniPlayerController {
   private suppressNextClick = false
   private readonly onDocumentPointerDown = (event: PointerEvent) => {
     const menu = this.contextMenu
-    if (menu && !menu.hidden && !menu.contains(event.target as Node)) this.closeContextMenu()
+    const target = event.target as HTMLElement
+    if (menu && !menu.hidden && !menu.contains(target)
+      && !target.closest('[data-action="mini-show-menu"]')) this.closeContextMenu()
   }
   private readonly onDocumentKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") this.closeContextMenu()
@@ -50,6 +56,7 @@ class MiniPlayerController {
   }
   private quickConnection: any | null = null
   private quickConnections: any[] = []
+  private readonly quickModelLabels = new Map<string, string>()
   private quickCanAppend = false
   private quickPending: GenerationDetails | null = null
   private quickConfirm: ((prompt: string, negativePrompt: string) => void) | null = null
@@ -95,43 +102,46 @@ class MiniPlayerController {
       const stored = JSON.parse(window.localStorage.getItem(MINIPLAYER_STORAGE_KEY) || "{}")
       this.collapsed = this.isMobileViewport()
         ? true
-        : stored.collapsed === true
+        : stored.collapsed !== false
       this.expanded = !this.collapsed
     } catch {
-      this.collapsed = this.isMobileViewport()
+      this.collapsed = true
       this.expanded = !this.collapsed
     }
     this.root.innerHTML = `
-      <div class="ss-miniplayer" data-role="miniplayer" data-state="idle" data-collapsed="false" data-expanded="true" data-indeterminate="false">
-        <div class="ss-mini-preview" data-action="mini-open" role="button" tabindex="0" title="Open Swarm Studio" aria-label="Open Swarm Studio">
+      <div class="ss-miniplayer" data-role="miniplayer" data-state="idle" data-collapsed="true" data-expanded="false" data-quick-view="rail" data-indeterminate="false">
+        <div class="ss-mini-preview" data-action="mini-open" role="button" tabindex="0" title="Open Quick Create" aria-label="Open Quick Create">
           <span data-role="mini-placeholder">${FRAME_WALL_ICON}</span>
           <img data-role="mini-image" alt="Latest Swarm Studio preview" hidden />
           <span class="ss-mini-live-dot" aria-hidden="true"></span>
         </div>
-        <div class="ss-mini-copy">
-          <div class="ss-mini-title"><span>Swarm Studio</span><span class="ss-mini-state" data-role="mini-state">Ready</span></div>
-          <div class="ss-mini-status" data-role="mini-status">Ready when inspiration hits.</div>
-          <div class="ss-mini-track"><span class="ss-mini-fill"></span></div>
-        </div>
-        <div class="ss-mini-actions">
-          <button class="ss-mini-button" data-action="mini-append" title="Append latest output to chat" aria-label="Append latest output to chat" disabled>${APPEND_CHAT_ICON}</button>
-          <button class="ss-mini-button" data-action="mini-open" title="Open Swarm Studio" aria-label="Open Swarm Studio">↗</button>
-          <button class="ss-mini-button" data-action="mini-library" title="Open output library" aria-label="Open output library">${LIBRARY_ICON}</button>
-          <button class="ss-mini-button" data-action="mini-collapse" title="Minimize to image" aria-label="Minimize to image">−</button>
+        <span class="ss-mini-satellite" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2Z"/><path d="m19 17 .7 2.3L22 20l-2.3.7L19 23l-.7-2.3L16 20l2.3-.7L19 17Z"/></svg></span>
+        <div class="ss-mini-actions" aria-label="Quick Create action rail">
+          <button class="ss-mini-button ss-mini-compose-cta" data-action="mini-compose" title="Compose illustration" aria-label="Compose illustration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></button>
+          <button class="ss-mini-button" data-action="mini-append" title="Append latest artwork to chat" aria-label="Append latest artwork to chat" disabled>${APPEND_CHAT_ICON}</button>
+          <button class="ss-mini-button" data-action="mini-show-menu" title="Quick Create options" aria-label="Quick Create options" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
         </div>
         <div class="ss-mini-quick" data-role="mini-quick">
           <div class="ss-mini-quick-head">
-            <strong>Quick create</strong>
-            <div class="ss-mini-editor-actions" aria-label="Expanded prompt editors">
-              <button class="ss-mini-editor-button" data-action="mini-edit-prompt" data-prompt-role="positive" title="Open positive prompt in Lumiverse editor" aria-label="Expand positive prompt"><span class="ss-mini-editor-key">P</span>${EXPAND_ICON}</button>
-              <button class="ss-mini-editor-button" data-action="mini-edit-prompt" data-prompt-role="negative" title="Open negative prompt in Lumiverse editor" aria-label="Expand negative prompt"><span class="ss-mini-editor-key">N</span>${EXPAND_ICON}</button>
+            <div><strong>Compose illustration</strong><span class="ss-mini-connection" data-role="mini-connection">Inherited Studio recipe</span></div>
+            <div class="ss-mini-head-actions">
+              <button class="ss-mini-button" data-action="mini-show-menu" title="Quick Create options" aria-label="Quick Create options" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+              <button class="ss-mini-button" data-action="mini-close-compose" title="Back to action rail" aria-label="Back to action rail">×</button>
             </div>
           </div>
-          <textarea class="ss-mini-prompt" data-role="mini-prompt" placeholder="Describe a quick image…" aria-label="Quick image prompt"></textarea>
-          <input class="ss-mini-negative" data-role="mini-negative" placeholder="Negative prompt (optional)" aria-label="Quick negative prompt" />
+          <div class="ss-mini-quick-body">
+            <div class="ss-mini-artwork" aria-label="Latest artwork preview">
+              <span class="ss-mini-artwork-thumb"><span data-role="mini-compose-placeholder">${FRAME_WALL_ICON}</span><img data-role="mini-compose-image" alt="Latest illustration" hidden /></span>
+              <div><strong>Latest artwork</strong><span>Preview updates after generation</span></div>
+            </div>
+            <label class="ss-mini-field"><span>Positive prompt <button class="ss-mini-editor-button" data-action="mini-edit-prompt" data-prompt-role="positive" aria-label="Expand positive prompt">${EXPAND_ICON}</button></span><textarea class="ss-mini-prompt" data-role="mini-prompt" placeholder="Describe your illustration…" aria-label="Quick image prompt"></textarea></label>
+            <button class="ss-mini-negative-toggle" data-action="mini-toggle-negative" aria-expanded="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><span data-role="mini-negative-label">Hide negative prompt</span></button>
+            <label class="ss-mini-field ss-mini-negative-field"><span>Negative prompt <button class="ss-mini-editor-button" data-action="mini-edit-prompt" data-prompt-role="negative" aria-label="Expand negative prompt">${EXPAND_ICON}</button></span><textarea class="ss-mini-negative" data-role="mini-negative" placeholder="What should not appear…" aria-label="Quick negative prompt"></textarea></label>
+            <div class="ss-mini-quick-hint"><span class="ss-mini-recipe-dot"></span>Using current Studio recipe</div>
+          </div>
           <div class="ss-mini-quick-actions">
-            <span class="ss-mini-connection" data-role="mini-connection">Finding Lumiverse’s SwarmUI connection…</span>
-            <button class="ss-mini-generate" data-action="mini-generate" disabled>Generate quick image</button>
+            <button class="ss-mini-append-compose" data-action="mini-append" disabled>${APPEND_CHAT_ICON}<span>Append</span></button>
+            <button class="ss-mini-generate" data-action="mini-generate" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2Z"/></svg><span data-role="mini-generate-label">Generate image</span></button>
           </div>
         </div>
       </div>
@@ -166,6 +176,22 @@ class MiniPlayerController {
       if (action === "mini-append") this.appendLatestToChat()
       if (action === "mini-library" || action === "mini-menu-library") this.openLibrary()
       if (action === "mini-collapse") this.setCollapsed(true)
+      if (action === "mini-compose") { this.quickView = "composer"; this.resizeWidget(); this.render() }
+      if (action === "mini-close-compose") { this.quickView = "rail"; this.resizeWidget(); this.render() }
+      if (action === "mini-show-menu") {
+        event.preventDefault()
+        event.stopPropagation()
+        if (this.contextMenu && !this.contextMenu.hidden) this.closeContextMenu()
+        else {
+          const rect = button.getBoundingClientRect()
+          this.showContextMenu(rect.right, rect.bottom + 5)
+        }
+      }
+      if (action === "mini-toggle-negative") {
+        this.negativeExpanded = !this.negativeExpanded
+        if (!this.collapsed && this.quickView === "composer") this.resizeWidget()
+        this.render()
+      }
       if (action === "mini-menu-toggle") this.setCollapsed(!this.collapsed)
       if (action === "mini-menu-studio") this.openStudio()
       if (action === "mini-menu-hide") this.onBehaviorChange({ ...this.behavior, widgetEnabled: false })
@@ -178,6 +204,9 @@ class MiniPlayerController {
       if (action?.startsWith("mini-menu-")) this.closeContextMenu()
     }
     this.root.addEventListener("click", handleAction)
+    this.root.addEventListener("input", (event) => {
+      if ((event.target as HTMLElement).matches('[data-role="mini-prompt"], [data-role="mini-negative"]')) this.quickDraftTouched = true
+    })
     this.contextMenu?.addEventListener("click", handleAction)
     this.root.addEventListener("keydown", (event) => {
       if (!this.collapsed || (event.key !== "Enter" && event.key !== " ")) return
@@ -193,8 +222,13 @@ class MiniPlayerController {
         // deliberately allowed through so the only visible surface can drag.
         event.stopPropagation()
       }
-      if (event.button === 0 && target.closest('[data-action="mini-open"]')) {
+      if (this.collapsed && event.button === 0 && target.closest('[data-role="miniplayer"]')) {
         this.scheduleLongPress(event)
+      }
+      if (event.button === 2 && !target.closest("input, textarea, select")) {
+        event.preventDefault()
+        event.stopPropagation()
+        this.showContextMenu(event.clientX, event.clientY)
       }
     })
     this.root.addEventListener("contextmenu", (event) => {
@@ -202,7 +236,7 @@ class MiniPlayerController {
       event.preventDefault()
       event.stopPropagation()
       this.showContextMenu(event.clientX, event.clientY)
-    })
+    }, true)
     document.addEventListener("pointerdown", this.onDocumentPointerDown)
     document.addEventListener("keydown", this.onDocumentKeyDown)
     window.addEventListener("resize", this.onWindowResize)
@@ -256,7 +290,7 @@ class MiniPlayerController {
     this.snapshotValue.draft = draft
     if (syncPrompts) {
       const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')
-      const negative = this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')
+      const negative = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-negative"]')
       if (prompt) prompt.value = draft.details.prompt || ""
       if (negative) negative.value = draft.details.negativePrompt || ""
     }
@@ -272,8 +306,10 @@ class MiniPlayerController {
     if (this.isMobileViewport() && !this.behavior.mobileQuickCreate) return false
     this.setCollapsed(false)
     if (this.collapsed) return false
+    this.quickView = "composer"
+    this.resizeWidget()
     const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')
-    const negative = this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')
+    const negative = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-negative"]')
     if (!prompt || !negative) return false
     prompt.value = promptValue
     negative.value = negativePromptValue
@@ -371,7 +407,7 @@ class MiniPlayerController {
       }
     }
     const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')
-    const negative = this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')
+    const negative = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-negative"]')
     if (prompt && !prompt.value.trim() && details?.prompt) prompt.value = details.prompt
     if (negative && !negative.value.trim() && details?.negativePrompt) negative.value = details.negativePrompt
     this.quickPending = null
@@ -479,7 +515,20 @@ class MiniPlayerController {
       const swarmConnections = connections.filter((connection: any) => String(connection?.provider || "").toLowerCase() === "swarmui")
       this.quickConnections = swarmConnections
       this.quickConnection = swarmConnections.find((connection: any) => connection?.is_default) || swarmConnections[0] || null
+      // The bootstrap's chatVisuals payload already carries friendly model
+      // labels. Reuse these instead of requesting the entire metadata catalog.
+      const models = Array.isArray(data.chatVisuals?.models) ? data.chatVisuals.models : []
+      this.quickModelLabels.clear()
+      for (const item of models) {
+        const id = String(item?.id || "").trim()
+        const label = String(item?.label || "").trim()
+        if (id && label && label !== id && !/\.safetensors$/i.test(label)) {
+          this.quickModelLabels.set(id.toLowerCase(), label)
+        }
+      }
       this.quickCanAppend = Boolean(data.activeChat?.id && data.permissions?.chatMutation)
+      const characterId = String(data.activeChat?.character_id || "").trim()
+      this.characterAvatarUrl = characterId ? `/api/v1/characters/${encodeURIComponent(characterId)}/avatar?size=sm` : ""
       this.render()
       return
     }
@@ -597,7 +646,7 @@ class MiniPlayerController {
       const input = role === "positive"
         ? this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')
         : role === "negative"
-          ? this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')
+          ? this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-negative"]')
           : null
       if (input && data.cancelled !== true) input.value = String(data.text || "")
       return
@@ -705,7 +754,7 @@ class MiniPlayerController {
     const input = positive
       ? this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')
       : role === "negative"
-        ? this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')
+        ? this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-negative"]')
         : null
     if (!input) return
     this.ctx.sendToBackend({
@@ -730,7 +779,11 @@ class MiniPlayerController {
   }
 
   private activateWidget(): void {
-    this.openStudio()
+    if (this.collapsed && this.isMobileViewport() && !this.behavior.mobileQuickCreate) {
+      // Mobile Quick Create is opt-in, but the launcher must not become a dead button.
+      this.openStudio()
+    } else if (this.collapsed) this.setCollapsed(false)
+    else this.setCollapsed(true)
   }
 
   private cancelLongPress(): void {
@@ -790,20 +843,26 @@ class MiniPlayerController {
       if (icon) icon.innerHTML = this.collapsed ? EXPAND_ICON : MINIMIZE_ICON
     }
     menu.hidden = false
+    this.root.querySelectorAll<HTMLButtonElement>('[data-action="mini-show-menu"]').forEach(button => button.setAttribute("aria-expanded", "true"))
     menu.style.left = "8px"
     menu.style.top = "8px"
     const bounds = menu.getBoundingClientRect()
     const viewport = this.root.ownerDocument.documentElement
     const left = clamp(clientX, 8, Math.max(8, viewport.clientWidth - bounds.width - 8))
-    const top = clamp(clientY, 8, Math.max(8, viewport.clientHeight - bounds.height - 8))
+    // Menu lives under document.documentElement, outside body zoom and .ss-shell. Avoid
+    // --studio-safe-top here: the missing scoped variable invalidated the
+    // entire top declaration and sent the menu to the top of the page.
+    const safeInset = parseFloat(getComputedStyle(viewport).getPropertyValue("--app-interactive-safe-top")) || 0
+    const top = clamp(clientY, safeInset + 8, Math.max(safeInset + 8, viewport.clientHeight - bounds.height - 8))
     menu.style.left = `${Math.round(left)}px`
-    menu.style.top = `max(${Math.round(top)}px, calc(var(--studio-safe-top) + 8px))`
+    menu.style.top = `${Math.round(top)}px`
     menu.querySelector<HTMLButtonElement>("button:not([hidden]):not(:disabled)")?.focus()
   }
 
   private closeContextMenu(): void {
     const menu = this.contextMenu
     if (menu) menu.hidden = true
+    this.root.querySelectorAll<HTMLButtonElement>('[data-action="mini-show-menu"]').forEach(button => button.setAttribute("aria-expanded", "false"))
   }
 
   private appendLatestToChat(): void {
@@ -821,7 +880,7 @@ class MiniPlayerController {
 
   private confirmTaggedPromptEdit(): void {
     const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')?.value.trim() || ""
-    const negativePrompt = this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')?.value.trim() || ""
+    const negativePrompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-negative"]')?.value.trim() || ""
     if (!prompt) {
       this.state = "error"
       this.snapshotValue.status = "Give the inline illustration a prompt first."
@@ -846,7 +905,7 @@ class MiniPlayerController {
       ? this.quickConnections.find((candidate) => String(candidate.id) === draft.connectionId)
       : null) || this.quickConnection
     const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')?.value.trim() || ""
-    const negativePrompt = this.root.querySelector<HTMLInputElement>('[data-role="mini-negative"]')?.value.trim() || ""
+    const negativePrompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-negative"]')?.value.trim() || ""
     if (!connection) {
       this.state = "error"
       this.snapshotValue.status = "No Lumiverse SwarmUI connection is available."
@@ -928,6 +987,7 @@ class MiniPlayerController {
     if (!value && this.isMobileViewport() && !this.behavior.mobileQuickCreate) return
     this.collapsed = value
     this.expanded = !value
+    this.quickView = "rail"
     try {
       window.localStorage.setItem(MINIPLAYER_STORAGE_KEY, JSON.stringify({ collapsed: value }))
     } catch {
@@ -941,6 +1001,7 @@ class MiniPlayerController {
     if (mini) {
       mini.dataset.collapsed = String(value)
       mini.dataset.expanded = String(this.expanded)
+    mini.dataset.quickView = this.quickView
       void mini.offsetWidth
     }
     const toggle = this.root.querySelector<HTMLButtonElement>('[data-action="mini-collapse"]')
@@ -950,8 +1011,13 @@ class MiniPlayerController {
       toggle.setAttribute("aria-label", toggle.title)
     }
     if (!value) {
-      const liveDraft = this.getStudioDraft()
-      if (liveDraft) this.captureDraft(liveDraft)
+      const prompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-prompt"]')
+      const negative = this.root.querySelector<HTMLTextAreaElement>('[data-role="mini-negative"]')
+      // Orb/Rail/Composer transitions never overwrite a user's unsaved prompt.
+      if (!prompt?.value && !negative?.value && !this.quickDraftTouched) {
+        const liveDraft = this.getStudioDraft()
+        if (liveDraft) this.captureDraft(liveDraft)
+      }
     }
     // Commit every state-derived attribute together. Without this, an expand
     // could leave data-mobile-orb="true" beside data-expanded="true" until a
@@ -962,12 +1028,22 @@ class MiniPlayerController {
   private resizeWidget(): void {
     const compact = this.collapsed
     const viewportWidth = this.root.ownerDocument.documentElement.clientWidth || window.innerWidth
+    // Desktop: the portrait sits ABOVE the three actions in one compact column.
+    // Mobile: the same controls share a horizontal row. Keep the native host
+    // float footprint synchronized with the actual CSS layout.
+    const mobileRail = this.isMobileViewport()
     const width = compact
-      ? this.isMobileViewport() ? 64 : 56
-      : Math.min(430, viewportWidth - 24)
+      ? 64
+      : this.quickView === "rail" ? (mobileRail ? 183 : 66) : Math.min(370, viewportWidth - 24)
+    const viewportHeight = this.root.ownerDocument.documentElement.clientHeight || window.innerHeight
+    // Hiding the negative prompt must also shrink Lumiverse's native float;
+    // otherwise its original 520px wrapper keeps an enormous empty gap.
+    const expandedComposerHeight = Math.min(520, Math.max(300, viewportHeight - 86))
+    const collapsedComposerHeight = Math.min(390, Math.max(300, expandedComposerHeight - 125))
     const height = compact
-      ? width
-      : this.isMobileViewport() ? 304 : 270
+      ? 64
+      : this.quickView === "rail" ? (mobileRail ? 64 : 220)
+        : this.negativeExpanded ? expandedComposerHeight : collapsedComposerHeight
     this.expectedWidth = width
     this.expectedHeight = height
     this.applyWidgetSize(width, height)
@@ -1019,11 +1095,13 @@ class MiniPlayerController {
     mini.dataset.mobileOrb = String(mobileOrb)
     mini.dataset.collapsed = String(this.collapsed)
     mini.dataset.expanded = String(this.expanded)
+    mini.dataset.quickView = this.quickView
+    mini.dataset.railLayout = this.isMobileViewport() ? "horizontal" : "vertical"
     if (this.collapsed) {
       mini.dataset.action = "mini-open"
       mini.setAttribute("role", "button")
       mini.tabIndex = 0
-      mini.setAttribute("aria-label", "Open Swarm Studio")
+      mini.setAttribute("aria-label", "Open Quick Create")
     } else {
       delete mini.dataset.action
       mini.removeAttribute("role")
@@ -1033,33 +1111,49 @@ class MiniPlayerController {
     mini.dataset.indeterminate = String(this.state === "running" && !hasTotal)
     mini.style.setProperty("--ss-mini-progress", `${percentage}%`)
     const labels = { idle: "Ready", running: "Live", done: "Done", error: "Stopped" }
-    this.root.querySelector<HTMLElement>('[data-role="mini-state"]')!.textContent = labels[this.state]
-    this.root.querySelector<HTMLElement>('[data-role="mini-status"]')!.textContent = this.snapshotValue.status
+    const stateLabel = this.root.querySelector<HTMLElement>('[data-role="mini-state"]')
+    const statusLabel = this.root.querySelector<HTMLElement>('[data-role="mini-status"]')
+    if (stateLabel) stateLabel.textContent = labels[this.state]
+    if (statusLabel) statusLabel.textContent = this.snapshotValue.status
     const image = this.root.querySelector<HTMLImageElement>('[data-role="mini-image"]')!
     const placeholder = this.root.querySelector<HTMLElement>('[data-role="mini-placeholder"]')!
-    if (this.snapshotValue.preview) {
-      image.src = this.snapshotValue.preview
-      image.hidden = false
-      placeholder.hidden = true
-    } else {
-      image.hidden = true
-      placeholder.hidden = false
+    const artwork = this.snapshotValue.preview || this.characterAvatarUrl
+    const renderArtwork = (img: HTMLImageElement | null, fallback: HTMLElement | null) => {
+      if (!img || !fallback) return
+      if (!artwork || img.dataset.failedSrc === artwork) { img.hidden = true; fallback.hidden = false; return }
+      if (img.getAttribute("src") !== artwork) { img.dataset.failedSrc = ""; img.src = artwork }
+      img.hidden = false
+      fallback.hidden = true
+      img.onerror = () => { img.dataset.failedSrc = artwork; img.hidden = true; fallback.hidden = false }
     }
-    const append = this.root.querySelector<HTMLButtonElement>('[data-action="mini-append"]')
-    if (append) append.disabled = !this.quickCanAppend || !this.snapshotValue.latestImage?.id
+    renderArtwork(image, placeholder)
+    renderArtwork(this.root.querySelector<HTMLImageElement>('[data-role="mini-compose-image"]'), this.root.querySelector<HTMLElement>('[data-role="mini-compose-placeholder"]'))
+    mini.dataset.negativeOpen = String(this.negativeExpanded)
+    const toggleNegative = this.root.querySelector<HTMLButtonElement>('[data-action="mini-toggle-negative"]')
+    if (toggleNegative) toggleNegative.setAttribute("aria-expanded", String(this.negativeExpanded))
+    const negativeLabel = this.root.querySelector<HTMLElement>('[data-role="mini-negative-label"]')
+    if (negativeLabel) negativeLabel.textContent = this.negativeExpanded ? "Hide negative prompt" : "Negative prompt"
+    this.root.querySelectorAll<HTMLButtonElement>('[data-action="mini-append"]').forEach(append => {
+      append.disabled = !this.quickCanAppend || !this.snapshotValue.latestImage?.id
+    })
     const quickButton = this.root.querySelector<HTMLButtonElement>('[data-action="mini-generate"]')
     if (quickButton) {
       quickButton.disabled = !this.quickConfirm && !this.snapshotValue.active && !this.quickConnection
       quickButton.dataset.running = String(this.snapshotValue.active)
-      quickButton.textContent = this.snapshotValue.active
+      const text = quickButton.querySelector<HTMLElement>('[data-role="mini-generate-label"]')
+      if (text) text.textContent = this.snapshotValue.active
         ? "Stop generation"
-        : this.quickConfirm ? "Confirm" : "Generate quick image"
+        : this.quickConfirm ? "Confirm" : "Generate image"
     }
     const connection = this.root.querySelector<HTMLElement>('[data-role="mini-connection"]')
     if (connection) {
-      connection.textContent = this.quickConnection
-        ? `${String(this.quickConnection.name || "SwarmUI")} · ${String(this.quickConnection.model || "connection default")}`
-        : "No Lumiverse SwarmUI connection found"
+      const activeConnection = this.quickConnections.find((candidate) =>
+        String(candidate?.id || "") === String(this.snapshotValue.draft?.connectionId || ""),
+      ) || this.quickConnection
+      const modelId = String(this.snapshotValue.draft?.details.model || activeConnection?.model || "").trim()
+      const friendlyModel = this.quickModelLabels.get(modelId.toLowerCase()) || ""
+      connection.textContent = friendlyModel
+        || (activeConnection ? String(activeConnection.name || "SwarmUI") : "No Lumiverse SwarmUI connection found")
     }
   }
 }

@@ -1,4 +1,75 @@
+## v22 — Satin Locket finish (2026-11-14)
+
+- Replaced the idle Orb's heavy metallic gradient/halo with one subtle, thin theme-aware satin rim, matching the understated Action Rail.
+- Kept the lower-right sparkle badge with a gentler matte finish and preserved the approved Locket → Rail → Composer interactions.
+- During generation only, the existing progress percentage drives a thin ring; indeterminate generation rotates only the ring, respecting reduced-motion preferences.
+- Added a compiled-UI Chromium regression for idle/running visuals, mobile opt-in, menu, and Composer, plus a source contract. No backend, metadata or saved content changes.
+
+## v21 — Quick Create Composer polish (2026-11-14)
+
+- Negative disclosure now truly resizes the native floating Composer (520px expanded / 390px collapsed in normal-height viewports), preserving drafts and footer access.
+- Quick Create subtitle uses the existing image-gen metadata model label, falling back to the connection name rather than showing a raw `.safetensors` filename.
+- The rail / Composer `⋯` toggles the shared context menu closed as well as open. See `LIVE_CHECK_V21.md` for tests and limitations.
+
+## v20 — Fully stacked desktop Quick Create rail (2026-11-14)
+
+- Corrected v19's interpretation of “vertical”: the portrait is now ABOVE Compose, Append and ⋯, not beside the buttons.
+- Reduced desktop footprint to 66 × 220px and restored the subtle separator between Compose and secondary actions.
+- Kept the mobile horizontal rail at 183 × 64px, the lower-right Locket, composer, prompt drafts and context-menu behavior unchanged.
+- Updated the source and browser rail contracts, and captured real compiled desktop/mobile previews. See `LIVE_CHECK_V20.md`.
+
+## v19 — Compact responsive Quick Create rail (2026-11-14)
+
+- Restored the desktop vertical tool strip next to the Locket portrait, eliminating the old 244px horizontal capsule's unused width.
+- Kept mobile's horizontal rail, now sized to its visible controls; preserved composer, right-click/⋯ menu, drafts, and widget behavior.
+- Added desktop/mobile regression coverage, validated with Chromium at 320–1440px and body zoom. See `LIVE_CHECK_V19.md`.
+
+## v18 — Locket / rail / menu contract correction (2026-11-14)
+
+- Restored the approved Orb → horizontal Action Rail → artwork-first Composer and lower-right Satellite Locket, keeping generation handlers and prompts intact.
+- Repaired orb right-click / long-press and Quick Create ⋯ menus: missing scoped CSS variable invalidated menu positioning; numeric viewport bounds and a single shared menu now work under host zoom.
+- Added browser/source regressions for menu actions, portrait fallback, collapse flow, mobile, and drafts. See `LIVE_CHECK_V18.md`.
+
+## v17 — Locket Quick Create & Character Lookbook (2026-11-14)
+
+- Rebuilt Quick Create around the approved **lower-right Satellite Locket → Action Rail → Composer** sequence, including a detached sparkle badge and theme-aware frame.
+- Kept generation, interruption, appending, inherited Studio recipes, edit-in-Lumiverse actions, right-click/long-press menu, and mobile opt-in connected to their existing handlers. With opt-in disabled, tapping the mobile orb opens Studio.
+- Fixed unsaved prompt overwrites when minimizing and reopening Quick Create.
+- Replaced the Character Visuals modal form layout with a persistent **Base Identity / Named Looks** navigation rail and a focused editor; mobile uses a horizontally scrollable navigation strip.
+- Kept identity prompts, render recipes, checkpoint/LoRA stack inheritance, look activation, and backend saving on their original data contracts.
+- Added source and Chromium integration regression tests for mobile bounds, data binding, navigation and Quick Create draft preservation. No stored outputs or folder data was migrated.
+
 # Changelog
+
+## v10 Output Library restoration
+
+- Rebuilt the Output Library's missing folder-preview, collage, thumbnail, selection and character-visual styles in the original Studio stylesheet, using the earlier working library as a behavior reference and v9 theme tokens for appearance.
+- Restored bounded 2×2 folder collages, square image thumbnails, paginated scrolling, visible selection/favorite decorations, and responsive mobile grids without changing any persisted image or folder records.
+- Reset the thumbnail grid to the first row after changing pages.
+- Added an offline Chromium regression fixture with 1,435 simulated outputs, character folders, Favorites, pagination, selection, and mobile viewports.
+
+
+## v9 theme contract repair
+
+- Made Accent control the real Studio highlight/focus/selection token and accurately sample Lumiverse inheritance.
+- Made Buttons also cover Generate, Save, Add and other primary actions while preserving distinct Accent and Button colors.
+- Removed stale lavender declarations and a conflicting accent reset in place; primary/button text now adapts to bright/dark swatch choices.
+- Added Chromium color-contract tests and preserved the separate Output Library workstream.
+
+## v8 theme swatches and inline image size
+
+- Replaced the surface-mode dropdown with an inherited Surface color swatch, made all color pickers circular, and removed nonfunctional surface-opacity controls.
+- Restored three side-by-side image-size choices and preserved the existing profile, color override, and reset workflow.
+- Updated browser coverage at narrow widths and refreshed CSS color sampling.
+
+
+## v7 visual polish
+
+- Made Ink/Neutral surface treatments affect controls and raised cards, with separate persisted Cards and Inputs colors.
+- Clipped Tune disclosure highlights to their rounded borders and repaired stroke-only SVGs across the folder and stack actions.
+- Used stack-width container queries for two-row preset controls and a proper 2×2 share-action grid.
+- Fixed the LoRA metadata viewer to render its terms **and** values, and extended browser regression coverage.
+
 
 ## 1.0.16
 

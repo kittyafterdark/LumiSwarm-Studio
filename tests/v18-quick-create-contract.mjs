@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+const controller=await readFile(new URL('../src/miniplayer/controller.ts',import.meta.url),'utf8')
+const css=await readFile(new URL('../src/studio/styles.ts',import.meta.url),'utf8')
+const unique=(text,pattern)=>assert.equal(text.split(pattern).length-1,1,`${pattern} must be unique`)
+for (const action of ['mini-show-menu','mini-compose','mini-close-compose','mini-toggle-negative','mini-append','mini-generate','mini-menu-toggle','mini-menu-studio','mini-menu-library','mini-menu-hide']) assert.match(controller,new RegExp(`data-action="${action}"`))
+assert.match(controller,/documentElement\.appendChild\(this\.contextMenu\)/)
+assert.doesNotMatch(controller,/body\.appendChild\(this\.contextMenu\)/)
+assert.match(controller,/menu\.style\.top = `\$\{Math\.round\(top\)\}px`/)
+assert.doesNotMatch(controller,/menu\.style\.top = `max\(/)
+assert.match(controller,/this\.characterAvatarUrl/)
+assert.match(controller,/this\.quickView = "rail"/)
+assert.match(css,/\.ss-mini-satellite/)
+assert.match(css,/\.ss-mini-negative-field/)
+assert.match(css,/\.ss-mini-context-menu/)
+assert.equal(css.split('\.ss-miniplayer {').length-1,1,'Single miniplayer stylesheet, no stacked overrides')
+console.log('v18 Locket + Action Rail + context-menu source contract: PASS')

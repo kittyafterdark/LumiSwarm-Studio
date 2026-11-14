@@ -82,6 +82,7 @@ class StudioController {
   private outputMetadataRequestId = ""
   private pendingMetadataAction: "reuse" | "init" | "" = ""
   private inspectorResizeObserver: ResizeObserver | null = null
+  private fullscreenAnchor: Comment | null = null
   private stopActiveResize: (() => void) | null = null
   private profileSyncTimer: ReturnType<typeof setTimeout> | null = null
   private studioView: "generate" | "styles" = "generate"
@@ -92,6 +93,10 @@ class StudioController {
   private nativeSavePending = false
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      const meta = this.root.querySelector<HTMLElement>('[data-role="lora-meta-layer"]')
+      if (meta && !meta.hidden) { meta.hidden = true; event.stopPropagation(); return }
+    }
     if (this.root.querySelector<HTMLDialogElement>(".ss-avatar-crop[open], .ss-confirm-folder[open]")?.open) return
     if (event.key !== "Escape") return
     const loraSortMenu = this.root.querySelector<HTMLElement>('[data-role="lora-sort-menu"]')
@@ -225,6 +230,7 @@ class StudioController {
     this.buildV3()
     this.restoreWorkspaceState()
     this.bind()
+    this.updateContextControls()
     this.updatePresetViewport()
     window.visualViewport?.addEventListener("resize", this.updatePresetViewport)
     window.visualViewport?.addEventListener("scroll", this.updatePresetViewport)
@@ -260,6 +266,7 @@ class StudioController {
 
   dispose(): void {
     this.persistWorkspaceState()
+    this.syncFullscreenRoot(false)
     this.syncStudioProfile()
     this.disposed = true
     this.avatarCropAbort?.abort()
@@ -563,19 +570,27 @@ class StudioController {
     const fallbackColors: Record<AppearanceColorKey, string> = {
       accent: "#7dd3fc",
       canvas: "#090a0d",
+      surface: "#14151a",
       panel: "#14151a",
+      raised: "#18191f",
       header: "#1b1d24",
       outline: "#343640",
       button: "#191b21",
+      field: "#111217",
       text: "#f4f5f7",
     }
     const sampledColors: Record<AppearanceColorKey, string | null> = {
-      accent: normalizeHexColor(getComputedStyle(shell).getPropertyValue("--lumiverse-accent")),
+      accent: normalizeHexColor(getComputedStyle(shell).getPropertyValue("--ss-accent")),
       canvas: normalizeHexColor(getComputedStyle(shell).backgroundColor),
+      surface: panel ? normalizeHexColor(getComputedStyle(panel).backgroundColor) : null,
       panel: panel ? normalizeHexColor(getComputedStyle(panel).backgroundColor) : null,
-      header: header ? normalizeHexColor(getComputedStyle(header).backgroundColor) : null,
+      raised: normalizeHexColor(getComputedStyle(this.get<HTMLElement>(".ss-tune-group")).backgroundColor),
+      header: normalizeHexColor(getComputedStyle(shell).getPropertyValue("--ss-header-bg"))
+        || (header ? normalizeHexColor(getComputedStyle(header).backgroundColor) : null),
       outline: panel ? normalizeHexColor(getComputedStyle(panel).borderTopColor) : null,
-      button: button ? normalizeHexColor(getComputedStyle(button).backgroundColor) : null,
+      button: normalizeHexColor(getComputedStyle(shell).getPropertyValue("--ss-button-bg"))
+        || (button ? normalizeHexColor(getComputedStyle(button).backgroundColor) : null),
+      field: normalizeHexColor(getComputedStyle(this.get<HTMLElement>(".ss-select")).backgroundColor),
       text: normalizeHexColor(getComputedStyle(shell).color),
     }
     for (const input of this.root.querySelectorAll<HTMLInputElement>('[data-role="appearance-color"]')) {
@@ -592,9 +607,6 @@ class StudioController {
     radius.value = String(this.appearance.radius ?? clamp(inheritedRadius, 0, 28))
     this.get<HTMLOutputElement>('[data-role="appearance-radius-output"]').value =
       this.appearance.radius === null ? `${Math.round(inheritedRadius)}px*` : `${Math.round(this.appearance.radius)}px`
-    const opacity = this.get<HTMLInputElement>('[data-role="appearance-opacity"]')
-    opacity.value = String(this.appearance.opacity)
-    this.get<HTMLOutputElement>('[data-role="appearance-opacity-output"]').value = `${Math.round(this.appearance.opacity)}%`
     const blur = this.get<HTMLInputElement>('[data-role="appearance-blur"]')
     blur.value = String(this.appearance.blur)
     this.get<HTMLOutputElement>('[data-role="appearance-blur-output"]').value = `${Math.round(this.appearance.blur)}px`
@@ -783,6 +795,7 @@ class StudioController {
                       </section>
                       <section class="ss-config-section">
                         <div class="ss-config-section-head"><strong>Component colors</strong><button class="ss-button ss-tiny" data-action="reset-appearance">Reset overrides</button></div>
+                        <p class="ss-muted ss-tiny">Surface sets the base fill for panels and controls. Other swatches override individual components; without an override, Lumiverse stays in charge.</p>
                         <div class="ss-appearance-colors">
                           ${APPEARANCE_COLORS.map((color) => `<label class="ss-color-control"><input type="color" data-role="appearance-color" data-color-key="${color.key}" value="#7dd3fc" /><span>${color.label}</span></label>`).join("")}
                         </div>
@@ -793,11 +806,6 @@ class StudioController {
                           <label for="ss-radius-control">Border radius</label>
                           <input id="ss-radius-control" data-role="appearance-radius" type="range" min="0" max="28" step="1" value="8" />
                           <output data-role="appearance-radius-output">8px</output>
-                        </div>
-                        <div class="ss-appearance-range">
-                          <label for="ss-opacity-control">Surface opacity</label>
-                          <input id="ss-opacity-control" data-role="appearance-opacity" type="range" min="45" max="100" step="1" value="96" />
-                          <output data-role="appearance-opacity-output">96%</output>
                         </div>
                         <div class="ss-appearance-range">
                           <label for="ss-blur-control">Backdrop blur</label>
@@ -837,7 +845,7 @@ Theme variables
 --ss-button-bg            button surfaces
 --ss-control-radius       controls
 --ss-panel-radius         panels
---ss-surface-opacity      panel alpha
+--ss-surface-base         inherited surface base (swatch)
 --ss-backdrop-blur        panel blur
 
 Use .ss-shell before a selector to keep
@@ -890,32 +898,42 @@ are removed when CSS is applied.</pre>
         <div class="ss-workspace" data-studio-page="generate" aria-label="Generate">
           <aside class="ss-generation-pane" data-mobile-pane="generation">
             <div class="ss-pane-head">
-              <div class="ss-pane-title"><strong>Generation</strong><div class="ss-muted ss-tiny">Model and render controls</div></div>
-              <button class="ss-icon-button ss-pane-toggle" data-action="toggle-generation" title="Collapse generation sidebar" aria-label="Collapse generation sidebar">‹</button>
+              <div class="ss-pane-title"><strong>Tune</strong><div class="ss-muted ss-tiny">Generation parameters</div></div>
+              <div class="ss-tune-header-actions">
+                <details class="ss-recipe-menu" data-role="recipe-menu">
+                  <summary class="ss-icon-button ss-recipe-menu-toggle" aria-label="Recipe actions" title="Save, restore and export recipes" aria-haspopup="menu"><span class="ss-menu-dots" aria-hidden="true">•••</span></summary>
+                  <div class="ss-recipe-menu-sheet" role="group" aria-label="Recipe actions">
+                    <div class="ss-menu-heading">Recipe actions <span>Current settings</span></div>
+                    <section class="ss-defaults-menu"><h4>STUDIO DEFAULTS</h4>
+                      <button class="ss-menu-action" data-action="save-defaults">${CHECK_ICON}<span>Save current as default</span></button>
+                      <button class="ss-menu-action" data-action="restore-defaults">${IMPORT_ICON}<span>Restore saved defaults</span></button>
+                      <button class="ss-menu-action ss-menu-danger" data-action="clear-defaults">${TRASH_ICON}<span>Reset to provider defaults</span></button>
+                    </section>
+                    <section class="ss-character-actions" data-role="active-character-actions" hidden>
+                      <h4 data-role="active-character-actions-label">Active character</h4>
+                      <button class="ss-menu-action" data-action="save-base-recipe" hidden>${CHECK_ICON}<span>Save recipe to character base</span></button>
+                      <button class="ss-menu-action" data-action="save-look-recipe" hidden>${CHECK_ICON}<span>Save recipe to active look</span></button>
+                      <button class="ss-menu-action" data-action="save-native-character" hidden>${EXPORT_ICON}<span>Mirror prompts to Lumiverse</span></button>
+                    </section>
+                    <section class="ss-native-actions"><h4>LUMIVERSE IMAGE GEN</h4>
+                      <button class="ss-menu-action" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">${EXPORT_ICON}<span>Save prompts to Lumiverse</span></button>
+                      <p>Prompts only. Render settings remain in Studio.</p>
+                    </section>
+                  </div>
+                </details>
+                <button class="ss-icon-button ss-pane-toggle" data-action="toggle-generation" title="Collapse generation sidebar" aria-label="Collapse generation sidebar">‹</button>
+              </div>
             </div>
             <div class="ss-pane-body">
               <div class="ss-generation-controls">
-                <details class="ss-defaults-menu"><summary>Studio defaults</summary>
-                  <div class="ss-context-actions">
-                    <button class="ss-button" data-action="save-defaults">Save current as default</button>
-                    <button class="ss-button" data-action="restore-defaults">Restore defaults</button>
-                    <button class="ss-button" data-action="clear-defaults">Reset to provider defaults</button>
-                  </div>
-                </details>
-                <details class="ss-character-actions" data-role="active-character-actions" hidden>
-                  <summary data-role="active-character-actions-label">Active character</summary>
-                  <div class="ss-context-actions">
-                    <button class="ss-button" data-action="save-base-recipe" hidden>Save current recipe to character base</button>
-                    <button class="ss-button" data-action="save-look-recipe" hidden>Save current recipe to active look</button>
-                    <button class="ss-button" data-action="save-native-character" hidden>Mirror character prompts to Lumiverse</button>
-                  </div>
-                </details>
-                <details class="ss-native-actions"><summary>Lumiverse Image Gen</summary>
-                  <div class="ss-context-actions">
-                    <p class="ss-muted ss-tiny">Save the current prompts as a native preset. Render settings stay in Studio.</p>
-                    <button class="ss-button" data-action="save-native-main" disabled title="Lumiverse Image Gen is unavailable">Save prompts to Lumiverse</button>
-                  </div>
-                </details>
+                <div class="ss-tune-recipe-card">
+                  <div class="ss-tune-recipe-identity"><span class="ss-tune-orb">✧</span><span><strong>Active recipe</strong><small data-role="tune-recipe-summary">Current generation settings</small></span></div>
+                  <span class="ss-tune-recipe-tag">Custom</span>
+                </div>
+                <div class="ss-tune-divider">RENDER SETUP</div>
+                <details class="ss-tune-group" data-tune-group="model" open>
+                  <summary><span class="ss-tune-group-icon">◇</span><span class="ss-tune-group-copy"><strong>Model &amp; workflow</strong><small data-role="tune-model-summary">Standard Swarm · Checkpoint</small></span><span class="ss-tune-chevron"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M216.49 168.49a12 12 0 0 1-17 0L128 97l-71.51 71.49a12 12 0 0 1-17-17l80-80a12 12 0 0 1 17 0l80 80a12 12 0 0 1 0 17"/></svg></span></summary>
+                  <div class="ss-tune-group-body">
                 <section class="ss-workflow-panel">
                   <div class="ss-workflow-picker">
                     <div class="ss-field">
@@ -933,6 +951,13 @@ are removed when CSS is applied.</pre>
                   <label>Checkpoint</label>
                   <select class="ss-select" data-role="model"><option value="">Select a connection first</option></select>
                 </div>
+                  </div>
+                </details>
+                <details class="ss-tune-group" data-tune-group="canvas" open>
+                  <summary><span class="ss-tune-group-icon">▭</span><span class="ss-tune-group-copy"><strong>Canvas &amp; size</strong><small data-role="tune-canvas-summary">Aspect and dimensions</small></span><span class="ss-tune-chevron"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M216.49 168.49a12 12 0 0 1-17 0L128 97l-71.51 71.49a12 12 0 0 1-17-17l80-80a12 12 0 0 1 17 0l80 80a12 12 0 0 1 0 17"/></svg></span></summary>
+                  <div class="ss-tune-group-body">
+                    <div class="ss-orientation-heading"><span>Orientation</span><button class="ss-button ss-context-button" data-action="change-orientation" data-role="orientation-action" title="Flip the current aspect ratio">${PORTRAIT_ICON}<span>Portrait</span></button></div>
+                    <div class="ss-tune-orientation-display" role="group" aria-label="Canvas orientation"><button type="button" class="ss-orientation-landscape" data-action="select-orientation" data-orientation="landscape" aria-pressed="false">Landscape</button><button type="button" class="ss-orientation-square" data-action="select-orientation" data-orientation="square" aria-pressed="false">Square</button><button type="button" class="ss-orientation-portrait" data-action="select-orientation" data-orientation="portrait" aria-pressed="false">Portrait</button></div>
                 <div class="ss-aspect-controls">
                   <div class="ss-field">
                     <label>Aspect ratio</label>
@@ -961,6 +986,12 @@ are removed when CSS is applied.</pre>
                     <input data-role="link-size" type="checkbox" checked hidden />
                   </div>
                 </div>
+                  </div>
+                </details>
+                <details class="ss-tune-group" data-tune-group="sampling" open>
+                  <summary><span class="ss-tune-group-icon">✧</span><span class="ss-tune-group-copy"><strong>Sampling &amp; quality</strong><small data-role="tune-sampling-summary">Steps · CFG · Seed</small></span><span class="ss-tune-chevron"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M216.49 168.49a12 12 0 0 1-17 0L128 97l-71.51 71.49a12 12 0 0 1-17-17l80-80a12 12 0 0 1 17 0l80 80a12 12 0 0 1 0 17"/></svg></span></summary>
+                  <div class="ss-tune-group-body">
+                    <div class="ss-sampling-pair">
                 <div class="ss-field">
                   <label>Steps</label>
                   <input class="ss-input" data-role="steps" type="number" min="1" max="150" step="1" value="20" />
@@ -969,10 +1000,14 @@ are removed when CSS is applied.</pre>
                   <label>CFG</label>
                   <input class="ss-input" data-role="cfg" type="number" min="1" max="30" step="0.5" value="7" />
                 </div>
+                    </div>
                 <div class="ss-field ss-wide">
                   <label>Seed</label>
                   <input class="ss-input" data-role="seed" type="number" step="1" value="-1" title="-1 uses a random seed" />
                 </div>
+                    <div class="ss-seed-actions"><button class="ss-button" data-action="random-seed-mobile" title="Set seed to -1 for a random generation">${RANDOM_SEED_ICON}<span>Random</span></button><button class="ss-button" data-action="use-output-seed" title="Reuse the latest generated output's seed">${CURRENT_SEED_ICON}<span>Use output seed</span></button></div>
+                    <div class="ss-field-help ss-seed-hint">-1 generates a random seed.</div>
+                    <div class="ss-sampling-pair">
                 <div class="ss-field ss-wide">
                   <label>Sampler</label>
                   <select class="ss-select" data-role="sampler"><option value="">Connection default</option></select>
@@ -981,10 +1016,12 @@ are removed when CSS is applied.</pre>
                   <label>Scheduler</label>
                   <select class="ss-select" data-role="scheduler"><option value="">Connection default</option></select>
                 </div>
-                <div class="ss-inline-actions ss-wide">
-                  <button class="ss-button ss-context-button" data-action="change-orientation" data-role="orientation-action" title="Change image orientation">${PORTRAIT_ICON}<span>Portrait</span></button>
-                  <button class="ss-button ss-context-button" data-action="toggle-seed-mode" data-role="seed-action" title="Reuse the current output seed">${CURRENT_SEED_ICON}<span>Current seed</span></button>
-                </div>
+                    </div>
+                  </div>
+                </details>
+                <details class="ss-tune-group ss-init-group" open>
+                  <summary><span class="ss-tune-group-icon">▧</span><span class="ss-tune-group-copy"><strong>Image to image</strong><small>Starting image &amp; creativity</small></span><span class="ss-tune-chevron"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M216.49 168.49a12 12 0 0 1-17 0L128 97l-71.51 71.49a12 12 0 0 1-17-17l80-80a12 12 0 0 1 17 0l80 80a12 12 0 0 1 0 17"/></svg></span></summary>
+                  <div class="ss-tune-group-body">
                 <div class="ss-init-slot" data-role="tune-init-slot"><div class="ss-init-panel">
                   <div class="ss-init-preview" data-role="init-preview">No init</div>
                   <div class="ss-init-content">
@@ -997,12 +1034,12 @@ are removed when CSS is applied.</pre>
                   </div>
                   <label class="ss-creativity-row"><span>Creativity</span><input data-role="denoise" type="range" min="0" max="1" step="0.05" value="0.6" /><span data-role="denoise-label">0.60</span></label>
                   <input data-role="init-file" type="file" accept="image/*" hidden />
-                </div>
+                </div>                  </div>
+                </details>
               </div>
-              </div>
-              <details class="ss-advanced">
-                <summary>Advanced Swarm controls</summary>
-                <div class="ss-advanced-grid">
+              <details class="ss-advanced ss-tune-group">
+                <summary><span class="ss-tune-group-icon">${SETTINGS_ICON}</span><span class="ss-tune-group-copy"><strong>Advanced Swarm controls</strong><small>Presets, components &amp; overrides</small></span><span class="ss-tune-chevron"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M216.49 168.49a12 12 0 0 1-17 0L128 97l-71.51 71.49a12 12 0 0 1-17-17l80-80a12 12 0 0 1 17 0l80 80a12 12 0 0 1 0 17"/></svg></span></summary>
+                <div class="ss-advanced-grid ss-tune-group-body">
                   <div class="ss-field ss-wide">
                     <label>Swarm preset stack</label>
                     <div class="ss-preset-picker">
@@ -1091,10 +1128,11 @@ are removed when CSS is applied.</pre>
                   <button class="ss-button ss-button-primary ss-generate ss-desktop-generate" data-action="generate" disabled>Generate image</button>
                 </div>
               </div>
+              <div class="ss-prompt-context"><button class="ss-active-visual-pill" data-role="active-visual-pill" data-action="toggle-active-visual" type="button" hidden></button><button class="ss-active-visual-pill" data-role="active-persona-visual-pill" data-action="toggle-active-persona-visual" type="button" hidden></button><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span></div>
               <div class="ss-prompt-grid">
                 <div class="ss-field">
                   <div class="ss-prompt-field-head">
-                    <div class="ss-positive-label"><label for="ss-positive-v3">Positive</label><button class="ss-active-visual-pill" data-role="active-visual-pill" data-action="toggle-active-visual" type="button" hidden></button><button class="ss-active-visual-pill" data-role="active-persona-visual-pill" data-action="toggle-active-persona-visual" type="button" hidden></button><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span></div>
+                    <label for="ss-positive-v3">Positive</label>
                     <button class="ss-prompt-editor-button" data-action="edit-prompt" data-prompt-role="positive" title="Open positive prompt in Lumiverse editor" aria-label="Expand positive prompt">${EXPAND_ICON}</button>
                   </div>
                   <textarea id="ss-positive-v3" class="ss-textarea" data-role="positive" placeholder="Describe the image…"></textarea>
@@ -1164,7 +1202,7 @@ are removed when CSS is applied.</pre>
             <footer class="ss-style-footer">
               <button class="ss-button ss-button-primary" data-action="style-apply"><span class="ss-desktop-label">Apply Style</span><span class="ss-mobile-label">Apply</span></button>
               <button class="ss-button" data-action="style-save"><span class="ss-desktop-label">Save changes</span><span class="ss-mobile-label">Save</span></button>
-              <details class="ss-style-more" data-role="style-more" open><summary class="ss-button" aria-label="More Style actions">⋯</summary><div class="ss-style-more-actions">
+              <details class="ss-style-more" data-role="style-more"><summary class="ss-button" aria-label="More Style actions">⋯</summary><div class="ss-style-more-actions">
               <button class="ss-button" data-action="style-duplicate">Duplicate</button>
               <button class="ss-button ss-button-danger" data-action="style-delete">Delete</button>
               <button class="ss-button" data-action="style-clear">Clear active Style</button>
@@ -1172,6 +1210,7 @@ are removed when CSS is applied.</pre>
             </footer>
           </div>
           </section>
+          <div class="ss-styles-resizer" data-resize="styles-editor" role="separator" aria-orientation="vertical" title="Drag to resize Style editor and library" tabindex="0"></div>
           <section class="ss-style-column ss-style-library-column" data-style-column="library" data-mobile-pane="loras">
 <section class="ss-lora-library">
               <div class="ss-lora-titlebar">
@@ -1229,6 +1268,7 @@ are removed when CSS is applied.</pre>
               </footer>
             </section>
           </section>
+          <div class="ss-styles-resizer" data-resize="styles-stack" role="separator" aria-orientation="vertical" title="Drag to resize LoRA stack and library" tabindex="0"></div>
           <section class="ss-style-column ss-style-stack-column" data-style-column="stacks" data-mobile-pane="stack">
 <section class="ss-stack-pane">
               <div class="ss-section-head">
@@ -1256,6 +1296,11 @@ are removed when CSS is applied.</pre>
           </section>
           </div>
         </section>
+
+        <span class="ss-visually-hidden" role="status" aria-live="polite" data-role="lora-order-status"></span>
+        <div class="ss-lora-meta-layer" data-role="lora-meta-layer" hidden>
+          <section class="ss-lora-meta-dialog" data-role="lora-meta-dialog" role="dialog" aria-modal="true" aria-label="LoRA metadata"></section>
+        </div>
 
         <div class="ss-commandbar">
           <div class="ss-command-summary">
@@ -1473,6 +1518,17 @@ are removed when CSS is applied.</pre>
                 </div>
                 <button class="ss-icon-button" data-action="close-visual-profile" aria-label="Close prompts and visuals">×</button>
               </header>
+              <div class="ss-library-lookbook">
+                <nav class="ss-lookbook-rail" aria-label="Character identity and looks" data-role="library-lookbook-nav" data-mode="profile">
+                  <div class="ss-lookbook-rail-heading">IDENTITY LAYERS</div>
+                  <button type="button" class="ss-lookbook-base" data-action="library-visual-back" aria-current="page">
+                    <span class="ss-lookbook-base-symbol">${FOLDER_ICON}</span><span><strong>Base identity</strong><small>Inherited by every look</small></span>
+                  </button>
+                  <div class="ss-lookbook-rail-bar"><span>NAMED LOOKS</span><span class="ss-library-look-count" data-role="library-look-count">0 looks</span></div>
+                  <div class="ss-library-look-grid" data-role="library-look-list"></div>
+                  <button class="ss-button ss-lookbook-new" data-action="library-new-look">${PLUS_ICON}<span>New look</span></button>
+                </nav>
+                <div class="ss-lookbook-editor">
               <div class="ss-library-visual-body" data-role="library-visual-profile-panel">
                 <section class="ss-library-visual-section">
                   <div class="ss-library-visual-section-title">
@@ -1488,16 +1544,6 @@ are removed when CSS is applied.</pre>
                     <label class="ss-field"><span>Checkpoint</span><select class="ss-select" data-role="visual-checkpoint"><option value="">Use current Studio checkpoint</option></select></label>
                     <label class="ss-field"><span>Base LoRA stack</span><select class="ss-select" data-role="visual-stack"><option value="">No bound stack</option></select></label>
                   </div>
-                </section>
-                <section class="ss-library-visual-section ss-library-look-section">
-                  <div class="ss-library-visual-section-title">
-                    <div><strong>Named looks</strong><span class="ss-muted ss-tiny">Outfits and visual variants appended to the identity layer</span></div>
-                    <div class="ss-library-look-heading-actions">
-                      <span class="ss-library-look-count" data-role="library-look-count">0 looks</span>
-                      <button class="ss-button" data-action="library-new-look">${PLUS_ICON}<span>Add look</span></button>
-                    </div>
-                  </div>
-                  <div class="ss-library-look-grid" data-role="library-look-list"></div>
                 </section>
               </div>
               <div class="ss-library-visual-body ss-library-look-editor" data-role="library-look-editor" hidden>
@@ -1516,6 +1562,8 @@ are removed when CSS is applied.</pre>
                     <label class="ss-field ss-library-look-wide"><span>Continuity notes</span><textarea class="ss-textarea" data-role="library-look-notes" placeholder="Immutable details, seasonal variations, scene constraints…"></textarea></label>
                   </div>
                 </section>
+              </div>
+                </div>
               </div>
               <footer class="ss-library-visual-footer" data-role="library-profile-footer">
                 <button class="ss-button" data-action="close-visual-profile">Cancel</button>
@@ -1580,17 +1628,15 @@ are removed when CSS is applied.</pre>
         if (!APPEARANCE_COLORS.some((color) => color.key === key)) return
         const next = cloneStudioAppearance(this.appearance)
         next.colors[key] = input.value
+        // Migrated v7 Ink/Neutral profiles remain visible until Surface is edited;
+        // a new swatch choice becomes the single source of truth for base fills.
+        if (key === "surface") next.surfaceMode = "host"
         this.onAppearanceChange(next)
       })
     }
     this.get<HTMLInputElement>('[data-role="appearance-radius"]').addEventListener("input", (event) => {
       const next = cloneStudioAppearance(this.appearance)
       next.radius = numberValue(event.currentTarget as HTMLInputElement, 8)
-      this.onAppearanceChange(next)
-    })
-    this.get<HTMLInputElement>('[data-role="appearance-opacity"]').addEventListener("input", (event) => {
-      const next = cloneStudioAppearance(this.appearance)
-      next.opacity = numberValue(event.currentTarget as HTMLInputElement, 96)
       this.onAppearanceChange(next)
     })
     this.get<HTMLInputElement>('[data-role="appearance-blur"]').addEventListener("input", (event) => {
@@ -1692,6 +1738,8 @@ are removed when CSS is applied.</pre>
       this.applyAspectSelection()
     })
     this.get<HTMLInputElement>('[data-role="seed"]').addEventListener("input", () => this.updateContextControls())
+    this.get<HTMLElement>('.ss-generation-pane').addEventListener('input', () => this.updateTuneSummaries())
+    this.get<HTMLElement>('.ss-generation-pane').addEventListener('change', () => this.updateTuneSummaries())
     this.get<HTMLInputElement>('[data-role="denoise"]').addEventListener("input", (event) => {
       this.get<HTMLElement>('[data-role="denoise-label"]').textContent =
         Number((event.currentTarget as HTMLInputElement).value).toFixed(2)
@@ -1780,12 +1828,15 @@ are removed when CSS is applied.</pre>
         event.stopPropagation()
         return
       }
+      if (!target.closest(".ss-recipe-menu")) this.get<HTMLDetailsElement>('[data-role="recipe-menu"]').open = false
       if (!target.closest(".ss-config-wrap, .ss-settings-layer")) this.closeConfigPopover()
       if (!target.closest(".ss-history-card")) this.closeHistoryMenus()
       if (!target.closest(".ss-lora-sort-wrap")) this.closeLoraSortMenu()
       const button = target.closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
+      if (button.closest('.ss-recipe-menu')) this.get<HTMLDetailsElement>('[data-role="recipe-menu"]').open = false
+      if (action === "use-output-seed") this.useOutputSeed()
       if (action === "lora-page-prev" || action === "lora-page-next") {
         this.loraPage += action === "lora-page-next" ? 1 : -1
         this.renderLoras()
@@ -1832,8 +1883,8 @@ are removed when CSS is applied.</pre>
       if (action === "reset-appearance") {
         const next = cloneStudioAppearance(this.appearance)
         next.colors = {}
+        next.surfaceMode = "host" // Reset any persisted v7 Ink/Neutral preset as well.
         next.radius = null
-        next.opacity = 96
         next.blur = 12
         this.onAppearanceChange(next)
       }
@@ -1855,6 +1906,7 @@ are removed when CSS is applied.</pre>
       if (action === "clear-token") this.clearToken()
       if (action === "close-studio") this.modal.dismiss()
       if (action === "change-orientation") this.changeOrientation()
+      if (action === "select-orientation") this.selectOrientation(button.dataset.orientation || "")
       if (action === "toggle-seed-mode") this.toggleSeedMode()
       if (action === "random-seed-mobile") this.useRandomSeed()
       if (action === "toggle-size-link") this.toggleSizeLink()
@@ -4048,19 +4100,14 @@ are removed when CSS is applied.</pre>
   private makeLoraCard(lora: LoraMetadata): HTMLElement {
     const card = element("article", "ss-lora-card")
     card.dataset.loraName = lora.name
-    card.title = [
-      lora.name,
-      lora.triggerPhrase ? `Trigger: ${lora.triggerPhrase}` : "",
-      lora.compatClass || lora.architecture,
-      lora.usageHint,
-    ].filter(Boolean).join("\n")
-
+    const title = lora.title || labelFromName(lora.name)
+    card.title = title
     const preview = element("div", "ss-lora-preview")
     preview.appendChild(element("div", "ss-lora-placeholder", "◇"))
     const cached = this.previewCache.get(lora.name)
     if (cached || lora.previewRef) {
       const image = element("img")
-      image.alt = `${lora.title || labelFromName(lora.name)} preview`
+      image.alt = `${title} preview`
       image.dataset.name = lora.name
       image.dataset.loraImage = lora.name
       if (lora.previewRef) image.dataset.previewRef = lora.previewRef
@@ -4068,33 +4115,19 @@ are removed when CSS is applied.</pre>
       if (cached) this.revealDecodedPreview(image, cached)
       else this.previewObserver?.observe(image)
     }
-
     const body = element("div", "ss-lora-body")
-    body.appendChild(element("div", "ss-lora-title", lora.title || labelFromName(lora.name)))
-    body.appendChild(element("div", "ss-lora-author", lora.author || lora.name))
-    body.appendChild(element("div", "ss-lora-desc", lora.description || lora.usageHint || lora.triggerPhrase || "No description in SwarmUI metadata."))
-
-    const badges = element("div", "ss-badges")
-    const badgeValues = [
-      lora.compatClass || lora.architecture,
-      lora.triggerPhrase ? `trigger: ${lora.triggerPhrase}` : "",
-      ...lora.tags.slice(0, 1),
-    ].filter(Boolean).slice(0, 3)
-    for (const value of badgeValues) badges.appendChild(element("span", "ss-badge", value))
-    if (!this.isLoraCompatible(lora)) {
-      badges.appendChild(element("span", "ss-badge ss-badge-warning", "model mismatch"))
-    }
-    body.appendChild(badges)
-
+    body.appendChild(element("div", "ss-lora-title", title))
     const footer = element("div", "ss-lora-footer")
-    footer.appendChild(element("span", "ss-weight-label", `default ${lora.defaultWeight.toFixed(2)}`))
-    const inStack = this.state.stack.some((item) => item.lora.name === lora.name)
+    const inStack = this.state.stack.some(item => item.lora.name === lora.name)
     const add = element("button", `ss-button ss-add-button${inStack ? "" : " ss-button-primary"}`, inStack ? "Stacked" : "Add")
     add.disabled = inStack
     add.addEventListener("click", () => this.addLora(lora))
-    footer.appendChild(add)
+    const more = element("button", "ss-icon-button ss-lora-more", "⋯")
+    more.title = `Metadata for ${title}`
+    more.setAttribute("aria-label", `Metadata for ${title}`)
+    more.addEventListener("click", () => this.openLoraMetadata(lora))
+    footer.append(add, more)
     body.appendChild(footer)
-
     card.append(preview, body)
     return card
   }
@@ -4240,17 +4273,9 @@ are removed when CSS is applied.</pre>
             this.send("preview", { connectionId: this.state.connection?.id, name: item.lora.name, previewRef: item.lora.previewRef })
           }
         }
-        row.querySelector<HTMLInputElement>('[data-stack-control="enabled"]')!.checked = item.enabled
         const weight = row.querySelector<HTMLInputElement>('.ss-stack-weight')!
         if (weight.value !== String(item.weight)) weight.value = String(item.weight)
-        const trigger = row.querySelector<HTMLInputElement>('.ss-trigger-toggle input')!
-        trigger.checked = item.useTrigger
-        trigger.disabled = !item.lora.triggerPhrase
-        row.querySelector<HTMLElement>('.ss-trigger-toggle')!.title = item.lora.triggerPhrase || "No trigger phrase in metadata"
         row.querySelector<HTMLElement>('.ss-stack-name strong')!.textContent = item.lora.title || labelFromName(item.lora.name)
-        const buttons = row.querySelectorAll<HTMLButtonElement>('.ss-stack-actions button')
-        buttons[0].disabled = index === 0
-        buttons[1].disabled = index === this.state.stack.length - 1
         if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null)
       })
       if (!this.state.stack.length && !list.firstElementChild) list.appendChild(element("div", "ss-empty", "Add LoRAs from the library."))
@@ -4283,50 +4308,71 @@ are removed when CSS is applied.</pre>
 
   private makeStackRow(item: StackItem, index: number): HTMLElement {
     const key = item.lora.name
-    // Events resolve the current item even after loading a saved stack with the same names.
     const currentItem = () => this.state.stack.find(entry => entry.lora.name === key) || item
     const currentIndex = () => this.state.stack.findIndex(entry => entry.lora.name === key)
     const row = element("div", "ss-stack-row")
     row.dataset.stackName = key
-    const drag = element("button", "ss-icon-button ss-stack-drag", "⠿")
-    drag.type = "button"
-    drag.draggable = true
-    drag.title = "Drag to reorder LoRA"
-    drag.setAttribute("aria-label", "Drag to reorder LoRA")
-    drag.addEventListener("dragstart", event => { event.dataTransfer?.setData("application/x-studio-lora", key) })
-    row.addEventListener("dragover", event => { if (event.dataTransfer?.types.includes("application/x-studio-lora")) event.preventDefault() })
-    row.addEventListener("drop", event => {
-      const source = this.state.stack.findIndex(entry => entry.lora.name === event.dataTransfer?.getData("application/x-studio-lora"))
-      if (source < 0) return
-      event.preventDefault()
-      this.moveStack(source, currentIndex() - source)
-    })
-    const installed = Boolean(this.installedLora(item.lora.name))
     row.dataset.disabled = String(!item.enabled)
+    const installed = Boolean(this.installedLora(key))
     row.dataset.missing = String(!installed)
     row.dataset.incompatible = String(installed && !this.isLoraCompatible(item.lora))
 
-    const enabled = element("input") as HTMLInputElement
-    enabled.type = "checkbox"
-    enabled.checked = item.enabled
-    enabled.title = "Enable LoRA"
-    enabled.dataset.stackControl = "enabled"
-    enabled.addEventListener("change", () => {
-      currentItem().enabled = enabled.checked
-      this.renderStack()
+    const drag = element("button", "ss-icon-button ss-stack-drag", "⠿")
+    drag.type = "button"
+    drag.title = "Drag to reorder · arrow keys also supported"
+    drag.setAttribute("aria-label", `Reorder ${item.lora.title || labelFromName(key)}. Drag or use the up and down arrow keys.`)
+    drag.addEventListener("pointerdown", event => {
+      if (event.pointerType === "mouse" && event.button !== 0) return
+      event.preventDefault()
+      drag.setPointerCapture(event.pointerId)
+      const from = currentIndex(), startY = event.clientY
+      let active = false, destination = from
+      const rows = () => [...(row.parentElement?.querySelectorAll<HTMLElement>(".ss-stack-row") || [])]
+      const move = (pointer: PointerEvent) => {
+        if (!active && Math.abs(pointer.clientY - startY) < 5) return
+        active = true
+        row.classList.add("ss-stack-dragging")
+        const list = rows()
+        destination = list.findIndex(node => pointer.clientY < node.getBoundingClientRect().top + node.getBoundingClientRect().height / 2)
+        if (destination < 0) destination = list.length - 1
+        list.forEach((node, n) => node.classList.toggle("ss-stack-drop-target", n === destination && n !== from))
+      }
+      const finish = (pointer: PointerEvent, cancelled: boolean) => {
+        drag.removeEventListener("pointermove", move)
+        drag.removeEventListener("pointerup", up)
+        drag.removeEventListener("pointercancel", cancel)
+        if (drag.hasPointerCapture(pointer.pointerId)) drag.releasePointerCapture(pointer.pointerId)
+        row.classList.remove("ss-stack-dragging")
+        rows().forEach(node => node.classList.remove("ss-stack-drop-target"))
+        if (!cancelled && active && from >= 0 && destination !== from) this.moveStack(from, destination - from)
+      }
+      const up = (pointer: PointerEvent) => finish(pointer, false)
+      const cancel = (pointer: PointerEvent) => finish(pointer, true)
+      drag.addEventListener("pointermove", move)
+      drag.addEventListener("pointerup", up)
+      drag.addEventListener("pointercancel", cancel)
+    })
+    drag.addEventListener("keydown", event => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
+      event.preventDefault()
+      const before = currentIndex()
+      if (before < 0 || (event.key === "ArrowUp" && before === 0) || (event.key === "ArrowDown" && before === this.state.stack.length - 1)) return
+      this.moveStack(before, event.key === "ArrowUp" ? -1 : 1)
+      const target = this.get<HTMLElement>('[data-role="stack-list"]')
+        .querySelectorAll<HTMLButtonElement>(".ss-stack-drag")[before + (event.key === "ArrowUp" ? -1 : 1)]
+      target?.focus({ preventScroll: true })
     })
 
     const preview = element("div", "ss-stack-preview")
     const image = element("img")
-    image.dataset.loraImage = item.lora.name
+    image.dataset.loraImage = key
     image.alt = ""
     image.hidden = true
     preview.appendChild(image)
-
     const name = element("div", "ss-stack-name")
-    name.appendChild(element("strong", "", item.lora.title || labelFromName(item.lora.name)))
-    name.appendChild(element("span", "", item.lora.name))
-
+    const label = item.lora.title || labelFromName(key)
+    name.appendChild(element("strong", "", label))
+    name.title = `${label}\n${key}`
     const weight = element("input", "ss-input ss-stack-weight") as HTMLInputElement
     weight.type = "number"
     weight.min = "-10"
@@ -4334,50 +4380,86 @@ are removed when CSS is applied.</pre>
     weight.step = "0.05"
     weight.value = String(item.weight)
     weight.title = "LoRA weight"
+    weight.setAttribute("aria-label", `Weight for ${label}`)
     weight.addEventListener("change", () => {
       currentItem().weight = clamp(numberValue(weight, currentItem().weight), -10, 10)
       weight.value = String(currentItem().weight)
       this.renderStack()
     })
-
-    const trigger = element("label", "ss-trigger-toggle")
-    const triggerCheckbox = element("input") as HTMLInputElement
-    triggerCheckbox.type = "checkbox"
-    triggerCheckbox.checked = item.useTrigger
-    triggerCheckbox.disabled = !item.lora.triggerPhrase
-    triggerCheckbox.addEventListener("change", () => {
-      currentItem().useTrigger = triggerCheckbox.checked
-      this.renderStack()
-    })
-    trigger.append(triggerCheckbox, document.createTextNode("trigger"))
-    trigger.title = item.lora.triggerPhrase || "No trigger phrase in metadata"
-
     const actions = element("div", "ss-stack-actions")
-    const up = element("button", "ss-icon-button", "↑")
-    up.disabled = index === 0
-    up.title = "Move up"
-    up.addEventListener("click", () => this.moveStack(currentIndex(), -1))
-    const down = element("button", "ss-icon-button", "↓")
-    down.disabled = index === this.state.stack.length - 1
-    down.title = "Move down"
-    down.addEventListener("click", () => this.moveStack(currentIndex(), 1))
-    const remove = element("button", "ss-icon-button ss-button-danger", "×")
-    remove.title = "Remove"
-    remove.addEventListener("click", () => {
-      this.state.stack.splice(currentIndex(), 1)
-      this.renderStack()
-    })
-    actions.append(up, down, remove)
-    row.append(drag, enabled, preview, name, weight, trigger, actions)
+    const more = element("button", "ss-icon-button ss-stack-more", "⋯")
+    more.type = "button"
+    more.title = "LoRA metadata and options"
+    more.setAttribute("aria-label", `Details and options for ${label}`)
+    more.addEventListener("click", () => this.openLoraMetadata(currentItem().lora, key))
+    actions.appendChild(more)
+    row.append(drag, preview, name, weight, actions)
     return row
   }
 
   private moveStack(index: number, direction: number): void {
     const target = index + direction
-    if (target < 0 || target >= this.state.stack.length) return
+    if (index < 0 || target < 0 || target >= this.state.stack.length) return
     const [item] = this.state.stack.splice(index, 1)
     this.state.stack.splice(target, 0, item)
     this.renderStack()
+    const status = this.root.querySelector<HTMLElement>('[data-role="lora-order-status"]')
+    if (status) status.textContent = `${item.lora.title || labelFromName(item.lora.name)} moved to ${target + 1} of ${this.state.stack.length}`
+  }
+
+  private openLoraMetadata(lora: LoraMetadata, stackKey?: string): void {
+    const layer = this.get<HTMLElement>('[data-role="lora-meta-layer"]')
+    const dialog = this.get<HTMLElement>('[data-role="lora-meta-dialog"]')
+    dialog.replaceChildren()
+    const head = element("header", "ss-lora-meta-header")
+    head.appendChild(element("strong", "", lora.title || labelFromName(lora.name)))
+    const close = element("button", "ss-icon-button", "×")
+    close.title = "Close LoRA metadata"
+    close.setAttribute("aria-label", "Close LoRA metadata")
+    close.addEventListener("click", () => { layer.hidden = true })
+    head.appendChild(close)
+    const info = element("dl", "ss-lora-meta-grid")
+    const pairs: Array<[string,string]> = [
+      ["File", lora.name],
+      ["Author", lora.author || "Unknown"],
+      ["Architecture", lora.architecture || "Unknown"],
+      ["Compatibility", lora.compatClass || "Not specified"],
+      ["Trigger", lora.triggerPhrase || "None"],
+      ["Tags", lora.tags.join(", ") || "None"],
+      ["Default weight", lora.defaultWeight.toFixed(2)],
+      ["Description", lora.description || lora.usageHint || "No description provided"],
+    ]
+    for (const [label, value] of pairs) {
+      info.append(element("dt", "", label), element("dd", "", value))
+    }
+    dialog.append(head, info)
+    const controls = element("div", "ss-lora-meta-controls")
+    if (stackKey) {
+      const item = () => this.state.stack.find(entry => entry.lora.name === stackKey)
+      for (const [caption, property] of [["Enabled", "enabled"], ["Use trigger", "useTrigger"]] as const) {
+        const field = element("label", "ss-lora-meta-toggle")
+        const input = element("input") as HTMLInputElement
+        input.type = "checkbox"
+        input.checked = Boolean(item()?.[property])
+        input.disabled = property === "useTrigger" && !lora.triggerPhrase
+        input.addEventListener("change", () => { const found = item(); if (!found) return; found[property] = input.checked; this.renderStack() })
+        field.append(input, document.createTextNode(caption))
+        controls.appendChild(field)
+      }
+      const remove = element("button", "ss-button ss-button-danger", "Remove from stack")
+      remove.addEventListener("click", () => { const index = this.state.stack.findIndex(entry => entry.lora.name === stackKey); if (index >= 0) { this.state.stack.splice(index,1); this.renderStack() } layer.hidden = true })
+      controls.appendChild(remove)
+    } else {
+      const add = element("button", "ss-button ss-button-primary", "Add to stack")
+      const inStack = () => this.state.stack.some(entry => entry.lora.name === lora.name)
+      add.disabled = inStack()
+      add.addEventListener("click", () => { this.addLora(lora); layer.hidden = true })
+      controls.appendChild(add)
+    }
+    dialog.appendChild(controls)
+    layer.onclick = event => { if (event.target === layer) layer.hidden = true }
+    layer.hidden = false
+    close.focus({ preventScroll: true })
   }
 
   private updateDockSummary(): void {
@@ -4757,7 +4839,7 @@ are removed when CSS is applied.</pre>
   }
 
   private recipeEditorMarkup(prefix: string): string {
-    return `<div class="ss-style-editor"><label>Render Style<select class="ss-select" data-role="${prefix}-recipe-style"></select></label>${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key}<input class="ss-input" data-role="${prefix}-recipe-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>`
+    return `<div class="ss-style-editor ss-lookbook-recipe"><label class="ss-lookbook-style-pick">Render Style<select class="ss-select" data-role="${prefix}-recipe-style"></select></label>${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key === "cfg" ? "CFG" : key[0].toUpperCase() + key.slice(1)}<input class="ss-input" data-role="${prefix}-recipe-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>`
   }
 
   private populateRecipeEditor(prefix: string, target: { generationRecipe?: GenerationRecipe; styleId?: string } | null | undefined): void {
@@ -4852,7 +4934,7 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="active-character-actions"]').hidden = !binding
     this.get<HTMLElement>('[data-role="active-character-actions-label"]').textContent = this.activeVisualFolder()?.name || "Active character"
     const look = binding?.looks.find(item => item.id === binding.activeLookId)
-    this.get<HTMLElement>('[data-action="save-look-recipe"]').textContent = look ? `Save current recipe to ${look.name}` : "Save current recipe to active look"
+    this.get<HTMLElement>('[data-action="save-look-recipe"] span')!.textContent = look ? `Save current recipe to ${look.name}` : "Save current recipe to active look"
     this.get<HTMLElement>('[data-action="save-base-recipe"]').hidden = !binding
     this.get<HTMLElement>('[data-action="save-look-recipe"]').hidden = !binding?.looks.some(item => item.id === binding.activeLookId)
   }
@@ -4961,6 +5043,7 @@ are removed when CSS is applied.</pre>
     shell.classList.toggle("ss-generation-collapsed", state?.collapsed?.generation === true)
     shell.classList.remove("ss-history-collapsed")
     shell.classList.toggle("ss-fullscreen-layer", state?.fullscreen === true)
+    this.syncFullscreenRoot(state?.fullscreen === true)
     const advanced = this.root.querySelector<HTMLDetailsElement>("details.ss-advanced")
     if (advanced) advanced.open = state?.details?.advanced === true
     const savedLoraFolder = state?.loraBrowser?.folder
@@ -4991,6 +5074,8 @@ are removed when CSS is applied.</pre>
     const sizes: Record<string, string> = {
       generationWidth: "--ss-generation-width",
       historyWidth: "--ss-history-width",
+      stylesEditorWidth: "--ss-styles-editor-width",
+      stylesStackWidth: "--ss-styles-stack-width",
       promptHeight: "--ss-prompt-height",
     }
     for (const [key, property] of Object.entries(sizes)) {
@@ -5028,6 +5113,8 @@ are removed when CSS is applied.</pre>
         sizes: {
           generationWidth: size("--ss-generation-width"),
           historyWidth: size("--ss-history-width"),
+          stylesEditorWidth: size("--ss-styles-editor-width"),
+          stylesStackWidth: size("--ss-styles-stack-width"),
           promptHeight: size("--ss-prompt-height"),
         },
       }))
@@ -5061,7 +5148,7 @@ are removed when CSS is applied.</pre>
 
   private beginResize(kind: string, event: PointerEvent): void {
     if (window.matchMedia("(max-width: 720px)").matches) return
-    if (!["generation", "history", "prompt"].includes(kind)) return
+    if (!["generation", "history", "prompt", "styles-editor", "styles-stack"].includes(kind)) return
     event.preventDefault()
     this.stopActiveResize?.()
     const shell = this.get<HTMLElement>(".ss-shell")
@@ -5100,6 +5187,16 @@ are removed when CSS is applied.</pre>
         `${Math.round(width)}px`,
       )
     }
+    if (kind === "styles-editor" || kind === "styles-stack") {
+      const bounds = this.get<HTMLElement>('[data-role="styles-columns"]').getBoundingClientRect()
+      if (kind === "styles-editor") {
+        const width = clamp(clientX - bounds.left, 220, Math.max(220, bounds.width - 580))
+        shell.style.setProperty("--ss-styles-editor-width", `${Math.round(width)}px`)
+      } else {
+        const width = clamp(bounds.right - clientX, 220, Math.max(220, bounds.width - 540))
+        shell.style.setProperty("--ss-styles-stack-width", `${Math.round(width)}px`)
+      }
+    }
     if (kind === "prompt") {
       const bounds = this.get<HTMLElement>(".ss-center").getBoundingClientRect()
       const max = Math.max(130, bounds.height - 180)
@@ -5112,6 +5209,8 @@ are removed when CSS is applied.</pre>
     const properties: Record<string, string> = {
       generation: "--ss-generation-width",
       history: "--ss-history-width",
+      "styles-editor": "--ss-styles-editor-width",
+      "styles-stack": "--ss-styles-stack-width",
       prompt: "--ss-prompt-height",
     }
     const property = properties[kind]
@@ -5119,10 +5218,29 @@ are removed when CSS is applied.</pre>
     this.persistWorkspaceState()
   }
 
+  private syncFullscreenRoot(enabled: boolean): void {
+    if (enabled) {
+      if (this.fullscreenAnchor || !this.root.parentNode || !document.body) return
+      this.fullscreenAnchor = document.createComment("Swarm Studio fullscreen origin")
+      this.root.parentNode.insertBefore(this.fullscreenAnchor, this.root)
+      document.body.appendChild(this.root)
+      this.root.classList.add("ss-fullscreen-root")
+    } else {
+      this.root.classList.remove("ss-fullscreen-root")
+      const anchor = this.fullscreenAnchor
+      if (anchor) {
+        anchor.parentNode?.insertBefore(this.root, anchor)
+        anchor.remove()
+        this.fullscreenAnchor = null
+      }
+    }
+  }
+
   private toggleFullscreen(force?: boolean): void {
     const shell = this.get<HTMLElement>(".ss-shell")
     const shouldEnter = force ?? !shell.classList.contains("ss-fullscreen-layer")
     shell.classList.toggle("ss-fullscreen-layer", shouldEnter)
+    this.syncFullscreenRoot(shouldEnter)
     this.updateWorkspaceButtons()
     this.persistWorkspaceState()
   }
@@ -5139,7 +5257,7 @@ are removed when CSS is applied.</pre>
       pane.hidden = mobile && pane.dataset.mobilePane !== selected
     }
     if (selected === "history") this.get<HTMLDetailsElement>('[data-role="rail-history"]').open = true
-    this.get<HTMLDetailsElement>('[data-role="style-more"]').open = !mobile
+    this.get<HTMLDetailsElement>('[data-role="style-more"]').open = false
     const init = this.get<HTMLElement>(".ss-init-panel")
     const slot = this.get<HTMLElement>(`[data-role="${mobile ? "create" : "tune"}-init-slot"]`)
     if (init.parentElement !== slot) slot.appendChild(init)
@@ -5737,6 +5855,12 @@ are removed when CSS is applied.</pre>
     if (!folder?.binding) return this.closeVisualProfile()
     const look = this.currentLibraryLook()
     this.libraryVisualMode = "look"
+    this.get<HTMLElement>('[data-role="library-lookbook-nav"]').dataset.mode = "look"
+    for (const card of this.root.querySelectorAll<HTMLElement>('[data-role="library-look-list"] [data-look-id]')) {
+      card.dataset.selected = String(card.dataset.lookId === this.libraryLookId)
+      if (card.dataset.selected === "true") card.setAttribute("aria-current", "page")
+      else card.removeAttribute("aria-current")
+    }
     this.get<HTMLElement>('[data-role="library-visual-profile-panel"]').hidden = true
     this.get<HTMLElement>('[data-role="library-profile-footer"]').hidden = true
     this.get<HTMLElement>('[data-role="library-look-editor"]').hidden = false
@@ -5908,6 +6032,11 @@ are removed when CSS is applied.</pre>
       panel.hidden = true
       return
     }
+    this.get<HTMLElement>('[data-role="library-lookbook-nav"]').dataset.mode = "profile"
+    for (const card of this.root.querySelectorAll<HTMLElement>('[data-role="library-look-list"] [data-look-id]')) {
+      card.dataset.selected = "false"
+      card.removeAttribute("aria-current")
+    }
     this.get<HTMLElement>('[data-role="library-visual-profile-panel"]').hidden = false
     this.get<HTMLElement>('[data-role="library-profile-footer"]').hidden = false
     this.get<HTMLElement>('[data-role="library-look-editor"]').hidden = true
@@ -5964,6 +6093,8 @@ are removed when CSS is applied.</pre>
       card.dataset.action = "library-edit-look"
       card.dataset.lookId = look.id
       card.dataset.active = String(look.id === folder.binding.activeLookId)
+      card.dataset.selected = String(this.libraryVisualMode === "look" && look.id === this.libraryLookId)
+      if (card.dataset.selected === "true") card.setAttribute("aria-current", "page")
       card.type = "button"
       card.title = `Edit ${look.name}`
       const preview = element("span", "ss-library-look-preview")
@@ -6031,6 +6162,8 @@ are removed when CSS is applied.</pre>
     this.libraryPage = clamp(this.libraryPage + delta, 0, pages - 1)
     this.librarySelectionAnchorId = ""
     this.renderOutputLibrary()
+    // A new page should start at its first row, even if the prior page was scrolled.
+    this.get<HTMLElement>('[data-role="library-grid"]').scrollTop = 0
   }
 
   private currentLibraryPageSize(): number {
@@ -6948,6 +7081,18 @@ are removed when CSS is applied.</pre>
     }
   }
 
+  private selectOrientation(orientation: string): void {
+    if (!['landscape', 'square', 'portrait'].includes(orientation)) return
+    const aspect = this.get<HTMLSelectElement>('[data-role="aspect"]')
+    const selected = aspect.value
+    const toPortrait: Record<string, string> = { '3:2': '2:3', '4:3': '3:4', '5:4': '4:5', '16:9': '9:16' }
+    const toLandscape: Record<string, string> = { '2:3': '3:2', '3:4': '4:3', '4:5': '5:4', '9:16': '16:9' }
+    aspect.value = orientation === 'square' ? '1:1'
+      : orientation === 'portrait' ? (toPortrait[selected] || (selected in toLandscape ? selected : '2:3'))
+      : (toLandscape[selected] || (selected in toPortrait ? selected : '3:2'))
+    this.applyAspectSelection()
+  }
+
   private changeOrientation(): void {
     const width = numberValue(this.get<HTMLInputElement>('[data-role="width"]'), 1024)
     const height = numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024)
@@ -6994,9 +7139,41 @@ are removed when CSS is applied.</pre>
     this.updateContextControls()
   }
 
+  private useOutputSeed(): void {
+    const recorded = Number(this.state.currentImage?.details?.parameters?.seed)
+    if (!this.state.currentImage || !Number.isFinite(recorded) || recorded < 0) {
+      this.setRunStatus("No recorded output seed available. Generate or select an image first.")
+      return
+    }
+    this.get<HTMLInputElement>('[data-role="seed"]').value = String(Math.trunc(recorded))
+    this.updateContextControls()
+    this.updateTuneSummaries()
+    this.setRunStatus(`Using output seed ${Math.trunc(recorded)}.`)
+  }
+
+  private updateTuneSummaries(): void {
+    const text = (role: string, value: string): void => {
+      const node = this.root.querySelector<HTMLElement>(`[data-role="${role}"]`)
+      if (node) node.textContent = value
+    }
+    const select = (role: string): HTMLSelectElement => this.get<HTMLSelectElement>(`[data-role="${role}"]`)
+    const value = (role: string): string => this.get<HTMLInputElement>(`[data-role="${role}"]`).value
+    const model = select("model")
+    const workflow = select("workflow-select")
+    const checkpoint = model.selectedOptions[0]?.textContent?.trim() || "Choose checkpoint"
+    const flow = workflow.value ? workflow.selectedOptions[0]?.textContent?.trim() || "Custom workflow" : "Standard Swarm"
+    text("tune-model-summary", `${flow} · ${checkpoint}`)
+    text("tune-canvas-summary", `${value("width")} × ${value("height")}`)
+    const steps = value("steps"), cfg = value("cfg")
+    const seed = Number(value("seed")) === -1 ? "Random seed" : "Fixed seed"
+    text("tune-sampling-summary", `${steps} steps · CFG ${cfg} · ${seed}`)
+    text("tune-recipe-summary", `${checkpoint} · ${value("width")} × ${value("height")}`)
+  }
+
   private useRandomSeed(): void {
     this.get<HTMLInputElement>('[data-role="seed"]').value = "-1"
     this.updateContextControls()
+    this.updateTuneSummaries()
     this.setRunStatus("Random seed enabled for the next generation.")
   }
 
@@ -7019,6 +7196,13 @@ are removed when CSS is applied.</pre>
         ? "Lock to the current output's seed (or create a fixed seed if no output is selected)"
         : "Set seed to -1 for a random generation"
     }
+    const selected = width === height ? 'square' : width > height ? 'landscape' : 'portrait'
+    for (const tile of this.root.querySelectorAll<HTMLButtonElement>('[data-action="select-orientation"]')) {
+      const active = tile.dataset.orientation === selected
+      tile.dataset.active = String(active)
+      tile.setAttribute('aria-pressed', String(active))
+    }
+    this.updateTuneSummaries()
   }
 
   private setConnectionStatus(status: "loading" | "ready" | "warning" | "error"): void {

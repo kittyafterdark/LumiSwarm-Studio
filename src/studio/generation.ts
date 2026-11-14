@@ -99,7 +99,7 @@ function applySwarmPresetTokens(prompt: string, titles: string[]): string {
 function normalizeWorkspaceState(value: unknown): any {
   const old = value && typeof value === "object" ? value as any : {}
   const sizes: Record<string, number> = {}
-  for (const [key, min, max] of [["generationWidth", 310, 360], ["historyWidth", 240, 300], ["libraryWidth", 220, 900], ["promptHeight", 220, 480]] as const) {
+  for (const [key, min, max] of [["generationWidth", 310, 360], ["historyWidth", 240, 300], ["libraryWidth", 220, 900], ["stylesEditorWidth", 220, 650], ["stylesStackWidth", 220, 650], ["promptHeight", 220, 480]] as const) {
     const value = old.sizes?.[key]
     if (typeof value === "number" && Number.isFinite(value)) sizes[key] = clamp(value, min, max)
   }

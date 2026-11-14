@@ -16,7 +16,7 @@ function setup(ctx: FrontendContext): () => void {
 }
 
 function setupStudio(ctx: FrontendContext): () => void {
-  const removeStyle = ctx.dom.addStyle(`${STYLES}\n${STUDIO_V3_STYLES}`)
+  const removeStyle = ctx.dom.addStyle(STYLES)
   let currentTheme = storedStudioTheme()
   let appearance = storedStudioAppearance()
   let behavior = storedStudioBehavior()
@@ -122,8 +122,8 @@ function setupStudio(ctx: FrontendContext): () => void {
     try {
       modal = ctx.ui.showModal({
         title: "Swarm Studio",
-        width: 1440,
-        maxHeight: 980,
+        width: Math.max(940, Math.ceil(window.innerWidth / (parseFloat(getComputedStyle(document.body).zoom) || 1))),
+        maxHeight: Math.max(620, Math.ceil(window.innerHeight / (parseFloat(getComputedStyle(document.body).zoom) || 1))),
         persistent: false,
       })
     } catch (error) {

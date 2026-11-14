@@ -1,11 +1,11 @@
 type FrontendContext = any
 type StudioTheme = "lumiverse" | "custom"
-type AppearanceColorKey = "accent" | "canvas" | "panel" | "header" | "outline" | "button" | "text"
+type AppearanceColorKey = "accent" | "canvas" | "surface" | "panel" | "raised" | "header" | "outline" | "button" | "field" | "text"
 
 interface StudioAppearance {
   colors: Partial<Record<AppearanceColorKey, string>>
+  surfaceMode: "host" | "neutral" | "flat"
   radius: number | null
-  opacity: number
   blur: number
   customCss: string
 }
