@@ -62,10 +62,17 @@ with sync_playwright() as pw:
         page.locator('[data-action="close-studio"]').first.click()
       page.locator('.ss-mini-preview').click()
       assert orb.get_attribute('data-quick-view')=='rail'
-      page.locator('[data-action="mini-show-menu"]').first.click()
+      # Orb right-click keeps its original four-action menu, distinct from rail ⋯.
+      orb.click(button='right', position={'x': 15, 'y': 15})
       assert page.locator('[data-role="mini-context-menu"]').is_visible()
+      assert page.locator('[data-role="mini-context-menu"] button').count() == 4
       page.keyboard.press('Escape')
       assert not page.locator('[data-role="mini-context-menu"]').is_visible()
+      page.locator('[data-action="mini-show-menu"]').first.click()
+      assert page.locator('[data-role="mini-strip-menu"]').is_visible()
+      assert not page.locator('[data-role="mini-context-menu"]').is_visible()
+      page.keyboard.press('Escape')
+      assert not page.locator('[data-role="mini-strip-menu"]').is_visible()
       page.locator('[data-action="mini-compose"]').click()
       assert orb.get_attribute('data-quick-view')=='composer'
       page.locator('[data-role="mini-prompt"]').fill('Satin locket draft stays')

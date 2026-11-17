@@ -82,6 +82,7 @@ function setupStudio(ctx: FrontendContext): () => void {
       parserModel: typeof value?.parserModel === "string" ? value.parserModel : "",
       stripUserOnlyLoraStack: value?.stripUserOnlyLoraStack === true,
       autoPrintCharacterPositive: value?.autoPrintCharacterPositive === true,
+      autoFinalizeInline: value?.autoFinalizeInline === true,
       requiredImageMin: range.min,
       requiredImageMax: range.max,
       tagPromptMode: value?.promptMode === "pov" ? "pov" : "multi",
@@ -104,6 +105,7 @@ function setupStudio(ctx: FrontendContext): () => void {
         parserModel: behavior.parserModel,
         stripUserOnlyLoraStack: behavior.stripUserOnlyLoraStack,
         autoPrintCharacterPositive: behavior.autoPrintCharacterPositive,
+        autoFinalizeInline: behavior.autoFinalizeInline,
         requiredImageMin: behavior.requiredImageMin,
         requiredImageMax: behavior.requiredImageMax,
         promptMode: behavior.tagPromptMode,
@@ -179,6 +181,18 @@ function setupStudio(ctx: FrontendContext): () => void {
     (prompt, negativePrompt, onConfirm) =>
       miniplayer?.openTaggedPromptEditor(prompt, negativePrompt, onConfirm) === true,
     () => openStudio("library"),
+    (action, target) => {
+      const openedFromChat = !activeModal
+      openStudio()
+      const studio = activeStudio
+      if (!studio) return
+      const selection = {
+        ...target,
+        onExit: () => { if (openedFromChat && activeStudio === studio) activeModal?.dismiss() },
+      }
+      if (action === "inpaint") studio.requestInlineInpaint(selection)
+      else studio.openInlineReplacement(selection)
+    },
   )
   let unregisterTagInterceptor = () => {}
   let unregisterParserTagInterceptor = () => {}
@@ -224,6 +238,7 @@ function setupStudio(ctx: FrontendContext): () => void {
         widget,
         () => openStudio("studio"),
         () => openStudio("library"),
+        image => { openStudio("studio"); activeStudio?.requestUpscaleFromToolkit(image) },
         () => activeStudio?.exportDraft() || null,
         behavior,
         updateBehavior,

@@ -108,6 +108,8 @@ assert.equal(matchesKeywordQuery("illustrious portrait", ["Anima model", "soft p
 assert.equal(outputLibraryPageSize(390), 15)
 assert.equal(outputLibraryPageSize(720), 15)
 assert.equal(outputLibraryPageSize(721), 30)
+assert.equal(outputLibraryPageSize(1920, 10, 4), 40)
+assert.equal(outputLibraryPageSize(390, 2, 10), 15)
 const libraryStateNode = { dataset: {} }
 const landingStateNode = { hidden: true }
 const folderStateNode = { hidden: false }
@@ -396,7 +398,7 @@ assert.match(source, /\.ss-library-landing\[hidden\],[\s\S]*?\.ss-library-folder
 // contract was replaced by a responsive auto-fill grid with explicit frames.
 assert.match(source, /\.ss-library-folder-grid \{[\s\S]*?grid-template-columns:repeat\(auto-fill,minmax\(min\(212px,100%\),1fr\)\)/)
 assert.match(source, /\.ss-library-folder-preview img \{[\s\S]*?object-fit:cover/)
-assert.match(source, /\.ss-library-output-button \{[\s\S]*?aspect-ratio:1/)
+assert.match(source, /\.ss-library-output-button \{[\s\S]*?aspect-ratio:var\(--ss-library-preview-ratio,1\)/)
 assert.match(source, /@media \(max-width: 720px\)[\s\S]*?\.ss-library-folder-grid \{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
 assert.match(source, /\.ss-library-visual-prompts,\.ss-library-visual-options,\.ss-library-look-editor-grid \{ display:grid; grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
 assert.match(source, /data-action="open-visual-profile"/)
@@ -443,7 +445,7 @@ assert.match(source, /new ResizeObserver/)
 assert.match(source, /typeof ctx\.ui\.createFloatWidget === "function"[\s\S]*?\|\| createOverlayMiniplayerWidget\(\)/)
 assert.match(source, /class="ss-mini-preview" data-action="mini-open" role="button"/)
 assert.match(source, /this\.root\.ownerDocument\.documentElement\.appendChild\(this\.contextMenu\)/)
-assert.match(source, /!this\.collapsed && target\.closest/)
+assert.match(source, /!this\.collapsed && !preview && target\.closest/)
 assert.match(source, /mini\.dataset\.action = "mini-open"/)
 assert.match(source, /private widgetSizeTargets\(\)/)
 assert.match(source, /data-mobile-orb="true"[\s\S]*?this\.render\(\)/)
@@ -536,9 +538,9 @@ assert.match(source, /window\.removeEventListener\("click", this\.handleInlineCl
 assert.match(source, /window\.removeEventListener\("contextmenu", this\.handleInlineContextMenu, true\)/)
 assert.match(source, /window\.removeEventListener\("keydown", this\.handleInlineKeyDown, true\)/)
 assert.doesNotMatch(source, /document\.(?:add|remove)EventListener\("(?:click|contextmenu|keydown)", this\.handleInline/)
-assert.match(source, /Regenerate with current Studio settings/)
+assert.match(source, /Regenerate with Studio settings/)
 assert.match(source, /Edit prompt in Quick Create/)
-assert.match(source, /Remove from chat \(keeps Library copy\)/)
+assert.match(source, /label: "Remove from chat", danger: true/)
 assert.match(source, /type: "remove_tagged_image_from_chat"/)
 assert.match(source, /promptOverride: overrides\.prompt/)
 assert.match(source, /negativePromptOverride: overrides\.negativePrompt/)

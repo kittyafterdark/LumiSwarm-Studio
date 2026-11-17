@@ -43,7 +43,7 @@ It adds:
 - A full-height, negative-space drawer composition with the picture-frame emblem, disjointed corner ornaments, serif wordmark, and direct **Open Studio** / **Open Library** actions
 - Lumiverse output deletion from the inspector, history menu, or bulk library selection
 - Live SwarmUI/ComfyUI progress frames and a step-aware progress bar through `spindle.imageGen.generateStream()` when available, plus a persistent **Interrupt generation** action
-- A draggable two-state Lumiverse float player: a square image orb and a full **Quick create** panel. Its single visible surface mounts above Lumiverse's zero-height mobile body without leaving a ghost host widget, keeps its box exactly synchronized with the 64px orb across responsive transitions, stays beneath Lumi drawers/modals, and hides while Studio is open; it survives closing Studio, generates from editable lightweight prompts, follows live previews and step progress, can append the latest output to chat, and turns its stable Generate action into Stop while rendering
+- A draggable satin Locket that expands into a six-action toolkit. Quick Create and the optional artwork Preview are separate floating portal surfaces, retaining the native 64px orb/rail hitbox. Quick Create inherits the current Studio model and prompt context; Preview uses true backend progress frames, generated images, and Generate/Stop, with a draggable/resizable stage. The toolkit also opens Full Studio or the existing Output Library directly and can append the latest image to chat.
 - Shared float-player/Studio output and draft state, so Quick create inherits the last model, dimensions, sampler, scheduler, presets, LoRAs, workflow, init image, and overrides—and the full Studio restores them when it reopens
 - The drawer’s picture-frame wall emblem reused consistently in the float player, Studio header, drawer registration, and chat input action
 
@@ -213,9 +213,10 @@ The macro reference is collapsed beneath the editable protocol in **Studio setti
 
 Add `output="url"` to a generation request to replace that entire tag with only
 its permanent Lumiverse image URL. Studio still uses the configured generation
-profile and saves the output in the Library. It adds no figure, inline styling,
-action overlay, or recovered-image widget. Omitting `output` (or using
-`output="inline"`) preserves the normal Studio illustration.
+profile and saves the output in the Library. The saved message keeps its authored
+HTML or Markdown. **↻** appears on a rendered image or below the message when
+the output is a plain URL.
+Omitting `output` (or using `output="inline"`) uses the normal Studio illustration.
 
 For a plain URL, emit the request on its own. For an authored HTML layout, put it
 in the image source using single quotes around `src` and double quotes inside
@@ -231,9 +232,12 @@ The same contract works inside a Markdown image destination. Use a distinct
 slot for each image. In Parser model mode, use `request="parse" output="url"`;
 the parser expands the visual brief while preserving URL-only output. Successful
 URL requests remain URL-only after reload, navigation, and extension remount.
-Retries replace the previously attached URL using saved message metadata; an
-ambiguous repeated URL is left untouched. Removing a URL output clears its
-request/URL while preserving the caller's surrounding markup.
+Choose **Inpaint** from the image actions, paint the region, and generate a
+variant. **Use variant in chat** applies the result. **Replace image…** opens the
+Output Library so you can choose and confirm one saved image. The original
+remains in the Library. URL replacements use saved message metadata and require
+a unique URL in the message. Removing a URL output clears the URL and preserves
+the surrounding markup.
 
 ## Metadata behavior
 
@@ -511,6 +515,12 @@ After every successful generation, `{{last_genned}}` resolves to the latest
 Lumiverse-owned output URL. This is intended for image URLs in HTML artifacts,
 presets, and other Lumiverse macro-aware text; it is session-live and updates
 again on the next Studio or Quick Create generation.
+
+### Floating Studio toolkit (v26)
+
+The existing satin Locket retains its artwork, badge, generation progress ring, drag behavior, context menu, and collapsed 64px footprint. Clicking it expands a vertical desktop or horizontal mobile strip containing **Quick Create**, **Full Studio**, **Preview**, **Recent Images**, **Append**, and **More**. The orb itself does not open Preview. Quick Create opens its own compact, model-aware prompt panel beside the strip rather than duplicating Compose. Full Studio opens the complete workspace, and Recent Images opens the existing Output Library directly.
+
+**Preview** opens a separate, resizable floating easel. The image stays contained, preserving portrait and landscape artwork. Its displayed intermediate previews, progress, status, and finished output come from the same actual generation activity as the orb and Studio; no simulated progress or duplicate job is used. Append, Gallery, and real Generate/Stop controls are available from the frame. The panel can be dragged and resized, remembers its size and detached position, and hides when the orb is collapsed. Both panels inherit Lumiverse theme variables and avoid enlarging the native float's draggable hitbox. Mobile Quick Create remains opt-in, with Preview temporarily hidden while composing on narrow screens.
 
 ## GitHub source installation
 

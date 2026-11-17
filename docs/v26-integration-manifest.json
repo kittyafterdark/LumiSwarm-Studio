@@ -1,0 +1,109 @@
+{
+  "integration": "Lumiswarm Studio v26 Floating Toolkit + Optional Artwork Easel",
+  "source_input": "lumiswarm studio.zip",
+  "created_date": "2026-11-14",
+  "source_version": "1.0.15 (manifest left unchanged)",
+  "delivery": "Complete cumulative extension source at ZIP root, including rebuilt dist/frontend.js. Extract/overlay onto extension checkout, preserving relative folders.",
+  "compatibility": {
+    "original_orb": "Satin locket original markup, context menu, and progress ring retained",
+    "toolkit": [
+      "Quick Create",
+      "Full Studio",
+      "Preview",
+      "Recent Images → Output Library",
+      "Append",
+      "More"
+    ],
+    "quick_create": "Separate portal beside toolkit, existing backend workflow, shared UI state",
+    "preview": "Opt-in, independent toggle, drag/resize/persist, live provider events via existing snapshot, no synthetic progress",
+    "mobile": "320px and 390px viewport tests, Quick Create and Preview avoid overlap"
+  },
+  "files_modified": [
+    {
+      "path": "CHANGELOG.md",
+      "original_sha256": "41881986b77111f50198ef6b778a90eca0c3afd619182a99dd54e15dc91f0419",
+      "new_sha256": "a05d02f93058e06d031fde45e12bced0193a458a62fd78577f70bfc5209efea6"
+    },
+    {
+      "path": "README.md",
+      "original_sha256": "0199a88fd14e8b022c0b18396832701b63fc9fa90a2346220b6b216663d0f32f",
+      "new_sha256": "f0549630c699b648a052ed2e89832773a710dd11492c5263655f50f18773fd17"
+    },
+    {
+      "path": "dist/frontend.js",
+      "original_sha256": "b5117468e47429843da46718ae83d43f2f0dc8b4e7e6fa920a7fe5fe99ed75b8",
+      "new_sha256": "bfce02121fdce39f9a5466a8b9d9682f32ce99a4d0d9e9969b58f9e0fce41af7"
+    },
+    {
+      "path": "docs/feature-reference.md",
+      "original_sha256": "9f59efc95ef041ed0bce50d7cbcf59616cb6860038cbf93da945bb80f1581b03",
+      "new_sha256": "b616bf2b4f63e197d2f1a974ed83e96a23f469563db33c117264bf2387a15016"
+    },
+    {
+      "path": "package.json",
+      "original_sha256": "ec23e812f48ff6342a015c405d325ad5cfc7c1cb0b0ec2dc60fc40d7c1987448",
+      "new_sha256": "713472ed73329c8416edc5f6ba2ad07070d5d3e3e552d04da9b6fe0128f6d28b"
+    },
+    {
+      "path": "src/miniplayer/controller.ts",
+      "original_sha256": "9b30869f6a3a3566226debff230135144bf27c698f5d24b091b166df6cc8bf6c",
+      "new_sha256": "8ed91a5933099b3119593468d4742307b955b9d52917e0686a9b44489fcf048b"
+    },
+    {
+      "path": "src/studio/styles.ts",
+      "original_sha256": "44bba9a104ba9d5d34b9aae2396e6175b001fafd7dfd3b5d78430d794049d40c",
+      "new_sha256": "f9061c4ac9f0a6c6c1b7b530926148607f32a28c3503abca4c221b406657235e"
+    },
+    {
+      "path": "tests/v19-vertical-rail-browser.mjs",
+      "original_sha256": "a9d959c6070c47303cf678593bb0759a7f98d6cd43f09fa0c7fe723e739a2156",
+      "new_sha256": "14aa0f8301976ca761d0cbe142d682c14fb50f6db556b26c72eceb48ca970b3c"
+    },
+    {
+      "path": "tests/v19-vertical-rail-contract.mjs",
+      "original_sha256": "a2ac881b6cac191dbff2892876210dc14c9ad33b546f9822fc207a68eae8f825",
+      "new_sha256": "06bf0915a68124b49c0bd7c57578198deb0d0c20a0963e5e93c31f74b18741c8"
+    },
+    {
+      "path": "tests/v21-quick-composer-browser.py",
+      "original_sha256": "2007f31b66ea26c954142ee7adf0061a33ccdc8e7d0141a484ddbba6f8a5bfd4",
+      "new_sha256": "39a2f6400f3803e1697b80f596efac8edde8355040c10246d12a9ffa4841ba3a"
+    }
+  ],
+  "files_added": [
+    {
+      "path": "docs/floating-easel-v26.md",
+      "sha256": "11538903a2a8efcb29391dce6cbbff3193d26f727edb46d5694f9e4d395d8ec6"
+    },
+    {
+      "path": "tests/v26-floating-easel-browser.py",
+      "sha256": "b3c760135ecd60aa9978429bb09fee15d288c29b3ad357b45cfdb39afce82720"
+    },
+    {
+      "path": "tests/v26-floating-easel-contract.mjs",
+      "sha256": "4b89429510cb19bf430d03be321fcbb872070a543f05fb71da78d0773e995765"
+    }
+  ],
+  "files_deleted": [],
+  "validation": {
+    "passed": [
+      "npm run build",
+      "npm run typecheck (global TypeScript)",
+      "v26 source contract",
+      "v19 rail contract",
+      "v21 Quick Create contract",
+      "v22 satin locket contract",
+      "v25 upscaler contract",
+      "v26 Chromium 1440/900/390/320 mocked provider E2E",
+      "v21 Chromium Quick Create E2E",
+      "v22 Chromium Satin Locket E2E"
+    ],
+    "not_run": [
+      "Full npm test (dependencies such as jsdom are not installed in supplied source; npm ci then npm test needed in installed checkout)",
+      "Live SwarmUI and Lumiverse integration acceptance (requires running host)"
+    ],
+    "screenshots": "Diagnostic v26 screenshots excluded from final source ZIP, available separately in analysis runtime"
+  },
+  "rollback": "Lumiswarm_Studio_v26_Originals_Backup.zip contains exact originals of every modified file",
+  "sha256_hashes": "All per-file hashes generated from exact input ZIP bytes and staged output bytes"
+}

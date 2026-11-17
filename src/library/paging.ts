@@ -1,5 +1,6 @@
-function outputLibraryPageSize(viewportWidth: number): number {
-  return viewportWidth <= 720 ? 15 : 30
+function outputLibraryPageSize(viewportWidth: number, columns = 0, rows = 0): number {
+  if (viewportWidth <= 720) return 15
+  return columns > 0 && rows > 0 ? Math.max(30, columns * rows) : 30
 }
 
 function setOutputLibraryView(

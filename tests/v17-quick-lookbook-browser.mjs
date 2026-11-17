@@ -80,7 +80,7 @@ try {
   assert.equal(await page.locator('[data-role="mini-prompt"]').inputValue(),'mobile draft persistence')
   await page.locator('[data-action="mini-close-compose"]').click()
   await page.locator('[data-action="mini-show-menu"]').first().click()
-  const menu=page.locator('[data-role="mini-context-menu"]')
+  const menu=page.locator('[data-role="mini-strip-menu"]')
   assert.equal(await menu.isVisible(),true)
   const rect=await menu.boundingBox()
   assert.ok(rect&&rect.x>=0&&rect.x+rect.width<=width+1,`Context menu fits ${width}px`)

@@ -99,22 +99,35 @@ strip.onMessage({type:'tagged_image_jobs_result',data:[]});assert.equal(strips.s
 strip.destroy();stripDom.window.close()
 console.log('terminal snapshots, concurrent attempts, late native image mounts and removed strips: ok')
 
-// A completed URL contract never acquires a recovered Studio image widget.
+// Completed URL output exposes a menu without recovering a second bitmap.
 const urlDom=new JSDOM('<main><img alt="Authored harbor" src="/api/v1/images/saved-url"></main>',{url:'https://studio.test'})
 for(const name of ['window','document','HTMLElement','MutationObserver'])globalThis[name]=urlDom.window[name]
-const urlWidgets=new Map(),urlSent=[]
-const urlCtx={sendToBackend:message=>urlSent.push(message),messages:{renderWidget({widgetId,html}){urlWidgets.set(widgetId,html);return()=>urlWidgets.delete(widgetId)}}}
-const urlSaved={...job,id:'saved-url',output:'url',imageUrl:'/api/v1/images/saved-url'}
+const urlWidgets=new Map(),urlSent=[],urlActions=[]
+const urlCtx={
+ sendToBackend:message=>urlSent.push(message),
+ ui:{async showContextMenu({items}){
+  assert.deepEqual(items.filter(item=>['inpaint','replace'].includes(item.key)).map(item=>item.label),['Inpaint','Replace image…'])
+  return {selectedKey:'inpaint'}
+ }},
+ messages:{renderWidget({widgetId,html},openMenu){urlWidgets.set(widgetId,{html,openMenu});return()=>urlWidgets.delete(widgetId)}},
+}
+const urlSaved={...job,id:'saved-url',output:'url',imageId:'saved-image',imageUrl:'/api/v1/images/saved-url'}
 for(let mount=0;mount<2;mount++) {
- const urlInline=new TaggedImageController(urlCtx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+ const urlInline=new TaggedImageController(urlCtx,defaultStudioBehavior(),()=>{},()=>false,()=>{},(action,target)=>urlActions.push([action,target.jobId,target.imageId]))
  urlInline.onMessage({type:'tagged_image_jobs_result',data:[urlSaved]})
  urlInline.onMessage({type:'tagged_image_job',data:urlSaved})
- assert.equal(urlWidgets.size,0,'Recovery and live completion preserve URL-only output')
+ assert.equal(urlWidgets.size,1,'Recovery and live completion share one URL action widget')
+ const {html,openMenu}=[...urlWidgets.values()][0]
+ assert.match(html,/Illustration actions for Scene/)
+ assert.doesNotMatch(html,/<img|<figure/)
+ openMenu({type:'menu'})
+ await Promise.resolve()
  assert.equal(document.querySelectorAll('img').length,1)
  assert.equal(document.querySelector('img').alt,'Authored harbor')
  urlInline.destroy()
  assert.equal(urlWidgets.size,0)
 }
+assert.deepEqual(urlActions,Array(2).fill(['inpaint','saved-url','saved-image']))
 assert.equal(urlSent.length,0,'URL recovery neither regenerates nor rewrites the saved message')
 urlDom.window.close()
 console.log('URL-only recovery, late completion and full remount: ok')

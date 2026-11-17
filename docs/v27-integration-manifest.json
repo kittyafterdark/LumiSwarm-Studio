@@ -1,0 +1,122 @@
+{
+  "integration": "Swarm Studio v27 · Floating Toolkit Refinement",
+  "created_date": "2026-11-14",
+  "baseline": "Lumiswarm_Studio_v26_Floating_Toolkit_FULL_SOURCE.zip",
+  "distribution": "FULL cumulative source+runtime ZIP at extension root. Extract/overlay maintaining relative directory names.",
+  "original_orb": "Existing satin locket markup, ring and original 4-button context menu unchanged",
+  "enhancements": [
+    "Independent toolkit ⋯ menu (upscale latest / quick create / gallery / pin / reset / collapse), placed to avoid covering its own trigger",
+    "Pin adjacent to orb to keep toolkit open",
+    "Readable outlined Full Studio icon",
+    "Draggable Quick Create panel with position memory and bounds protection",
+    "Quick Create in-place aspect/size/sampler/steps/CFG/seed controls passed through actual generation request",
+    "Preview stays open when its Quick Create button is used, including on mobile",
+    "Consistent Preview header icon alignment"
+  ],
+  "validation": {
+    "passed": [
+      "npm run build",
+      "npm run typecheck (global TypeScript)",
+      "v21+v22+v23+v24+v25+v26+v27 source contracts",
+      "v27 Chromium 1440/390/320 (separate menus, menu toggle close/reopen, pin, settings payload, draggable Quick Create, Preview coexistence, AI Upscale routing)",
+      "v26 Chromium 1440/900/390/320",
+      "v21 Chromium 360/390/1440 plus short viewport",
+      "v22 satin locket Chromium 360/390/1440",
+      "Older v17/v18/v19 JS browser scripts updated to target separate menus and syntactically checked"
+    ],
+    "not_run": [
+      "Full npm test blocked by absent jsdom dev dependency in source checkout",
+      "Older v17/v18/v19 JS Playwright tests unavailable without local node_modules",
+      "Live Lumiverse/SwarmUI integration requires running host"
+    ]
+  },
+  "modified": [
+    {
+      "path": "CHANGELOG.md",
+      "baseline_sha256": "a05d02f93058e06d031fde45e12bced0193a458a62fd78577f70bfc5209efea6",
+      "updated_sha256": "0f58fbfbe58a07d9c0fdb6e483847f482adbd63aadcdc900f33d0ee31731e2b0"
+    },
+    {
+      "path": "README.md",
+      "baseline_sha256": "f0549630c699b648a052ed2e89832773a710dd11492c5263655f50f18773fd17",
+      "updated_sha256": "27830bcf7a277d1baca44b3c7165780351e01c779cdcc91728cb2eaabdc463c0"
+    },
+    {
+      "path": "dist/frontend.js",
+      "baseline_sha256": "bfce02121fdce39f9a5466a8b9d9682f32ce99a4d0d9e9969b58f9e0fce41af7",
+      "updated_sha256": "0c05ba659b9d2ae69e45c15fbb75458cf6f18119170b79a415042f157d780452"
+    },
+    {
+      "path": "package.json",
+      "baseline_sha256": "713472ed73329c8416edc5f6ba2ad07070d5d3e3e552d04da9b6fe0128f6d28b",
+      "updated_sha256": "5302af94923b65680b96d067fde890151cb4a90ee4c6bb1c7f6c5cade99127bd"
+    },
+    {
+      "path": "src/host/setup.ts",
+      "baseline_sha256": "576423bc1815c359187005d1ce4bb043f786d13e62b6d4a471af08e9a371e4cc",
+      "updated_sha256": "122e494497667d1d5841fb45dc32d5e9425732d3145c7561bb744445854f33f2"
+    },
+    {
+      "path": "src/miniplayer/controller.ts",
+      "baseline_sha256": "8ed91a5933099b3119593468d4742307b955b9d52917e0686a9b44489fcf048b",
+      "updated_sha256": "a0cb740bdfd71ecd2d79e034e37b62afb5e14d2f3a1519ec76e34c363d3f2a8b"
+    },
+    {
+      "path": "src/studio/controller.ts",
+      "baseline_sha256": "c2bab4e890d58d67a439d227e66f0f1e18798be9729e87395d27b185b815e1ef",
+      "updated_sha256": "9f4ed0d07ec64972312ee7c5ceb9f0300ba51fbd25021e413dc5fb3ce62b3245"
+    },
+    {
+      "path": "src/studio/styles.ts",
+      "baseline_sha256": "f9061c4ac9f0a6c6c1b7b530926148607f32a28c3503abca4c221b406657235e",
+      "updated_sha256": "dd9f5c7da0d6698acb3e7e35ae517b16b7d22c7dcae78433ed84ac39c4e115b9"
+    },
+    {
+      "path": "tests/v17-quick-lookbook-browser.mjs",
+      "baseline_sha256": "6998c829662e3d07d6163f51af12f1b60123c16a6462ee7dc5faaa4b37bf792e",
+      "updated_sha256": "0ae8e672d315ad2e6a9a44ad31b8c530d9aeb4100fdc50e14f35321183330336"
+    },
+    {
+      "path": "tests/v18-quick-create-browser.mjs",
+      "baseline_sha256": "b329178d6cea3aa75eed3c47919179e5c121ac5f1058c554706cd4965ffaa6fa",
+      "updated_sha256": "97fb2993b3607da2f400cc6defca3fc9a5eadbb3fdcd911a9f364d329f0b8cc4"
+    },
+    {
+      "path": "tests/v19-vertical-rail-browser.mjs",
+      "baseline_sha256": "14aa0f8301976ca761d0cbe142d682c14fb50f6db556b26c72eceb48ca970b3c",
+      "updated_sha256": "576449e78dd4624ed0283e5ee33ff66b1d46a764f2105a437305cb0bda406829"
+    },
+    {
+      "path": "tests/v21-quick-composer-browser.py",
+      "baseline_sha256": "39a2f6400f3803e1697b80f596efac8edde8355040c10246d12a9ffa4841ba3a",
+      "updated_sha256": "997b521c479638abb95a48637556bdf8a5b9b33c9403a04f7666e208f08570d8"
+    },
+    {
+      "path": "tests/v21-quick-composer-contract.mjs",
+      "baseline_sha256": "726c82e0daa2b384781af4b98cabeb16c7c097146515b7aab99c7ad75a47d15a",
+      "updated_sha256": "dde2f4676f4a767a3f6ed647883ba2d85ab5d26ebb9c641ed12e74af47cc60f0"
+    },
+    {
+      "path": "tests/v22-satin-locket-browser.py",
+      "baseline_sha256": "09d127c21b5ad66b35c7d988f3a25727a41d59d106074e5a9b89580196517b66",
+      "updated_sha256": "3a7c5bcb151fb263688506fc75b8944e321aff43c18d4ac21783b08fc86c07e8"
+    },
+    {
+      "path": "tests/v26-floating-easel-browser.py",
+      "baseline_sha256": "b3c760135ecd60aa9978429bb09fee15d288c29b3ad357b45cfdb39afce82720",
+      "updated_sha256": "671aef599eede82d65e93456522824f017a60e3d8ce60375ec2a3cbe566f83a2"
+    }
+  ],
+  "added": [
+    {
+      "path": "tests/v27-floating-toolkit-browser.py",
+      "sha256": "a49b832f5a3b33141b23ebc2f1a11a191c774958046e1a70c3e9585547838b67"
+    },
+    {
+      "path": "tests/v27-floating-toolkit-contract.mjs",
+      "sha256": "d5c850f429428e2cea0ecbe36c86fb2284b5eb4d40a9a0585fd3041f28832340"
+    }
+  ],
+  "deleted": [],
+  "rollback": "Lumiswarm_Studio_v27_Originals_Backup.zip restores exact v26 bytes for every modified path"
+}

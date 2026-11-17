@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+const read = path => readFileSync(new URL(path, import.meta.url), 'utf8')
+const backend=read('../src/backend.ts'), controller=read('../src/studio/controller.ts'), workspace=read('../src/studio/upscale.ts'), css=read('../src/studio/styles.ts')
+const sources=read('../scripts/frontend-sources.mjs'), packed=read('../dist/frontend.js'), server=read('../dist/backend.js')
+for(const value of ['UpscaleModelLoader','ImageUpscaleWithModel','ImageScale','SwarmLoadImageB64','SaveImage','load_upscale_options','load_upscale_workflow','studio-upscale-settings.json'])
+  assert.ok(backend.includes(value), `${value}: backend source missing`)
+for(const action of ['AI Upscale', 'Auto-finalize inline images', 'upscale_options_result', 'upscale_workflow_result','upscale_output_result','upscaleSession?.reportError'])
+  assert.ok(controller.includes(action), `${action}: controller missing`)
+for(const ui of ['data-upscale="model"','data-upscale="factor"','data-upscale="workflow"','data-upscale="image-param"','data-upscale="graph"','data-upscale="file"','data-upscale="remember"'])
+  assert.ok(workspace.includes(ui), `${ui}: editor control missing`)
+for(const ui of ['ss-upscale-dialog','ss-upscale-stage','ss-upscale-panel','ss-upscale-header','ss-upscale-footer'])
+  assert.ok(css.includes(`.${ui}`), `${ui}: authored styles missing`)
+assert.equal((css.match(/^\.ss-upscale-dialog \{/gm)||[]).length,1,'one canonical root rule')
+assert.ok(sources.includes('src/studio/upscale.ts'), 'registered in compiled frontend unit')
+assert.ok(packed.includes('openStudioUpscale') && server.includes('ImageUpscaleWithModel'), 'compiled files include source')
+assert.ok(!controller.includes('Lanczos 2× resize'), 'no obsolete interpolation menu')
+console.log('v25 AI upscale workbench source and compiled contracts passed')

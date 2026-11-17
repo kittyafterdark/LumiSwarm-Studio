@@ -267,7 +267,7 @@ globalThis.spindle = {
   persona="none"
   alt="Train platform"
 >
-train platform, waving, <preset:composition></swarm-image>`,
+train⠀platform,⠀waving, <preset:composition></swarm-image>`,
       }
     },
   },
@@ -541,6 +541,7 @@ train platform, waving, <preset:composition></swarm-image>`,
             { id: "seed", name: "Seed", type: "integer" },
             { id: "sampler", name: "Sampler", type: "dropdown", values: ["euler", "dpmpp_2m_sde_gpu"] },
             { id: "scheduler", name: "Scheduler", type: "dropdown", values: ["normal", "beta57"] },
+            { id: "refinerupscalemethod", name: "Refiner Upscale Method", type: "dropdown", values: ["pixel-lanczos", "model-4x-UltraSharp.pth///Model: 4x-UltraSharp.pth", "model-RealESRGAN_x4plus_anime_6B.pth///Model: Anime"] },
           ],
         }),
       }
@@ -586,6 +587,9 @@ train platform, waving, <preset:composition></swarm-image>`,
                 visible: true,
                 toggleable: true,
                 group: { id: "refine", name: "Refine", open: true, advanced: false, can_shrink: true, toggles: false },
+              },
+              comfyrawworkflowinputimageinputc: {
+                id: "comfyrawworkflowinputimageinputc", name: "Source image", type: "image", image_always_b64: true, visible: true,
               },
             }),
           },
@@ -801,7 +805,7 @@ assert.doesNotMatch(povPrompt, /<region:/)
 async function request(type, extra = {}) {
   const requestId = `${type}-${sent.length}`
   await frontendHandler({ type, requestId, ...extra }, "user-1")
-  const response = sent.find((entry) => entry.payload.requestId === requestId)
+  const response = sent.findLast((entry) => entry.payload.requestId === requestId)
   assert.ok(response, `Missing response for ${type}`)
   assert.notEqual(response.payload.type, "studio_error", response.payload.error)
   return response.payload
@@ -919,7 +923,7 @@ const workflow = await request("load_swarm_workflow", {
   name: "Portrait/Inpaint",
 })
 assert.equal(workflow.data.name, "Portrait/Inpaint")
-assert.equal(workflow.data.parameters.length, 2)
+assert.equal(workflow.data.parameters.length, 3)
 assert.equal(workflow.data.parameters[1].group.name, "Refine")
 assert.equal(workflow.data.parameters[1].default, 0.55)
 
@@ -1268,6 +1272,54 @@ const resolvedPocket=await composePocket("A fresh scene by the window")
 assert.match(resolvedPocket.prompt,/fresh scene by the window/)
 assert.match(resolvedPocket.prompt,/black hair, red eyes/)
 assert.equal(resolvedPocket.model,"base.safetensors")
+assert.equal(resolvedPocket.parameters.rawRequestOverride?.includes("AnimaRefAdapter") ?? false, false)
+
+const folderReference = "data:image/png;base64,Zm9sZGVy"
+const lookReference = "data:image/png;base64,bG9vaw=="
+const updateAdapter = (animaReference, animaReferenceUrl = folderReference) => request("update_output_folder_profile", {
+  folderId: "character:char-1",
+  profile: { ...customCharacterVisuals.data.characterFolder.binding, animaReference, animaReferenceUrl },
+})
+const saveAdapterLook = (animaReference, referenceImageUrl) => request("save_character_look", {
+  characterId: "char-1", activate: true,
+  look: { id: "default", name: "Default", animaReference, referenceImageUrl },
+})
+const previousAdapterProfile = userFiles.get("studio-generation-profile.json")
+await updateAdapter(true)
+await assert.rejects(() => composePocket("Conflicting custom workflow"), /Clear the selected Swarm workflow/)
+userFiles.set("studio-generation-profile.json", {
+  ...previousAdapterProfile,
+  input: { ...previousAdapterProfile.input, parameters: { ...previousAdapterProfile.input.parameters, rawRequestOverride: "{}" } },
+})
+const adaptedFolder = await composePocket("A fresh scene by the window")
+const graph = JSON.parse(JSON.parse(adaptedFolder.parameters.rawRequestOverride).comfyworkflowraw)
+const findNode = (type) => Object.entries(graph).find(([, node]) => node.class_type === type)
+const [adapterId, adapter] = findNode("AnimaRefAdapter")
+assert.deepEqual(adaptedFolder.parameters.referenceImages, [{ data: "Zm9sZGVy", mimeType: "image/png" }])
+assert.equal(findNode("SwarmLoadImageB64")[1].inputs.image_base64, "${init_image}")
+assert.equal(adapter.inputs.lora_name, "anima_ref_adapter_v2_r64.safetensors")
+assert.deepEqual(adapter.inputs.model, [findNode("LoraLoader")[0], 0])
+assert.equal(findNode("LoraLoader")[1].inputs.strength_model, 0.61)
+assert.deepEqual(findNode("KSampler")[1].inputs.model, [adapterId, 0])
+assert.deepEqual(findNode("KSampler")[1].inputs.latent_image, [findNode("EmptyLatentImage")[0], 0])
+assert.equal(findNode("EmptyLatentImage")[1].inputs.width, "%%_COMFYFIXME_${width}_ENDFIXME_%%")
+assert.equal(findNode("KSampler")[1].inputs.denoise, 1)
+
+await saveAdapterLook("inherit", lookReference)
+assert.deepEqual((await composePocket("Look reference")).parameters.referenceImages, [{ data: "bG9vaw==", mimeType: "image/png" }])
+await saveAdapterLook("off", lookReference)
+const ordinaryLook = await composePocket("Standard look")
+assert.equal(ordinaryLook.parameters.rawRequestOverride?.includes("AnimaRefAdapter") ?? false, false)
+assert.equal(ordinaryLook.parameters.denoise, 0.6)
+await updateAdapter(false)
+await saveAdapterLook("on", lookReference)
+assert.match((await composePocket("Explicit look opt-in")).parameters.rawRequestOverride, /AnimaRefAdapter/)
+await saveAdapterLook("on", "")
+await updateAdapter(false, "")
+await assert.rejects(() => composePocket("Missing reference"), /Add an accessible Anima reference image URL/)
+await saveAdapterLook("inherit", "")
+userFiles.set("studio-generation-profile.json", previousAdapterProfile)
+
 assert.deepEqual(resolvedPocket.parameters.loras,["styles/ink.safetensors"])
 assert.deepEqual(resolvedPocket.parameters.loraWeights,[0.61])
 const pocketPositiveOff=await composePocket("A plain identity test","scene","char-1",{includeCharacterPositive:false})
@@ -1699,7 +1751,7 @@ taggedMessages.push({
     character="active"
     persona="none"
     alt="Train platform"
-  >a character waving at a train platform</swarm-image>After.`,
+  >a⠀character⠀waving at a train platform</swarm-image>After.`,
   metadata: {},
 })
 eventHandlers.get("GENERATION_ENDED")({
@@ -1718,8 +1770,29 @@ assert.equal(quietParserCalls.length, 1)
 assert.equal(quietParserCalls[0].connection_id, "text-1")
 assert.equal(quietParserCalls[0].parameters.model, "parser-override")
 assert.match(quietParserCalls[0].messages[0].content, /local image-request parser/)
+assert.match(quietParserCalls[0].messages[1].content, /a character waving at a train platform/)
+assert.doesNotMatch(quietParserCalls[0].messages[1].content, /\u2800/, "Parser must never receive Braille blanks from model tags")
 assert.match(taggedMessages.at(-1).content, /^Before\.<figure/)
 assert.match(taggedMessages.at(-1).content, /<\/figure>After\.$/)
+assert.doesNotMatch(taggedGenerationInputs.at(-1).prompt, /\u2800/, "Parser output Braille blanks must not reach SwarmUI")
+// A late lifecycle replay with a *different* generationId must not pay Gem
+// to parse the old request again after the source message was replaced.
+const parserReplayCount = quietParserCalls.length
+eventHandlers.get("GENERATION_ENDED")({
+  generationId: "generation-parser-1-replayed",
+  chatId: "chat-1",
+  messageId: "message-parser-1",
+  content: `Before.<swarm-image
+    request="parse"
+    slot="parsed-scene"
+    aspect="4:3"
+    character="active"
+    persona="none"
+    alt="Train platform"
+  >a⠀character⠀waving at a train platform</swarm-image>After.`,
+}, "user-1")
+await new Promise(resolve=>setTimeout(resolve,15))
+assert.equal(quietParserCalls.length, parserReplayCount, "Replayed GENERATION_ENDED must not invoke the parser again")
 
 permissions.add("world_books")
 const visualLore = await request("get_visual_lore")
@@ -1979,6 +2052,53 @@ try {
 spindle.imageGen.generateStream=originalStream
 console.log('URL output: authored HTML, plain URL, Markdown, parser, retry, duplicate delivery, persistence, remapping and removal: ok')
 
+{
+  const previousGet = spindle.images.get
+  const replacement = { id: "library-replacement", url: "/api/v1/images/library-replacement", original_filename: "replacement.png" }
+  spindle.images.get = async (id, options) => {
+    assert.equal(options.onlyOwned, true)
+    assert.equal(options.specificity, "full")
+    assert.equal(options.userId, "user-1")
+    if (id === replacement.id) return replacement
+    if (id === parsedUrlJob.imageId) return { id, url: parsedUrlJob.imageUrl }
+    return null
+  }
+  try {
+    const source = await request("load_inline_edit_source", { jobId: parsedUrlJob.id, imageId: parsedUrlJob.imageId })
+    assert.equal(source.data.id, parsedUrlJob.imageId)
+    assert.equal(source.data.url, parsedUrlJob.imageUrl)
+    assert.ok(source.data.details?.prompt)
+
+    for (const recorded of [parsedUrlJob, inlineJob]) {
+      const message = taggedMessages.find(item => item.id === recorded.messageId)
+      const before = message.content
+      const replace = (imageId = recorded.imageId, replacementId = replacement.id) => request("select_inline_variant", {
+        action: "replace", jobId: recorded.id, imageId, replacementId,
+      })
+      await assert.rejects(() => replace(recorded.imageId, "not-owned"), /Lumiverse-owned/)
+      assert.equal(message.content, before)
+      if (recorded.output === "url") {
+        message.content += " " + recorded.imageUrl
+        await assert.rejects(() => replace(), /ambiguous/)
+        assert.equal(message.content, before + " " + recorded.imageUrl)
+        message.content = before
+      }
+      await replace()
+      const stored = message.metadata.swarm_studio_tagged_images.find(item => item.jobId === recorded.id)
+      assert.equal(stored.imageId, replacement.id)
+      assert.equal(stored.imageUrl, replacement.url)
+      assert.equal(stored.output, recorded.output)
+      assert.equal(message.content, before.replace(recorded.imageUrl, replacement.url))
+      await assert.rejects(() => replace(), /currently attached/)
+      const refreshed = (await request("list_tagged_jobs")).data.find(item => item.id === recorded.id)
+      assert.equal(refreshed.imageId, replacement.id)
+      assert.equal(refreshed.draftImageId, "")
+      assert.equal(refreshed.finalImageId, "")
+    }
+  } finally { spindle.images.get = previousGet }
+}
+console.log("inline replacement: owned image, authored URL preservation, stale attachment checks and refreshed job state: ok")
+
 // A message can be swiped while its image or quiet parser is still running.
 await request('set_tag_automation',{config:{autoGenerate:true,requestMode:'inline'}})
 const beforeSwipeStream=spindle.imageGen.generateStream
@@ -2081,3 +2201,358 @@ await submitUrl(streamedMessage,streamedTag,{force:false})
 assert.equal(swipeSequence,beforeStreamedReplay,'Replaying a completed swipe request without a visible source tag never regenerates')
 spindle.imageGen.generateStream=beforeSwipeStream
 console.log('swipe ownership: background generation/parser/removal, identical alternatives, edited requests, and ambiguous message remapping: ok')
+const originalInpaintStream = spindle.imageGen.generateStream
+const savedInpaintProfile = structuredClone(userFiles.get("studio-generation-profile.json"))
+await request("move_output_to_folder", { imageId: "image-1", folderId: "character:char-1" })
+const sourceFolderBeforeInpaint = userFiles.get("output-folders.json").find(folder => folder.id !== "__swarm_studio_favorites__" && folder.imageIds.includes("image-1"))
+assert.ok(sourceFolderBeforeInpaint, "The source belongs to a regular output folder")
+let inpaintCalls = 0
+spindle.imageGen.generateStream = async function* (input) {
+  inpaintCalls++
+  assert.equal(input.prompt, "Change the sleeve")
+  assert.deepEqual(input.parameters.referenceImages, [{ data: "c291cmNl", mimeType: "image/png" }])
+  assert.equal(input.parameters.denoise, 0.6)
+  assert.equal(input.parameters.width, 512)
+  assert.equal(input.parameters.height, 768)
+  assert.deepEqual(JSON.parse(input.parameters.rawRequestOverride), {
+    maskimage: "data:image/png;base64,bWFzaw==", maskblur: 12, initimagerecompositemask: true,
+  })
+  return { imageId: "inpaint-variant", imageUrl: "/api/v1/image-gen/results/inpaint-variant" }
+}
+const edit = {
+  input: { clientJobId: "inpaint-fixture", connection_id: "swarm-1", model: "base.safetensors", prompt: "Change the sleeve",
+    parameters: { width: 512, height: 768, denoise: 0.6, rawRequestOverride: '{"comfyuicustomworkflow":"Other"}' } },
+  inpaint: { sourceImageId: "image-1", source: "data:image/png;base64,c291cmNl", mask: "data:image/png;base64,bWFzaw==", feather: 12 },
+  recordHints: { initImageId: "image-1", initImageLabel: "source.png" },
+}
+try {
+  const result = await request("generate", edit)
+  assert.equal(result.data.record.initImageId, "image-1")
+  assert.equal(result.data.record.imageId, "inpaint-variant")
+  assert.equal(result.data.record.parameters.referenceImages, undefined)
+  assert.doesNotMatch(JSON.stringify(result.data.record), /bWFzaw==|c291cmNl/)
+  assert.deepEqual(userFiles.get("studio-generation-profile.json"), savedInpaintProfile)
+  const folder = result.data.outputFolders.find(item => item.id === sourceFolderBeforeInpaint.id)
+  assert.ok(folder.imageIds.includes("image-1") && folder.imageIds.includes("inpaint-variant"))
+  await assert.rejects(() => request("generate", {
+    ...edit, input: { ...edit.input, clientJobId: "invalid-inpaint-fixture" },
+    inpaint: { ...edit.inpaint, mask: "https://example.invalid/image.png" },
+  }), /source image or region mask/)
+  assert.equal(inpaintCalls, 1)
+} finally {
+  spindle.imageGen.generateStream = originalInpaintStream
+}
+console.log("native masked render, source folder, history hygiene and rejected mask: ok")
+
+const previousUpscaleGet = spindle.images.get
+const previousUpscaleRead = spindle.images.readBinary
+let upscaleCount = 0
+let beforeUpscaleReturn = () => {}
+const upscaleTag = '<swarm-image request="generate" slot="finalize-test">a portrait to finalize</swarm-image>'
+const upscaleMessage = { id: "upscale-message", role: "assistant", content: upscaleTag, swipe_id: 0, swipes: [upscaleTag, "Other reply"], metadata: {} }
+taggedMessages.push(upscaleMessage)
+spindle.imageGen.generateStream = async function* () {
+  return { imageId: "draft-fixture", imageUrl: "/api/v1/image-gen/results/draft-fixture" }
+}
+const draft = await submitUrl(upscaleMessage, upscaleTag, { swipeId: 0 })
+spindle.images.get = async (id, options) => {
+  if (id !== draft.imageId) return previousUpscaleGet(id, options)
+  assert.equal(options.onlyOwned, true)
+  assert.equal(options.specificity, "full")
+  return { id, mime_type: "image/png", width: 512, height: 384 }
+}
+spindle.images.readBinary = async id => {
+  assert.equal(id, draft.imageId)
+  return Uint8Array.of(1, 2, 3)
+}
+spindle.imageGen.generateStream = async function* (input) {
+  assert.deepEqual(input.parameters.referenceImages, [{ data: "AQID", mimeType: "image/png" }])
+  const graph = JSON.parse(JSON.parse(input.parameters.rawRequestOverride).comfyworkflowraw)
+  if (graph["2"].class_type === "UpscaleModelLoader") {
+    assert.equal(graph["2"].inputs.model_name, "RealESRGAN_x4plus_anime_6B.pth")
+    assert.equal(graph["3"].class_type, "ImageUpscaleWithModel")
+    assert.equal(graph["4"].inputs.width, 1024)
+    assert.equal(graph["4"].inputs.height, 768)
+  } else {
+    assert.equal(graph["2"].class_type, "ImageScaleBy")
+    assert.equal(graph["2"].inputs.scale_by, 2)
+    assert.equal(graph["2"].inputs.upscale_method, "lanczos")
+  }
+  beforeUpscaleReturn()
+  return { imageId: `upscale-fixture-${++upscaleCount}` }
+}
+try {
+  const options = await request("load_upscale_options", { connectionId: "swarm-1" })
+  assert.deepEqual(options.data.models, ["4x-UltraSharp.pth", "RealESRGAN_x4plus_anime_6B.pth"])
+  assert.equal(options.data.recommended, "RealESRGAN_x4plus_anime_6B.pth")
+  assert.equal(options.data.workflows[0].name, "Portrait/Inpaint")
+  const upscaleSettings = { mode: "model", factor: 2, model: options.data.recommended, workflow: "", imageParam: "", graph: "" }
+  const standalone = await request("upscale_output", { imageId: draft.imageId, connectionId: "swarm-1", settings: upscaleSettings })
+  assert.equal(standalone.data.record.initImageId, draft.imageId)
+  assert.equal(standalone.data.record.workflow, "2× AI · RealESRGAN_x4plus_anime_6B.pth")
+  assert.equal((await request("load_upscale_options", { connectionId: "swarm-1" })).data.settings.model, upscaleSettings.model)
+  assert.equal(standalone.data.record.parameters.width, 1024)
+  assert.match(upscaleMessage.content, /draft-fixture/)
+  const select = (action, imageId = draft.imageId) => request("select_inline_variant", { action, imageId, jobId: draft.id })
+  const upscaleStream = spindle.imageGen.generateStream
+  const upscaleEntered = deferred()
+  const lateUpscale = deferred()
+  spindle.imageGen.generateStream = async function* () {
+    upscaleEntered.resolve()
+    return await lateUpscale.promise
+  }
+  const cancelledUpscale = select("finalize")
+  await bounded(upscaleEntered.promise)
+  await frontendHandler({ type: "cancel_inline_upscale", jobId: draft.id }, "user-1")
+  await bounded(cancelledUpscale)
+  lateUpscale.resolve({ imageId: "cancelled-upscale-must-not-attach" })
+  assert.match(upscaleMessage.content, /draft-fixture/)
+  spindle.imageGen.generateStream = upscaleStream
+  beforeUpscaleReturn = () => { upscaleMessage.swipe_id = 1; upscaleMessage.content = "Other reply" }
+  await select("finalize")
+  assert.match(upscaleMessage.swipes[0], /draft-fixture/)
+  assert.equal(upscaleMessage.content, "Other reply")
+  upscaleMessage.swipe_id = 0
+  upscaleMessage.content = upscaleMessage.swipes[0]
+  await select("final")
+  assert.match(upscaleMessage.content, /upscale-fixture-2/)
+  await assert.rejects(() => select("finalize"), /currently attached/)
+  await select("draft", "upscale-fixture-2")
+  assert.match(upscaleMessage.content, /draft-fixture/)
+  await select("final")
+  assert.match(upscaleMessage.content, /upscale-fixture-2/)
+  assert.equal(upscaleCount, 2, "Switching versions reuses the saved upscale")
+  spindle.imageGen.generateStream = async function* (input) {
+    const override = JSON.parse(input.parameters.rawRequestOverride)
+    if (override.comfyworkflowraw) {
+      const graph = JSON.parse(override.comfyworkflowraw)
+      assert.equal(graph["1"].inputs.image_base64, "${init_image}")
+      assert.equal(graph["3"].inputs.filename_prefix, "${prefix}")
+    } else {
+      assert.equal(override.comfyuicustomworkflow, "Portrait/Inpaint")
+      assert.equal(override.comfyrawworkflowinputimageinputc, "data:image/png;base64,AQID")
+    }
+    return { imageId: `upscale-fixture-${++upscaleCount}` }
+  }
+  const json = JSON.stringify({
+    "1": { class_type: "SwarmLoadImageB64", inputs: { image_base64: "overwritten" } },
+    "2": { class_type: "ImageScaleBy", inputs: { image: ["1", 0], upscale_method: "nearest-exact", scale_by: 2 } },
+    "3": { class_type: "SaveImage", inputs: { images: ["2", 0], filename_prefix: "any" } },
+  })
+  const customSettings = { mode: "custom", factor: 2, model: "", workflow: "", imageParam: "", graph: json }
+  const custom = await request("upscale_output", { imageId: draft.imageId, connectionId: "swarm-1", settings: customSettings })
+  assert.equal(custom.data.record.workflow, "Custom Comfy upscale")
+  const saved = await request("upscale_output", { imageId: draft.imageId, connectionId: "swarm-1",
+    settings: { ...customSettings, mode: "saved", workflow: "Portrait/Inpaint", imageParam: "comfyrawworkflowinputimageinputc", graph: "" } })
+  assert.equal(saved.data.record.workflow, "Saved Comfy upscale · Portrait/Inpaint")
+  const missing = await request("load_upscale_workflow", { connectionId: "swarm-1", name: "Portrait/Inpaint" })
+  assert.equal(missing.data.parameters[2].type, "image")
+  const invalidRequestId = "upscale-bad-model"
+  await frontendHandler({ type: "upscale_output", requestId: invalidRequestId, imageId: draft.imageId,
+    connectionId: "swarm-1", settings: { ...customSettings, mode: "model", model: "not-installed.pth" } }, "user-1")
+  assert.equal(sent.find(entry => entry.payload.requestId === invalidRequestId)?.payload.type, "studio_error")
+  assert.match(sent.find(entry => entry.payload.requestId === invalidRequestId)?.payload.error, /not installed/)
+} finally {
+  spindle.imageGen.generateStream = beforeSwipeStream
+  spindle.images.get = previousUpscaleGet
+  spindle.images.readBinary = previousUpscaleRead
+}
+console.log("upscale graph, draft/final round trip and swipe-safe completion: ok")
+
+
+// V28 regression: one clientJobId can cross the provider boundary only once.
+// Normalization is applied at the shared stream/legacy sink, not to the editor.
+{
+  const nativeStream = spindle.imageGen.generateStream
+  const nativeGenerate = spindle.imageGen.generate
+  const fixture = {type:"generate",input:{connection_id:"swarm-1",clientJobId:"v28-same-job",model:"base.safetensors",prompt:"portrait⠀with⠀braille",negativePrompt:"keep⠀negative",parameters:{}}}
+  const entered = deferred()
+  const release = deferred()
+  const providerInputs = []
+  try {
+    spindle.imageGen.generateStream = input => {
+      providerInputs.push(input)
+      entered.resolve()
+      return {next: () => release.promise}
+    }
+    const first = frontendHandler({...fixture,requestId:"v28-first"},"user-1")
+    await bounded(entered.promise)
+    await bounded(frontendHandler({...fixture,requestId:"v28-same-id-during"},"user-1"))
+    assert.equal(providerInputs.length,1,"Duplicate in-flight job must not issue a second provider call")
+    assert.equal(providerInputs[0].prompt,"portrait with braille")
+    assert.equal(providerInputs[0].negativePrompt,"keep negative","Negative prompt must be normalized too")
+    release.resolve({done:true,value:{imageId:"v28-image",imageUrl:"/api/v1/image-gen/results/v28-image"}})
+    await bounded(first)
+    const resultsBefore = sent.filter(e=>e.payload.type==="generation_result" && e.payload.clientJobId==="v28-same-job").length
+    await bounded(frontendHandler({...fixture,requestId:"v28-same-id-ended"},"user-1"))
+    assert.equal(providerInputs.length,1,"Completed job replay must not issue another provider call")
+    assert.equal(sent.filter(e=>e.payload.type==="generation_result" && e.payload.clientJobId==="v28-same-job").length,resultsBefore)
+
+    delete spindle.imageGen.generateStream
+    spindle.imageGen.generate = async input => {
+      assert.equal(input.prompt,"legacy with braille")
+      assert.equal(input.negativePrompt,"leave this")
+      return {imageId:"v28-legacy",imageUrl:"/api/v1/image-gen/results/v28-legacy"}
+    }
+    await bounded(frontendHandler({type:"generate",requestId:"v28-legacy-normalization",input:{connection_id:"swarm-1",clientJobId:"v28-legacy-normalization",model:"base.safetensors",prompt:"legacy⠀with⠀braille",negativePrompt:"leave⠀this",parameters:{}}},"user-1"))
+  } finally {
+    spindle.imageGen.generateStream = nativeStream
+    spindle.imageGen.generate = nativeGenerate
+  }
+}
+console.log("v28: braille normalization and same-ID in-flight/completed deduplication: ok")
+
+// Two near-simultaneous tag callbacks must reuse one persisted image job.
+{
+  const nativeStream = spindle.imageGen.generateStream
+  const fullMatch = '<swarm-image request="generate" slot="v28-race" aspect="4:3">{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition></swarm-image>'
+  const msg = {id:"v28-tag-race-message",role:"assistant",content:fullMatch,metadata:{}}
+  taggedMessages.push(msg)
+  let providerCalls = 0
+  try {
+    spindle.imageGen.generateStream = async function* () {
+      providerCalls++
+      return {imageId:"v28-tag-race-image",imageUrl:"/api/v1/image-gen/results/v28-tag-race-image"}
+    }
+    const makePayload = index => ({type:"tag_generate",requestId:`v28-tag-race-${index}`,chatId:"chat-1",messageId:msg.id,fullMatch,attrs:{request:"generate",slot:"v28-race",aspect:"4:3"},content:"{{swarm_preset}}, outside, city street, food stall, smiling, <preset:composition>",isStreaming:false})
+    await bounded(Promise.all([frontendHandler(makePayload(1),"user-1"),frontendHandler(makePayload(2),"user-1")]))
+    assert.equal(providerCalls,1,"Concurrent identical tag callbacks must make one image request")
+    assert.equal(userFiles.get("tagged-image-jobs.json").filter(job=>job.messageId===msg.id).length,1,"Tag race must persist one job")
+  } finally {
+    spindle.imageGen.generateStream = nativeStream
+  }
+}
+console.log("v28: concurrent image-tag creation is serialized: ok")
+
+{
+  const originalExpressionsStream = spindle.imageGen.generateStream
+  const originalExpressionsGet = spindle.images.get
+  const originalExpressionsRead = spindle.images.readBinary
+  const originalExpressionsCors = spindle.cors
+  const calls = []
+  try {
+    spindle.imageGen.generateStream = async function* (input) {
+      calls.push({ ...input, signal: undefined })
+      yield { type: "progress", data: { step: 8, totalSteps: 24, preview: "data:image/png;base64,AQID" } }
+      return { imageId: `expression-fixture-${calls.length}` }
+    }
+    const defaults = (await request("load_expression_set")).data
+    assert.equal(defaults.selected.length, 6)
+    assert.equal(defaults.slots.length, 20)
+    await request("save_expression_set", { settings: {
+      selected: ["neutral", "wistful", "missing"],
+      slots: [{ label: "Wistful", direction: "distant eyes and a soft smile" }],
+      generation: { recipe: { width: 832, height: 1024, steps: 24, cfg: 0, scheduler: "karras" }, prefix: "standing, looking at viewer", negative: "hands in front of face" },
+    } })
+    const saved = (await request("load_expression_set")).data
+    assert.deepEqual(saved.selected, ["neutral", "wistful"])
+    assert.deepEqual(saved.slots.at(-1), { label: "Wistful", direction: "distant eyes and a soft smile" })
+    const base = { folderId: "character:char-1", connectionId: "swarm-1", model: "anima-base.safetensors", direction: "furrowed brows" }
+    const plain = await request("render_folder_expression", base)
+    assert.equal(plain.data.id, "expression-fixture-1")
+    assert.match(calls[0].prompt, /head and shoulders portrait.*furrowed brows/)
+    assert.equal(calls[0].owner_character_id, "char-1")
+    assert.equal(calls[0].parameters.seed, -1)
+    assert.equal(calls[0].parameters.rawRequestOverride, undefined)
+    const renderProgress = sent.filter(entry => entry.payload.requestId === plain.requestId && entry.payload.type === "folder_expression_progress")
+    assert.equal(renderProgress.length, 1)
+    assert.equal(renderProgress[0].userId, "user-1")
+    assert.deepEqual(renderProgress[0].payload.data, { step: 8, totalSteps: 24, preview: "data:image/png;base64,AQID", nodeId: "" })
+    spindle.images.get = async (id, options) => id === plain.data.id
+      ? (assert.equal(options.onlyOwned, true), { id, url: "data:image/png;base64,AQID" })
+      : originalExpressionsGet(id, options)
+    await request("render_folder_expression", { ...base, family: "anima", referenceId: plain.data.id, generation: saved.generation })
+    assert.match(calls[1].prompt, /^standing, looking at viewer,.+furrowed brows$/)
+    assert.doesNotMatch(calls[1].prompt, /head and shoulders portrait/)
+    assert.match(calls[1].negativePrompt, /^hands in front of face/)
+    for (const [key, value] of Object.entries({ width: 832, height: 1024, steps: 24, cfgScale: 0, scheduler: "karras" })) {
+      assert.equal(calls[1].parameters[key], value)
+    }
+    assert.match(calls[1].parameters.rawRequestOverride, /AnimaRefAdapter/)
+    assert.equal(calls[1].parameters.referenceImages[0].data, "AQID")
+    await assert.rejects(() => request("render_folder_expression", { ...base, referenceId: "unrelated-output" }), /reference from this character folder/)
+    assert.equal(calls.length, 2)
+
+    spindle.images.get = async (id, options) => id === plain.data.id
+      ? { id, mime_type: "image/png", width: 512, height: 512 }
+      : originalExpressionsGet(id, options)
+    spindle.images.readBinary = async () => Uint8Array.of(1, 2, 3)
+    const source = { ...base, imageId: plain.data.id }
+    const graphs = []
+    spindle.imageGen.generateStream = async function* (input) {
+      graphs.push(JSON.parse(JSON.parse(input.parameters.rawRequestOverride).comfyworkflowraw))
+      assert.equal(input.parameters.referenceImages[0].data, "AQID")
+      return { imageId: "background-fixture-" + graphs.length }
+    }
+    await request("process_folder_expression", { ...source, action: "remove-background" })
+    assert.equal(graphs[0]["1"].class_type, "SwarmLoadImageB64")
+    assert.equal(graphs[0]["2"].inputs.bg_removal_name, "birefnet.safetensors")
+    assert.deepEqual(graphs[0]["4"].inputs.mask, ["3", 0])
+    assert.deepEqual(graphs[0]["5"].inputs, { image: ["1", 0], alpha: ["4", 0] })
+    assert.deepEqual(graphs[0]["6"].inputs.images, ["5", 0])
+    const graph = JSON.stringify({ "8": { class_type: "LoadImage", inputs: { image: "placeholder.png" } },
+      "9": { class_type: "SaveImage", inputs: { images: ["8", 0], filename_prefix: "old" } } })
+    await request("process_folder_expression", { ...source, action: "remove-background", backgroundMode: "custom", graph })
+    assert.deepEqual(graphs[1]["8"], { class_type: "SwarmLoadImageB64", inputs: { image_base64: "${init_image}" } })
+    assert.deepEqual(graphs[1]["9"].inputs.images, ["8", 0])
+    assert.equal(graphs[1]["9"].inputs.filename_prefix, "${prefix}")
+    for (const [spec, status] of [
+      [{ LoadBackgroundRemovalModel: { input: { required: { bg_removal_name: [["birefnet.safetensors"]] } } } }, "installed"],
+      [{ LoadBackgroundRemovalModel: { input: { required: { bg_removal_name: ["COMBO", { options: [] }] } } } }, "missing"],
+      [{}, "unsupported"],
+    ]) {
+      spindle.cors = async (url, options) => {
+        assert.match(url, /\/ComfyBackendDirect\/object_info\/LoadBackgroundRemovalModel$/)
+        assert.equal(options.method, "GET")
+        return { status: 200, body: JSON.stringify(spec) }
+      }
+      assert.equal((await request("check_expression_background_model", base)).data.status, status)
+    }
+    spindle.cors = originalExpressionsCors
+    const storedUpscale = userFiles.get("studio-upscale-settings.json")
+    userFiles.set("studio-upscale-settings.json", { ...storedUpscale, "swarm-1": { mode: "model", model: "4x-UltraSharp.pth", factor: 2 } })
+    const enhanceOptions = (await request("load_expression_enhance_options", base)).data
+    assert.equal(enhanceOptions.mode, "model")
+    await request("process_folder_expression", { ...source, action: "enhance", factor: 4 })
+    assert.equal(graphs[2]["4"].inputs.width, 2048)
+    assert.equal(graphs[2]["4"].inputs.height, 2048)
+    assert.deepEqual((await request("load_expression_enhance_options", base)).data, enhanceOptions)
+    userFiles.set("studio-upscale-settings.json", storedUpscale)
+    const stages = [
+      ["generate", { ...base, type: "render_folder_expression" }],
+      ["enhance", { ...source, type: "process_folder_expression", action: "enhance" }],
+      ["background", { ...source, type: "process_folder_expression", action: "remove-background",
+        workflow: "Portrait/Inpaint", imageParam: "comfyrawworkflowinputimageinputc" }],
+    ]
+    for (const [stage, fields] of stages) {
+      const entered = deferred(), late = deferred()
+      const requestId = `stop-expression-${stage}`
+      let signal
+      spindle.imageGen.generateStream = input => {
+        signal = input.signal
+        return { next() { entered.resolve(); return late.promise } }
+      }
+      const pending = frontendHandler({ ...fields, requestId }, "user-1")
+      await bounded(entered.promise)
+      await frontendHandler({ type: "stop_folder_expression", requestId }, "other-user")
+      assert.equal(signal.aborted, false, "Stop is scoped to the submitting user")
+      await frontendHandler({ type: "stop_folder_expression", requestId }, "user-1")
+      await bounded(pending)
+      assert.equal(signal.aborted, true)
+      late.resolve({ done: true, value: { imageId: requestId } })
+      assert.deepEqual(sent.filter(entry => entry.payload.requestId === requestId).map(entry => entry.payload.type), ["folder_expression_stopped"])
+      assert.ok(!userFiles.get("generation-records.json").some(record => record.imageId === requestId))
+    }
+    spindle.imageGen.generateStream = () => assert.fail("A stop received first must prevent a render")
+    const early = "stop-expression-before-render"
+    await frontendHandler({ type: "stop_folder_expression", requestId: early }, "user-1")
+    await bounded(frontendHandler({ ...base, type: "render_folder_expression", requestId: early }, "user-1"))
+    assert.equal(sent.find(entry => entry.payload.requestId === early)?.payload.type, "folder_expression_stopped")
+  } finally {
+    spindle.imageGen.generateStream = originalExpressionsStream
+    spindle.images.get = originalExpressionsGet
+    spindle.images.readBinary = originalExpressionsRead
+    spindle.cors = originalExpressionsCors
+  }
+}
+console.log("character expression generation, owned references, Anima workflow and scoped cancellation: ok")

@@ -22,6 +22,8 @@ interface StudioBehavior {
   parserModel: string
   stripUserOnlyLoraStack: boolean
   autoPrintCharacterPositive: boolean
+  autoFinalizeInline: boolean
+  deleteExpressionDrafts: boolean
   inlineImageScale: 100 | 75 | 50
   requiredImageMin: number
   requiredImageMax: number
@@ -180,6 +182,8 @@ interface OutputFolder {
   name: string
   imageIds: string[]
   binding: {
+    animaReference?: boolean
+    animaReferenceUrl?: string
     type: "character"
     generationRecipe?: GenerationRecipe
     styleId?: string
@@ -198,6 +202,7 @@ interface OutputFolder {
 }
 
 interface CharacterVisualLook {
+  animaReference?: "inherit" | "on" | "off"
   generationRecipe?: GenerationRecipe
   styleId?: string
   id: string

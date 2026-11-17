@@ -2,6 +2,7 @@
 // Keep feature implementation out of src/frontend.ts; it is only the public export surface.
 export const frontendSources = [
   "src/state/recipes.ts",
+  "src/state/expression-set.ts",
   "src/state/types.ts",
   "src/state/runtime.ts",
   "src/visuals/icons.ts",
@@ -18,6 +19,9 @@ export const frontendSources = [
   "src/workflows/helpers.ts",
   "src/library/paging.ts",
   "src/studio/generation.ts",
+  "src/studio/inpaint.ts",
+  "src/studio/expressions.ts",
+  "src/studio/upscale.ts",
   "src/library/loras.ts",
   "src/miniplayer/controller.ts",
   "src/studio/controller.ts",

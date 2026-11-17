@@ -169,6 +169,8 @@ interface OutputFolder {
 }
 
 interface OutputFolderBinding {
+  animaReference?: boolean
+  animaReferenceUrl?: string
   generationRecipe?: GenerationRecipe
   styleId?: string
   type: "character"
@@ -185,6 +187,7 @@ interface OutputFolderBinding {
 }
 
 interface CharacterVisualLook {
+  animaReference?: "inherit" | "on" | "off"
   generationRecipe?: GenerationRecipe
   styleId?: string
   id: string
@@ -247,6 +250,7 @@ interface TagAutomationConfig {
   parserModel: string
   stripUserOnlyLoraStack: boolean
   autoPrintCharacterPositive: boolean
+  autoFinalizeInline: boolean
   requiredImageMin: number
   requiredImageMax: number
   promptMode: "multi" | "pov"
@@ -294,6 +298,8 @@ interface LoraDownloadJob {
 type TaggedImageJobStatus = "requested" | "queued" | "generating" | "ready" | "failed" | "cancelled"
 
 interface TaggedImageJob {
+  draftImage?: { id: string; url: string }
+  finalImage?: { id: string; url: string }
   swipeId?: number
   awaitingSource?: boolean
   output: "inline" | "url"
@@ -351,6 +357,7 @@ const FAVORITES_FOLDER_NAME = "Favorites"
 const TAG_AUTOMATION_CONFIG_FILE = "tag-automation-config.json"
 const TAGGED_IMAGE_JOBS_FILE = "tagged-image-jobs.json"
 const STUDIO_GENERATION_PROFILE_FILE = "studio-generation-profile.json"
+const UPSCALE_SETTINGS_FILE = "studio-upscale-settings.json"
 const CHARACTER_BASE_TAGS_FILE = "character-base-tags.json"
 const PERSONA_VISUAL_PRESETS_FILE = "persona-visual-presets.json"
 const VISUAL_LORE_NAMESPACE = "swarm_studio_visuals"
@@ -377,10 +384,23 @@ const generationControllers = new Map<string, {
 }>()
 let legacyGenerationFallbackLogged = false
 const runningTaggedJobs = new Set<string>()
+const upscalingImages = new Set<string>()
+const folderExpressionControllers = new Map<string, AbortController>()
+const inlineUpscaleControllers = new Map<string, AbortController>()
 const pendingTaggedJobs = new Set<string>()
+// An ended stream must never permit a replay of the same job ID to start
+// another provider request. New deliberate generations always have new IDs.
+const completedGenerationKeys = new Set<string>()
+// Two interceptors may deliver the same tag while its first job is still
+// being persisted. Serialize per tag before deciding whether a job exists.
+const taggedImageRequestQueues = new Map<string, Promise<TaggedImageJob>>()
 const removedTaggedJobs = new Set<string>()
 const settledTaggedSources = new Map<string, { messageId: string; swipeId?: number }>()
 const runningParserCompletions = new Set<string>()
+// Lumiverse can replay GENERATION_ENDED after the parser has already changed
+// the source message. The old event payload still has its original parse tag:
+// it must not dispatch another text-model completion.
+const completedParserCompletions = new Set<string>()
 const taggedMessageFinalizeLocks = new Map<string, Promise<void>>()
 const taggedFinalizeRetries = new Map<string, Promise<boolean>>()
 const taggedFinalizeMessageTargets = new Map<string, string>()
@@ -1711,6 +1731,7 @@ function cleanCharacterLooks(value: unknown): CharacterVisualLook[] {
     return [{
       id,
       name,
+      animaReference: item.animaReference === "on" || item.animaReference === "off" ? item.animaReference : "inherit",
       generationRecipe: sanitizeGenerationRecipe(item.generationRecipe),
       styleId: asString(item.styleId).slice(0, 200),
       aliases: cleanVisualWords(item.aliases),
@@ -1789,6 +1810,8 @@ function cleanOutputFolders(value: unknown): OutputFolder[] {
       ? {
           type: "character",
           characterId,
+          animaReference: rawBinding.animaReference === true,
+          animaReferenceUrl: asString(rawBinding.animaReferenceUrl).trim().slice(0, 2_000),
           generationRecipe: sanitizeGenerationRecipe(rawBinding.generationRecipe),
           styleId: asString(rawBinding.styleId).slice(0, 200),
           positivePrompt: asString(rawBinding.positivePrompt).trim().slice(0, 12_000),
@@ -1946,6 +1969,8 @@ async function updateOutputFolderProfile(
   }
   folder.binding = {
     ...folder.binding,
+    animaReference: asBoolean(input.animaReference, folder.binding.animaReference ?? false),
+    animaReferenceUrl: typeof input.animaReferenceUrl === "string" ? input.animaReferenceUrl.trim().slice(0, 2_000) : folder.binding.animaReferenceUrl,
     generationRecipe: sanitizeGenerationRecipe(input.generationRecipe ?? folder.binding.generationRecipe),
     styleId: typeof input.styleId === "string" ? input.styleId.slice(0, 200) : folder.binding.styleId,
     positivePrompt: asString(input.positivePrompt).trim().slice(0, 12_000),
@@ -2612,12 +2637,24 @@ function isAbortError(error: unknown): boolean {
     && (error.name === "AbortError" || /abort|interrupt|cancel/i.test(error.message))
 }
 
+function normalizePromptSpaces(value: unknown): string {
+  // Braille pattern blank (U+2800) is not a regular ASCII space (U+0020).
+  // Model-authored positive AND negative prompts must reach the parser and
+  // generation backend without invisible token-separation surprises.
+  return asString(value).replace(/\u2800/g, " ")
+}
+
+type ImageGenerationProgress = { step: number; totalSteps: number; preview: string; nodeId: string }
+
 async function generateWithProgress(
   input: JsonObject,
   controller: AbortController,
   clientJobId: string,
   userId?: string,
+  onProgress?: (data: ImageGenerationProgress) => void,
 ): Promise<JsonObject> {
+  input.prompt = normalizePromptSpaces(input.prompt)
+  input.negativePrompt = normalizePromptSpaces(input.negativePrompt)
   const streamFactory = spindle.imageGen?.generateStream
   if (typeof streamFactory !== "function") {
     if (!legacyGenerationFallbackLogged) {
@@ -2680,18 +2717,16 @@ async function generateWithProgress(
       ?? lastTotalSteps
     if (step) lastStep = step
     if (totalSteps) lastTotalSteps = totalSteps
-    spindle.sendToFrontend({
-      type: "generation_progress",
-      clientJobId,
-      data: {
-        step,
-        totalSteps,
-        preview: metadataString(chunk, "preview", "imageDataUrl", "image_data_url")
-          || metadataString(chunkData, "preview", "imageDataUrl", "image_data_url"),
-        nodeId: metadataString(chunk, "nodeId", "node_id")
-          || metadataString(chunkData, "nodeId", "node_id"),
-      },
-    }, userId)
+    const data: ImageGenerationProgress = {
+      step,
+      totalSteps,
+      preview: metadataString(chunk, "preview", "imageDataUrl", "image_data_url")
+        || metadataString(chunkData, "preview", "imageDataUrl", "image_data_url"),
+      nodeId: metadataString(chunk, "nodeId", "node_id")
+        || metadataString(chunkData, "nodeId", "node_id"),
+    }
+    if (onProgress) onProgress(data)
+    else spindle.sendToFrontend({ type: "generation_progress", clientJobId, data }, userId)
   }
 }
 
@@ -2836,6 +2871,7 @@ function cleanTagAutomationConfig(value: unknown): TagAutomationConfig {
     parserModel: asString(record.parserModel).trim().slice(0, 300),
     stripUserOnlyLoraStack: record.stripUserOnlyLoraStack === true,
     autoPrintCharacterPositive: record.autoPrintCharacterPositive === true,
+    autoFinalizeInline: record.autoFinalizeInline === true,
     requiredImageMin,
     requiredImageMax,
     promptMode: record.promptMode === "pov" ? "pov" : "multi",
@@ -2855,6 +2891,7 @@ async function loadTagAutomationConfig(userId?: string): Promise<TagAutomationCo
       parserModel: "",
       stripUserOnlyLoraStack: false,
       autoPrintCharacterPositive: false,
+      autoFinalizeInline: false,
       requiredImageMin: 0,
       requiredImageMax: 0,
       promptMode: "multi",
@@ -2969,6 +3006,12 @@ function cleanTaggedImageJob(value: unknown): TaggedImageJob | null {
   const chatId = asString(record.chatId).trim()
   const messageId = asString(record.messageId).trim()
   if (!id || !key || !chatId || !messageId) return null
+  const cleanVariant = (value: unknown) => {
+    const variant = asRecord(value)
+    const id = asString(variant.id).slice(0, 200)
+    const url = asString(variant.url).slice(0, 2_000)
+    return id && url ? { id, url } : undefined
+  }
   const rawStatus = asString(record.status)
   const status: TaggedImageJobStatus = ["requested", "queued", "generating", "ready", "failed", "cancelled"].includes(rawStatus)
     ? rawStatus as TaggedImageJobStatus
@@ -2991,6 +3034,8 @@ function cleanTaggedImageJob(value: unknown): TaggedImageJob | null {
     clientJobId: asString(record.clientJobId).slice(0, 120),
     imageId: asString(record.imageId).slice(0, 200),
     imageUrl: asString(record.imageUrl).slice(0, 2_000),
+    draftImage: cleanVariant(record.draftImage),
+    finalImage: cleanVariant(record.finalImage),
     inserted: record.inserted === true,
     error: asString(record.error).slice(0, 1_000),
     ownerCharacterId: asString(record.ownerCharacterId).slice(0, 200),
@@ -3407,8 +3452,9 @@ async function completeParserImageRequests(payload: any, userId?: string): Promi
   const requests = parseSwarmParserRequests(content)
   if (!chatId || !messageId || !requests.length) return
 
-  const completionKey = asString(payload?.generationId).trim() || `${chatId}:${messageId}:${stableTextHash(content)}`
-  if (runningParserCompletions.has(completionKey)) return
+  const completionKey = [userId || "scoped", chatId, messageId,
+    cleanTaggedSwipeId(payload?.swipeId) ?? "", stableTextHash(content)].join("\0")
+  if (runningParserCompletions.has(completionKey) || completedParserCompletions.has(completionKey)) return
   runningParserCompletions.add(completionKey)
 
   try {
@@ -3428,7 +3474,7 @@ async function completeParserImageRequests(payload: any, userId?: string): Promi
       connection_id: connection.id,
       messages: [
         { role: "system", content: parserCompletionInstruction(profile, context, config) },
-        { role: "user", content: requests.map((request) => request.fullMatch).join("\n\n") },
+        { role: "user", content: requests.map((request) => normalizePromptSpaces(request.fullMatch)).join("\n\n") },
       ],
       parameters: {
         temperature: 0.2,
@@ -3436,7 +3482,7 @@ async function completeParserImageRequests(payload: any, userId?: string): Promi
       },
       reasoning: { source: "off" },
     }, userId)
-    const completedTags = parseSwarmImageTags(asString(response?.content))
+    const completedTags = parseSwarmImageTags(normalizePromptSpaces(response?.content))
     if (completedTags.length !== requests.length) {
       throw new Error(`The parser returned ${completedTags.length} completed image request${completedTags.length === 1 ? "" : "s"} for ${requests.length} placed request${requests.length === 1 ? "" : "s"}.`)
     }
@@ -3489,6 +3535,8 @@ ${completed.content.trim()}</swarm-image>`
         isStreaming: false,
       }, userId)
     }
+    completedParserCompletions.add(completionKey)
+    if (completedParserCompletions.size > 256) completedParserCompletions.delete(completedParserCompletions.values().next().value!)
     spindle.sendToFrontend({
       type: "parser_completion_result",
       data: { chatId, messageId, count: generatedTags.length },
@@ -3593,6 +3641,116 @@ async function resolveVisualReferenceImage(
   if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(mimeType)) return null
   const data = String(response.body || "")
   return data && data.length <= 7_500_000 ? { data, mimeType } : null
+}
+
+function characterAnimaReference(binding?: OutputFolderBinding | null, look?: CharacterVisualLook | null) {
+  if (!binding?.enabled || look?.animaReference === "off") return null
+  if (look?.animaReference !== "on" && binding.animaReference !== true) return null
+  if (look?.referenceImageUrl || look?.referenceImageId) {
+    return { id: look.referenceImageId, url: look.referenceImageUrl }
+  }
+  return { id: "", url: binding.animaReferenceUrl || "" }
+}
+
+async function prepareInpaintInput(input: JsonObject, edit: JsonObject, userId?: string): Promise<JsonObject> {
+  const sourceId = asString(edit.sourceImageId)
+  const source = asString(edit.source)
+  const mask = asString(edit.mask)
+  if (!sourceId || !spindle.permissions.has("images") ||
+      !(await spindle.images.get(sourceId, { onlyOwned: true, specificity: "sm", userId }))) {
+    throw new Error("Choose a saved Lumiverse output you own.")
+  }
+  const maxDataLength = 7_500_000
+  if (source.length > maxDataLength || mask.length > maxDataLength ||
+      !/^data:image\/png;base64,[a-z\d+/=]+$/i.test(source) ||
+      !/^data:image\/png;base64,[a-z\d+/=]+$/i.test(mask)) {
+    throw new Error("The source image or region mask could not be encoded within the image size limit.")
+  }
+  const parameters = asRecord(input.parameters)
+  const width = Number(parameters.width)
+  const height = Number(parameters.height)
+  const denoise = Number(parameters.denoise)
+  if (!asString(input.prompt).trim() || ![width, height].every(value =>
+    Number.isInteger(value) && value >= 64 && value <= 2048 && value % 8 === 0
+  ) || !Number.isFinite(denoise) || denoise <= 0 || denoise > 1) {
+    throw new Error("Check the edit prompt, image dimensions, and creativity.")
+  }
+  return {
+    ...input,
+    parameters: {
+      ...parameters,
+      resolvedSourceImages: undefined,
+      referenceImages: [{ data: source.slice("data:image/png;base64,".length), mimeType: "image/png" }],
+      rawRequestOverride: JSON.stringify({ maskimage: mask, maskblur: Math.max(0, Math.min(64, Math.round(typeof edit.feather === "number" && Number.isFinite(edit.feather) ? edit.feather : 4))), initimagerecompositemask: true }),
+    },
+  }
+}
+
+async function withAnimaReference(
+  input: JsonObject,
+  source: { id: string; url: string },
+  userId?: string,
+): Promise<JsonObject> {
+  const parameters = asRecord(input.parameters)
+  const raw = asString(parameters.rawRequestOverride)
+  const parsed = raw ? asRecord(JSON.parse(raw)) : {}
+  const override = parsed.param_map ? asRecord(parsed.param_map) : parsed
+  if (Object.keys(override).some((key) => /^comfy(?:uicustomworkflow|workflowraw)$/i.test(key) && override[key])) {
+    throw new Error("Clear the selected Swarm workflow to use the character’s Anima Reference Adapter.")
+  }
+  const reference = await resolveVisualReferenceImage(source.id, source.url, userId)
+  if (!reference) throw new Error("Add an accessible Anima reference image URL to the character folder or active look.")
+
+  // Swarm supplies its init image to the loader via a workflow placeholder.
+  // The sampler starts with empty noise, and only the adapter sees the reference.
+  type Link = [string, number]
+  const nodes: Record<string, { class_type: string; inputs: JsonObject }> = {}
+  const node = (class_type: string, inputs: JsonObject): Link => {
+    const id = String(Object.keys(nodes).length + 1)
+    nodes[id] = { class_type, inputs }
+    return [id, 0]
+  }
+  const numberTag = (name: string) => `%%_COMFYFIXME_\${${name}}_ENDFIXME_%%`
+  const vae = node("VAELoader", { vae_name: asString(override.vae ?? parameters.vae) || "qwen_image_vae.safetensors" })
+  const image = node("SwarmLoadImageB64", { image_base64: "${init_image}" })
+  let model = node("UNETLoader", { unet_name: "${model}", weight_dtype: "default" })
+  let clip = node("CLIPLoader", {
+    clip_name: asString(override.qwenmodel ?? parameters.qwenModel) || "qwen_3_06b_base.safetensors",
+    type: "stable_diffusion",
+    device: "default",
+  })
+  const asList = (value: unknown) => Array.isArray(value) ? value.map(String) : String(value ?? "").split(",")
+  const weights = asList(override.loraweights ?? parameters.loraWeights)
+  const loras = asList(override.loras ?? parameters.loras)
+  for (const [index, name] of loras.entries()) {
+    const filename = name.trim()
+    if (!filename || /^anima_ref_adapter_v2_r64(?:\.safetensors)?$/i.test(filename.split(/[\\/]/).pop() || "")) continue
+    const weight = Number.parseFloat(weights[index] || "")
+    const strength = Number.isFinite(weight) ? weight : 1
+    model = node("LoraLoader", { model, clip, lora_name: filename, strength_model: strength, strength_clip: strength })
+    clip = [model[0], 1]
+  }
+  model = node("AnimaRefAdapter", { model, vae, image, lora_name: "anima_ref_adapter_v2_r64.safetensors", ref_guidance: 4.5, correction: "apg" })
+  const positive = node("CLIPTextEncode", { clip, text: "${prompt}" })
+  const negative = node("CLIPTextEncode", { clip, text: "${negative_prompt}" })
+  const latent = node("EmptyLatentImage", { width: numberTag("width"), height: numberTag("height"), batch_size: 1 })
+  const samples = node("KSampler", {
+    model, positive, negative, latent_image: latent, denoise: 1,
+    seed: numberTag("seed"), steps: numberTag("steps"), cfg: numberTag("cfg_scale"),
+    sampler_name: "${sampler:er_sde}", scheduler: "${scheduler:simple}",
+  })
+  node("SaveImage", { images: node("VAEDecode", { samples, vae }), filename_prefix: "${prefix}" })
+  delete override.initimage
+  delete override.initimagecreativity
+  return {
+    ...input,
+    parameters: {
+      ...parameters,
+      referenceImages: [reference],
+      resolvedSourceImages: undefined,
+      rawRequestOverride: JSON.stringify({ ...override, comfyworkflowraw: JSON.stringify(nodes) }),
+    },
+  }
 }
 
 type ScenePromptFamily = "anima" | "illustrious"
@@ -3858,7 +4016,7 @@ async function applyCharacterLayer(
   requestedLook = "",
   userId?: string,
   inheritWorkspaceStyle = true,
-): Promise<{ generationRecipe: GenerationRecipe; prompt: string; negativePrompt: string; checkpoint: string; preferredAspect: string; stack: StackPresetItem[]; excludedLoras: string[]; characterId: string; characterName: string; lookId: string; lookName: string; visualLoreEntryIds: string[]; referenceImageId: string; referenceImageUrl: string }> {
+): Promise<{ generationRecipe: GenerationRecipe; prompt: string; negativePrompt: string; checkpoint: string; preferredAspect: string; stack: StackPresetItem[]; excludedLoras: string[]; characterId: string; characterName: string; lookId: string; lookName: string; visualLoreEntryIds: string[]; referenceImageId: string; referenceImageUrl: string; animaReference: ReturnType<typeof characterAnimaReference> }> {
   const chat = spindle.permissions.has("chats") ? await spindle.chats.get(chatId, userId) : null
   const characterId = asString(chat?.character_id)
   const visualFolder = (await loadOutputFolders(userId)).find((folder) =>
@@ -4023,6 +4181,7 @@ async function applyCharacterLayer(
     lookId: activeLook?.id || "",
     lookName: activeLook?.name || "",
     visualLoreEntryIds: visualLore.map((item) => item.entryId),
+    animaReference: includeCharacter ? characterAnimaReference(visualFolder?.binding, activeLook) : null,
     referenceImageId: activeLook?.referenceImageId || visualLore.find((item) => item.identity.referenceImageId)?.identity.referenceImageId || "",
     referenceImageUrl: activeLook?.referenceImageUrl || visualLore.find((item) => item.identity.referenceImageUrl)?.identity.referenceImageUrl || "",
   }
@@ -4095,6 +4254,8 @@ function taggedJobPublic(job: TaggedImageJob): JsonObject {
     id: job.id,
     key: job.key,
     tagFingerprint: stableTextHash(job.fullMatch),
+    draftImageId: job.draftImage?.id || "",
+    finalImageId: job.finalImage?.id || "",
     swipeId: job.swipeId,
     awaitingSource: job.awaitingSource,
     output: job.output,
@@ -4178,6 +4339,10 @@ function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, mar
       replaced: true,
     }
   }
+  return replaceAttachedTaggedImage(content, job, markup, previousImageUrl)
+}
+
+function replaceAttachedTaggedImage(content: string, job: TaggedImageJob, markup: string, previousImageUrl: string, verifyImage = false): { content: string; replaced: boolean } {
   if (job.output === "url") {
     // URL outputs have no DOM marker. The message metadata owns the previous
     // result; refuse ambiguous matches rather than changing another image.
@@ -4192,11 +4357,13 @@ function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, mar
     return { content, replaced: false }
   }
   const existingFigure = new RegExp(
-    `<figure\\b[^>]*data-swarm-studio-job-id="${escapeRegex(job.id)}"[^>]*>[\\s\\S]*?<\\/figure>`,
-    "i",
+    String.raw`<figure\b[^>]*data-swarm-studio-job-id="${escapeRegex(job.id)}"[^>]*>[\s\S]*?<\/figure>`,
+    "gi",
   )
-  if (existingFigure.test(content)) {
-    return { content: content.replace(existingFigure, markup), replaced: true }
+  const figures = [...content.matchAll(existingFigure)]
+  if (figures.length === 1 && (!verifyImage || (previousImageUrl &&
+      figures[0][0].includes(`src="${escapeHtmlAttribute(previousImageUrl)}"`)))) {
+    return { content: content.replace(figures[0][0], () => markup), replaced: true }
   }
   return { content, replaced: false }
 }
@@ -4305,7 +4472,7 @@ async function removeTaggedImageFromChat(
   })
 }
 
-async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Promise<boolean> {
+async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string, expectedImageId?: string): Promise<boolean> {
   const settled = settledTaggedSources.get(job.id)
   if (settled) { job.awaitingSource = false; job.messageId = settled.messageId; job.swipeId = settled.swipeId }
   if (job.awaitingSource || removedTaggedJobs.has(job.id) || !job.imageUrl || !spindle.permissions.has("chat_mutation")) return false
@@ -4329,11 +4496,20 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string): Pro
     }
     const content = asString(target?.content)
     if (!target || !job.messageId || removedTaggedJobs.has(job.id)) return false
+    const attachment = taggedImageAttachment(target, job)
+    const previousImageUrl = asString(attachment.imageUrl)
+    if (expectedImageId && (targetMessageId !== initialMessageId ||
+        cleanTaggedSwipeId(target.studioSwipeId) !== cleanTaggedSwipeId(target.swipe_id) ||
+        asString(attachment.imageId) !== expectedImageId ||
+        (job.output === "url" && content.includes(job.imageUrl)))) return false
     job.swipeId = cleanTaggedSwipeId(target.studioSwipeId)
     const alt = job.alt || `Generated illustration for ${job.slot}`
     const markup = job.output === "url" ? job.imageUrl : `<figure data-swarm-studio-image="true" data-swarm-studio-job-id="${escapeHtmlAttribute(job.id)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" tabindex="0" style="position:relative;display:block;width:100%;height:100%;margin:0;"><img src="${escapeHtmlAttribute(job.imageUrl)}" alt="${escapeHtmlAttribute(alt)}" data-swarm-studio-slot="${escapeHtmlAttribute(job.slot)}" data-swarm-studio-fit="cover" loading="lazy" style="display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center;"><span data-swarm-studio-inline-action="true" tabindex="0" role="button" aria-label="Illustration actions for ${escapeHtmlAttribute(alt)}">↻</span></figure>`
-    const replacement = replaceTaggedImagePlaceholder(content, job, markup, asString(taggedImageAttachment(target, job).imageUrl))
+    const replacement = expectedImageId
+      ? replaceAttachedTaggedImage(content, job, markup, previousImageUrl, true)
+      : replaceTaggedImagePlaceholder(content, job, markup, previousImageUrl)
     if (!replacement.replaced) {
+      if (expectedImageId) return false
       if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) {
         job.inserted = true
         job.error = ""
@@ -4486,7 +4662,7 @@ async function runTaggedImageJob(
     Object.assign(parameters, recipeParameters(characterLayer.generationRecipe))
     if (originalTag?.attrs.aspect) applyAspectToParameters(parameters, job.aspect)
     if (characterLayer.checkpoint) input.model = characterLayer.checkpoint
-    if (characterLayer.referenceImageId || characterLayer.referenceImageUrl) {
+    if (!characterLayer.animaReference && (characterLayer.referenceImageId || characterLayer.referenceImageUrl)) {
       try {
         const reference = await resolveVisualReferenceImage(
           characterLayer.referenceImageId,
@@ -4531,7 +4707,9 @@ async function runTaggedImageJob(
     }
     input.parameters = parameters
     input.clientJobId = await backendUuid()
-    job.prompt = characterLayer.prompt
+    input.prompt = normalizePromptSpaces(input.prompt)
+    input.negativePrompt = normalizePromptSpaces(input.negativePrompt)
+    job.prompt = asString(input.prompt)
     job.negativePrompt = asString(input.negativePrompt)
     job.ownerCharacterId = characterLayer.characterId
     job.clientJobId = asString(input.clientJobId)
@@ -4550,8 +4728,12 @@ async function runTaggedImageJob(
     const signal = controller.signal
     await awaitGenerationTask(signal, () => upsertTaggedImageJob(job, userId))
     sendTaggedJobState(job, userId)
+    const source = characterLayer.animaReference
+    const renderInput = source
+      ? await awaitGenerationTask(signal, () => withAnimaReference(input, source, userId))
+      : input
     const result = await generateWithProgress({
-      ...input,
+      ...renderInput,
       owner_chat_id: job.chatId,
       owner_character_id: characterLayer.characterId || undefined,
       userId,
@@ -4568,6 +4750,8 @@ async function runTaggedImageJob(
       source: "message-tag",
     }, timing, userId))
     signal.throwIfAborted()
+    job.draftImage = undefined
+    job.finalImage = undefined
     job.imageId = record.imageId || asString(result.imageId)
     job.imageUrl = record.imageUrl || asString(result.imageUrl)
     if (!job.imageUrl && job.imageId) job.imageUrl = `/api/v1/image-gen/results/${encodeURIComponent(job.imageId)}`
@@ -4598,8 +4782,44 @@ async function runTaggedImageJob(
       },
     }, userId)
     const inserted = await finalizeTaggedImageJobWithRetry(job, userId)
+    let autoFinalized = false
+    if (inserted && job.output === "inline" && automation.autoFinalizeInline && !removedTaggedJobs.has(job.id)) {
+      try {
+        const connection = await connectionForTaggedProfile(
+          job.generationInput ? { input: job.generationInput, recordHints: {}, updatedAt: job.updatedAt } : profile,
+          userId,
+        )
+        const savedUpscale = await readStudioUpscaleSettings(connection.id, userId)
+        if (hasConfiguredStudioUpscale(savedUpscale)) {
+          const draftImage = { id: job.imageId, url: job.imageUrl }
+          const final = await upscaleOutput(job.imageId, connection, userId, job, undefined, savedUpscale)
+          const updated = {
+            ...job,
+            draftImage,
+            finalImage: { id: final.id, url: final.url },
+            imageId: final.id,
+            imageUrl: final.url,
+          }
+          if (await finalizeTaggedImageJob(updated, userId)) {
+            Object.assign(job, updated)
+            autoFinalized = true
+          } else if (!removedTaggedJobs.has(job.id)) {
+            const current = (await loadTaggedImageJobs(userId)).find(item => item.id === job.id)
+            if (current?.imageId === draftImage.id && current.inserted) {
+              const persisted = { ...current, draftImage, finalImage: { id: final.id, url: final.url } }
+              await upsertTaggedImageJob(persisted, userId)
+              sendTaggedJobState(persisted, userId)
+            }
+          }
+        }
+      } catch (error) {
+        spindle.log.warn(`Could not auto-finalize inline image ${job.id}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
     if (inserted && automation.completionToast && typeof spindle.toast?.success === "function") {
-      spindle.toast.success(`Swarm Studio attached ${job.alt || "an illustration"}.`)
+      spindle.toast.success(autoFinalized
+        ? `Swarm Studio finalized and attached ${job.alt || "an illustration"}.`
+        : `Swarm Studio attached ${job.alt || "an illustration"}.`)
     }
   } catch (error) {
     job.status = isAbortError(error) ? "cancelled" : "failed"
@@ -4619,13 +4839,29 @@ async function runTaggedImageJob(
 }
 
 async function requestTaggedImageGeneration(payload: any, userId?: string): Promise<TaggedImageJob> {
+  const attrs = asRecord(payload?.attrs)
+  const key = [userId || "scoped", asString(payload?.chatId), asString(payload?.messageId),
+    asString(attrs.slot), stableTextHash(asString(payload?.fullMatch))].join("\0")
+  const previous = taggedImageRequestQueues.get(key)
+  const queued = previous
+    ? previous.catch(() => undefined).then(() => requestTaggedImageGenerationUnlocked(payload, userId))
+    : requestTaggedImageGenerationUnlocked(payload, userId)
+  taggedImageRequestQueues.set(key, queued)
+  try {
+    return await queued
+  } finally {
+    if (taggedImageRequestQueues.get(key) === queued) taggedImageRequestQueues.delete(key)
+  }
+}
+
+async function requestTaggedImageGenerationUnlocked(payload: any, userId?: string): Promise<TaggedImageJob> {
   if (!spindle.permissions.has("image_gen")) throw new Error("Grant Image Generation permission to use Swarm image tags.")
   if (!spindle.permissions.has("chat_mutation")) throw new Error("Grant Chat Mutation permission to attach generated images to messages.")
   const chatId = asString(payload?.chatId).trim()
   const messageId = asString(payload?.messageId).trim()
   const fullMatch = asString(payload?.fullMatch).slice(0, 24_000)
   const attrs = asRecord(payload?.attrs)
-  const scenePrompt = asString(payload?.content).trim().slice(0, 12_000)
+  const scenePrompt = normalizePromptSpaces(payload?.content).trim().slice(0, 12_000)
   const strictRequest = asString(attrs.request).toLowerCase() === "generate"
   const compatibleLegacyRequest = Boolean(asString(attrs.slot) && (asString(attrs.aspect) || asString(attrs.alt)))
   if (!strictRequest && !compatibleLegacyRequest) {
@@ -4713,6 +4949,466 @@ async function requestTaggedImageGeneration(payload: any, userId?: string): Prom
   }
 }
 
+// Native model super-resolution and opt-in custom Comfy workflows share the existing
+// Lumiverse generation stream. Inline chat finalization can reuse the remembered
+// AI recipe, while manual fallback behavior remains available for older installs.
+interface StudioUpscaleSettings {
+  mode: "model" | "saved" | "custom"
+  factor: 2 | 3 | 4
+  model: string
+  workflow: string
+  imageParam: string
+  graph: string
+}
+
+function normalizeStudioUpscaleSettings(value: unknown): StudioUpscaleSettings {
+  const raw = asRecord(value)
+  const factor = Number(raw.factor)
+  return {
+    mode: raw.mode === "saved" || raw.mode === "custom" ? raw.mode : "model",
+    factor: factor === 3 || factor === 4 ? factor : 2,
+    model: asString(raw.model).trim().slice(0, 500),
+    workflow: asString(raw.workflow).trim().slice(0, 500),
+    imageParam: asString(raw.imageParam).trim().slice(0, 200),
+    graph: asString(raw.graph).trim().slice(0, 128_000),
+  }
+}
+
+async function readStudioUpscaleSettings(connectionId: string, userId?: string): Promise<StudioUpscaleSettings> {
+  const saved = asRecord(await spindle.userStorage.getJson(UPSCALE_SETTINGS_FILE, { fallback: {}, userId }))
+  return normalizeStudioUpscaleSettings(saved[connectionId])
+}
+
+async function saveStudioUpscaleSettings(connectionId: string, settings: StudioUpscaleSettings, userId?: string): Promise<void> {
+  const saved = asRecord(await spindle.userStorage.getJson(UPSCALE_SETTINGS_FILE, { fallback: {}, userId }))
+  saved[connectionId] = settings
+  await spindle.userStorage.setJson(UPSCALE_SETTINGS_FILE, saved, { userId })
+}
+
+function parseUpscaleModelOptions(paramsData: JsonObject): string[] {
+  const list = Array.isArray(paramsData.list) ? paramsData.list.map(asRecord) : []
+  const candidates = list.filter(item => /^(refinerupscalemethod|upscalemethod)$/.test(asString(item.id).toLowerCase()))
+  const names = candidates.flatMap(item => Array.isArray(item.values) ? item.values : [])
+    .map(item => asString(item).split("///")[0].trim())
+    .filter(value => value.startsWith("model-") && value.length > 6)
+    .map(value => value.slice(6))
+  return [...new Set(names)].sort((a, b) => a.localeCompare(b)).slice(0, 500)
+}
+
+function hasConfiguredStudioUpscale(settings: StudioUpscaleSettings): boolean {
+  return settings.mode === "model" ? Boolean(settings.model)
+    : settings.mode === "saved" ? Boolean(settings.workflow && settings.imageParam)
+    : Boolean(settings.graph)
+}
+
+function recommendUpscaleModel(models: string[]): string {
+  // This is a suggested *installed* model, not an implicit download or model fallback.
+  return [...models].sort((a, b) => {
+    const score = (s: string) => /anime.?6b|anime.?sharp/i.test(s) ? 0
+      : /ultrasharp|ultra.sharp/i.test(s) ? 1
+      : /realesrgan.*anime|anime/i.test(s) ? 2
+      : /nmkd|realesrgan|esrgan/i.test(s) ? 3 : 4
+    return score(a) - score(b) || a.localeCompare(b)
+  })[0] || ""
+}
+
+async function loadStudioUpscaleOptions(connection: SwarmConnection, userId?: string): Promise<JsonObject> {
+  if (!spindle.permissions.has("cors_proxy")) throw new Error("Grant CORS Proxy permission to discover SwarmUI upscalers and workflows.")
+  const token = await getMetadataToken(connection.id, userId)
+  const sessionId = await getSession(connection, token, userId)
+  const [params, workflows] = await Promise.allSettled([
+    corsJson(`${normalizeBaseUrl(connection.api_url)}/API/ListT2IParams`, { session_id: sessionId }, token, "upscaler model discovery"),
+    listSwarmWorkflows(connection, token, sessionId),
+  ])
+  const models = params.status === "fulfilled" ? parseUpscaleModelOptions(params.value) : []
+  const saved = await readStudioUpscaleSettings(connection.id, userId)
+  return {
+    models,
+    recommended: recommendUpscaleModel(models),
+    workflows: workflows.status === "fulfilled" ? workflows.value : [],
+    modelError: params.status === "rejected" ? String(params.reason) : "",
+    workflowError: workflows.status === "rejected" ? String(workflows.reason) : "",
+    settings: saved,
+  }
+}
+
+function parseStudioUpscaleGraph(raw: string, allowNativeImage = false): JsonObject {
+  if (!raw.trim() || raw.length > 128_000) throw new Error("Paste an API-format ComfyUI graph (up to 128 KB).")
+  let candidate: unknown
+  try { candidate = JSON.parse(raw) } catch { throw new Error("The Comfy workflow is not valid JSON.") }
+  let graph = asRecord(candidate)
+  // Some Comfy exports wrap the API node dictionary in a prompt field.
+  if (graph.prompt && typeof graph.prompt === "object") graph = asRecord(graph.prompt)
+  const entries = Object.entries(graph)
+  if (!entries.length || entries.length > 150 || entries.some(([id, value]) =>
+    !/^\d{1,8}$/.test(id) || !asString(asRecord(value).class_type).trim() ||
+    !asRecord(value).inputs || typeof asRecord(value).inputs !== "object" || Array.isArray(asRecord(value).inputs))) {
+    throw new Error("Use a ComfyUI API-format graph of up to 150 numbered nodes (not the UI-layout export).")
+  }
+  const sourceNodes = entries.filter(([, node]) => {
+    const type = asString(asRecord(node).class_type)
+    return type === "SwarmLoadImageB64" || (allowNativeImage && type === "LoadImage")
+  })
+  const outputNodes = entries.filter(([, node]) => asString(asRecord(node).class_type) === "SaveImage")
+  if (sourceNodes.length !== 1 || outputNodes.length !== 1) {
+    throw new Error(allowNativeImage ? "Custom background graphs require one LoadImage or SwarmLoadImageB64 input and one SaveImage output."
+      : "Custom upscale graphs require exactly one SwarmLoadImageB64 input and one SaveImage output.")
+  }
+  // Only one source can own the injected image. No guessing across multiple nodes.
+  const [sourceId] = sourceNodes[0]
+  const [outputId] = outputNodes[0]
+  const result = JSON.parse(JSON.stringify(graph)) as JsonObject
+  const source = asRecord(result[sourceId])
+  if (source.class_type === "LoadImage") {
+    source.class_type = "SwarmLoadImageB64"
+    source.inputs = {}
+  }
+  asRecord(source.inputs).image_base64 = "${init_image}"
+  asRecord(asRecord(result[outputId]).inputs).filename_prefix = "${prefix}"
+  return result
+}
+
+async function buildStudioUpscaleWorkflow(settings: StudioUpscaleSettings, connection: SwarmConnection,
+  inputWidth: number, inputHeight: number, imageDataUrl: string, userId?: string, backgroundRemoval = false): Promise<{ override: JsonObject; workflow: string }> {
+  if (settings.mode === "custom") {
+    const graph = parseStudioUpscaleGraph(settings.graph, backgroundRemoval)
+    return { override: { comfyworkflowraw: JSON.stringify(graph) }, workflow: "Custom Comfy upscale" }
+  }
+  if (!spindle.permissions.has("cors_proxy")) throw new Error("Grant CORS Proxy permission to verify installed upscaler models and saved workflows.")
+  const token = await getMetadataToken(connection.id, userId)
+  const sessionId = await getSession(connection, token, userId)
+  if (settings.mode === "saved") {
+    const details = await loadSwarmWorkflow(connection, token, userId, settings.workflow)
+    const imageParams = details.parameters.filter(param => param.type === "image" || param.viewType === "image")
+    const imageParam = imageParams.find(param => param.id === settings.imageParam)
+    if (!imageParam) throw new Error("Choose a saved workflow image input exposed by SwarmUI; the workflow must accept the source image.")
+    return {
+      override: { comfyuicustomworkflow: details.name, [imageParam.id]: imageDataUrl },
+      workflow: `Saved Comfy upscale · ${details.name}`,
+    }
+  }
+  const options = await corsJson(`${normalizeBaseUrl(connection.api_url)}/API/ListT2IParams`,
+    { session_id: sessionId }, token, "upscaler model validation")
+  const installed = parseUpscaleModelOptions(options)
+  if (!installed.length) throw new Error("No AI upscaler model is installed. Put an ESRGAN/UltraSharp model in SwarmUI's ComfyUI upscale_models folder, refresh, then choose it.")
+  if (!settings.model || !installed.includes(settings.model)) {
+    throw new Error("Selected upscale model is not installed on this SwarmUI backend. Refresh the model list and select an installed model.")
+  }
+  const targetWidth = inputWidth * settings.factor
+  const targetHeight = inputHeight * settings.factor
+  const graph = {
+    "1": { class_type: "SwarmLoadImageB64", inputs: { image_base64: "${init_image}" } },
+    "2": { class_type: "UpscaleModelLoader", inputs: { model_name: settings.model } },
+    "3": { class_type: "ImageUpscaleWithModel", inputs: { upscale_model: ["2", 0], image: ["1", 0] } },
+    // A 4x ESRGAN model can provide more texture while saving an exact 2x result.
+    "4": { class_type: "ImageScale", inputs: { image: ["3", 0], upscale_method: "lanczos", width: targetWidth, height: targetHeight, crop: "disabled" } },
+    "5": { class_type: "SaveImage", inputs: { images: ["4", 0], filename_prefix: "${prefix}" } },
+  }
+  return { override: { comfyworkflowraw: JSON.stringify(graph) }, workflow: `${settings.factor}× AI · ${settings.model}` }
+}
+
+async function generateFolderExpression(payload: JsonObject, controller: AbortController, onProgress: (data: ImageGenerationProgress) => void, userId?: string) {
+  const { signal } = controller
+  if (!spindle.permissions.has("image_gen") || !spindle.permissions.has("images")) {
+    throw new Error("Grant Image Generation and Images permissions to render expressions.")
+  }
+  const folder = (await awaitGenerationTask(signal, () => loadOutputFolders(userId))).find(item => item.id === payload.folderId)
+  if (!folder?.binding) throw new Error("Choose a character folder.")
+  const connection = await awaitGenerationTask(signal, () => getConnection(asString(payload.connectionId), userId))
+  const binding = folder.binding
+  const look = binding.looks.find(item => item.id === binding.activeLookId)
+  const generation = cleanExpressionGeneration(payload.generation)
+  const recipe = resolveGenerationConfig({ provider: connection.default_parameters, characterBase: binding, characterLook: look, job: generation.recipe })
+  const model = recipe.checkpoint || asString(payload.model) || connection.model
+  const direction = asString(payload.direction).trim().slice(0, EXPRESSION_DIRECTION_LIMIT)
+  if (!direction) throw new Error("Enter expression direction before rendering.")
+  const family = asString(payload.family)
+  const referenceId = asString(payload.referenceId)
+  if (referenceId && !folder.imageIds.includes(referenceId)) throw new Error("Choose a reference from this character folder.")
+  const visualSource = referenceId ? { id: referenceId, url: "" } :
+    { id: look?.referenceImageId || "", url: look?.referenceImageUrl || binding.animaReferenceUrl || "" }
+  const stackPresets = await awaitGenerationTask(signal, () => loadStackPresets(userId))
+  const stack = new Map<string, StackPresetItem>()
+  for (const layer of [binding, look]) {
+    if (!layer) continue
+    const items = stackPresets.find(item => item.id === layer.stackPresetId)?.items || layer.stackSnapshot
+    for (const item of items) stack.set(item.name, item)
+  }
+  const enabled = [...stack.values()].filter(item => item.enabled !== false)
+  const input: JsonObject = {
+    connection_id: connection.id,
+    model,
+    prompt: [generation.prefix, binding.positivePrompt, look?.outfitPrompt, direction].map(value => value?.trim()).filter(Boolean).join(", "),
+    negativePrompt: [generation.negative, binding.negativePrompt, look?.negativePrompt].map(value => value?.trim()).filter(Boolean).join(", "),
+    parameters: { ...EXPRESSION_DEFAULT_RECIPE, ...recipeParameters(recipe), seed: -1,
+      loras: enabled.map(item => item.name), loraWeights: enabled.map(item => item.weight) },
+  }
+  let renderInput = input
+  if (family === "anima" && (visualSource.id || visualSource.url)) {
+    renderInput = await awaitGenerationTask(signal, () => withAnimaReference(input, visualSource, userId))
+  } else if (family === "illustrious" && (visualSource.id || visualSource.url)) {
+    const reference = await awaitGenerationTask(signal, () => resolveVisualReferenceImage(visualSource.id, visualSource.url, userId))
+    if (!reference) throw new Error("Could not read the expression reference.")
+    const token = await awaitGenerationTask(signal, () => getMetadataToken(connection.id, userId))
+    const sessionId = await awaitGenerationTask(signal, () => getSession(connection, token, userId))
+    const metadata = await awaitGenerationTask(signal, () => corsJson(`${normalizeBaseUrl(connection.api_url)}/API/ListT2IParams`,
+      { session_id: sessionId }, token, "IPAdapter discovery"))
+    const parameter = (Array.isArray(metadata.list) ? metadata.list : []).map(asRecord).find(item => item.id === "useipadapter")
+    const advertised = Array.isArray(parameter?.values) ? parameter.values : []
+    const adapter = advertised.map(value => typeof value === "string" ? value : asString(asRecord(value).value || asRecord(value).name))
+      .find(value => /^PLUS \(/i.test(value))
+    if (!adapter) throw new Error("Install SDXL IPAdapter PLUS and its matching CLIP Vision weights in SwarmUI, or select Prompt only.")
+    renderInput = { ...input, parameters: { ...asRecord(input.parameters),
+      rawRequestOverride: JSON.stringify({ promptimages: `data:${reference.mimeType};base64,${reference.data}`,
+        useipadapter: adapter, ipadapterweight: .65, ipadapterend: .8, ipadapterweighttype: "prompt is more important" }) } }
+  }
+  const started = Date.now()
+  const result = await generateWithProgress({ ...renderInput, userId, owner_character_id: binding.characterId },
+    controller, await backendUuid(), userId, onProgress)
+  const id = asString(result.imageId)
+  if (!id) throw new Error("Lumiverse did not save the expression.")
+  const url = asString(result.imageUrl) || `/api/v1/image-gen/results/${encodeURIComponent(id)}`
+  await saveGenerationRecord({ ...result, imageUrl: url }, input, { workflow: "Character expression" }, {
+    totalMs: Date.now() - started, prep: "", generation: "", source: "measured",
+    resolvedPrompt: "", resolvedNegativePrompt: "", presets: [], swarmPath: "", swarmPathVerified: false, resolvedSeed: null,
+  }, userId)
+  await moveOutputToFolder(id, folder.id, userId)
+  return { id, url }
+}
+
+async function upscaleOutput(imageId: string, connection: SwarmConnection, userId?: string, job?: TaggedImageJob,
+  controller = new AbortController(), requestedSettings?: unknown, operation?: "remove-background",
+  onProgress?: (data: ImageGenerationProgress) => void) {
+  const { signal } = controller
+  if (!spindle.permissions.has("images") || !spindle.permissions.has("image_gen")) {
+    throw new Error("Grant Images and Image Generation permission to upscale.")
+  }
+  const image = await awaitGenerationTask(signal, () => spindle.images.get(imageId, { onlyOwned: true, specificity: "full", userId }))
+  const mimeType = asString(image?.mime_type)
+  if (!image || !["image/png", "image/jpeg", "image/webp"].includes(mimeType)) {
+    throw new Error("Choose a saved PNG, JPEG, or WebP output you own.")
+  }
+  const width = Number(image.width) || 0
+  const height = Number(image.height) || 0
+  if (width < 1 || height < 1 || Math.max(width, height) > 4096) {
+    throw new Error("Choose a source image with valid dimensions, no larger than 4096px on either side.")
+  }
+  const settings = requestedSettings === undefined ? null : normalizeStudioUpscaleSettings(requestedSettings)
+  if (settings && !operation && (width * settings.factor > 8192 || height * settings.factor > 8192 ||
+    width * height * settings.factor * settings.factor > 36_000_000)) {
+    throw new Error("That upscale would exceed the 8192px / 36-megapixel output safety limit. Try a lower factor or smaller source.")
+  }
+  if (typeof spindle.images.readBinary !== "function") throw new Error("This Lumiverse version does not expose full-resolution image reads.")
+  const pixels: Uint8Array = await awaitGenerationTask(signal, () => spindle.images.readBinary(imageId, userId))
+  controller.signal.throwIfAborted()
+  let binary = ""
+  for (let offset = 0; offset < pixels.length; offset += 8192) binary += String.fromCharCode(...pixels.subarray(offset, offset + 8192))
+  if (!binary) throw new Error("The source image is empty.")
+  const imageDataUrl = `data:${mimeType};base64,${btoa(binary)}`
+  const legacyGraph = {
+    "1": { class_type: "SwarmLoadImageB64", inputs: { image_base64: "${init_image}" } },
+    "2": { class_type: "ImageScaleBy", inputs: { image: ["1", 0], upscale_method: "lanczos", scale_by: 2 } },
+    "3": { class_type: "SaveImage", inputs: { images: ["2", 0], filename_prefix: "${prefix}" } },
+  }
+  const recipe = settings
+    ? await awaitGenerationTask(signal, () => buildStudioUpscaleWorkflow(settings, connection, width, height, imageDataUrl, userId, operation === "remove-background"))
+    : { override: { comfyworkflowraw: JSON.stringify(legacyGraph) }, workflow: "2× Lanczos upscale" }
+  const original = (await awaitGenerationTask(signal, () => loadGenerationRecords(userId))).find(record => record.imageId === imageId)
+  const input = {
+    connection_id: connection.id,
+    model: original?.model || connection.model,
+    prompt: original?.prompt || job?.prompt || "",
+    negativePrompt: original?.negativePrompt || job?.negativePrompt || "",
+    parameters: { width, height },
+  }
+  const started = Date.now()
+  const result = await generateWithProgress({
+    ...input, userId,
+    owner_chat_id: job?.chatId || image.owner_chat_id || undefined,
+    owner_character_id: job?.ownerCharacterId || image.owner_character_id || undefined,
+    parameters: {
+      ...input.parameters,
+      resolvedSourceImages: undefined,
+      referenceImages: [{ data: btoa(binary), mimeType }],
+      rawRequestOverride: JSON.stringify(recipe.override),
+    },
+  }, controller, await backendUuid(), userId, onProgress)
+  const id = asString(result?.imageId)
+  if (!id) throw new Error("Lumiverse did not return a saved upscale.")
+  const url = asString(result.imageUrl) || `/api/v1/image-gen/results/${encodeURIComponent(id)}`
+  const factor = settings?.factor || 2
+  const derivative = await saveGenerationRecord({ ...result, imageUrl: url }, {
+    ...input,
+    // Keep an auditable recipe, not an enormous custom graph or embedded image.
+    parameters: {
+      // Custom and saved workflows own their output dimensions. Never record a
+      // speculative 2× width/height when the graph can produce any size.
+      ...(settings?.mode === "saved" || settings?.mode === "custom"
+        ? {} : { width: width * factor, height: height * factor, upscaleFactor: factor }),
+      sourceWidth: width, sourceHeight: height,
+      upscaleMode: settings?.mode || "legacy",
+      upscaleModel: settings?.mode === "model" ? settings.model : "",
+      upscaleWorkflow: settings?.mode === "saved" ? settings.workflow : "",
+    },
+  }, {
+    workflow: operation === "remove-background" ? "Expression background removal" : recipe.workflow,
+    initImageId: imageId,
+    initImageLabel: asString(image.original_filename),
+  }, {
+    totalMs: Date.now() - started, prep: "", generation: "", source: "measured",
+    resolvedPrompt: original?.resolvedPrompt || "", resolvedNegativePrompt: original?.resolvedNegativePrompt || "",
+    presets: [], swarmPath: "", swarmPathVerified: false, resolvedSeed: null,
+  }, userId)
+  try {
+    const folder = (await loadOutputFolders(userId)).find(item => item.id !== FAVORITES_FOLDER_ID && item.imageIds.includes(imageId))
+    if (folder) await moveOutputToFolder(id, folder.id, userId)
+  } catch (error) {
+    spindle.log.warn(`Could not file the saved upscale: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  return { id, url, preview: asString(result.imageDataUrl), record: derivative }
+}
+
+const STUDIO_BIREFNET_MODEL = "birefnet.safetensors"
+
+function builtInBackgroundGraph(): JsonObject {
+  return {
+    "1": { class_type: "SwarmLoadImageB64", inputs: { image_base64: "${init_image}" } },
+    "2": { class_type: "LoadBackgroundRemovalModel", inputs: { bg_removal_name: STUDIO_BIREFNET_MODEL } },
+    "3": { class_type: "RemoveBackground", inputs: { image: ["1", 0], bg_removal_model: ["2", 0] } },
+    "4": { class_type: "InvertMask", inputs: { mask: ["3", 0] } },
+    "5": { class_type: "JoinImageWithAlpha", inputs: { image: ["1", 0], alpha: ["4", 0] } },
+    "6": { class_type: "SaveImage", inputs: { images: ["5", 0], filename_prefix: "${prefix}" } },
+  }
+}
+
+async function inspectStudioBiRefNet(connection: SwarmConnection, userId?: string): Promise<string> {
+  if (!spindle.permissions.has("cors_proxy")) return "unknown"
+  const token = await getMetadataToken(connection.id, userId)
+  const response = await spindle.cors(
+    normalizeBaseUrl(connection.api_url) + "/ComfyBackendDirect/object_info/LoadBackgroundRemovalModel",
+    { method: "GET", headers: cookieHeaders(token) },
+  )
+  if (Number(response?.status) !== 200) return "unknown"
+  const data = parseResponseBody(response, "background model discovery")
+  if (!data.LoadBackgroundRemovalModel) return "unsupported"
+  const field = asRecord(asRecord(asRecord(data.LoadBackgroundRemovalModel).input).required).bg_removal_name
+  if (!Array.isArray(field)) return "unknown"
+  const choices = Array.isArray(field[0]) ? field[0] : asRecord(field[1]).options
+  if (!Array.isArray(choices)) return "unknown"
+  return choices.includes(STUDIO_BIREFNET_MODEL) ? "installed" : "missing"
+}
+
+async function processFolderExpression(payload: JsonObject, controller: AbortController, onProgress: (data: ImageGenerationProgress) => void, userId?: string) {
+  const { signal } = controller
+  const folder = (await awaitGenerationTask(signal, () => loadOutputFolders(userId))).find(item => item.id === payload.folderId)
+  const imageId = asString(payload.imageId)
+  if (!folder?.binding || !folder.imageIds.includes(imageId)) throw new Error("Choose an image from this character folder.")
+  const connection = await awaitGenerationTask(signal, () => getConnection(asString(payload.connectionId), userId))
+  const remove = payload.action === "remove-background"
+  const savedBackground = payload.backgroundMode === "saved" || (payload.backgroundMode === undefined && payload.workflow)
+  const settings = remove ? normalizeStudioUpscaleSettings(savedBackground
+    ? { mode: "saved", workflow: payload.workflow, imageParam: payload.imageParam }
+    : { mode: "custom", graph: payload.backgroundMode === "custom" ? payload.graph : JSON.stringify(builtInBackgroundGraph()) })
+    : await awaitGenerationTask(signal, () => readStudioUpscaleSettings(connection.id, userId))
+  if (!hasConfiguredStudioUpscale(settings)) {
+    throw new Error(!remove ? "Configure AI Upscale for this connection before enhancing expressions."
+      : savedBackground ? "Choose a saved background-removal workflow and its image input." : "Paste a background-removal API graph.")
+  }
+  const factor = payload.factor
+  if (!remove && settings.mode === "model" && (factor === 2 || factor === 3 || factor === 4)) settings.factor = factor
+  const result = await upscaleOutput(imageId, connection, userId, undefined, controller, settings, remove ? "remove-background" : undefined, onProgress)
+  return { id: result.id, url: result.url }
+}
+
+interface InlineVariantSelectionOptions {
+  allowActiveJob?: boolean
+  relaxExpectedImageCheck?: boolean
+  replacementId?: string
+}
+
+async function readAttachedInlineJob(jobId: string, expectedImageId: string, userId?: string): Promise<TaggedImageJob> {
+  const job = (await loadTaggedImageJobs(userId)).find(item => item.id === jobId)
+  if (!job || job.status !== "ready" || !job.inserted || !expectedImageId || job.imageId !== expectedImageId) {
+    throw new Error("Choose the currently attached Studio illustration.")
+  }
+  return job
+}
+
+async function readOwnedInlineOutput(imageId: string, userId?: string): Promise<JsonObject> {
+  if (!spindle.permissions.has("images")) throw new Error("Grant Images permission to use saved outputs.")
+  const image = imageId && await spindle.images.get(imageId, { onlyOwned: true, specificity: "full", userId })
+  if (!image || !asString(image.url).trim()) throw new Error("That Lumiverse-owned output could not be found.")
+  return asRecord(image)
+}
+
+async function selectInlineVariant(
+  jobId: string,
+  expectedImageId: string,
+  action: string,
+  userId?: string,
+  options: InlineVariantSelectionOptions = {},
+): Promise<string> {
+  const key = generationKey(userId, jobId)
+  if (upscalingImages.has(key) || (!options.allowActiveJob && runningTaggedJobs.has(jobId))) {
+    throw new Error("This illustration already has a render in progress.")
+  }
+  upscalingImages.add(key)
+  try {
+    if (!spindle.permissions.has("chat_mutation")) throw new Error("Grant Chat Mutation permission to replace illustrations.")
+    const job = await readAttachedInlineJob(jobId, expectedImageId, userId)
+    if (action === "replace") {
+      const id = asString(options.replacementId).trim()
+      if (id === job.imageId) throw new Error("Choose a different image to replace this illustration.")
+      const image = await readOwnedInlineOutput(id, userId)
+      const updated = { ...job, imageId: id, imageUrl: asString(image.url).trim(),
+        draftImage: undefined, finalImage: undefined }
+      if (!await finalizeTaggedImageJob(updated, userId, expectedImageId)) {
+        throw new Error("The original is no longer selected, or the image URL is ambiguous in this message.")
+      }
+      return "Chat image replaced."
+    }
+    if (job.output !== "inline") throw new Error("Choose the currently attached Studio illustration.")
+    let next = action === "draft" ? job.draftImage : job.finalImage
+    if (action === "finalize" && !next) {
+      const controller = new AbortController()
+      inlineUpscaleControllers.set(key, controller)
+      const connection = await connectionForTaggedProfile(
+        job.generationInput ? { input: job.generationInput, recordHints: {}, updatedAt: job.updatedAt } : await loadStudioGenerationProfile(userId), userId,
+      )
+      // Inline finalization inherits the user's configured AI recipe; old installations
+      // retain their existing Lanczos finalizer until an AI workflow is selected.
+      const savedUpscale = await readStudioUpscaleSettings(connection.id, userId)
+      const configuredUpscale = hasConfiguredStudioUpscale(savedUpscale)
+      const final = await upscaleOutput(job.imageId, connection, userId, job, controller,
+        configuredUpscale ? savedUpscale : undefined)
+      controller.signal.throwIfAborted()
+      next = { id: final.id, url: final.url }
+      job.draftImage = { id: job.imageId, url: job.imageUrl }
+      job.finalImage = next
+    }
+    if (!next || next.id === job.imageId) throw new Error("That illustration version is already selected or unavailable.")
+    const updated = { ...job, imageId: next.id, imageUrl: next.url }
+    if (await finalizeTaggedImageJob(updated, userId, options.relaxExpectedImageCheck ? undefined : expectedImageId)) {
+      return action === "draft" ? "Draft restored." : "Final image is now in chat."
+    }
+    if (action === "finalize" && !removedTaggedJobs.has(job.id)) {
+      const current = (await loadTaggedImageJobs(userId)).find(item => item.id === job.id)
+      if (current?.imageId === expectedImageId && current.inserted) {
+        await upsertTaggedImageJob({ ...current, draftImage: job.draftImage, finalImage: job.finalImage }, userId)
+        sendTaggedJobState({ ...current, draftImage: job.draftImage, finalImage: job.finalImage }, userId)
+      }
+      return "Final image saved to the Output Library. The chat image stayed as it was."
+    }
+    throw new Error("The selected chat image changed before the version could be switched.")
+  } catch (error) {
+    if (inlineUpscaleControllers.get(key)?.signal.aborted) return "Stopped waiting for the upscale. The draft stayed in chat."
+    throw error
+  } finally {
+    inlineUpscaleControllers.delete(key)
+    upscalingImages.delete(key)
+  }
+}
+
 async function retryTaggedImageGeneration(
   jobId: string,
   retryMode: string,
@@ -4721,7 +5417,7 @@ async function retryTaggedImageGeneration(
 ): Promise<TaggedImageJob> {
   const job = (await loadTaggedImageJobs(userId)).find((candidate) => candidate.id === jobId)
   if (!job) throw new Error("That inline illustration job is no longer available.")
-  if (runningTaggedJobs.has(job.id) || job.status === "generating") {
+  if (runningTaggedJobs.has(job.id) || upscalingImages.has(generationKey(userId, job.id)) || job.status === "generating") {
     sendTaggedJobState(job, userId)
     return job
   }
@@ -5302,6 +5998,8 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           positivePrompt: asString(payload?.positivePrompt),
           negativePrompt: asString(payload?.negativePrompt),
           checkpoint: asString(payload?.checkpoint),
+          animaReference: payload?.animaReference,
+          animaReferenceUrl: payload?.animaReferenceUrl,
           sourcePresetId: asString(payload?.sourcePresetId),
           stackPresetId: stackPreset?.id || "",
           stackSnapshot: stackPreset?.items || cleanStackPresetItems(payload?.stackSnapshot),
@@ -5346,6 +6044,112 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
             })
           }
         }
+        return
+      }
+      case "load_upscale_workflow": {
+        const connection = await getConnection(asString(payload?.connectionId), userId)
+        const token = await getMetadataToken(connection.id, userId)
+        const detail = await loadSwarmWorkflow(connection, token, userId, asString(payload?.name))
+        spindle.sendToFrontend({ type: "upscale_workflow_result", requestId, data: detail }, userId)
+        return
+      }
+      case "load_upscale_options": {
+        const connection = await getConnection(asString(payload?.connectionId), userId)
+        spindle.sendToFrontend({ type: "upscale_options_result", requestId,
+          data: await loadStudioUpscaleOptions(connection, userId) }, userId)
+        return
+      }
+      case "upscale_output": {
+        const id = asString(payload?.imageId)
+        const key = generationKey(userId, `upscale:${id}`)
+        if (!id || upscalingImages.has(key)) throw new Error("Choose a saved output that is not already upscaling.")
+        upscalingImages.add(key)
+        try {
+          const connection = await getConnection(asString(payload?.connectionId), userId)
+          const settings = payload?.settings === undefined ? null : normalizeStudioUpscaleSettings(payload.settings)
+          if (!settings) throw new Error("Choose an AI upscaler or custom workflow before starting.")
+          const result = await upscaleOutput(id, connection, userId, undefined, new AbortController(), settings)
+          if (payload?.remember !== false) await saveStudioUpscaleSettings(connection.id, settings, userId)
+          const chat = spindle.permissions.has("chats") ? await spindle.chats.getActive(userId) : null
+          spindle.sendToFrontend({
+            type: "upscale_output_result", requestId,
+            data: { ...result, sourceId: id, outputFolders: await loadOutputFolders(userId), ...(await listOutputs(userId, chat)) },
+          }, userId)
+        } finally { upscalingImages.delete(key) }
+        return
+      }
+      case "cancel_inline_upscale": {
+        inlineUpscaleControllers.get(generationKey(userId, asString(payload?.jobId)))?.abort()
+        return
+      }
+      case "load_expression_set": {
+        const saved = await spindle.userStorage.getJson("expression-set.json", { fallback: null, userId })
+        spindle.sendToFrontend({ type: "expression_set_result", requestId, data: cleanStudioExpressionSet(saved) }, userId)
+        return
+      }
+      case "save_expression_set": {
+        const settings = cleanStudioExpressionSet(payload.settings)
+        await spindle.userStorage.setJson("expression-set.json", settings, { userId })
+        spindle.sendToFrontend({ type: "expression_set_result", requestId }, userId)
+        return
+      }
+      case "load_expression_enhance_options": {
+        const connection = await getConnection(asString(payload.connectionId), userId)
+        const settings = await readStudioUpscaleSettings(connection.id, userId)
+        const mode = hasConfiguredStudioUpscale(settings) ? settings.mode : ""
+        spindle.sendToFrontend({ type: "expression_enhance_options_result", requestId, data: { mode, factor: settings.factor } }, userId)
+        return
+      }
+      case "check_expression_background_model": {
+        const connection = await getConnection(asString(payload.connectionId), userId)
+        const status = await inspectStudioBiRefNet(connection, userId)
+        spindle.sendToFrontend({ type: "expression_background_model_result", requestId, data: { status } }, userId)
+        return
+      }
+      case "stop_folder_expression": {
+        if (!requestId) return
+        const key = generationKey(userId, "expression:" + requestId)
+        rememberStoppedGeneration(key)
+        folderExpressionControllers.get(key)?.abort()
+        return
+      }
+      case "render_folder_expression":
+      case "process_folder_expression": {
+        const key = generationKey(userId, "expression:" + requestId)
+        if (folderExpressionControllers.has(key)) return
+        const controller = new AbortController()
+        folderExpressionControllers.set(key, controller)
+        if (stoppedGenerationKeys.has(key)) controller.abort()
+        const progress = (data: ImageGenerationProgress) => spindle.sendToFrontend({ type: "folder_expression_progress", requestId, data }, userId)
+        try {
+          const execute = type === "render_folder_expression" ? generateFolderExpression : processFolderExpression
+          const result = await execute(asRecord(payload), controller, progress, userId)
+          spindle.sendToFrontend({ type: "folder_expression_result", requestId, data: result }, userId)
+        } catch (error) {
+          if (!controller.signal.aborted) throw error
+          spindle.sendToFrontend({ type: "folder_expression_stopped", requestId }, userId)
+        } finally {
+          folderExpressionControllers.delete(key)
+        }
+        return
+      }
+      case "load_inline_edit_source": {
+        const job = await readAttachedInlineJob(asString(payload?.jobId), asString(payload?.imageId), userId)
+        const image = await readOwnedInlineOutput(job.imageId, userId)
+        const record = (await loadGenerationRecords(userId)).find(item => item.imageId === job.imageId)
+        spindle.sendToFrontend({ type: "inline_edit_source_result", requestId, data: {
+          id: job.imageId, src: image.url, url: image.url, label: job.alt || image.original_filename || "Inline illustration",
+          details: record || null,
+        } }, userId)
+        return
+      }
+      case "select_inline_variant": {
+        const action = asString(payload?.action)
+        if (!["finalize", "draft", "final", "replace"].includes(action)) throw new Error("Choose a draft, final, or replacement illustration.")
+        const message = await selectInlineVariant(asString(payload?.jobId), asString(payload?.imageId), action, userId,
+          { replacementId: asString(payload?.replacementId) })
+        spindle.toast?.success?.(message)
+        spindle.sendToFrontend({ type: "inline_variant_result", requestId }, userId)
         return
       }
       case "retry_tagged_job": {
@@ -5604,8 +6408,18 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           throw new Error("Grant the Image Generation permission to generate.")
         }
         const input = asRecord(payload?.input)
+        const inpaint = payload?.inpaint === undefined ? null : asRecord(payload.inpaint)
+        if (inpaint) {
+          const parameters = { ...asRecord(input.parameters) }
+          delete parameters.rawRequestOverride
+          input.parameters = parameters
+        }
         const clientJobId = asString(input.clientJobId).trim() || await backendUuid()
         const controllerKey = generationKey(userId, clientJobId)
+        if (generationControllers.has(controllerKey) || completedGenerationKeys.has(controllerKey)) {
+          spindle.log.warn(`[Swarm Studio] Ignoring repeated generation delivery for job ${clientJobId}; no second SwarmUI request issued.`)
+          return
+        }
         const controller = new AbortController()
         const controllerEntry = {
           controller,
@@ -5614,7 +6428,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         generationControllers.set(controllerKey, controllerEntry)
         if (stoppedGenerationKeys.has(controllerKey)) controller.abort("Stopped before preparation")
         try {
-        await awaitGenerationTask(controller.signal, () => saveStudioGenerationProfile(
+        if (!inpaint) await awaitGenerationTask(controller.signal, () => saveStudioGenerationProfile(
           Object.keys(asRecord(payload?.profileInput)).length ? payload.profileInput : input,
           payload?.recordHints,
           userId,
@@ -5637,8 +6451,20 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         const startedAt = Date.now()
         let result: JsonObject
         try {
+          const characterId = asString(activeChat?.character_id)
+          const binding = !inpaint && characterId
+            ? (await awaitGenerationTask(controller.signal, () => loadOutputFolders(userId)))
+              .find((folder) => folder.binding?.characterId === characterId)?.binding
+            : null
+          const look = binding?.looks.find((item) => item.id === binding.activeLookId)
+          const source = characterAnimaReference(binding, look)
+          const renderInput = inpaint
+            ? await awaitGenerationTask(controller.signal, () => prepareInpaintInput(input, inpaint, userId))
+            : source
+            ? await awaitGenerationTask(controller.signal, () => withAnimaReference(input, source, userId))
+            : input
           result = await generateWithProgress({
-            ...input,
+            ...renderInput,
             clientJobId,
             owner_chat_id: activeChat?.id || undefined,
             owner_character_id: activeChat?.character_id || undefined,
@@ -5675,7 +6501,17 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         } catch (error) {
           spindle.log.warn(`Could not persist Swarm Studio generation details: ${error instanceof Error ? error.message : String(error)}`)
         }
-        if (record?.imageId && activeChat?.character_id) {
+        if (record?.imageId && inpaint) {
+          const sourceFolder = (await loadOutputFolders(userId)).find(folder =>
+            folder.id !== FAVORITES_FOLDER_ID && folder.imageIds.includes(asString(inpaint.sourceImageId)))
+          if (sourceFolder) {
+            try {
+              await moveOutputToFolder(record.imageId, sourceFolder.id, userId)
+            } catch (error) {
+              spindle.log.warn(`Could not file the saved inpaint variant: ${error instanceof Error ? error.message : String(error)}`)
+            }
+          }
+        } else if (record?.imageId && activeChat?.character_id) {
           const characterId = asString(activeChat.character_id)
           const visualFolder = (await loadOutputFolders(userId)).find((folder) =>
             folder.binding?.characterId === characterId && folder.binding.enabled,
@@ -5695,6 +6531,8 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
             ...outputPage,
           },
         }, userId)
+        completedGenerationKeys.add(controllerKey)
+        if (completedGenerationKeys.size > 256) completedGenerationKeys.delete(completedGenerationKeys.values().next().value!)
         const latestUrl = record?.imageUrl || asString(result.imageUrl)
         if (latestUrl) spindle.updateMacroValue("last_genned", latestUrl)
         // Completion notifications are intentionally opt-in. Older clients that
@@ -6050,6 +6888,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
       requestId,
       clientJobId: asString(payload?.clientJobId) || asString(asRecord(payload?.input).clientJobId),
     })
+    if (type === "select_inline_variant") spindle.toast?.error?.(error instanceof Error ? error.message : String(error))
     spindle.sendToFrontend({
       type: "studio_error",
       requestId,
@@ -6119,7 +6958,7 @@ if (typeof spindle.registerMacroInterceptor === "function") {
     Object.assign(parameters, recipeParameters(layer.generationRecipe))
     if (layer.checkpoint) input.model = layer.checkpoint
 
-    if (layer.referenceImageId || layer.referenceImageUrl) {
+    if (!layer.animaReference && (layer.referenceImageId || layer.referenceImageUrl)) {
       const reference = await resolveVisualReferenceImage(layer.referenceImageId, layer.referenceImageUrl, ctx.userId)
       if (!reference) throw new Error("The bound Studio reference image is unavailable.")
       parameters.referenceImages = [reference]
@@ -6153,6 +6992,7 @@ if (typeof spindle.registerMacroInterceptor === "function") {
     }
     input.parameters = parameters
 
+    const renderInput = layer.animaReference ? await withAnimaReference(input, layer.animaReference, ctx.userId) : input
     return encodeURIComponent(JSON.stringify({
       version: 1,
       chatId,
@@ -6161,7 +7001,7 @@ if (typeof spindle.registerMacroInterceptor === "function") {
       negativePrompt: asString(input.negativePrompt),
       model: asString(input.model),
       connectionId: connection.id,
-      parameters,
+      parameters: renderInput.parameters,
     }))
   }, 85)
 }

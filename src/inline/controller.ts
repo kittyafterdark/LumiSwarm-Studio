@@ -1,4 +1,6 @@
 interface TaggedImageJobView {
+  draftImageId?: string
+  finalImageId?: string
   swipeId?: number
   output?: "inline" | "url"
   id: string
@@ -19,6 +21,23 @@ interface TaggedImageJobView {
   updatedAt?: number
   error: string
 }
+
+interface StudioInlineImageTarget {
+  jobId: string
+  imageId: string
+  replace: (replacementId: string) => Promise<void>
+  onExit?: () => void
+}
+
+interface InlineImageMenuItem {
+  key: string
+  label: string
+  disabled?: boolean
+  danger?: boolean
+  type?: "divider"
+}
+
+const INLINE_IMAGE_ACTION_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 6l2.3-2.3M20 4v7h-7"/></svg>`
 
 function widgetEscape(value: unknown): string {
   return String(value ?? "")
@@ -57,6 +76,8 @@ class TaggedImageController {
   private readonly cleanups = new Map<string, () => void>()
   private readonly removedJobs = new Set<string>()
   private readonly jobRequests = new Map<string, string>()
+  private readonly variantRequests = new Map<string, string>()
+  private readonly replacementRequests = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: number }>()
   private readonly retiredAttempts = new Map<string, Set<string>>()
   private readonly widgetHtml = new Map<string, string>()
   private readonly selectedMessages = new Map<string, any>()
@@ -65,6 +86,11 @@ class TaggedImageController {
   private selectedChatId: string | null | undefined
   private recoveredObserver: MutationObserver | null = null
   private readonly recoveredJobs = new Set<string>()
+  private urlActionObserver: MutationObserver | null = null
+  private readonly urlActionJobs = new Set<string>()
+  private readonly urlActions = new Map<string, { image: HTMLImageElement; button: HTMLButtonElement; events: AbortController; resize?: ResizeObserver }>()
+  private urlActionFrame = 0
+  private closeImageMenu: (() => void) | null = null
   private destroyed = false
 
   private eventClosest<T extends HTMLElement>(
@@ -95,17 +121,12 @@ class TaggedImageController {
     )
     if (!action) return
 
-    const inline = this.inlineJobFromTarget(action)
-    if (!inline) return
+    const job = this.jobForAction(action)
+    if (!job) return
 
     event.preventDefault()
     event.stopImmediatePropagation()
-
-    void this.showJobMenu(
-      inline.job,
-      event.clientX,
-      event.clientY,
-    )
+    void this.openAnchoredImageMenu(job, action)
   }
 
   private readonly handleInlineContextMenu = (event: MouseEvent) => {
@@ -113,19 +134,13 @@ class TaggedImageController {
       event,
       'figure[data-swarm-studio-image="true"][data-swarm-studio-job-id]',
     )
-    if (!figure) return
-
-    const inline = this.inlineJobFromTarget(figure)
-    if (!inline) return
+    const job = figure ? this.inlineJobFromTarget(figure)?.job : this.urlJobFromEvent(event)
+    if (!job) return
 
     event.preventDefault()
     event.stopImmediatePropagation()
 
-    void this.showJobMenu(
-      inline.job,
-      event.clientX,
-      event.clientY,
-    )
+    void this.showJobMenu(job, event.clientX, event.clientY, { context: true })
   }
 
   private readonly handleInlineKeyDown = (event: KeyboardEvent) => {
@@ -137,17 +152,12 @@ class TaggedImageController {
     )
     if (!action) return
 
-    const inline = this.inlineJobFromTarget(action)
-    if (!inline) return
+    const job = this.jobForAction(action)
+    if (!job) return
 
     event.preventDefault()
     event.stopImmediatePropagation()
-
-    void this.showJobMenu(
-      inline.job,
-      Math.round(window.innerWidth / 2),
-      Math.round(window.innerHeight / 2),
-    )
+    void this.openAnchoredImageMenu(job, action)
   }
 
   constructor(
@@ -160,6 +170,7 @@ class TaggedImageController {
       onConfirm: (prompt: string, negativePrompt: string) => void,
     ) => boolean,
     openLibrary: () => void,
+    private readonly editInlineImage?: (action: "inpaint" | "replace", target: StudioInlineImageTarget) => void,
   ) {
     this.ctx = ctx
     this.behavior = { ...behavior }
@@ -270,6 +281,17 @@ class TaggedImageController {
   onMessage(payload: any): void {
     if (this.destroyed) return
     this.sourceSnapshot = null
+    if (payload?.type === "inline_variant_result" || payload?.type === "studio_error") {
+      const requestId = String(payload.requestId)
+      this.variantRequests.delete(requestId)
+      const replacement = this.replacementRequests.get(requestId)
+      if (replacement) {
+        window.clearTimeout(replacement.timer)
+        this.replacementRequests.delete(requestId)
+        if (payload.type === "studio_error") replacement.reject(new Error(String(payload.error || "The chat image could not be replaced.")))
+        else replacement.resolve()
+      }
+    }
     if (payload?.type === "studio_error" && this.jobRequests.has(String(payload.requestId))) {
       const requestId = String(payload.requestId)
       const job = this.jobs.get(this.jobRequests.get(requestId)!)
@@ -346,6 +368,10 @@ class TaggedImageController {
 
   destroy(): void {
     this.destroyed = true
+    this.closeImageMenu?.()
+    this.urlActionJobs.clear()
+    for (const id of this.urlActions.keys()) this.removeUrlAction(id)
+    this.stopUrlActionObserver()
     this.recoveredObserver?.disconnect()
     this.recoveredObserver = null
     this.recoveredJobs.clear()
@@ -363,6 +389,12 @@ class TaggedImageController {
     for (const cleanup of this.selectionCleanups) cleanup()
     this.selectionCleanups.length = 0
     this.jobRequests.clear()
+    this.variantRequests.clear()
+    for (const request of this.replacementRequests.values()) {
+      window.clearTimeout(request.timer)
+      request.reject(new Error("Swarm Studio closed. Check the chat before retrying."))
+    }
+    this.replacementRequests.clear()
     this.widgetHtml.clear()
     this.selectedMessages.clear()
     this.removedJobs.clear()
@@ -427,11 +459,153 @@ class TaggedImageController {
     }
   }
 
+  private jobForAction(action: HTMLElement): TaggedImageJobView | undefined {
+    const urlId = action.dataset.swarmStudioUrlAction
+    return urlId ? this.jobs.get(urlId) : this.inlineJobFromTarget(action)?.job
+  }
+
+  private urlJobFromEvent(event: MouseEvent): TaggedImageJobView | undefined {
+    const media = this.eventClosest<HTMLImageElement | HTMLAnchorElement>(event, "img[src], a[href]")
+    const messageId = this.eventClosest<HTMLElement>(event, "[data-message-id]")?.dataset.messageId
+    if (!media || !messageId) return
+    const url = media.tagName === "IMG" ? (media as HTMLImageElement).src : (media as HTMLAnchorElement).href
+    this.sourceSnapshot = null
+    const matches = [...this.jobs.values()].filter(job => {
+      if (job.output !== "url" || !job.inserted || !job.imageId || job.messageId !== messageId || !this.isSelected(job)) return false
+      try { return new URL(job.imageUrl, window.location.href).href === url } catch { return false }
+    })
+    return matches.length === 1 ? matches[0] : undefined
+  }
+
+  private readonly scheduleUrlActions = () => {
+    if (this.urlActionFrame || !this.urlActionJobs.size || !window.requestAnimationFrame) return
+    this.urlActionFrame = window.requestAnimationFrame(() => {
+      this.urlActionFrame = 0
+      this.sourceSnapshot = null
+      for (const id of this.urlActionJobs) {
+        const job = this.jobs.get(id)
+        if (job && this.isSelected(job)) this.renderUrlImageActions(job)
+        else if (job) this.remove(job)
+      }
+    })
+  }
+
+  private stopUrlActionObserver(): void {
+    this.urlActionObserver?.disconnect()
+    this.urlActionObserver = null
+    window.removeEventListener("lumiverse:message-content-layout", this.scheduleUrlActions)
+    window.removeEventListener("resize", this.scheduleUrlActions)
+    if (this.urlActionFrame) window.cancelAnimationFrame(this.urlActionFrame)
+    this.urlActionFrame = 0
+  }
+
+  private removeUrlAction(id: string): void {
+    const action = this.urlActions.get(id)
+    action?.events.abort()
+    action?.resize?.disconnect()
+    action?.button.remove()
+    this.urlActions.delete(id)
+  }
+
+  private mountUrlAction(job: TaggedImageJobView): boolean {
+    if (!window.CSS?.escape) return false
+    const selector = `[data-message-id="${window.CSS.escape(job.messageId)}"]`
+    const matches = new Set<HTMLImageElement>()
+    let expectedUrl: string
+    try { expectedUrl = new URL(job.imageUrl, window.location.href).href } catch { return false }
+    for (const message of document.querySelectorAll<HTMLElement>(selector)) {
+      const roots = [message, ...Array.from(message.querySelectorAll("[data-lumiverse-html-island]"), island => island.shadowRoot)]
+      for (const root of roots) {
+        for (const image of root?.querySelectorAll<HTMLImageElement>("img[src]") || []) {
+          if (image.src === expectedUrl && image.getClientRects().length) matches.add(image)
+        }
+      }
+    }
+    if (matches.size !== 1) return false
+    const image = matches.values().next().value!
+    const imageRoot = image.getRootNode()
+    let host = (imageRoot instanceof window.ShadowRoot ? imageRoot.host : image).closest<HTMLElement>(selector)
+    while (host && getComputedStyle(host).position === "static") host = host.parentElement?.closest<HTMLElement>(selector) ?? null
+    if (!host?.offsetWidth) return false
+    const bounds = image.getBoundingClientRect()
+    if (bounds.width < 36 || bounds.height < 36) return false
+    let action = this.urlActions.get(job.id)
+    if (action?.image !== image || action.button.parentElement !== host) {
+      this.removeUrlAction(job.id)
+      const button = element("button", "ss-url-image-action")
+      button.type = "button"
+      button.dataset.swarmStudioInlineAction = "true"
+      button.dataset.swarmStudioUrlAction = job.id
+      button.setAttribute("aria-haspopup", "menu")
+      button.innerHTML = INLINE_IMAGE_ACTION_ICON
+      const events = new AbortController()
+      const updateHover = (hovered: boolean) => button.toggleAttribute("data-image-hovered", hovered)
+      image.addEventListener("pointerenter", event => { if (event.pointerType !== "touch") updateHover(true) }, { signal: events.signal })
+      image.addEventListener("pointerleave", () => updateHover(false), { signal: events.signal })
+      updateHover(image.matches(":hover"))
+      const resize = typeof ResizeObserver === "function" ? new ResizeObserver(this.scheduleUrlActions) : undefined
+      resize?.observe(image)
+      resize?.observe(host)
+      host.append(button)
+      action = { image, button, events, resize }
+      this.urlActions.set(job.id, action)
+    }
+    const name = job.alt || job.slot || "Illustration"
+    action.button.setAttribute("aria-label", `Illustration actions for ${name}`)
+    action.button.title = "Image actions"
+    const hostBounds = host.getBoundingClientRect()
+    const scale = hostBounds.width / host.offsetWidth || 1
+    action.button.style.left = `${(bounds.right - hostBounds.left) / scale - host.clientLeft + host.scrollLeft - 6}px`
+    action.button.style.top = `${(bounds.top - hostBounds.top) / scale - host.clientTop + host.scrollTop + 6}px`
+    return true
+  }
+
+  private renderUrlImageActions(job: TaggedImageJobView): void {
+    if (!this.editInlineImage || !job.imageId) { this.remove(job); return }
+    this.urlActionJobs.add(job.id)
+    if (!this.urlActionObserver) {
+      this.urlActionObserver = new MutationObserver(this.scheduleUrlActions)
+      this.urlActionObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] })
+      window.addEventListener("lumiverse:message-content-layout", this.scheduleUrlActions)
+      window.addEventListener("resize", this.scheduleUrlActions)
+    }
+    if (this.mountUrlAction(job)) { this.removeWidget(job); return }
+    this.removeUrlAction(job.id)
+    const label = widgetEscape(job.alt || job.slot || "Illustration")
+    const html = `<style>
+      :root{color-scheme:dark;font-family:system-ui,sans-serif}
+      body{margin:0;color:var(--lumiverse-text,#eee);background:transparent}
+      button{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:4px 9px;border:1px solid var(--lumiverse-border,#454550);border-radius:8px;background:var(--lumiverse-fill-subtle,#191820);color:inherit;font:inherit;font-size:12px;cursor:pointer}
+      button:hover,button:focus-visible{border-color:var(--lumiverse-accent,#b994ff)}
+      svg{width:14px;height:14px}
+    </style><button type="button" id="image-options" aria-haspopup="menu" aria-label="Illustration actions for ${label}">${INLINE_IMAGE_ACTION_ICON}<span>Image actions</span></button>
+    <script>
+      const button=document.getElementById('image-options')
+      button.addEventListener('click',()=>{
+        const {left,right,top,bottom}=button.getBoundingClientRect()
+        window.spindleSandbox.postMessage({type:'menu',left,right,top,bottom})
+      })
+    </script>`
+    this.upsertWidget(job, html, message => {
+      const current = this.jobs.get(job.id) || job
+      const frame = document.querySelector<HTMLIFrameElement>(`iframe[data-spindle-message-widget="${this.widgetId(job)}"]`)
+      const bounds = frame?.getBoundingClientRect()
+      if (frame && bounds?.width && message && [message.left, message.right, message.top, message.bottom].every(Number.isFinite)) {
+        const scale = bounds.width / frame.offsetWidth || 1
+        const anchor = new DOMRect(bounds.left + message.left * scale, bounds.top + message.top * scale,
+          (message.right - message.left) * scale, (message.bottom - message.top) * scale)
+        void this.showJobMenu(current, anchor.right, anchor.bottom, { rect: anchor })
+      } else {
+        void this.showJobMenu(current, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2))
+      }
+    })
+  }
+
   private renderRecoveredImage(job: TaggedImageJobView): void {
     // A public message widget recovers the saved bitmap without writing stale
     // message content back to the server or starting another generation.
-    if (job.output === "url" || !this.isSelected(job)) { this.remove(job); return }
-    const widgetId = this.widgetId(job)
+    if (!this.isSelected(job)) { this.remove(job); return }
+    if (job.output === "url") { this.renderUrlImageActions(job); return }
     let url: URL
     try { url = new URL(job.imageUrl, window.location.href) } catch { return }
     if (!["http:", "https:"].includes(url.protocol)) return
@@ -453,8 +627,16 @@ class TaggedImageController {
   }
 
   private remove(job: TaggedImageJobView): void {
+    if (this.urlActionJobs.delete(job.id)) {
+      this.removeUrlAction(job.id)
+      if (!this.urlActionJobs.size) this.stopUrlActionObserver()
+    }
     this.recoveredJobs.delete(job.id)
     if (!this.recoveredJobs.size) { this.recoveredObserver?.disconnect(); this.recoveredObserver = null }
+    this.removeWidget(job)
+  }
+
+  private removeWidget(job: TaggedImageJobView): void {
     const id = this.widgetId(job)
     this.cleanups.get(id)?.()
     this.cleanups.delete(id)
@@ -557,6 +739,7 @@ class TaggedImageController {
   private onSelectionEvent(name: string, payload: any): void {
     if (this.destroyed) return
     this.sourceSnapshot = null
+    if (name === "CHAT_SWITCHED" || name === "MESSAGE_SWIPED") this.closeImageMenu?.()
     if (name === "CHAT_SWITCHED") {
       this.selectedChatId = typeof payload?.chatId === "string" ? payload.chatId : null
       this.selectedMessages.clear()
@@ -589,7 +772,7 @@ class TaggedImageController {
     this.cleanups.set(widgetId, this.ctx.messages.renderWidget({ messageId: job.messageId, widgetId, html }, (message: any) => {
       if (!this.destroyed && !this.removedJobs.has(job.id) && this.isSelected(this.jobs.get(job.id) || job)) handler(message)
     }))
-    this.watchNativeImage(job)
+    if (job.output !== "url") this.watchNativeImage(job)
   }
 
   private render(job: TaggedImageJobView): void {
@@ -683,24 +866,154 @@ class TaggedImageController {
     await this.showJobMenu(job, Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2))
   }
 
-  private async showJobMenu(job: TaggedImageJobView, x: number, y: number): Promise<void> {
-    if (this.destroyed || !this.isSelected(job)) return
-    const result = await this.ctx.ui.showContextMenu({
-      position: { x: Math.max(8, Math.round(x)), y: Math.max(8, Math.round(y)) },
-      items: [
-        { key: "retry-current", label: job.inserted ? "Regenerate with current Studio settings" : job.status === "requested" ? "Generate with current Studio settings" : "Retry with current Studio settings" },
-        { key: "retry-original", label: "Retry with original settings", disabled: !job.clientJobId },
-        { key: "edit", label: "Edit prompt in Quick Create", disabled: !job.prompt && !this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId)) },
-        { key: "divider", label: "", type: "divider" },
-        { key: "studio", label: "Open Swarm Studio" },
-        { key: "library", label: "Open output library" },
-        { key: "remove-divider", label: "", type: "divider" },
-        { key: "remove-chat", label: "Remove from chat (keeps Library copy)", disabled: !job.inserted },
-      ],
+  private openAnchoredImageMenu(job: TaggedImageJobView, trigger: HTMLElement): Promise<void> {
+    if (trigger.getAttribute("aria-expanded") === "true" && this.closeImageMenu) {
+      this.closeImageMenu()
+      return Promise.resolve()
+    }
+    const rect = trigger.getBoundingClientRect()
+    return this.showJobMenu(job, rect.right, rect.bottom, { rect, trigger })
+  }
+
+  private showImageMenu(items: InlineImageMenuItem[], x: number, y: number, rect?: DOMRect, trigger?: HTMLElement): Promise<{ selectedKey: string | null }> {
+    this.closeImageMenu?.()
+    return new Promise(resolve => {
+      const menu = element("div", "ss-inline-image-menu")
+      menu.setAttribute("role", "menu")
+      menu.setAttribute("aria-label", "Image actions")
+      const title = element("div", "ss-inline-menu-title", "Image actions")
+      title.setAttribute("aria-hidden", "true")
+      menu.append(title)
+      const cleanup = (selectedKey: string | null, restoreFocus = false) => {
+        if (this.closeImageMenu !== close) return
+        this.closeImageMenu = null
+        menu.remove()
+        window.removeEventListener("pointerdown", outside, true)
+        window.removeEventListener("keydown", keydown, true)
+        window.removeEventListener("resize", close)
+        window.removeEventListener("scroll", scroll, true)
+        trigger?.setAttribute("aria-expanded", "false")
+        if (restoreFocus && trigger?.isConnected) trigger.focus({ preventScroll: true })
+        resolve({ selectedKey })
+      }
+      const close = () => cleanup(null)
+      const outside = (event: Event) => {
+        const path = event.composedPath()
+        if (!path.includes(menu) && !(trigger && path.includes(trigger))) close()
+      }
+      const scroll = (event: Event) => {
+        if (event.target !== menu) close()
+      }
+      const keydown = (event: KeyboardEvent) => {
+        const buttons = [...menu.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")]
+        if (event.key === "Tab") { close(); return }
+        if (!["Escape", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        if (event.key === "Escape") { cleanup(null, true); return }
+        if (!buttons.length) return
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+          : (index + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length
+        buttons[next].focus()
+      }
+      this.closeImageMenu = close
+      const icons: Record<string, string> = {
+        inpaint: INPAINT_ICON, replace: INIT_IMAGE_ICON, finalize: EXPAND_ICON, draft: INIT_IMAGE_ICON,
+        final: INIT_IMAGE_ICON, "cancel-upscale": MINIMIZE_ICON, "retry-current": INLINE_IMAGE_ACTION_ICON,
+        "retry-original": INLINE_IMAGE_ACTION_ICON, edit: SPARKLE_ICON, studio: FRAME_WALL_ICON,
+        library: LIBRARY_ICON, "remove-chat": TRASH_ICON,
+      }
+      for (const item of items) {
+        if (item.type === "divider") {
+          const separator = element("div", "ss-inline-menu-separator")
+          separator.setAttribute("role", "separator")
+          menu.append(separator)
+          continue
+        }
+        const button = element("button", "ss-inline-menu-action")
+        button.type = "button"
+        button.tabIndex = -1
+        button.setAttribute("role", "menuitem")
+        button.disabled = Boolean(item.disabled)
+        if (item.danger) button.dataset.danger = "true"
+        const icon = element("span", "ss-inline-menu-icon")
+        icon.innerHTML = icons[item.key] || ""
+        button.append(icon, element("span", "", item.label))
+        button.addEventListener("click", () => cleanup(item.key, true))
+        menu.append(button)
+      }
+      const viewport = document.documentElement
+      viewport.append(menu)
+      const bounds = menu.getBoundingClientRect()
+      const safeTop = (parseFloat(getComputedStyle(viewport).getPropertyValue("--app-interactive-safe-top")) || 0) + 8
+      const left = rect ? rect.right - bounds.width : x
+      const below = y + 6
+      const top = rect && below + bounds.height > viewport.clientHeight - 8 ? rect.top - bounds.height - 6 : below
+      menu.style.left = `${clamp(left, 8, Math.max(8, viewport.clientWidth - bounds.width - 8))}px`
+      menu.style.top = `${clamp(top, safeTop, Math.max(safeTop, viewport.clientHeight - bounds.height - 8))}px`
+      trigger?.setAttribute("aria-expanded", "true")
+      window.addEventListener("pointerdown", outside, true)
+      window.addEventListener("keydown", keydown, true)
+      window.addEventListener("resize", close)
+      window.addEventListener("scroll", scroll, true)
+      menu.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true })
     })
+  }
+
+  private async showJobMenu(job: TaggedImageJobView, x: number, y: number, anchor?: { context?: boolean; rect?: DOMRect; trigger?: HTMLElement }): Promise<void> {
+    if (this.destroyed || !this.isSelected(job)) return
+    const expectedImageId = job.imageId
+    const variantBusy = [...this.variantRequests.values()].includes(job.id)
+    const hasImage = job.status === "ready" && job.inserted && Boolean(expectedImageId)
+    const canFinalize = job.output !== "url" && hasImage
+    const items: InlineImageMenuItem[] = [
+      ...(this.editInlineImage && hasImage ? [
+        { key: "inpaint", label: "Inpaint", disabled: variantBusy },
+        { key: "replace", label: "Replace image…", disabled: variantBusy },
+      ] : []),
+      ...(canFinalize ? [job.finalImageId === expectedImageId
+        ? { key: "draft", label: "Show draft", disabled: variantBusy }
+        : job.finalImageId
+          ? { key: "final", label: "Show final", disabled: variantBusy }
+          : variantBusy ? { key: "cancel-upscale", label: "Cancel upscale" }
+            : { key: "finalize", label: "Finalize · upscale 2×" }] : []),
+      { key: "retry-current", label: job.inserted ? "Regenerate with Studio settings" : job.status === "requested" ? "Generate with current Studio settings" : "Retry with current Studio settings" },
+      { key: "retry-original", label: "Retry with original settings", disabled: !job.clientJobId },
+      { key: "edit", label: "Edit prompt in Quick Create", disabled: !job.prompt && !this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId)) },
+      { key: "divider", label: "", type: "divider" },
+      { key: "studio", label: "Open Swarm Studio" },
+      { key: "library", label: "Open output library" },
+      { key: "remove-divider", label: "", type: "divider" },
+      { key: "remove-chat", label: "Remove from chat", danger: true, disabled: !job.inserted || variantBusy },
+    ]
+    const result = anchor && (anchor.rect?.width || anchor.context)
+      ? await this.showImageMenu(items, x, y, anchor.rect, anchor.trigger)
+      : await this.ctx.ui.showContextMenu({ position: { x: Math.max(8, Math.round(x)), y: Math.max(8, Math.round(y)) }, items })
     this.sourceSnapshot = null
     if (this.destroyed || !this.isSelected(job)) return
     job = this.jobs.get(job.id) || job
+    if ((result.selectedKey === "inpaint" || result.selectedKey === "replace") &&
+        hasImage && expectedImageId === job.imageId && ![...this.variantRequests.values()].includes(job.id)) {
+      const jobId = job.id
+      this.editInlineImage?.(result.selectedKey, {
+        jobId, imageId: expectedImageId, replace: id => this.replaceInlineImage(jobId, expectedImageId, id),
+      })
+    }
+    if (result.selectedKey === "cancel-upscale") {
+      this.ctx.sendToBackend({ type: "cancel_inline_upscale", requestId: createRequestId(), jobId: job.id })
+    }
+    if (["finalize", "draft", "final"].includes(result.selectedKey) && expectedImageId === job.imageId &&
+        ![...this.variantRequests.values()].includes(job.id)) {
+      const requestId = createRequestId()
+      this.variantRequests.set(requestId, job.id)
+      try {
+        this.ctx.sendToBackend({ type: "select_inline_variant", requestId, jobId: job.id, imageId: expectedImageId, action: result.selectedKey })
+      } catch (error) {
+        this.variantRequests.delete(requestId)
+        throw error
+      }
+    }
     if (result.selectedKey === "retry-current") this.retry(job, "current")
     if (result.selectedKey === "retry-original") this.retry(job, "original")
     if (result.selectedKey === "edit") {
@@ -725,12 +1038,43 @@ class TaggedImageController {
     }
   }
 
+  private replaceInlineImage(jobId: string, imageId: string, replacementId: string): Promise<void> {
+    this.sourceSnapshot = null
+    const current = this.jobs.get(jobId)
+    if (!current || !this.isSelected(current) || current.imageId !== imageId || !current.inserted || current.status !== "ready") {
+      return Promise.reject(new Error("The original illustration is no longer selected. Reopen its image actions."))
+    }
+    if ([...this.variantRequests.values()].includes(jobId)) {
+      return Promise.reject(new Error("An image action is already in progress for this illustration."))
+    }
+    return new Promise((resolve, reject) => {
+      const requestId = createRequestId()
+      const cleanup = () => {
+        this.variantRequests.delete(requestId)
+        this.replacementRequests.delete(requestId)
+      }
+      const timer = window.setTimeout(() => {
+        cleanup()
+        reject(new Error("Lumiverse did not confirm the replacement. Check the chat before retrying."))
+      }, 15_000)
+      this.variantRequests.set(requestId, jobId)
+      this.replacementRequests.set(requestId, { resolve, reject, timer })
+      try {
+        this.ctx.sendToBackend({ type: "select_inline_variant", action: "replace", jobId, imageId, replacementId, requestId })
+      } catch (error) {
+        window.clearTimeout(timer)
+        cleanup()
+        reject(error)
+      }
+    })
+  }
+
   private retry(
     job: TaggedImageJobView,
     retryMode: "current" | "original",
     overrides?: { prompt: string; negativePrompt: string },
   ): void {
-    if (this.destroyed || !this.isSelected(job) || ["queued", "generating"].includes(job.status)) return
+    if (this.destroyed || !this.isSelected(job) || [...this.variantRequests.values()].includes(job.id) || ["queued", "generating"].includes(job.status)) return
     const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId))
     job.status = "queued"
     job.error = ""

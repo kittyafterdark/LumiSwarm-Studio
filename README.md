@@ -5,9 +5,11 @@
   <p>Prompt, tune, stack LoRAs, browse generations, and bring images into your chats—without switching applications.</p>
   <p><code>Spindle extension</code> · <code>Lumiverse 0.15.8+</code> · <code>SwarmUI / ComfyUI workflows</code></p>
   <p><a href="#installation"><strong>Install</strong></a> · <a href="#the-studio"><strong>Explore the studio</strong></a> · <a href="#what-it-does"><strong>Features</strong></a> · <a href="#documentation"><strong>Documentation</strong></a></p>
-> **Quick Create (v18):** the lower-right Locket opens a compact Action Rail and artwork-first Composer. Right-click/long-press the orb or use `⋯` to open its shared context menu. See [v18 repair notes](LIVE_CHECK_V18.md).
-
 </div>
+
+> **Inline generation reliability (v28):** The extension converts U+2800 Braille blanks to ordinary spaces in Gem-authored inline image prompts and both outgoing SwarmUI prompt fields. Replayed generation events and identical inline callback deliveries are deduplicated; explicit regenerate/retry still produces a new job. This is an outgoing-data fix, not a rewrite of existing chat text.
+
+> **Floating toolkit (v27):** the original satin Locket opens a six-action rail: Quick Create, Full Studio, Preview, Recent Images, Append, and More. The small pin beside the orb keeps the rail open. Right-click/long-press the **orb** for its unchanged context menu; use the **rail’s `⋯`** for a separate toolkit menu with AI Upscale, Quick Create, Gallery, pinning, and panel reset. Quick Create has a draggable header and an in-panel render-settings screen (ratio, dimensions, sampler, steps, CFG, and seed). Preview stays independently open while Quick Create is in use, including on mobile. The easel uses real generation events.
 
 ---
 
@@ -91,6 +93,20 @@ If a previous GitHub-source installation failed partway through, stop Lumiverse 
 **Connected features vary.** LoRA previews, checkpoints, saved presets, workflows, and original-file downloads depend on the APIs and metadata your SwarmUI server exposes. Character-editor Visuals integration and automatic in-message image interception require the corresponding Lumiverse host capabilities. Core Studio generation remains available when optional integrations are missing.
 
 **No surprise downloads.** Importing a LoRA stack does not automatically download its missing models; transfers require an explicit action.
+
+### AI Upscale workbench (v25)
+
+**One-time setup:** SwarmUI needs a running ComfyUI backend (usually **Server → Backends → ComfyUI Self-Starting**), and your SwarmUI account must be allowed to run dynamic Comfy workflows. To use the recommended **AI upscaler** mode, place an actual super-resolution model file such as [RealESRGAN_x4plus_anime_6B.pth](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth) (anime illustrations) or [4x-UltraSharp.pth](https://huggingface.co/Runware/upscaler/resolve/main/4x-UltraSharp.pth) (general illustrations) in **`<SwarmUI model root>/upscale_models/`**. The model root is configured in SwarmUI's model path settings; check it rather than guessing your install path. Restart/refresh SwarmUI's ComfyUI backend so it sees the newly installed model. Studio does **not** silently download or install checkpoints.
+
+Open a saved PNG/JPEG/WebP in **Studio → Output inspector → AI Upscale**. The new workbench offers three paths:
+
+- **AI upscaler (recommended):** Discovers models actually installed through SwarmUI's `ListT2IParams`, recommends an anime-specific model if one is present, and defaults to **2×** output. Select **3×** or **4×** as needed. The pipeline executes `SwarmLoadImageB64 → UpscaleModelLoader → ImageUpscaleWithModel → ImageScale → SaveImage`. The final `ImageScale` step only resizes the *AI-enhanced* result to the exact desired dimensions; enhancement itself runs through the selected model. No fake model fallback to Lanczos.
+- **Saved workflow:** Lists saved SwarmUI Comfy workflows and lets you choose an explicitly **exposed image input**. The saved workflow decides its own enhancement steps and final output dimensions; Studio sends the source image to that exposed input. Your SwarmUI account needs permission to read and execute saved workflows.
+- **Custom graph:** Paste or import a **ComfyUI API-format** JSON graph (not Comfy's visual/UI-layout export). It must have exactly one `SwarmLoadImageB64` input node and one `SaveImage` output node; Studio injects the saved image and output filename prefix. All graph nodes must be installed and permitted on your own ComfyUI backend. Graphs are limited to 128 KB / 150 nodes.
+
+Choose **Remember this setup** to save your recipe per SwarmUI connection. Studio preserves the original image and saves a new result to the Output Library, normally beside the source in its folder. Owned input images must be no larger than 4096 px on either axis. Model-mode outputs are capped at 8192 px on either axis and at 36 megapixels; custom workflows have their own dimensions and VRAM requirements. Lumiverse must grant the extension **Images**, **Image Generation**, and (for discovery/validation) **CORS Proxy** permissions. The live generation uses Lumiverse's existing image-gen provider connection, not a separate ComfyUI URL.
+
+**Compatibility note:** The separate inline chat-image *Finalize* action now reuses a remembered AI upscale recipe when one exists. Older installations without a saved AI recipe retain their previous 2× Lanczos inline-finalize behavior; the Output Inspector's **AI Upscale** button never substitutes Lanczos for a missing model. If discovery shows no models, verify the file location, restart/refresh SwarmUI, and reopen the workbench.
 
 ## Documentation
 

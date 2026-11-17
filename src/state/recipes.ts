@@ -19,10 +19,12 @@ interface StudioRenderStyle {
 function recipeRecord(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}
 }
+const GENERATION_NUMBER_LIMITS = [["width", 64, 4096], ["height", 64, 4096], ["steps", 1, 150], ["cfg", 0, 30]] as const
+
 function sanitizeGenerationRecipe(value: unknown): GenerationRecipe {
   const input = recipeRecord(value)
   const result: Record<string, any> = {}
-  for (const [key, min, max] of [["width", 64, 4096], ["height", 64, 4096], ["steps", 1, 150], ["cfg", 0, 30]] as const) {
+  for (const [key, min, max] of GENERATION_NUMBER_LIMITS) {
     const v = key === "cfg" ? input.cfg ?? input.cfgScale ?? input.cfg_scale : input[key]
     if (typeof v === "number" && Number.isFinite(v) && v >= min && v <= max) result[key] = v
   }

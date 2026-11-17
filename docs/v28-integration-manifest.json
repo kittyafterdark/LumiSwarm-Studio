@@ -1,0 +1,62 @@
+{
+  "integration": "Swarm Studio v28 · Inline Parser Idempotency and Unicode Prompt Cleanup",
+  "created_date": "2026-11-14",
+  "baseline": "Lumiswarm_Studio_v27_Toolkit_Refresh_FULL_SOURCE.zip",
+  "distribution": "FULL cumulative source+runtime ZIP at extension root. Overlay preserving relative directory names.",
+  "features": [
+    "Normalize U+2800 to U+0020 for both outgoing positive/negative prompts, streaming and legacy generation",
+    "Clean model-generated inline requests on the way to Gem parser without changing the original chat source",
+    "Clean parser-model output before processing generated tags and persist normalized model-derived job prompts",
+    "Protect in-flight/completed same-ID image provider calls from duplicate frontend dispatches",
+    "Serialize identical inline-tag callbacks before job existence/persistence checks",
+    "Remember completed parser jobs per user/chat/message/swipe/source content to ignore late GENERATION_ENDED replays",
+    "Preserve explicit new job IDs and manual retry/regenerate; no frontend UI changes"
+  ],
+  "validation": {
+    "passed": [
+      "build with Node 22 stripTypeScriptTypes",
+      "typecheck using globally installed TypeScript against actual bundling units",
+      "backend-contract.mjs including streaming/legacy prompt normalization and parser-model Braille/replay tests",
+      "frontend-contract.mjs",
+      "safety-scan.mjs",
+      "workspace-contract.mjs",
+      "recipes-contract.mjs",
+      "native-image-gen-contract.mjs",
+      "v18, v19, v22, v25, v26, v27 source contracts"
+    ],
+    "not_run": [
+      "Full npm test blocked at jsdom import; checkout lacks node_modules",
+      "Live SwarmUI/Lumiverse integration requires host"
+    ]
+  },
+  "modified": [
+    {
+      "path": "CHANGELOG.md",
+      "baseline_sha256": "0f58fbfbe58a07d9c0fdb6e483847f482adbd63aadcdc900f33d0ee31731e2b0",
+      "updated_sha256": "62f825e8f92074b67ab7c61c33950337156e8740cb8aeeb0ed18a3292cee9957"
+    },
+    {
+      "path": "README.md",
+      "baseline_sha256": "27830bcf7a277d1baca44b3c7165780351e01c779cdcc91728cb2eaabdc463c0",
+      "updated_sha256": "336d81bcda958bfb04453edb36a3a3ed33189e4818b5f84c279c75911a202c97"
+    },
+    {
+      "path": "dist/backend.js",
+      "baseline_sha256": "d6e52da218898b6fb2032908d8b356e8f8148b198b730b514feff9e0b5086281",
+      "updated_sha256": "93a4ac6b2b404944d7af0413e04550b7e8eb572f0dbd18672f2b3d2315c64dfd"
+    },
+    {
+      "path": "src/backend.ts",
+      "baseline_sha256": "991ad832441983765e43a087a8138c12a42c5642fb8c248a0bf1d5252febefd0",
+      "updated_sha256": "8e7b6922105a42bf641891b4fbd1619b4488142909d7fb339b1de8b7825ec9ea"
+    },
+    {
+      "path": "tests/backend-contract.mjs",
+      "baseline_sha256": "856e201ba6d5cdc62bfad5255348e216470fac7d9de88371420c79bc1490d801",
+      "updated_sha256": "4a080c2b7aebd15b612d36dead9bb1bc3bb074e2241aaabc221ce8a89b266bef"
+    }
+  ],
+  "added": [],
+  "deleted": [],
+  "rollback": "Lumiswarm_Studio_v28_Originals_Backup.zip"
+}

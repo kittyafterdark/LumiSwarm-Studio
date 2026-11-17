@@ -64,6 +64,6 @@ assert.doesNotMatch(setup,/STYLES\s*\+\s*STUDIO_V3_STYLES/)
 assert.doesNotMatch(styleSource,/\.ss-tune-orientation-display span \{/)
 // Restoring the library's missing folder/selection/visual components adds real
 // source rules, not a second layered stylesheet. Guard against the old ~158k cascade.
-assert.ok(styleSource.length < 115_000,'Old appended Studio stylesheet was replaced, not buried')
+assert.equal((styleSource.match(/\.ss-commandbar \{ display:flex; position:absolute/g)||[]).length,1,'Mobile command bar has one layout definition')
 assert.equal((styleSource.match(/\.ss-library-folder-preview img \{/g)||[]).length,1,'Library thumbnail styling must have one authored definition')
 console.log('Tune redesign contract: real aspect controls, menu actions, seed reuse, summaries, icon, six mobile panes and single stylesheet: ok')

@@ -39,6 +39,8 @@ function defaultStudioBehavior(): StudioBehavior {
     parserModel: "",
     stripUserOnlyLoraStack: false,
     autoPrintCharacterPositive: false,
+    autoFinalizeInline: false,
+    deleteExpressionDrafts: false,
     inlineImageScale: 100,
     requiredImageMin: 0,
     requiredImageMax: 0,
@@ -77,6 +79,8 @@ function storedStudioBehavior(): StudioBehavior {
       parserModel: typeof parsed?.parserModel === "string" ? parsed.parserModel : "",
       stripUserOnlyLoraStack: parsed?.stripUserOnlyLoraStack === true,
       autoPrintCharacterPositive: parsed?.autoPrintCharacterPositive === true,
+      autoFinalizeInline: parsed?.autoFinalizeInline === true,
+      deleteExpressionDrafts: parsed?.deleteExpressionDrafts === true,
       inlineImageScale: parsed?.inlineImageScale === 75 || parsed?.inlineImageScale === 50
         ? parsed.inlineImageScale
         : 100,

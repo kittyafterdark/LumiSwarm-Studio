@@ -1,4 +1,4 @@
-"""Offline UI regression for Composer height, friendly model label, and menu toggling.
+"""Offline UI regression for separate Quick Create height, friendly model label, and toolkit menu toggling.
 Run with: python tests/v21-quick-composer-browser.py (requires Python Playwright + Chromium).
 """
 from pathlib import Path
@@ -43,18 +43,18 @@ with sync_playwright() as pw:
             negative = page.locator('[data-role="mini-negative"]')
             positive.fill('A preserved portrait prompt')
             negative.fill('Unwanted blur')
-            expanded = mini.bounding_box()['height']
+            expanded = page.locator('.ss-mini-quick').bounding_box()['height']
             assert 390 < expanded <= 520, (width, 'open height', expanded)
             page.locator('[data-action="mini-toggle-negative"]').click()
-            collapsed = mini.bounding_box()['height']
+            collapsed = page.locator('.ss-mini-quick').bounding_box()['height']
             assert collapsed < expanded - 90, (width, 'height did not shrink', expanded, collapsed)
             assert not page.locator('.ss-mini-negative-field').is_visible()
             assert positive.input_value() == 'A preserved portrait prompt'
             page.locator('[data-action="mini-toggle-negative"]').click()
-            reopened = mini.bounding_box()['height']
+            reopened = page.locator('.ss-mini-quick').bounding_box()['height']
             assert reopened > collapsed + 90, (width, 'height did not restore', reopened, collapsed)
             assert negative.input_value() == 'Unwanted blur'
-            menu = page.locator('[data-role="mini-context-menu"]')
+            menu = page.locator('[data-role="mini-strip-menu"]')
             opener = page.locator('[data-action="mini-show-menu"]').last
             opener.click()
             assert menu.is_visible(), (width,'first menu click did not open')
@@ -87,9 +87,9 @@ with sync_playwright() as pw:
         short.locator('[data-action="close-studio"]').first.click()
         short.locator('.ss-mini-preview').click()
         short.locator('[data-action="mini-compose"]').click()
-        open_short = short.locator('[data-role="miniplayer"]').bounding_box()['height']
+        open_short = short.locator('.ss-mini-quick').bounding_box()['height']
         short.locator('[data-action="mini-toggle-negative"]').click()
-        closed_short = short.locator('[data-role="miniplayer"]').bounding_box()['height']
+        closed_short = short.locator('.ss-mini-quick').bounding_box()['height']
         assert open_short - closed_short >= 85, (open_short, closed_short)
         assert short.locator('[data-action="mini-generate"]').is_visible()
         short.close()

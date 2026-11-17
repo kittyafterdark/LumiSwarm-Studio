@@ -1,3 +1,66 @@
+## Expressions, image editing, and Studio polish (2026-11-17)
+
+- **Character Expressions** — Generate with Basics, Full Spread, or reusable custom slots. Set canvas size, sampling, and shared prompts. Pick references and saved renders visually. Use IPAdapter PLUS on Illustrious or Anima Ref Adapter on Anima when configured.
+- **Finish expression sets** — Track each tile's live preview and progress. Select or clear all, stop a batch, or retry just the failures. Enhance at 2×, 3×, or 4× with a model, or use your workflow. Remove backgrounds with built-in BiRefNet or your own workflow, then send the set to Lumiverse. Draft cleanup is optional.
+- **Edit images in place** — Inpaint with brush, eraser, lasso, zoom, and feathering. See brush size under the cursor and review variants without leaving the editor. Inline images, including URL-only images, get a themed action menu for inpainting and swapping from the library. AI Upscale can finalize inline drafts.
+- **Studio and library** — Mobile Studio opens fullscreen with compact controls and a sticky Generate action. Tune starts with Canvas & Size and Sampling & Quality open. The Output Library and pickers share a preview toggle beside Search for square, landscape, and portrait views.
+- **Floating toolkit** — Compact, themed controls, a draggable portrait, and separate Quick Create and Artwork preview panels. Drag Quick Create to either side of the strip. Render settings stay in Quick Create.
+- **Reliability** — Duplicate inline requests are deduplicated, and Braille spaces are normalized so SwarmUI can read affected prompts.
+
+## v28 — Inline request idempotency and Gem Braille-space normalization (2026-11-14)
+
+- Normalize U+2800 Braille-pattern blanks into regular U+0020 spaces in **both positive and negative** prompts before SwarmUI generation. The shared sink covers native streaming, legacy fallback, inline tags, retries, and other image jobs without changing saved authored prompt text.
+- Normalize Gem/model-authored inline request text **before passing it to the parser model**, then normalize the parser response before parsing XML-like tags. The original chat message and source tag are retained for exact matching and safe image attachment. Stored tagged-job prompts use normalized spacing for later retries.
+- Guard duplicate in-flight and completed frontend generation deliveries by user-scoped client job ID, serialize identical inline-tag callbacks to avoid concurrent job creation, and prevent replays of `GENERATION_ENDED` from re-invoking the text parser for the same message/swipe/request body. Explicit new job IDs and dedicated Retry/Regenerate remain supported.
+- Added backend regression fixtures covering simulated streaming and legacy provider calls, **both prompt fields**, a Braille-spaced parser request/response, a late parser lifecycle replay, an in-flight/completed duplicate job, and simultaneous inline requests. Rebuilt `dist/backend.js`; frontend visuals and orb/toolkit styling were not changed.
+
+## v27 — Floating toolkit refinement (2026-11-14)
+
+- Kept the original satin Locket and its four-action right-click/long-press context menu unchanged. The full **toolkit strip** has its own refreshed `⋯` menu: Quick Create, AI Upscale latest (when an output exists), Recent Images, Pin/Unpin, Reset Floating Panels, and Collapse to Orb. The menu opens upward near the viewport edge so it never blocks its own toggle button.
+- Added a small pin beside the Locket so the toolkit can remain expanded, independent of the orb click behavior. Stored the pin state with the existing widget preference.
+- Replaced Quick Create's redundant `⋯` with a compact in-place Render Settings screen: aspect ratio, width, height, sampler, steps, CFG scale, and seed. Settings override the next generation request through the existing SwarmUI image-gen provider; they do not rewrite the saved Studio recipe.
+- Quick Create can now be dragged by its dedicated header grip, with viewport clamping, position persistence, and reset. The full Studio action uses a legible, stroke-based SVG rather than a filled glyph hidden by the rail's CSS.
+- Preview's Quick Create action opens the composer without closing the preview, including on mobile. Aligned Preview header actions in one consistent control row, and kept the easel independent of Studio's generation lifecycle.
+- Added v27 source and Chromium tests, including real request-payload inspection with mocked SwarmUI (1344×768, 34 steps, CFG 5.5, Euler sampler, seed 2468) and AI Upscale workbench routing. Updated the earlier v21 menu regression to distinguish the orb and strip. Rebuilt the checked-in frontend runtime.
+
+## v26 — Studio auto-finalize and floating toolkit (2026-11-14)
+
+- Preserved the existing satin Locket and its context menu. Expanding it now shows Quick Create, Full Studio, independent Preview, Recent Images (the real Output Library), Append, and More.
+- Quick Create opens as a separate, slender panel beside the always-visible toolkit. Prompt editing, negative disclosure, metadata labels, generate/interrupt, and draft inheritance use the existing generation contract.
+- Added optional draggable/resizable artwork easel. Its contained stage displays actual SwarmUI preview frames and completed outputs from the same activity snapshot as Studio and the Locket, without simulated progress or additional image jobs.
+- Portal surfaces leave the native float hitbox unchanged, inherit Lumiverse theme tokens, clamp to mobile viewports, clean up on teardown, and remember easel dimensions and position. Quick Create temporarily hides Preview on narrow mobile screens to prevent overlap.
+- Updated older rail and Quick Create height assertions; added dedicated source and Chromium regressions for gallery/editor actions, independent preview, resizing, draft preservation, and mock generation sync. Rebuilt `dist/frontend.js`.
+
+- Added a Studio behavior toggle to auto-finalize inline chat images with the remembered AI upscale recipe
+- Inline finalize automation now swaps low-resolution chat drafts to the saved AI-enhanced result when a valid upscaler/workflow is configured
+- Settings copy now makes it explicit that automatic finalization will not silently fall back to interpolation
+
+## v25 — Model-based AI upscaler and custom workflow workbench (2026-11-14)
+
+- Replaced the inspector's simple 2× Lanczos button with a responsive AI Upscale workbench: real installed-model discovery, preferred anime upscale model, 2× / 3× / 4× output, and a proper status/footer with recoverable errors.
+- Added a genuine Comfy super-resolution pipeline (`UpscaleModelLoader` and `ImageUpscaleWithModel`) before an exact-size final resize. A missing model produces an actionable error; Studio never disguises interpolation as AI enhancement.
+- Added **saved SwarmUI workflows**, with an explicitly selected exposed image input, and **importable ComfyUI API JSON graphs**, with strict single-image-input / output validation and source injection. Generation still goes through the existing Lumiverse provider.
+- Remembers upscale preferences separately for each SwarmUI connection; preserves original images, stores a derivative with workflow metadata, and respects existing Output Library organization. Corrected metadata handling for arbitrary-dimension custom workflows.
+- Existing inline chat image Finalize reuses a saved upscale recipe, while preserving legacy Lanczos only for users who have not configured one. Includes size/permission guards and no checkpoint auto-download.
+- Added model/custom/saved backend mock contracts, v25 source contract, and real Chromium flows at 390px/1440px, including error-state recovery. Complete compiled runtime and setup instructions included.
+
+## v24 — Persona / character crop editor (2026-11-14)
+
+- Rebuilt the legacy unstyled square-crop dialog as a centered canvas-first native modal with a live square preview, title, crop settings, zoom/position readouts, reset, close/cancel controls, and pinned footer.
+- Fixed the underlying theme inheritance: mount native crop and folder confirmation dialogs inside the Studio shell instead of outside it, so Lumiverse palette tokens and button styles resolve in the dialog top layer. Added one canonical, responsive stylesheet section rather than appended override layers.
+- Preserved original + cropped avatar upload fields, drag, keyboard slider controls, focus restoration, Escape cancellation, and existing character/persona permission checks.
+- Clarified that the current 2× upscaler performs a ComfyUI Lanczos resample, not an AI upscaler; no upscaler model is required, although SwarmUI Comfy workflow support is.
+- Added v24 source contract and a real Chromium regression for both 390px and 1440px, exercising the actual persona action with a mocked Lumiverse avatar endpoint and a bundled raster fixture.
+
+## v23 — Image inspector and inpaint workbench (2026-11-14)
+
+- Replaced the old inspector's permanently stacked buttons and collapsible metadata cards with an artwork-first lightbox, a structured metadata sidebar, and separate Overview / Prompt / Details tabs.
+- Preserved the real Studio actions for editing, reuse, image-to-image initialization, upscaling, downloads, favorites, Output Library, deletion, chat, gallery, and avatar assignment. The "Send image to…" menu uses the existing permission-aware action handlers.
+- Rebuilt the inpaint screen around the existing paint canvas: vertical brush/erase/lasso/undo/clear/pan/mask-visibility rail, floating zoom bar, scrollable generation controls and an always-accessible footer. Source-mask encoding, submission, cancellation and preview comparison are unchanged.
+- Open an edit with the recorded rendered prompt when available; empty optional inspector metadata stays hidden instead of creating placeholder cards. The brush readout now shows the actual stroke width in pixels.
+- Replaced the component CSS in its original authored section and removed obsolete inspector disclosure selectors (no additional CSS override layer). Preserved CRLF in edited TypeScript source.
+- Added a source contract and real Chromium mobile/desktop inpaint regression using a minimally viable raster mock for the existing Studio host harness. Full frontend rebuild included.
+
 ## v22 — Satin Locket finish (2026-11-14)
 
 - Replaced the idle Orb's heavy metallic gradient/halo with one subtle, thin theme-aware satin rim, matching the understated Action Rail.

@@ -1,3 +1,9 @@
+const LIBRARY_PREVIEW_SHAPES = [
+  { name: "square", label: "Square 1:1", ratio: 1, icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>' },
+  { name: "landscape", label: "Landscape 4:3", ratio: 4 / 3, icon: LANDSCAPE_ICON },
+  { name: "portrait", label: "Portrait 3:4", ratio: 3 / 4, icon: PORTRAIT_ICON },
+] as const
+
 class StudioController {
   private readonly ctx: FrontendContext
   private readonly modal: any
@@ -12,6 +18,7 @@ class StudioController {
   private readonly state: StudioState
   private readonly mobileMedia = window.matchMedia("(max-width: 720px)")
   private readonly handleMobileLayout = () => {
+    this.toggleFullscreen(this.desktopFullscreen)
     this.setMobileTab(this.get<HTMLElement>(".ss-shell").dataset.mobileTab || "create")
   }
   private readonly updatePresetViewport = () => {
@@ -56,7 +63,12 @@ class StudioController {
   private imageScale = 1
   private previewAspect = 1
   private libraryFolderId = "__landing__"
+  private expressionDialog: HTMLDialogElement | null = null
+  private expressionRequests = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; progress?: StudioExpressionProgress; stop?: () => void }>()
   private libraryPage = 0
+  private libraryPageSize = outputLibraryPageSize(window.innerWidth)
+  private libraryPreviewShape: (typeof LIBRARY_PREVIEW_SHAPES)[number] = LIBRARY_PREVIEW_SHAPES[0]
+  private libraryGridObserver: ResizeObserver | null = null
   private readonly librarySelection = new Set<string>()
   private librarySelectionAnchorId = ""
   private librarySearchOpen = false
@@ -82,6 +94,7 @@ class StudioController {
   private outputMetadataRequestId = ""
   private pendingMetadataAction: "reuse" | "init" | "" = ""
   private inspectorResizeObserver: ResizeObserver | null = null
+  private desktopFullscreen = false
   private fullscreenAnchor: Comment | null = null
   private stopActiveResize: (() => void) | null = null
   private profileSyncTimer: ReturnType<typeof setTimeout> | null = null
@@ -91,13 +104,31 @@ class StudioController {
   private activeRenderStyleId = ""
   private nativeImageGenReady = false
   private nativeSavePending = false
+  private inspectorReturnFocus: HTMLElement | null = null
+  private inpaintSession: StudioInpaintSession | null = null
+  private inpaintJobId = ""
+  private inlineInpaint: { target: StudioInlineImageTarget; requestId: string; image?: CurrentImage } | null = null
+  private libraryPicker: {
+    kind: "reference" | "saved" | "replace"
+    folderId?: string
+    initialId?: string
+    excludedId?: string
+    choose: (image: StudioExpressionImage) => void | Promise<void>
+    onExit?: () => void
+    pending: boolean
+  } | null = null
+  private upscaleRequestId = ""
+  private upscaleOptionsRequestId = ""
+  private upscaleWorkflowRequestId = ""
+  private upscaleSession: StudioUpscaleSession | null = null
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") {
       const meta = this.root.querySelector<HTMLElement>('[data-role="lora-meta-layer"]')
       if (meta && !meta.hidden) { meta.hidden = true; event.stopPropagation(); return }
     }
-    if (this.root.querySelector<HTMLDialogElement>(".ss-avatar-crop[open], .ss-confirm-folder[open]")?.open) return
+    if (this.expressionDialog?.open) return
+    if (this.root.querySelector<HTMLDialogElement>(".ss-avatar-crop[open], .ss-confirm-folder[open], .ss-inpaint-dialog[open], .ss-upscale-dialog[open]")?.open) return
     if (event.key !== "Escape") return
     const loraSortMenu = this.root.querySelector<HTMLElement>('[data-role="lora-sort-menu"]')
     if (loraSortMenu && !loraSortMenu.hidden) {
@@ -242,6 +273,12 @@ class StudioController {
     if (typeof ResizeObserver !== "undefined") {
       this.inspectorResizeObserver = new ResizeObserver(() => this.fitInspectorToSpace())
       this.inspectorResizeObserver.observe(this.get<HTMLElement>('[data-role="inspector-stage"]'))
+      const libraryGrid = this.get<HTMLElement>('[data-role="library-grid"]')
+      this.libraryGridObserver = new ResizeObserver(() => {
+        if (!libraryGrid.clientHeight || this.libraryFolderId === "__landing__") return
+        if (this.measureLibraryPageSize()) this.renderOutputLibrary()
+      })
+      this.libraryGridObserver.observe(libraryGrid)
     }
     document.addEventListener("keydown", this.handleKeyDown, true)
     this.setRunStatus("Loading Lumiverse connections…")
@@ -269,6 +306,15 @@ class StudioController {
     this.syncFullscreenRoot(false)
     this.syncStudioProfile()
     this.disposed = true
+    this.inpaintSession?.dialog.close()
+    if (this.libraryPicker?.folderId) this.closeOutputLibrary()
+    this.expressionDialog?.close()
+    for (const request of this.expressionRequests.values()) {
+      request.stop?.()
+      request.reject(new Error("Studio closed."))
+    }
+    this.expressionRequests.clear()
+    this.upscaleSession?.close()
     this.avatarCropAbort?.abort()
     this.folderDeleteAbort?.abort()
     window.visualViewport?.removeEventListener("resize", this.updatePresetViewport)
@@ -282,6 +328,7 @@ class StudioController {
     this.previewRequests.clear()
     this.previewObserver?.disconnect()
     this.previewObserver = null
+    this.libraryGridObserver?.disconnect()
     this.inspectorResizeObserver?.disconnect()
     this.inspectorResizeObserver = null
     this.stopActiveResize?.()
@@ -337,6 +384,10 @@ class StudioController {
     if (stripUserOnlyLoraStack) stripUserOnlyLoraStack.checked = this.behavior.stripUserOnlyLoraStack
     const autoPrintCharacterPositive = this.root.querySelector<HTMLInputElement>('[data-role="auto-print-character-positive"]')
     if (autoPrintCharacterPositive) autoPrintCharacterPositive.checked = this.behavior.autoPrintCharacterPositive
+    const deleteExpressionDrafts = this.root.querySelector<HTMLInputElement>('[data-role="delete-expression-drafts"]')
+    if (deleteExpressionDrafts) deleteExpressionDrafts.checked = this.behavior.deleteExpressionDrafts
+    const autoFinalizeInline = this.root.querySelector<HTMLInputElement>('[data-role="auto-finalize-inline"]')
+    if (autoFinalizeInline) autoFinalizeInline.checked = this.behavior.autoFinalizeInline
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="set-inline-image-scale"]')) {
       button.dataset.active = String(Number(button.dataset.scale) === this.behavior.inlineImageScale)
     }
@@ -726,6 +777,15 @@ class StudioController {
                           <span class="ss-settings-toggle-copy"><strong>Auto-print current character positive prompt</strong><span>Always prepend the bound character identity to tagged generations. Off lets the model choose only the relevant identities from the protocol—useful for multi-NPC character cards.</span></span>
                           <input type="checkbox" data-role="auto-print-character-positive" ${this.behavior.autoPrintCharacterPositive ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
                         </label>
+                        <label class="ss-settings-toggle">
+                          <span class="ss-settings-toggle-copy"><strong>Auto-finalize inline images</strong><span>After attaching an inline draft, automatically run AI Upscale and replace the chat image with the finalized result.</span></span>
+                          <input type="checkbox" data-role="auto-finalize-inline" ${this.behavior.autoFinalizeInline ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
+                        </label>
+                        <label class="ss-settings-toggle">
+                          <span class="ss-settings-toggle-copy"><strong>Delete expression drafts from Lumiverse Storage</strong><span>After sending expressions to Lumiverse, remove earlier renders replaced in this session.</span></span>
+                          <input type="checkbox" data-role="delete-expression-drafts" ${this.behavior.deleteExpressionDrafts ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
+                        </label>
+                        <p class="ss-muted ss-tiny">Configure the AI finalizer once from any output’s <strong>AI Upscale</strong> workspace. If no AI recipe is configured yet, the inline draft stays in chat as-is instead of falling back to interpolation.</p>
                         <label class="ss-config-field">
                           <span>Prompt composition</span>
                           <select class="ss-select" data-role="tag-prompt-mode">
@@ -931,7 +991,7 @@ are removed when CSS is applied.</pre>
                   <span class="ss-tune-recipe-tag">Custom</span>
                 </div>
                 <div class="ss-tune-divider">RENDER SETUP</div>
-                <details class="ss-tune-group" data-tune-group="model" open>
+                <details class="ss-tune-group" data-tune-group="model">
                   <summary><span class="ss-tune-group-icon">◇</span><span class="ss-tune-group-copy"><strong>Model &amp; workflow</strong><small data-role="tune-model-summary">Standard Swarm · Checkpoint</small></span><span class="ss-tune-chevron"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M216.49 168.49a12 12 0 0 1-17 0L128 97l-71.51 71.49a12 12 0 0 1-17-17l80-80a12 12 0 0 1 17 0l80 80a12 12 0 0 1 0 17"/></svg></span></summary>
                   <div class="ss-tune-group-body">
                 <section class="ss-workflow-panel">
@@ -1019,7 +1079,7 @@ are removed when CSS is applied.</pre>
                     </div>
                   </div>
                 </details>
-                <details class="ss-tune-group ss-init-group" open>
+                <details class="ss-tune-group ss-init-group">
                   <summary><span class="ss-tune-group-icon">▧</span><span class="ss-tune-group-copy"><strong>Image to image</strong><small>Starting image &amp; creativity</small></span><span class="ss-tune-chevron"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M216.49 168.49a12 12 0 0 1-17 0L128 97l-71.51 71.49a12 12 0 0 1-17-17l80-80a12 12 0 0 1 17 0l80 80a12 12 0 0 1 0 17"/></svg></span></summary>
                   <div class="ss-tune-group-body">
                 <div class="ss-init-slot" data-role="tune-init-slot"><div class="ss-init-panel">
@@ -1089,16 +1149,18 @@ are removed when CSS is applied.</pre>
               <div class="ss-output-stage-head">
                 <div class="ss-section-title"><strong>Current output</strong><span class="ss-muted ss-tiny">Saved by Lumiverse</span></div>
                 <div class="ss-output-actions">
-                  <button class="ss-button" data-action="download-output" disabled>Download</button>
-                  <button class="ss-button" data-action="copy-output" disabled>Copy URL</button>
-                  <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
+                  <button type="button" class="ss-icon-button" data-action="download-output" aria-label="Download output" title="Download output" disabled>${DOWNLOAD_ICON}</button>
+                  <button type="button" class="ss-icon-button" data-action="copy-output" aria-label="Copy output URL" title="Copy output URL" disabled>${BINDING_LINK_ICON}</button>
+                  <button type="button" class="ss-icon-button" data-action="append-to-chat" aria-label="Append output to chat" disabled>${APPEND_CHAT_ICON}</button>
+                  <button type="button" class="ss-icon-button" data-action="edit-region" aria-label="Edit region" title="Edit region" disabled>${INPAINT_ICON}</button>
+                  <button type="button" class="ss-icon-button" data-action="upscale-output" aria-label="AI upscale output" title="AI model / custom ComfyUI upscale" disabled>${EXPAND_ICON}</button>
                 </div>
               </div>
               <div class="ss-current-preview" data-role="current-preview" data-action="inspect-output" title="Open full-size image and generation details">
                 <button class="ss-icon-button ss-favorite-button ss-current-favorite" data-action="toggle-current-favorite" data-role="current-favorite" type="button" aria-label="Favorite current output" title="Add to Favorites" disabled>${STAR_ICON}</button>
                 <div class="ss-preview-empty" data-role="preview-empty"><strong>No output yet</strong>Generate an image or open one from History.</div>
                 <img data-role="preview-image" alt="Generated image preview" hidden />
-                <div class="ss-preview-loading" data-role="preview-loading">
+                <div class="ss-preview-loading" data-role="preview-loading" hidden>
                   <div class="ss-generation-progress" data-role="generation-progress" data-indeterminate="true">
                     <div class="ss-progress-track"><span class="ss-progress-fill" data-role="progress-fill"></span></div>
                     <div class="ss-progress-label" data-role="progress-label">Preparing…</div>
@@ -1114,7 +1176,7 @@ are removed when CSS is applied.</pre>
             <div class="ss-center-resizer" data-resize="prompt" role="separator" aria-orientation="horizontal" title="Drag to resize prompt area"></div>
 
             <section class="ss-prompt-panel" data-mobile-pane="create">
-              <div data-role="create-init-slot"></div>
+              <details class="ss-create-init"><summary>Image to image</summary><div data-role="create-init-slot"></div></details>
               <div class="ss-section-head ss-prompt-head">
                 <div class="ss-section-title"><strong>Prompt</strong><span class="ss-muted ss-tiny">LoRA triggers are opt-in</span></div>
                 <div class="ss-prompt-status" data-role="prompt-run-status">Waiting for SwarmUI.</div>
@@ -1395,55 +1457,117 @@ are removed when CSS is applied.</pre>
           </section>
         </div>
 
-        <div class="ss-inspector" data-role="inspector" hidden>
+        <div class="ss-inspector" data-role="inspector" data-inspector-tab="overview" hidden>
           <div class="ss-inspector-stage" data-role="inspector-stage">
-            <div class="ss-inspector-toolbar">
-              <button class="ss-icon-button ss-favorite-button" data-action="toggle-current-favorite" data-role="inspector-favorite" aria-label="Favorite output" title="Add to Favorites">${STAR_ICON}</button>
-              <button class="ss-icon-button" data-action="zoom-out" aria-label="Zoom out">−</button>
-              <button class="ss-button" data-action="zoom-reset" data-role="zoom-label">100%</button>
-              <button class="ss-icon-button" data-action="zoom-in" aria-label="Zoom in">+</button>
-              <button class="ss-button" data-action="download-output">Download</button>
+            <div class="ss-inspector-topline">
+              <span class="ss-inspector-eyebrow">Studio <span aria-hidden="true">/</span> Image <span aria-hidden="true">/</span> Inspect</span>
+              <button type="button" class="ss-icon-button ss-inspector-close" data-action="close-inspector" aria-label="Close output inspector" title="Close">×</button>
             </div>
-            <img class="ss-inspector-image" data-role="inspector-image" alt="Full-size generated output" />
+            <div class="ss-inspector-toolbar" role="toolbar" aria-label="Image viewer">
+              <button type="button" class="ss-icon-button ss-favorite-button" data-action="toggle-current-favorite" data-role="inspector-favorite" aria-label="Favorite output" title="Add to Favorites">${STAR_ICON}</button>
+              <span class="ss-inspector-divider" aria-hidden="true"></span>
+              <button type="button" class="ss-icon-button" data-action="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
+              <button type="button" class="ss-button ss-inspector-zoom-label" data-action="zoom-reset" data-role="zoom-label" title="Fit image to viewer">Fit</button>
+              <button type="button" class="ss-icon-button" data-action="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+              <span class="ss-inspector-divider" aria-hidden="true"></span>
+              <button type="button" class="ss-button" data-action="download-output">Download</button>
+            </div>
+            <div class="ss-inspector-picture"><img class="ss-inspector-image" data-role="inspector-image" alt="Full-size generated output" /></div>
+            <div class="ss-inspector-image-foot">
+              <div><strong>Generated output</strong><span data-role="inspector-image-dimensions"></span></div>
+              <button type="button" class="ss-button" data-action="copy-output">Copy image link</button>
+            </div>
           </div>
-          <aside class="ss-inspector-details">
-            <div class="ss-inspector-details-head">
+          <aside class="ss-inspector-details" aria-label="Generation inspector">
+            <header class="ss-inspector-details-head">
               <div>
-                <h3 data-role="inspector-title">Generated output</h3>
-                <div class="ss-muted ss-tiny">Full-size image and recorded generation settings</div>
+                <div class="ss-inspector-eyebrow">Image / Output inspector</div>
+                <h3>Generated image</h3>
+                <p class="ss-inspector-filename" data-role="inspector-title">Generated output</p>
               </div>
-              <button class="ss-icon-button ss-inspector-close" data-action="close-inspector" aria-label="Close full-size image">×</button>
-            </div>
-            <div class="ss-inspector-facts" data-role="inspector-facts"></div>
-            <div class="ss-inspector-actions">
-              <button class="ss-button ss-button-primary" data-action="reuse-parameters">Reuse parameters</button>
-              <button class="ss-button" data-action="use-as-init">Use as init image</button>
-              <button class="ss-button" data-action="append-to-chat" disabled>Append to chat</button>
-              <div class="ss-set-as-group" role="group" aria-labelledby="ss-set-as-heading">
-                <span class="ss-set-as-label" id="ss-set-as-heading">Set as picture</span>
-                <button class="ss-button" data-action="set-character-picture" disabled>Character</button>
-                <button class="ss-button" data-action="set-persona-picture" disabled>Persona</button>
+            </header>
+            <div class="ss-inspector-overview-head">
+              <div class="ss-inspector-facts" data-role="inspector-summary-facts" aria-label="Output summary"></div>
+              <div class="ss-inspector-actions" role="group" aria-label="Output actions">
+                <button type="button" class="ss-button ss-button-primary" data-action="edit-region">Edit region</button>
+                <button type="button" class="ss-button" data-action="reuse-parameters" title="Reuse recorded generation parameters">Reuse</button>
+                <button type="button" class="ss-button" data-action="use-as-init" title="Use this output as an image-to-image input">Use as init</button>
+                <button type="button" class="ss-button" data-action="upscale-output" title="AI model / custom ComfyUI upscale">AI Upscale</button>
               </div>
-              <button class="ss-button" data-action="send-character-gallery" disabled>Send to character gallery</button>
-              <button class="ss-button" data-action="open-output-library">Output library</button>
-              <button class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete from Lumiverse</button>
             </div>
-            <h4>Rendered positive prompt</h4>
-            <p class="ss-inspector-copy" data-role="inspector-positive">Prompt metadata is unavailable for this older output.</p>
-            <h4>Rendered negative prompt</h4>
-            <p class="ss-inspector-copy" data-role="inspector-negative">No negative prompt recorded.</p>
-            <h4>Used presets</h4>
-            <p class="ss-inspector-copy" data-role="inspector-presets">No Swarm presets recorded.</p>
-            <h4>LoRA stack</h4>
-            <p class="ss-inspector-copy" data-role="inspector-loras">No LoRAs recorded.</p>
-            <div class="ss-inspector-path" data-role="inspector-path" hidden>Saved by SwarmUI to <code data-role="inspector-path-value"></code></div>
+            <div class="ss-inspector-tabs" role="tablist" aria-label="Output information">
+              <button type="button" role="tab" aria-selected="true" tabindex="0" data-action="inspector-tab" data-inspector-tab="overview">Overview</button>
+              <button type="button" role="tab" aria-selected="false" tabindex="-1" data-action="inspector-tab" data-inspector-tab="prompt">Prompt</button>
+              <button type="button" role="tab" aria-selected="false" tabindex="-1" data-action="inspector-tab" data-inspector-tab="details">Details</button>
+            </div>
+            <div class="ss-inspector-sidebar">
+              <section class="ss-inspector-pane" data-inspector-pane="overview" role="tabpanel" aria-label="Overview">
+                <div class="ss-inspector-block">
+                  <div class="ss-inspector-block-head"><h4>Generation</h4><span>Recorded metadata</span></div>
+                  <dl class="ss-inspector-properties">
+                    <dt>Model</dt><dd data-role="inspector-model">Not recorded</dd>
+                    <dt>Resolution</dt><dd data-role="inspector-resolution">Not recorded</dd>
+                    <dt>Processing</dt><dd data-role="inspector-time">Not recorded</dd>
+                    <dt>Workflow</dt><dd data-role="inspector-workflow">Not recorded</dd>
+                  </dl>
+                </div>
+                <div class="ss-inspector-block">
+                  <div class="ss-inspector-block-head"><h4>Prompt</h4><button type="button" class="ss-inspector-text-button" data-action="inspector-show-prompt">View full ›</button></div>
+                  <p class="ss-inspector-prompt-preview" data-role="inspector-prompt-preview">Prompt metadata is unavailable for this older output.</p>
+                </div>
+                <div class="ss-inspector-block">
+                  <div class="ss-inspector-block-head"><h4>Use in Lumiverse</h4></div>
+                  <div class="ss-inspector-send">
+                    <button type="button" class="ss-button ss-inspector-send-trigger" data-action="inspector-send-toggle" aria-expanded="false" aria-controls="ss-inspector-send-menu">Send image to… <span aria-hidden="true">⌄</span></button>
+                    <div class="ss-inspector-send-menu" data-role="inspector-send-menu" id="ss-inspector-send-menu" hidden>
+                      <button type="button" data-action="append-to-chat" disabled>Append to current chat</button>
+                      <button type="button" data-action="send-character-gallery" disabled>Send to character gallery</button>
+                      <button type="button" data-action="set-character-picture" disabled>Set as character picture</button>
+                      <button type="button" data-action="set-persona-picture" disabled>Set as persona picture</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section class="ss-inspector-pane" data-inspector-pane="prompt" role="tabpanel" aria-label="Prompt" hidden>
+                <div class="ss-inspector-block">
+                  <div class="ss-inspector-block-head"><h4>Rendered positive prompt</h4><button type="button" class="ss-inspector-text-button" data-action="inspector-copy-prompt">Copy</button></div>
+                  <p class="ss-inspector-copy" data-role="inspector-positive">Prompt metadata is unavailable for this older output.</p>
+                </div>
+                <div class="ss-inspector-block">
+                  <div class="ss-inspector-block-head"><h4>Rendered negative prompt</h4></div>
+                  <p class="ss-inspector-copy" data-role="inspector-negative">No negative prompt recorded.</p>
+                </div>
+              </section>
+              <section class="ss-inspector-pane" data-inspector-pane="details" role="tabpanel" aria-label="Details" hidden>
+                <div class="ss-inspector-block">
+                  <div class="ss-inspector-block-head"><h4>Source and parameters</h4></div>
+                  <div class="ss-inspector-facts" data-role="inspector-facts"></div>
+                </div>
+                <div class="ss-inspector-block ss-inspector-optional" data-role="inspector-presets-block" hidden>
+                  <div class="ss-inspector-block-head"><h4>Used presets</h4></div>
+                  <p class="ss-inspector-copy" data-role="inspector-presets"></p>
+                </div>
+                <div class="ss-inspector-block ss-inspector-optional" data-role="inspector-loras-block" hidden>
+                  <div class="ss-inspector-block-head"><h4>LoRA stack</h4></div>
+                  <p class="ss-inspector-copy" data-role="inspector-loras"></p>
+                </div>
+                <div class="ss-inspector-block ss-inspector-path" data-role="inspector-path" hidden>
+                  <div class="ss-inspector-block-head"><h4>Verified SwarmUI path</h4></div>
+                  <code data-role="inspector-path-value"></code>
+                </div>
+              </section>
+            </div>
+            <footer class="ss-inspector-footer">
+              <button type="button" class="ss-button" data-action="open-output-library">Output library</button>
+              <button type="button" class="ss-button ss-button-danger" data-action="delete-output" disabled>Delete output</button>
+            </footer>
           </aside>
         </div>
 
         <div class="ss-output-library" data-role="output-library" data-view="folders" data-selection-mode="false" hidden>
           <header class="ss-library-head">
             <div class="ss-library-head-copy">
-              <strong>Output library</strong>
+              <strong data-role="library-heading">Output library</strong>
               <span class="ss-muted ss-tiny">Lumiverse-owned Swarm Studio images and virtual folders</span>
             </div>
             <label class="ss-library-folder-search">
@@ -1452,6 +1576,13 @@ are removed when CSS is applied.</pre>
             </label>
             <button class="ss-icon-button ss-library-close" data-action="close-output-library" data-role="library-close" aria-label="Close output library" title="Close output library">×</button>
           </header>
+          <div class="ss-library-selectbar ss-library-replacebar" data-role="library-replacebar" hidden>
+            <p class="ss-library-replace-status" data-role="library-replace-status" role="status">Choose one image to replace the illustration in chat.</p>
+            <div class="ss-library-selection-actions">
+              <button type="button" class="ss-button" data-action="close-output-library">Cancel</button>
+              <button type="button" class="ss-button ss-button-primary" data-action="confirm-library-pick" disabled>${CHECK_ICON}<span>Replace image</span></button>
+            </div>
+          </div>
           <section class="ss-library-landing" data-role="library-folders">
             <div class="ss-library-landing-inner">
               <div class="ss-library-folder-grid" data-role="library-folder-grid">
@@ -1475,9 +1606,11 @@ are removed when CSS is applied.</pre>
                   <span class="ss-muted" data-role="library-count">0 images</span>
                 </div>
                 <div class="ss-library-folder-actions">
+                  <button type="button" class="ss-button" data-action="cycle-library-preview"></button>
                   <button class="ss-button" data-action="toggle-library-search">${SEARCH_ICON}<span>Search</span></button>
                   <button class="ss-button" data-action="toggle-library-selection">${CHECK_ICON}<span>Select</span></button>
                   <button class="ss-button ss-button-primary" data-action="open-visual-profile" data-role="library-visual-button" hidden>${SPARKLE_ICON}<span>Prompts &amp; visuals</span></button>
+                  <button type="button" class="ss-button" data-action="open-folder-expressions" data-role="library-expression-button" hidden>Expressions</button>
                   <button class="ss-icon-button ss-library-folder-delete" data-action="delete-output-folder" data-role="library-delete-folder" title="Delete folder" aria-label="Delete folder">${TRASH_ICON}</button>
                 </div>
                 <div class="ss-library-pagination">
@@ -1544,6 +1677,17 @@ are removed when CSS is applied.</pre>
                     <label class="ss-field"><span>Checkpoint</span><select class="ss-select" data-role="visual-checkpoint"><option value="">Use current Studio checkpoint</option></select></label>
                     <label class="ss-field"><span>Base LoRA stack</span><select class="ss-select" data-role="visual-stack"><option value="">No bound stack</option></select></label>
                   </div>
+                  <div class="ss-anima-settings">
+                    <label class="ss-toggle-line ss-anima-toggle"><input type="checkbox" data-role="visual-anima-reference"><span>Use Anima Reference Adapter</span></label>
+                    <label class="ss-field"><span>Character reference image URL</span><input class="ss-input" data-role="visual-anima-url" placeholder="Lumiverse image URL"></label>
+                    <div>
+                      <div class="ss-anima-actions">
+                        <a class="ss-anima-setup" href="https://github.com/ArcAnima/ComfyUI-Anima-Ref-Adapter#quick-start" target="_blank" rel="noopener noreferrer">ComfyUI node setup</a>
+                        <button type="button" class="ss-button" data-action="download-anima-reference">Download adapter weights</button>
+                      </div>
+                      <p class="ss-muted ss-tiny ss-anima-status" data-role="anima-download-status" role="status"></p>
+                    </div>
+                  </div>
                 </section>
               </div>
               <div class="ss-library-visual-body ss-library-look-editor" data-role="library-look-editor" hidden>
@@ -1557,6 +1701,7 @@ are removed when CSS is applied.</pre>
                     <label class="ss-field"><span>Optional checkpoint override</span><select class="ss-select" data-role="library-look-checkpoint"><option value="">Inherit character checkpoint</option></select></label>
                     <label class="ss-field"><span>Optional LoRA stack</span><select class="ss-select" data-role="library-look-stack"><option value="">No additional LoRAs</option></select></label>
                     <label class="ss-field ss-library-look-wide"><span>Trigger words</span><input class="ss-input" data-role="library-look-triggers" placeholder="formal outfit, tailored suit"></label>
+                    <label class="ss-field"><span>Anima Reference Adapter</span><select class="ss-select" data-role="library-look-anima-reference"><option value="inherit">Inherit character setting</option><option value="on">Use Anima Reference Adapter</option><option value="off">Turn off for this look</option></select></label>
                     <label class="ss-field"><span>Reference / init image URL</span><input class="ss-input" data-role="library-look-reference" placeholder="Lumiverse image URL"></label>
                     <label class="ss-field"><span>Thumbnail URL</span><input class="ss-input" data-role="library-look-thumbnail" placeholder="Defaults to reference"></label>
                     <label class="ss-field ss-library-look-wide"><span>Continuity notes</span><textarea class="ss-textarea" data-role="library-look-notes" placeholder="Immutable details, seasonal variations, scene constraints…"></textarea></label>
@@ -1700,6 +1845,15 @@ are removed when CSS is applied.</pre>
         autoPrintCharacterPositive: (event.currentTarget as HTMLInputElement).checked,
       })
     })
+    this.get<HTMLInputElement>('[data-role="delete-expression-drafts"]').addEventListener("change", event => {
+      this.onBehaviorChange({ ...this.behavior, deleteExpressionDrafts: (event.currentTarget as HTMLInputElement).checked })
+    })
+    this.get<HTMLInputElement>('[data-role="auto-finalize-inline"]').addEventListener("change", (event) => {
+      this.onBehaviorChange({
+        ...this.behavior,
+        autoFinalizeInline: (event.currentTarget as HTMLInputElement).checked,
+      })
+    })
     this.get<HTMLSelectElement>('[data-role="tag-prompt-mode"]').addEventListener("change", (event) => {
       this.onBehaviorChange({
         ...this.behavior,
@@ -1832,6 +1986,7 @@ are removed when CSS is applied.</pre>
       if (!target.closest(".ss-config-wrap, .ss-settings-layer")) this.closeConfigPopover()
       if (!target.closest(".ss-history-card")) this.closeHistoryMenus()
       if (!target.closest(".ss-lora-sort-wrap")) this.closeLoraSortMenu()
+      if (!target.closest(".ss-inspector-send")) this.closeInspectorSendMenu()
       const button = target.closest<HTMLElement>("[data-action]")
       if (!button) return
       const action = button.dataset.action
@@ -1921,6 +2076,12 @@ are removed when CSS is applied.</pre>
       if (action === "clear-init") this.clearInitImage()
       if (action === "toggle-lora-download") this.toggleLoraDownloader()
       if (action === "start-lora-download") this.startManualLoraDownload()
+      if (action === "download-anima-reference") this.startLoraDownloadBatch([{
+        name: "anima_ref_adapter_v2_r64.safetensors",
+        title: "Anima Reference Adapter v2",
+        sourceUrl: "https://huggingface.co/ElectronGirl/anima-ref-adapter/resolve/main/anima_ref_adapter_v2_r64.safetensors",
+        weight: 1, enabled: true, useTrigger: false,
+      }])
       if (action === "cancel-lora-download") this.cancelLoraDownload()
       if (action === "toggle-lora-sort-menu") this.toggleLoraSortMenu()
       if (action === "select-lora-sort") this.selectLoraSort(button.dataset.sortValue || "title")
@@ -1953,7 +2114,12 @@ are removed when CSS is applied.</pre>
       if (action === "close-move-folder") this.closeMoveFolderModal()
       if (action === "move-folder-choice") this.confirmMoveFolder(button.dataset.folderId || "")
       if (action === "edit-prompt") this.openPromptEditor(button.dataset.promptRole || "")
-      if (action === "generate") this.generate()
+      if (action === "generate") {
+        if (this.mobileMedia.matches && this.get<HTMLElement>(".ss-shell").dataset.mobileTab !== "create") {
+          this.setMobileTab("create")
+          this.get<HTMLButtonElement>(".ss-mobile-generate").focus({ preventScroll: true })
+        } else this.generate()
+      }
       if (action === "interrupt-generation") this.interruptGeneration()
       if (action === "refresh-outputs") this.refreshOutputs()
       if (action === "history-prev") this.changeHistoryPage(-1)
@@ -1964,19 +2130,29 @@ are removed when CSS is applied.</pre>
       if (action === "set-character-picture" || action === "set-persona-picture") void this.setAvatarPicture(action === "set-persona-picture" ? "persona" : "character")
       if (action === "send-character-gallery" || action === "bulk-send-character-gallery") void this.sendCharacterImages(action)
       if (action === "inspect-output") this.openInspector()
+      if (action === "inspector-tab") this.setInspectorTab(button.dataset.inspectorTab || "overview")
+      if (action === "inspector-show-prompt") this.setInspectorTab("prompt")
+      if (action === "inspector-send-toggle") this.toggleInspectorSendMenu()
+      if (action === "inspector-copy-prompt") void this.copyInspectorPrompt()
+      if (["append-to-chat", "send-character-gallery", "set-character-picture", "set-persona-picture"].includes(action || "")) this.closeInspectorSendMenu()
+      if (action === "edit-region") this.editCurrentRegion()
+      if (action === "upscale-output") this.upscaleCurrentOutput()
       if (action === "close-inspector") this.closeInspector()
       if (action === "reuse-parameters") this.reuseCurrentParameters()
       if (action === "delete-output") this.deleteCurrentOutput()
       if (action === "open-output-library") this.openOutputLibrary()
       if (action === "close-output-library") this.closeOutputLibrary()
+      if (action === "confirm-library-pick") void this.confirmLibraryPick()
       if (action === "create-output-folder") this.openNewFolderModal()
       if (action === "close-new-folder") this.closeNewFolderModal()
       if (action === "confirm-new-folder") this.createOutputFolder()
       if (action === "delete-output-folder") void this.deleteSelectedOutputFolder()
+      if (action === "cycle-library-preview") this.cycleLibraryPreview()
       if (action === "toggle-library-search") this.toggleLibrarySearch()
       if (action === "toggle-library-selection") this.toggleLibrarySelectionMode()
       if (action === "save-visual-profile") this.saveVisualProfile()
       if (action === "open-visual-profile") this.openVisualProfile()
+      if (action === "open-folder-expressions") this.openFolderExpressions()
       if (action === "close-visual-profile") this.closeVisualProfile()
       if (action === "library-edit-look") this.openLibraryLook(button.dataset.lookId || "")
       if (action === "library-new-look") this.openLibraryLook("")
@@ -1984,7 +2160,7 @@ are removed when CSS is applied.</pre>
       if (action === "library-save-look") this.saveLibraryLook()
       if (action === "library-set-active-look") this.activateLibraryLook(this.libraryLookId)
       if (action === "library-delete-look") this.deleteLibraryLook()
-      if (action === "library-back") {
+      if (action === "library-back" && !this.libraryPicker?.folderId) {
         this.closeVisualProfile()
         this.libraryFolderId = "__landing__"
         this.libraryPage = 0
@@ -2005,7 +2181,7 @@ are removed when CSS is applied.</pre>
       if (action === "preset-remove") this.removeSelectedPreset(Number(button.dataset.presetIndex))
       if (action === "add-swarm-preset") this.openSavePresetModal()
       if (action === "move-library-output" && button.dataset.imageId) this.openMoveFolderModal([button.dataset.imageId])
-      if (action === "library-folder") {
+      if (action === "library-folder" && !this.libraryPicker?.folderId) {
         this.libraryFolderId = button.dataset.folderId || ""
         this.libraryPage = 0
         this.librarySelectionAnchorId = ""
@@ -2017,6 +2193,70 @@ are removed when CSS is applied.</pre>
         this.setInspectorZoom(1)
         this.fitInspectorToSpace()
       }
+    })
+  }
+
+  private openFolderExpressions(): void {
+    const folder = this.state.outputFolders.find(item => item.id === this.libraryFolderId)
+    const connection = this.state.connection
+    if (!folder?.binding || !connection || this.expressionDialog?.open) return
+    const look = folder.binding.looks.find(item => item.id === folder.binding?.activeLookId)
+    const recipe = resolveGenerationConfig({ provider: connection.default_parameters, characterBase: folder.binding, characterLook: look })
+    const model = recipe.checkpoint ||
+      this.get<HTMLSelectElement>('[data-role="model"]').value || connection.model
+    const mount = this.get<HTMLElement>(".ss-shell")
+    this.expressionDialog = openCharacterExpressions(mount, {
+      folder, model,
+      family: inferModelFamily(model, this.state.checkpoints.find(item => normalizeModelName(item.name) === normalizeModelName(model))?.architecture || ""),
+      workflows: this.state.swarmWorkflows,
+      inheritedRecipe: { ...EXPRESSION_DEFAULT_RECIPE, ...recipe },
+      samplers: this.state.samplers,
+      schedulers: this.state.schedulers,
+      deleteDrafts: this.behavior.deleteExpressionDrafts,
+      pickImage: (kind, initialId, choose) => this.openExpressionImagePicker(kind, folder.id, initialId, choose),
+      request: (type, data, progress, signal) => new Promise((resolve, reject) => {
+        if (signal?.aborted) { reject(signal.reason); return }
+        const requestId = createRequestId()
+        let timer = 0
+        let stopping = false
+        const cleanup = () => {
+          window.clearTimeout(timer)
+          this.expressionRequests.delete(requestId)
+          signal?.removeEventListener("abort", stop)
+        }
+        const failed = (error: Error) => { cleanup(); reject(error) }
+        const setDeadline = (delay: number, message: string) => {
+          window.clearTimeout(timer)
+          timer = window.setTimeout(() => failed(new Error(message)), delay)
+        }
+        const waitForResult = () => setDeadline(type.endsWith("_expression_set") || type === "load_expression_enhance_options" || type === "check_expression_background_model" ? 12_000 : 240_000,
+          "Lumiverse did not respond. Check the Output Library before retrying.")
+        const stop = () => {
+          if (stopping) return
+          stopping = true
+          setDeadline(12_000, "Lumiverse did not confirm Stop. Check the Output Library before retrying.")
+          try { this.ctx.sendToBackend({ type: "stop_folder_expression", requestId }) }
+          catch { failed(new Error("Could not send Stop. The active render may still finish.")) }
+        }
+        this.expressionRequests.set(requestId, {
+          resolve: value => { cleanup(); resolve(value) },
+          reject: failed,
+          progress: progress && (update => {
+            if (stopping) return
+            waitForResult()
+            progress(update)
+          }),
+          stop: signal ? stop : undefined,
+        })
+        signal?.addEventListener("abort", stop, { once: true })
+        waitForResult()
+        try { this.ctx.sendToBackend({ ...data, type, requestId, folderId: folder.id, connectionId: connection.id }) }
+        catch (error) { failed(error instanceof Error ? error : new Error(String(error))) }
+      }),
+      refresh: () => {
+        this.expressionDialog = null
+        if (!this.disposed) this.send("list_library_outputs")
+      },
     })
   }
 
@@ -2133,6 +2373,17 @@ are removed when CSS is applied.</pre>
 
   onMessage(payload: any): void {
     if (this.disposed) return
+    const expressionRequest = this.expressionRequests.get(String(payload?.requestId || ""))
+    if (expressionRequest) {
+      if (payload.type === "folder_expression_progress") {
+        expressionRequest.progress?.(payload.data)
+        return
+      }
+      if (payload.type === "folder_expression_stopped") expressionRequest.reject(new DOMException("Expression stopped.", "AbortError"))
+      else if (payload.type === "studio_error") expressionRequest.reject(new Error(String(payload.error || "Expression request failed.")))
+      else expressionRequest.resolve(payload.data)
+      return
+    }
     const data = payload?.data || {}
     switch (payload?.type) {
       case "render_settings_result":
@@ -2158,6 +2409,7 @@ are removed when CSS is applied.</pre>
         this.renderParserConnections()
         this.loadParserModels()
         this.populateConnections()
+        this.tryOpenInlineInpaint()
         this.renderOutputs()
         this.renderStackPresets()
         this.hydrateActiveVisualStack()
@@ -2212,7 +2464,16 @@ are removed when CSS is applied.</pre>
         this.applyPendingTaggedPrompt()
         this.setRunStatus(data.metadataError ? "Ready — LoRA metadata needs attention." : "Ready.")
         this.scheduleStudioProfileSync()
+        this.tryOpenToolkitUpscale()
+        this.tryOpenInlineInpaint()
         break
+      case "inline_edit_source_result": {
+        const pending = this.inlineInpaint
+        if (!pending || payload.requestId !== pending.requestId) break
+        pending.image = data as CurrentImage
+        this.tryOpenInlineInpaint()
+        break
+      }
       case "metadata_result":
         this.state.loras = Array.isArray(data.loras) ? data.loras : []
         this.state.stack = this.state.stack.map((item) => ({
@@ -2401,6 +2662,33 @@ are removed when CSS is applied.</pre>
         this.get<HTMLInputElement>('[data-role="metadata-token"]').value = ""
         this.setRunStatus(payload.type === "token_saved" ? "Metadata token saved and library refreshed." : "Metadata token cleared.")
         break
+      case "upscale_options_result": {
+        if (payload.requestId !== this.upscaleOptionsRequestId) break
+        this.upscaleOptionsRequestId = ""
+        this.upscaleSession?.updateOptions(data)
+        break
+      }
+      case "upscale_workflow_result": {
+        if (payload.requestId !== this.upscaleWorkflowRequestId) break
+        this.upscaleWorkflowRequestId = ""
+        this.upscaleSession?.updateWorkflow(data)
+        break
+      }
+      case "upscale_output_result": {
+        if (payload.requestId !== this.upscaleRequestId) break
+        this.upscaleRequestId = ""
+        this.acceptOutputPage(data)
+        if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
+        if (this.state.currentImage?.id === data.sourceId) {
+          this.setCurrentImage({ id: data.id, url: data.url, src: data.preview || data.url, label: data.record?.workflow || "Enhanced output", details: data.record })
+          if (!this.get<HTMLElement>('[data-role="inspector"]').hidden) this.openInspector()
+        }
+        this.upscaleSession?.close()
+        this.renderOutputs()
+        this.updateAppendControls()
+        this.setRunStatus("Enhanced output saved to the Output Library.")
+        break
+      }
       case "generation_result":
         if (payload.clientJobId && this.settledGenerationJobIds.has(String(payload.clientJobId))) break
         this.rememberSettledGenerationJob(String(payload.clientJobId || this.currentJobId))
@@ -2411,10 +2699,15 @@ are removed when CSS is applied.</pre>
         this.setGenerating(false)
         this.acceptOutputPage(data)
         if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
-        if (data.result?.imageDataUrl) {
+        if (this.inpaintJobId && payload.clientJobId === this.inpaintJobId) {
+          this.inpaintJobId = ""
+          const variant = String(data.result?.imageDataUrl || data.result?.imageUrl || data.record?.imageUrl || "")
+          const variantId = String(data.result?.imageId || data.record?.imageId || "")
+          this.inpaintSession?.finish(variant ? "Variant saved to the Output Library." : "The render did not return an image preview.", variant, variantId)
+        } else if (data.result?.imageDataUrl || data.result?.imageUrl) {
           this.setCurrentImage({
             id: data.result.imageId || data.record?.imageId,
-            src: data.result.imageDataUrl,
+            src: data.result.imageDataUrl || data.result.imageUrl,
             url: data.result.imageUrl || data.result.imageDataUrl,
             label: `${data.result.model || "SwarmUI"} · just generated`,
             details: data.record || this.pendingGeneration,
@@ -2454,7 +2747,9 @@ are removed when CSS is applied.</pre>
         if (!this.currentJobId || payload.clientJobId !== this.currentJobId) break
         const step = Number.isFinite(data.step) ? Number(data.step) : 0
         const totalSteps = Number.isFinite(data.totalSteps) ? Number(data.totalSteps) : 0
-        if (typeof data.preview === "string" && data.preview) {
+        if (this.inpaintJobId && payload.clientJobId === this.inpaintJobId) {
+          this.inpaintSession?.progress(totalSteps > 0 ? `Rendering · ${step} / ${totalSteps}` : "Rendering in SwarmUI…", typeof data.preview === "string" ? data.preview : undefined)
+        } else if (typeof data.preview === "string" && data.preview) {
           this.showLivePreview(data.preview, step, totalSteps)
         }
         this.updateGenerationProgress(step, totalSteps)
@@ -2471,6 +2766,10 @@ are removed when CSS is applied.</pre>
         break
       case "generation_interrupted":
         if (!payload.clientJobId || payload.clientJobId === this.currentJobId) {
+          if (this.inpaintJobId && (!payload.clientJobId || payload.clientJobId === this.inpaintJobId)) {
+            this.inpaintJobId = ""
+            this.inpaintSession?.finish("Render stopped. Your mask is still available.")
+          }
           this.rememberSettledGenerationJob(String(payload.clientJobId || this.currentJobId))
           this.generating = false
           this.currentJobId = ""
@@ -2603,6 +2902,29 @@ are removed when CSS is applied.</pre>
         this.setRunStatus("Saved LoRA stacks updated.")
         break
       case "studio_error":
+        if (payload.operation === "select_inline_variant") break
+        if (payload.operation === "load_inline_edit_source" && payload.requestId === this.inlineInpaint?.requestId) {
+          this.inlineInpaint = null
+          this.setRunStatus(payload.error || "Could not load the inline illustration.", true)
+          break
+        }
+        if (payload.operation === "list_library_outputs" && this.libraryPicker) {
+          this.get<HTMLElement>('[data-role="library-replace-status"]').textContent = payload.error || "Could not load the Output Library."
+          break
+        }
+        if (payload.operation === "upscale_output" && payload.requestId === this.upscaleRequestId) {
+          this.upscaleRequestId = ""
+          this.upscaleSession?.reportError(String(payload.error || payload.message || data?.message || "Upscale failed; check SwarmUI's backend logs."))
+          this.updateAppendControls()
+        }
+        if (payload.operation === "load_upscale_options" && payload.requestId === this.upscaleOptionsRequestId) {
+          this.upscaleOptionsRequestId = ""
+          this.upscaleSession?.updateOptions({ models: [], workflows: [], modelError: String(payload.error || payload.message || "SwarmUI discovery failed.") })
+        }
+        if (payload.operation === "load_upscale_workflow" && payload.requestId === this.upscaleWorkflowRequestId) {
+          this.upscaleWorkflowRequestId = ""
+          this.upscaleSession?.reportError(String(payload.error || payload.message || "Could not read the workflow's image inputs."))
+        }
         if (payload.operation === "preview") {
           const request = this.previewRequests.get(payload.requestId)
           this.previewRequests.delete(payload.requestId)
@@ -2624,6 +2946,9 @@ are removed when CSS is applied.</pre>
           this.loraDownloadActive = false
           this.setLoraDownloadStatus(payload.error || "SwarmUI could not start that download.", true)
         }
+        if (payload.operation === "interrupt_generation" && this.inpaintJobId && payload.clientJobId === this.inpaintJobId) {
+          this.inpaintSession?.stopFailed(payload.error || "SwarmUI could not stop the render.")
+        }
         if (payload.operation === "create_output_folder") this.pendingCreatedFolder = null
         if (payload.operation === "load_swarm_workflow") {
           this.workflowRequestId = ""
@@ -2635,6 +2960,10 @@ are removed when CSS is applied.</pre>
           this.renderWorkflowControls()
         }
         if (payload.operation === "generate") {
+          if (this.inpaintJobId && payload.clientJobId === this.inpaintJobId) {
+            this.inpaintJobId = ""
+            this.inpaintSession?.finish(payload.error || "The region edit failed. Your mask is still available.")
+          }
           this.rememberSettledGenerationJob(String(payload.clientJobId || this.currentJobId))
           this.generating = false
           this.currentJobId = ""
@@ -4207,7 +4536,11 @@ are removed when CSS is applied.</pre>
   }
 
   private startLoraDownloadBatch(items: StackPresetItem[]): void {
-    if (!items.length || !this.state.connection) return
+    if (!items.length) return
+    if (!this.state.connection) {
+      this.setLoraDownloadStatus("Choose a SwarmUI connection before downloading weights.", true)
+      return
+    }
     if (this.loraDownloadActive) {
       this.setLoraDownloadStatus("A LoRA download is already running. Cancel it before starting another.", true)
       return
@@ -4242,6 +4575,9 @@ are removed when CSS is applied.</pre>
       modalStatus.textContent = message
       modalStatus.style.color = error ? "#ff8b96" : ""
     }
+    const adapterStatus = this.get<HTMLElement>('[data-role="anima-download-status"]')
+    adapterStatus.textContent = message
+    this.get<HTMLButtonElement>('[data-action="download-anima-reference"]').disabled = this.loraDownloadActive
     if (message) this.setRunStatus(message, error)
   }
 
@@ -4430,7 +4766,27 @@ are removed when CSS is applied.</pre>
       ["Description", lora.description || lora.usageHint || "No description provided"],
     ]
     for (const [label, value] of pairs) {
-      info.append(element("dt", "", label), element("dd", "", value))
+      const field = element("dd", "", value)
+      if (label === "Description") {
+        const template = document.createElement("template")
+        template.innerHTML = value
+        const appendDescription = (source: Node, target: Node): void => {
+          for (const child of source.childNodes) {
+            if (child.nodeType === window.Node.TEXT_NODE) {
+              target.appendChild(document.createTextNode(child.textContent || ""))
+            } else if (child.nodeType === window.Node.ELEMENT_NODE && !["SCRIPT", "STYLE"].includes(child.nodeName)) {
+              if (["P", "BR", "STRONG", "B", "EM", "I", "UL", "OL", "LI", "CODE", "BLOCKQUOTE"].includes(child.nodeName)) {
+                const formatted = document.createElement(child.nodeName)
+                appendDescription(child, formatted)
+                target.appendChild(formatted)
+              } else appendDescription(child, target)
+            }
+          }
+        }
+        field.replaceChildren()
+        appendDescription(template.content, field)
+      }
+      info.append(element("dt", "", label), field)
     }
     dialog.append(head, info)
     const controls = element("div", "ss-lora-meta-controls")
@@ -4839,7 +5195,7 @@ are removed when CSS is applied.</pre>
   }
 
   private recipeEditorMarkup(prefix: string): string {
-    return `<div class="ss-style-editor ss-lookbook-recipe"><label class="ss-lookbook-style-pick">Render Style<select class="ss-select" data-role="${prefix}-recipe-style"></select></label>${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key === "cfg" ? "CFG" : key[0].toUpperCase() + key.slice(1)}<input class="ss-input" data-role="${prefix}-recipe-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div>`
+    return `<details class="ss-lookbook-advanced"><summary>Advanced settings</summary><div class="ss-style-editor ss-lookbook-recipe"><label class="ss-lookbook-style-pick">Render Style<select class="ss-select" data-role="${prefix}-recipe-style"></select></label>${["width", "height", "steps", "cfg", "sampler", "scheduler"].map(key => `<label>${key === "cfg" ? "CFG" : key[0].toUpperCase() + key.slice(1)}<input class="ss-input" data-role="${prefix}-recipe-${key}" placeholder="Inherit" ${["sampler", "scheduler"].includes(key) ? "" : 'type="number" step="any"'}></label>`).join("")}</div></details>`
   }
 
   private populateRecipeEditor(prefix: string, target: { generationRecipe?: GenerationRecipe; styleId?: string } | null | undefined): void {
@@ -5038,12 +5394,16 @@ are removed when CSS is applied.</pre>
     let state: any = {}
     try { state = JSON.parse(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || window.localStorage.getItem("swarm-studio-workspace-v1") || "{}") } catch {}
     state = normalizeWorkspaceState(state)
+    this.libraryPreviewShape = LIBRARY_PREVIEW_SHAPES.find(shape => shape.name === state.libraryPreviewShape) ?? LIBRARY_PREVIEW_SHAPES[0]
+    this.updateLibraryPreviewControls()
     this.setStudioView("generate")
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.classList.toggle("ss-generation-collapsed", state?.collapsed?.generation === true)
     shell.classList.remove("ss-history-collapsed")
-    shell.classList.toggle("ss-fullscreen-layer", state?.fullscreen === true)
-    this.syncFullscreenRoot(state?.fullscreen === true)
+    this.desktopFullscreen = state?.fullscreen === true
+    const fullscreen = this.mobileMedia.matches || this.desktopFullscreen
+    shell.classList.toggle("ss-fullscreen-layer", fullscreen)
+    this.syncFullscreenRoot(fullscreen)
     const advanced = this.root.querySelector<HTMLDetailsElement>("details.ss-advanced")
     if (advanced) advanced.open = state?.details?.advanced === true
     const savedLoraFolder = state?.loraBrowser?.folder
@@ -5096,7 +5456,8 @@ are removed when CSS is applied.</pre>
     try {
       window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
         version: 2,
-        fullscreen: shell.classList.contains("ss-fullscreen-layer"),
+        fullscreen: this.desktopFullscreen,
+        libraryPreviewShape: this.libraryPreviewShape.name,
         mobileTab: shell.dataset.mobileTab || "create",
         collapsed: {
           generation: shell.classList.contains("ss-generation-collapsed"),
@@ -5238,7 +5599,8 @@ are removed when CSS is applied.</pre>
 
   private toggleFullscreen(force?: boolean): void {
     const shell = this.get<HTMLElement>(".ss-shell")
-    const shouldEnter = force ?? !shell.classList.contains("ss-fullscreen-layer")
+    if (!this.mobileMedia.matches) this.desktopFullscreen = force ?? !this.desktopFullscreen
+    const shouldEnter = this.mobileMedia.matches || this.desktopFullscreen
     shell.classList.toggle("ss-fullscreen-layer", shouldEnter)
     this.syncFullscreenRoot(shouldEnter)
     this.updateWorkspaceButtons()
@@ -5274,14 +5636,38 @@ are removed when CSS is applied.</pre>
     const image = this.state.currentImage
     if (!image) return
     const inspector = this.get<HTMLElement>('[data-role="inspector"]')
+    const opening = inspector.hidden
+    if (opening) this.inspectorReturnFocus = document.activeElement as HTMLElement | null
     const inspectorImage = this.get<HTMLImageElement>('[data-role="inspector-image"]')
-    inspectorImage.onload = () => this.fitInspectorToSpace()
+    inspectorImage.onload = () => {
+      this.get<HTMLElement>('[data-role="inspector-image-dimensions"]').textContent =
+        inspectorImage.naturalWidth && inspectorImage.naturalHeight ? ` · ${inspectorImage.naturalWidth} × ${inspectorImage.naturalHeight}` : ""
+      this.fitInspectorToSpace()
+    }
     inspectorImage.src = image.url || image.src
     this.get<HTMLElement>('[data-role="inspector-title"]').textContent = image.label
     const details = image.details || null
     const parameters = details?.parameters || {}
     const facts = this.get<HTMLElement>('[data-role="inspector-facts"]')
     facts.replaceChildren()
+    this.get<HTMLElement>('[data-role="inspector-model"]').textContent = details?.model || "Not recorded"
+    this.get<HTMLElement>('[data-role="inspector-resolution"]').textContent =
+      parameters.width && parameters.height ? `${parameters.width} × ${parameters.height}` : "Not recorded"
+    this.get<HTMLElement>('[data-role="inspector-time"]').textContent = details?.timing?.totalMs
+      ? `${(details.timing.totalMs / 1000).toFixed(2)} sec` : details?.timing?.generation || "Not recorded"
+    this.get<HTMLElement>('[data-role="inspector-workflow"]').textContent = details?.workflow || "Standard generation"
+    this.get<HTMLElement>('[data-role="inspector-prompt-preview"]').textContent =
+      details?.resolvedPrompt || details?.prompt || "Prompt metadata is unavailable for this older output."
+    const summary = this.get<HTMLElement>('[data-role="inspector-summary-facts"]')
+    summary.replaceChildren()
+    const compactFacts = [
+      parameters.width && parameters.height ? `${parameters.width} × ${parameters.height}` : "",
+      details?.timing?.totalMs ? `${(details.timing.totalMs / 1000).toFixed(2)} sec` : "",
+      details?.workflow ? String(details.workflow) : "",
+    ].filter(Boolean)
+    for (const value of compactFacts) summary.appendChild(element("span", "ss-badge", String(value)))
+    this.get<HTMLElement>('[data-role="inspector-image-dimensions"]').textContent =
+      parameters.width && parameters.height ? ` · ${parameters.width} × ${parameters.height}` : ""
     const factValues = [
       details?.model,
       parameters.width && parameters.height ? `${parameters.width} × ${parameters.height}` : "",
@@ -5309,6 +5695,8 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="inspector-loras"]').textContent = details?.loras?.length
       ? details.loras.map((lora) => `${lora.name} · ${lora.weight}`).join("\n")
       : "No LoRAs recorded."
+    this.get<HTMLElement>('[data-role="inspector-presets-block"]').hidden = !details?.presets?.length
+    this.get<HTMLElement>('[data-role="inspector-loras-block"]').hidden = !details?.loras?.length
     const path = details?.swarmPathVerified ? details.swarmPath || "" : ""
     this.get<HTMLElement>('[data-role="inspector-path"]').hidden = !path
     this.get<HTMLElement>('[data-role="inspector-path-value"]').textContent = path
@@ -5318,13 +5706,62 @@ are removed when CSS is applied.</pre>
     this.updateAppendControls()
     this.syncFavoriteControls()
     inspector.hidden = false
+    if (opening) {
+      this.setInspectorTab("overview")
+      this.closeInspectorSendMenu()
+      this.get<HTMLButtonElement>('[data-action="close-inspector"]').focus({ preventScroll: true })
+    }
     this.requestCurrentOutputMetadata("")
     this.setInspectorZoom(1)
     requestAnimationFrame(() => this.fitInspectorToSpace())
   }
 
   private closeInspector(): void {
-    this.get<HTMLElement>('[data-role="inspector"]').hidden = true
+    const inspector = this.get<HTMLElement>('[data-role="inspector"]')
+    if (inspector.hidden) return
+    inspector.hidden = true
+    this.closeInspectorSendMenu()
+    const previous = this.inspectorReturnFocus
+    this.inspectorReturnFocus = null
+    if (previous?.isConnected && !previous.closest("[hidden]")) previous.focus({ preventScroll: true })
+  }
+
+  private setInspectorTab(tab: string): void {
+    const inspector = this.get<HTMLElement>('[data-role="inspector"]')
+    const selected = ["overview", "prompt", "details"].includes(tab) ? tab : "overview"
+    inspector.dataset.tab = selected
+    for (const control of inspector.querySelectorAll<HTMLButtonElement>('[data-action="inspector-tab"]')) {
+      const active = control.dataset.inspectorTab === selected
+      control.setAttribute("aria-selected", String(active))
+      control.tabIndex = active ? 0 : -1
+    }
+    for (const pane of inspector.querySelectorAll<HTMLElement>('[data-inspector-pane]')) {
+      pane.hidden = pane.dataset.inspectorPane !== selected
+    }
+    this.closeInspectorSendMenu()
+  }
+
+  private closeInspectorSendMenu(): void {
+    const menu = this.root.querySelector<HTMLElement>('[data-role="inspector-send-menu"]')
+    const trigger = this.root.querySelector<HTMLButtonElement>('[data-action="inspector-send-toggle"]')
+    if (menu) menu.hidden = true
+    trigger?.setAttribute("aria-expanded", "false")
+  }
+
+  private toggleInspectorSendMenu(): void {
+    const menu = this.get<HTMLElement>('[data-role="inspector-send-menu"]')
+    menu.hidden = !menu.hidden
+    this.get<HTMLButtonElement>('[data-action="inspector-send-toggle"]').setAttribute("aria-expanded", String(!menu.hidden))
+  }
+
+  private async copyInspectorPrompt(): Promise<void> {
+    const prompt = this.get<HTMLElement>('[data-role="inspector-positive"]').textContent || ""
+    try {
+      await navigator.clipboard.writeText(prompt)
+      this.setRunStatus("Rendered prompt copied.")
+    } catch {
+      this.setRunStatus("Clipboard unavailable. Select the prompt text to copy it.", true)
+    }
   }
 
   private setInspectorZoom(value: number): void {
@@ -5337,7 +5774,7 @@ are removed when CSS is applied.</pre>
   private fitInspectorToSpace(): void {
     const inspector = this.root.querySelector<HTMLElement>('[data-role="inspector"]')
     if (!inspector || inspector.hidden) return
-    const stage = this.get<HTMLElement>('[data-role="inspector-stage"]')
+    const stage = this.get<HTMLElement>('.ss-inspector-picture')
     const image = this.get<HTMLImageElement>('[data-role="inspector-image"]')
     const recordedWidth = Number(this.state.currentImage?.details?.parameters?.width)
     const recordedHeight = Number(this.state.currentImage?.details?.parameters?.height)
@@ -5346,8 +5783,8 @@ are removed when CSS is applied.</pre>
     if (!naturalWidth || !naturalHeight || stage.clientWidth <= 0 || stage.clientHeight <= 0) return
     const fitted = fitAspectWithin(
       naturalWidth / naturalHeight,
-      Math.max(80, stage.clientWidth - 48),
-      Math.max(80, stage.clientHeight - 94),
+      Math.max(80, stage.clientWidth - 28),
+      Math.max(80, stage.clientHeight - 28),
     )
     image.style.width = `${Math.round(fitted.width)}px`
     image.style.height = `${Math.round(fitted.height)}px`
@@ -5522,6 +5959,99 @@ are removed when CSS is applied.</pre>
     this.send("append_output_to_chat", { imageId: image.id, label: image.label })
   }
 
+  private pendingToolkitUpscale: CurrentImage | null = null
+
+  requestUpscaleFromToolkit(image: CurrentImage): void {
+    if (!image.id || this.disposed) return
+    this.pendingToolkitUpscale = image
+    this.tryOpenToolkitUpscale()
+  }
+
+  private tryOpenToolkitUpscale(): void {
+    const image = this.pendingToolkitUpscale
+    if (!image?.id || !this.state.connection?.id) return
+    this.pendingToolkitUpscale = null
+    if (!this.state.permissions.imageGen || !this.state.permissions.images) {
+      this.setRunStatus("AI Upscale requires SwarmUI image generation and image access.", true)
+      return
+    }
+    this.setCurrentImage(image)
+    this.upscaleCurrentOutput()
+  }
+
+  private upscaleCurrentOutput(): void {
+    const image = this.state.currentImage
+    const connectionId = this.state.connection?.id
+    if (this.upscaleRequestId || this.upscaleSession?.dialog.open || !image?.id || !connectionId ||
+      !this.state.permissions.imageGen || !this.state.permissions.images) return
+    const mount = this.root.querySelector<HTMLElement>(".ss-shell") || this.root
+    const selectedImageId = image.id
+    this.upscaleSession = openStudioUpscale(mount, image, (settings, remember) => {
+      if (this.disposed || !this.state.connection || this.state.connection.id !== connectionId) return
+      this.upscaleRequestId = this.send("upscale_output", {
+        imageId: selectedImageId, connectionId, settings, remember,
+      })
+      this.updateAppendControls()
+      this.setRunStatus("Running AI upscale workflow…")
+    }, name => {
+      if (this.disposed) return
+      this.upscaleWorkflowRequestId = this.send("load_upscale_workflow", { connectionId, name })
+    }, () => {
+      this.upscaleSession = null
+      this.upscaleOptionsRequestId = ""
+      this.upscaleWorkflowRequestId = ""
+    })
+    this.upscaleOptionsRequestId = this.send("load_upscale_options", { connectionId })
+  }
+
+  requestInlineInpaint(target: StudioInlineImageTarget): void {
+    if (this.inpaintSession?.dialog.open || this.disposed) return
+    const requestId = createRequestId()
+    this.inlineInpaint = { target, requestId }
+    this.setRunStatus("Loading the inline illustration…")
+    try {
+      this.ctx.sendToBackend({ type: "load_inline_edit_source", requestId, jobId: target.jobId, imageId: target.imageId })
+    } catch (error) {
+      this.inlineInpaint = null
+      this.setRunStatus(error instanceof Error ? error.message : String(error), true)
+    }
+  }
+
+  private tryOpenInlineInpaint(): void {
+    const pending = this.inlineInpaint
+    if (!pending?.image || this.disposed) return
+    if (this.state.permissions.imageGen === undefined) return
+    if (!this.state.permissions.imageGen || !this.state.permissions.images || !this.state.connections.length) {
+      this.inlineInpaint = null
+      this.setRunStatus("Inpainting requires image access and a SwarmUI connection.", true)
+      return
+    }
+    if (!this.state.connection) return
+    this.inlineInpaint = null
+    this.openRegionEditor(pending.image, pending.target)
+  }
+
+  private editCurrentRegion(): void {
+    const image = this.state.currentImage
+    if (image) this.openRegionEditor(image)
+  }
+
+  private openRegionEditor(image: CurrentImage, target?: StudioInlineImageTarget): void {
+    if (this.inpaintSession?.dialog.open || !image?.id || !this.state.connection || !this.state.permissions.imageGen) return
+    const session = openStudioInpaint(this.get<HTMLElement>(".ss-shell"), { ...image, id: image.id }, image.details?.resolvedPrompt || image.details?.prompt || "", edit => {
+      if (this.disposed || this.generating || !this.state.connection || !this.state.permissions.imageGen) return false
+      this.generate(edit, image)
+      return true
+    }, () => {
+      if (this.inpaintJobId && this.inpaintJobId === this.currentJobId) this.interruptGeneration()
+    }, target?.replace)
+    this.inpaintSession = session
+    session.dialog.addEventListener("close", () => {
+      if (this.inpaintSession === session) this.inpaintSession = null
+      if (!this.disposed) target?.onExit?.()
+    }, { once: true })
+  }
+
   private async useCurrentAsInit(): Promise<void> {
     const image = this.state.currentImage
     if (!image?.src) return
@@ -5622,25 +6152,127 @@ are removed when CSS is applied.</pre>
     clear.disabled = false
   }
 
-  private openOutputLibrary(): void {
+  openInlineReplacement(target: StudioInlineImageTarget): void {
+    this.openOutputLibrary({
+      kind: "replace", excludedId: target.imageId,
+      choose: image => target.replace(image.id), onExit: target.onExit,
+    })
+  }
+
+  private openExpressionImagePicker(kind: "reference" | "saved", folderId: string, initialId: string, choose: (image: StudioExpressionImage) => void): void {
+    if (this.libraryPicker || !this.expressionDialog?.open) return
+    const library = this.get<HTMLElement>('[data-role="output-library"]')
+    const search = this.get<HTMLInputElement>('[data-role="library-search"]')
+    const searchWrap = this.get<HTMLElement>('[data-role="library-search-wrap"]')
+    const grid = this.get<HTMLElement>('[data-role="library-grid"]')
+    const parent = library.parentNode!
+    const next = library.nextSibling
+    const focus = document.activeElement as HTMLElement | null
+    const previous = {
+      folder: this.libraryFolderId, page: this.libraryPage, pageSize: this.libraryPageSize, query: search.value, searchHidden: searchWrap.hidden,
+      mode: this.librarySelectionMode, selected: [...this.librarySelection], anchor: this.librarySelectionAnchorId, scroll: grid.scrollTop,
+    }
+    const pickerDialog = element("dialog", "ss-expression-picker")
+    pickerDialog.setAttribute("aria-label", kind === "reference" ? "Choose reference output" : "Choose saved image")
+    pickerDialog.addEventListener("cancel", event => { event.preventDefault(); this.closeOutputLibrary() })
+    this.expressionDialog.append(pickerDialog)
+    pickerDialog.append(library)
+    this.openOutputLibrary({
+      kind, folderId, initialId, choose,
+      onExit: () => {
+        parent.insertBefore(library, next)
+        pickerDialog.close()
+        pickerDialog.remove()
+        this.libraryFolderId = previous.folder
+        this.libraryPage = previous.page
+        this.libraryPageSize = previous.pageSize
+        search.value = previous.query
+        searchWrap.hidden = previous.searchHidden
+        this.librarySelectionMode = previous.mode
+        this.librarySelectionAnchorId = previous.anchor
+        for (const id of previous.selected) this.librarySelection.add(id)
+        if (this.disposed) return
+        library.hidden = false
+        this.renderOutputLibrary()
+        grid.scrollTop = previous.scroll
+        const key = focus?.dataset.expressionFocus
+        const trigger = focus?.isConnected ? focus
+          : [...this.expressionDialog?.querySelectorAll<HTMLElement>("[data-expression-focus]") ?? []]
+            .find(node => node.dataset.expressionFocus === key)
+        trigger?.focus({ preventScroll: true })
+      },
+    })
+    pickerDialog.showModal()
+  }
+
+  private selectedLibraryPick() {
+    const picker = this.libraryPicker
+    const id = this.librarySelection.values().next().value
+    if (!picker || !id || id === picker.excludedId) return
+    if (picker.folderId && !this.state.outputFolders.find(folder => folder.id === picker.folderId)?.imageIds.includes(id)) return
+    return this.state.libraryOutputs.find(item => String(item.id) === id && item.url)
+  }
+
+  private async confirmLibraryPick(): Promise<void> {
+    const picker = this.libraryPicker
+    const output = this.selectedLibraryPick()
+    if (!picker || picker.pending || !output) return
+    const status = this.get<HTMLElement>('[data-role="library-replace-status"]')
+    picker.pending = true
+    this.syncVisibleLibrarySelection()
+    status.textContent = picker.kind === "replace" ? "Replacing the chat image…" : "Selecting image…"
+    try {
+      await picker.choose({ id: String(output.id), url: output.url })
+      picker.pending = false
+      if (this.disposed || this.libraryPicker !== picker) return
+      this.closeOutputLibrary()
+    } catch (error) {
+      picker.pending = false
+      if (this.disposed || this.libraryPicker !== picker) return
+      this.syncVisibleLibrarySelection()
+      status.textContent = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  private openOutputLibrary(pick?: Omit<NonNullable<StudioController["libraryPicker"]>, "pending">): void {
+    if (this.libraryPicker) return
     this.closeInspector()
-    this.libraryFolderId = "__landing__"
+    this.libraryFolderId = pick ? pick.folderId ?? "" : "__landing__"
+    this.libraryPicker = pick ? { ...pick, pending: false } : null
+    this.librarySelection.clear()
+    if (pick?.initialId) this.librarySelection.add(pick.initialId)
+    this.librarySelectionAnchorId = ""
+    this.librarySelectionMode = Boolean(pick)
     this.get<HTMLElement>('[data-role="output-library"]').hidden = false
+    if (pick) {
+      this.libraryPage = 0
+      this.get<HTMLInputElement>('[data-role="library-search"]').value = ""
+      this.get<HTMLElement>('[data-role="library-search-wrap"]').hidden = true
+      this.renderOutputLibrary()
+    }
+    this.updateLibrarySelectionControls()
     window.requestAnimationFrame(() => {
       this.root.querySelector<HTMLButtonElement>('[data-role="library-close"]')?.focus({ preventScroll: true })
     })
-    this.get<HTMLElement>('[data-role="library-grid"]').replaceChildren(
-      element("div", "ss-empty", "Loading Lumiverse outputs…"),
-    )
+    if (!pick || !this.state.libraryOutputs.length) {
+      this.get<HTMLElement>('[data-role="library-grid"]').replaceChildren(
+        element("div", "ss-empty", "Loading Lumiverse outputs…"),
+      )
+    }
     this.send("list_library_outputs")
   }
 
   private closeOutputLibrary(): void {
+    const picker = this.libraryPicker
+    if (picker?.pending && !this.disposed) return
+    this.libraryPicker = null
     this.get<HTMLElement>('[data-role="output-library"]').hidden = true
     this.librarySelection.clear()
     this.librarySelectionMode = false
+    this.updateLibrarySelectionControls()
     this.closeNewFolderModal()
     this.closeVisualProfile()
+    picker?.onExit?.()
   }
 
   private openVisualProfile(): void {
@@ -5801,6 +6433,8 @@ are removed when CSS is applied.</pre>
     const selectedStack = this.state.stackPresets.find((preset) => preset.id === selectedStackId)
     const profile = {
       ...this.readRecipeEditor("base"),
+      animaReference: this.get<HTMLInputElement>('[data-role="visual-anima-reference"]').checked,
+      animaReferenceUrl: this.get<HTMLInputElement>('[data-role="visual-anima-url"]').value.trim(),
       positivePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value,
       negativePrompt: this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value,
       checkpoint: this.get<HTMLSelectElement>('[data-role="visual-checkpoint"]').value,
@@ -5877,6 +6511,7 @@ are removed when CSS is applied.</pre>
     set("library-look-negative", look?.negativePrompt || "")
     set("library-look-triggers", look?.triggerWords.join(", ") || "")
     set("library-look-reference", look?.referenceImageUrl || "")
+    this.get<HTMLSelectElement>('[data-role="library-look-anima-reference"]').value = look?.animaReference || "inherit"
     set("library-look-thumbnail", look?.thumbnailUrl || "")
     set("library-look-notes", look?.notes || "")
     const checkpoint = this.get<HTMLSelectElement>('[data-role="library-look-checkpoint"]')
@@ -5928,6 +6563,7 @@ are removed when CSS is applied.</pre>
     const stackValue = this.get<HTMLSelectElement>('[data-role="library-look-stack"]').value
     return {
       ...this.readRecipeEditor("look"),
+      animaReference: this.get<HTMLSelectElement>('[data-role="library-look-anima-reference"]').value as CharacterVisualLook["animaReference"],
       id: existing?.id || "",
       name,
       aliases: list(this.get<HTMLInputElement>('[data-role="library-look-aliases"]').value),
@@ -6045,6 +6681,8 @@ are removed when CSS is applied.</pre>
     this.get<HTMLElement>('[data-role="visual-profile-subtitle"]').textContent = "Base generation profile and named continuity looks"
     this.get<HTMLElement>('[data-role="visual-profile-state"]').textContent = folder.binding.enabled ? "Active" : "Disabled"
     this.populateRecipeEditor("base", folder.binding)
+    this.get<HTMLInputElement>('[data-role="visual-anima-reference"]').checked = folder.binding.animaReference === true
+    this.get<HTMLInputElement>('[data-role="visual-anima-url"]').value = folder.binding.animaReferenceUrl || ""
     this.get<HTMLInputElement>('[data-role="visual-enabled"]').checked = folder.binding.enabled
     this.get<HTMLTextAreaElement>('[data-role="visual-positive"]').value = folder.binding.positivePrompt
     this.get<HTMLTextAreaElement>('[data-role="visual-negative"]').value = folder.binding.negativePrompt
@@ -6108,11 +6746,13 @@ are removed when CSS is applied.</pre>
         preview.innerHTML = FOLDER_ICON
       }
       const copy = element("span", "ss-library-look-copy")
+      const title = element("span", "ss-library-look-title")
+      title.appendChild(element("strong", "", look.name))
+      if (look.id === folder.binding.activeLookId) title.appendChild(element("span", "ss-library-look-active", "Active"))
       copy.append(
-        element("strong", "", look.name),
+        title,
         element("span", "ss-muted ss-tiny", look.outfitPrompt || (look.id === "default" ? "Identity baseline" : "No outfit prompt yet")),
       )
-      if (look.id === folder.binding.activeLookId) copy.appendChild(element("span", "ss-library-look-active", "Active"))
       card.append(preview, copy)
       lookList.appendChild(card)
     }
@@ -6145,7 +6785,8 @@ are removed when CSS is applied.</pre>
       dialog.addEventListener("cancel", event => { event.preventDefault(); cancel() })
       dialog.querySelector('[data-confirm="cancel"]')!.addEventListener("click", cancel)
       dialog.querySelector('[data-confirm="delete"]')!.addEventListener("click", () => finish(true))
-      this.root.append(dialog); dialog.showModal()
+      const modalMount = this.root.querySelector(".ss-shell") || this.root
+      modalMount.append(dialog); dialog.showModal()
     })
     this.folderDeleteAbort = null
     if (this.disposed) return
@@ -6167,7 +6808,56 @@ are removed when CSS is applied.</pre>
   }
 
   private currentLibraryPageSize(): number {
-    return outputLibraryPageSize(window.innerWidth)
+    return this.libraryPageSize
+  }
+
+  private nextLibraryPreviewShape() {
+    const index = LIBRARY_PREVIEW_SHAPES.indexOf(this.libraryPreviewShape)
+    return LIBRARY_PREVIEW_SHAPES[(index + 1) % LIBRARY_PREVIEW_SHAPES.length]
+  }
+
+  private updateLibraryPreviewControls(): void {
+    const current = this.libraryPreviewShape
+    const next = this.nextLibraryPreviewShape()
+    const grid = this.get<HTMLElement>('[data-role="library-grid"]')
+    grid.style.setProperty("--ss-library-preview-ratio", String(current.ratio))
+    grid.style.setProperty("--ss-library-preview-fit", current.name === "square" ? "cover" : "contain")
+    const button = this.get<HTMLButtonElement>('[data-action="cycle-library-preview"]')
+    button.innerHTML = next.icon + "<span>" + next.label + "</span>"
+    button.setAttribute("aria-label", "Switch previews to " + next.label.toLowerCase())
+    button.title = current.label + " previews. Switch to " + next.label.toLowerCase() + "."
+  }
+
+  private cycleLibraryPreview(): void {
+    const pageStart = this.libraryPage * this.libraryPageSize
+    const selectedId = this.libraryPicker && this.librarySelection.values().next().value
+    const selectedIndex = selectedId
+      ? this.filteredLibraryOutputs().findIndex(output => String(output.id) === selectedId) : -1
+    const anchor = selectedIndex >= pageStart && selectedIndex < pageStart + this.libraryPageSize
+      ? selectedIndex : pageStart
+    this.libraryPreviewShape = this.nextLibraryPreviewShape()
+    this.updateLibraryPreviewControls()
+    this.measureLibraryPageSize(anchor)
+    this.renderOutputLibrary()
+    this.get<HTMLElement>('[data-role="library-grid"]').scrollTop = 0
+    this.persistWorkspaceState()
+  }
+
+  private measureLibraryPageSize(anchor = this.libraryPage * this.libraryPageSize): boolean {
+    const grid = this.get<HTMLElement>('[data-role="library-grid"]')
+    const style = window.getComputedStyle(grid)
+    // Grid tracks report column widths. Convert to tile heights before counting rows.
+    const tracks = style.gridTemplateColumns.trim().split(/\s+/)
+    const tile = (Number.parseFloat(tracks[0]) - 2) / this.libraryPreviewShape.ratio + 2
+    const gap = Number.parseFloat(style.rowGap) || 0
+    const height = grid.clientHeight - (Number.parseFloat(style.paddingTop) || 0) - (Number.parseFloat(style.paddingBottom) || 0)
+    const rows = tile > 0 ? Math.ceil(height / (tile + gap)) : 0
+    const size = outputLibraryPageSize(window.innerWidth, tracks.length, rows)
+    if (size === this.libraryPageSize) return false
+    this.libraryPage = Math.floor(anchor / size)
+    this.librarySelectionAnchorId = ""
+    this.libraryPageSize = size
+    return true
   }
 
   private libraryPageOutputs(): any[] {
@@ -6198,6 +6888,13 @@ are removed when CSS is applied.</pre>
   }
 
   private setLibrarySelection(imageId: string, selected: boolean, extendRange: boolean): void {
+    const picker = this.libraryPicker
+    if (picker) {
+      if (picker.pending || imageId === picker.excludedId) return
+      this.librarySelection.clear()
+      if (selected) this.librarySelection.add(imageId)
+      return
+    }
     const pageIds = this.libraryPageOutputs().map((output) => String(output.id))
     const anchorIndex = pageIds.indexOf(this.librarySelectionAnchorId)
     const currentIndex = pageIds.indexOf(imageId)
@@ -6220,8 +6917,31 @@ are removed when CSS is applied.</pre>
     const selected = this.librarySelection.size
     this.get<HTMLButtonElement>('[data-action="bulk-send-character-gallery"]').disabled = !selected || !this.state.activeChat?.character_id || !this.state.permissions.characters || !this.state.permissions.images || this.characterImageActionPending
     const library = this.get<HTMLElement>('[data-role="output-library"]')
+    const picker = this.libraryPicker
+    const reference = picker?.kind === "reference"
     library.dataset.selectionMode = String(this.librarySelectionMode)
-    this.get<HTMLElement>('[data-role="library-selectbar"]').hidden = !this.librarySelectionMode
+    library.dataset.picker = picker?.kind ?? ""
+    this.get<HTMLElement>('[data-role="library-heading"]').textContent = reference ? "Choose reference output"
+      : picker?.kind === "saved" ? "Choose saved image" : "Output library"
+    const replacebar = this.get<HTMLElement>('[data-role="library-replacebar"]')
+    replacebar.hidden = !picker
+    this.get<HTMLButtonElement>('[data-role="library-close"]').disabled = Boolean(picker?.pending)
+    if (picker) {
+      const output = this.selectedLibraryPick()
+      const status = this.get<HTMLElement>('[data-role="library-replace-status"]')
+      if (!picker.pending) {
+        status.textContent = reference
+          ? (output ? "One reference selected" : "Select a reference from this character folder.")
+          : picker.kind === "saved" ? (output ? "One image selected" : "Select an image from this character folder.")
+            : (output ? `Replace with ${output.original_filename || "the selected image"}?` : "Choose one image to replace the illustration in chat.")
+      }
+      const confirm = this.get<HTMLButtonElement>('[data-action="confirm-library-pick"]')
+      confirm.disabled = !output?.url || picker.pending
+      confirm.querySelector("span")!.textContent = reference ? "Use reference" : picker.kind === "saved" ? "Use image" : "Replace image"
+      const cancel = replacebar.querySelector<HTMLButtonElement>('[data-action="close-output-library"]')
+      if (cancel) cancel.disabled = picker.pending
+    }
+    this.get<HTMLElement>('[data-role="library-selectbar"]').hidden = !this.librarySelectionMode || Boolean(picker)
     this.get<HTMLElement>('[data-role="library-selection-count"]').textContent =
       this.librarySelectionMode ? `${selected} selected` : "Select"
     const pageIds = this.librarySelectablePageOutputs().map((output) => String(output.id))
@@ -6248,12 +6968,27 @@ are removed when CSS is applied.</pre>
       '[data-role="library-output-check"]',
     )) {
       const imageId = check.dataset.imageId || ""
-      const selected = this.librarySelection.has(imageId)
-      check.checked = selected
       const card = check.closest<HTMLElement>(".ss-library-output")
-      if (card) card.dataset.selected = String(selected)
+      if (card) this.updateLibraryOutputSelection(card, imageId)
     }
     this.updateLibrarySelectionControls()
+  }
+
+  private updateLibraryOutputSelection(card: HTMLElement, imageId: string): void {
+    const picker = this.libraryPicker
+    const unavailable = Boolean(picker && (picker.pending || imageId === picker.excludedId))
+    card.dataset.selected = String(this.librarySelection.has(imageId))
+    const open = card.querySelector<HTMLButtonElement>(".ss-library-output-button")
+    const check = card.querySelector<HTMLInputElement>('input[data-role="library-output-check"]')
+    if (open) {
+      open.disabled = unavailable
+      if (picker) open.setAttribute("aria-pressed", card.dataset.selected)
+      else open.removeAttribute("aria-pressed")
+    }
+    if (check) {
+      check.checked = card.dataset.selected === "true"
+      check.disabled = unavailable
+    }
   }
 
   private bulkMoveOutputs(): void {
@@ -6370,7 +7105,7 @@ are removed when CSS is applied.</pre>
       element("strong", "", "New folder"),
       element("span", "ss-muted", "Create a virtual folder to organize your outputs"),
     )
-    grid.appendChild(create)
+    if (!this.libraryPicker) grid.appendChild(create)
     let matchCount = 0
     const appendFolder = (id: string, name: string, outputs: any[], badge = "") => {
       if (query && !`${name} ${badge}`.toLowerCase().includes(query)) return
@@ -6426,18 +7161,20 @@ are removed when CSS is applied.</pre>
     if (landing) {
       this.closeVisualProfile()
       this.renderLibraryFolderLanding()
+      this.updateLibrarySelectionControls()
       return
     }
     this.renderVisualProfile()
     library.dataset.selectionMode = String(this.librarySelectionMode)
 
     const filtered = this.filteredLibraryOutputs()
-    const pages = Math.max(1, Math.ceil(filtered.length / this.currentLibraryPageSize()))
-    this.libraryPage = clamp(this.libraryPage, 0, pages - 1)
     const selectedFolder = this.state.outputFolders.find((folder) => folder.id === this.libraryFolderId)
     const title = selectedFolder?.name || (this.libraryFolderId === "__unfiled__" ? "Unfiled" : "All outputs")
     const visualButton = this.get<HTMLButtonElement>('[data-role="library-visual-button"]')
     visualButton.hidden = !selectedFolder?.binding
+    const expressionButton = this.get<HTMLButtonElement>('[data-role="library-expression-button"]')
+    expressionButton.hidden = !selectedFolder?.binding
+    expressionButton.disabled = !this.state.connection || !this.state.permissions.imageGen || !this.state.permissions.images
     const deleteButton = this.get<HTMLButtonElement>('[data-role="library-delete-folder"]')
     deleteButton.hidden = !selectedFolder || selectedFolder.id === FAVORITES_FOLDER_ID
     deleteButton.title = selectedFolder ? `Delete ${selectedFolder.name}` : "Delete folder"
@@ -6461,9 +7198,12 @@ are removed when CSS is applied.</pre>
     } else {
       cover.innerHTML = FOLDER_ICON
     }
-    this.get<HTMLElement>('[data-role="library-page"]').textContent = `${this.libraryPage + 1} / ${pages}`
+    this.measureLibraryPageSize()
+    const displayedPages = Math.max(1, Math.ceil(filtered.length / this.currentLibraryPageSize()))
+    this.libraryPage = clamp(this.libraryPage, 0, displayedPages - 1)
+    this.get<HTMLElement>('[data-role="library-page"]').textContent = `${this.libraryPage + 1} / ${displayedPages}`
     this.get<HTMLButtonElement>('[data-action="library-prev"]').disabled = this.libraryPage <= 0
-    this.get<HTMLButtonElement>('[data-action="library-next"]').disabled = this.libraryPage >= pages - 1
+    this.get<HTMLButtonElement>('[data-action="library-next"]').disabled = this.libraryPage >= displayedPages - 1
     const grid = this.get<HTMLElement>('[data-role="library-grid"]')
     grid.replaceChildren()
     const page = this.libraryPageOutputs()
@@ -6476,12 +7216,9 @@ are removed when CSS is applied.</pre>
     for (const output of page) {
       const card = element("article", "ss-library-output")
       const imageId = String(output.id)
-      const selected = this.librarySelection.has(imageId)
-      card.dataset.selected = String(selected)
       const checkLabel = element("label", "ss-library-output-check")
       const check = element("input")
       check.type = "checkbox"
-      check.checked = selected
       check.dataset.role = "library-output-check"
       check.dataset.imageId = imageId
       check.setAttribute("aria-label", `Select ${output.original_filename || `output ${imageId}`}`)
@@ -6501,6 +7238,7 @@ are removed when CSS is applied.</pre>
         this.openInspector()
       })
       card.append(checkLabel, open)
+      this.updateLibraryOutputSelection(card, imageId)
       if (this.isOutputFavorite(imageId)) {
         const favorite = element("span", "ss-library-output-star")
         favorite.title = "Favorite"
@@ -6660,14 +7398,14 @@ are removed when CSS is applied.</pre>
     return parameters
   }
 
-  private generate(): void {
+  private generate(edit?: StudioInpaintEdit, sourceImage?: CurrentImage): void {
     if (this.generating || !this.state.connection) return
     const selectedWorkflowName = this.get<HTMLSelectElement>('[data-role="workflow-select"]').value
-    if (selectedWorkflowName && this.state.selectedWorkflow?.name !== selectedWorkflowName) {
+    if (!edit && selectedWorkflowName && this.state.selectedWorkflow?.name !== selectedWorkflowName) {
       this.setRunStatus("Wait for the selected workflow controls to finish loading.", true)
       return
     }
-    const prompt = this.finalPrompt()
+    const prompt = edit?.prompt ?? this.finalPrompt()
     if (!prompt) {
       this.setRunStatus("Enter a prompt or enable a LoRA trigger phrase.", true)
       return
@@ -6675,7 +7413,7 @@ are removed when CSS is applied.</pre>
 
     let rawRequestOverride: string | undefined
     try {
-      rawRequestOverride = this.buildRawOverride()
+      if (!edit) rawRequestOverride = this.buildRawOverride()
     } catch (error) {
       this.setRunStatus(error instanceof Error ? error.message : String(error), true)
       return
@@ -6684,9 +7422,22 @@ are removed when CSS is applied.</pre>
     const enabled = this.effectiveStack().filter((item) => item.enabled)
     const parameters = { ...this.collectGenerationParameters(rawRequestOverride, enabled), ...recipeParameters(this.effectiveRecipe()) }
 
-    const model = this.effectiveRecipe().checkpoint || this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
+    const saved = edit?.settings === "source" ? sourceImage?.details : undefined
+    if (edit) {
+      delete parameters.referenceImages
+      for (const key of ["steps", "cfgScale", "sampler", "scheduler", "vae", "clipLModel", "clipGModel", "t5XXLModel", "qwenModel"]) {
+        if (saved?.parameters[key] !== undefined) (parameters as Record<string, unknown>)[key] = saved.parameters[key]
+      }
+      Object.assign(parameters, { width: edit.width, height: edit.height, denoise: edit.denoise, seed: -1 })
+    }
+    const model = saved?.model || this.effectiveRecipe().checkpoint || this.get<HTMLSelectElement>('[data-role="model"]').value || this.state.connection.model
     const clientJobId = createRequestId()
-    const negativePrompt = this.finalNegativePrompt()
+    if (saved) {
+      delete parameters.unet
+      parameters.loras = saved.loras.map(item => item.name)
+      parameters.loraWeights = saved.loras.map(item => item.weight)
+    }
+    const negativePrompt = saved?.negativePrompt ?? this.finalNegativePrompt()
     const profileInput = {
       prompt: this.get<HTMLTextAreaElement>('[data-role="positive"]').value.trim(),
       negativePrompt: this.get<HTMLTextAreaElement>('[data-role="negative"]').value.trim(),
@@ -6694,7 +7445,7 @@ are removed when CSS is applied.</pre>
       model,
       parameters: this.baseStudioProfileParameters(rawRequestOverride),
     }
-    const resolved = this.resolvedPrompts()
+    const resolved = edit ? { prompt, negativePrompt, presets: [] } : this.resolvedPrompts()
     this.pendingGeneration = {
       prompt,
       negativePrompt,
@@ -6704,9 +7455,9 @@ are removed when CSS is applied.</pre>
       parameters,
       loras: enabled.map((item) => ({ name: item.lora.name, weight: item.weight })),
       presets: resolved.presets,
-      workflow: this.state.selectedWorkflow?.name || "",
-      initImageId: this.state.initImage?.imageId || "",
-      initImageLabel: this.state.initImage?.label || "",
+      workflow: edit ? "" : this.state.selectedWorkflow?.name || "",
+      initImageId: edit?.sourceImageId || this.state.initImage?.imageId || "",
+      initImageLabel: sourceImage?.label || this.state.initImage?.label || "",
       createdAt: Date.now(),
     }
     this.preGenerationImage = this.state.currentImage
@@ -6718,17 +7469,19 @@ are removed when CSS is applied.</pre>
     this.activity?.begin(
       clientJobId,
       this.state.connection.id,
-      this.state.selectedWorkflow
+      edit ? "Preparing region edit…" : this.state.selectedWorkflow
         ? `Preparing workflow · ${this.state.selectedWorkflow.name}`
         : `Preparing ${model || "SwarmUI"}…`,
     )
     this.setGenerating(true)
-    this.setRunStatus(this.state.selectedWorkflow
+    this.setRunStatus(edit ? "Generating a region-edit variant…" : this.state.selectedWorkflow
       ? `Running workflow “${this.state.selectedWorkflow.name}” with ${enabled.length} LoRA${enabled.length === 1 ? "" : "s"}…`
       : `Generating with ${enabled.length} LoRA${enabled.length === 1 ? "" : "s"}…`)
-    if (window.matchMedia("(max-width: 720px)").matches) this.setMobileTab("create")
+    if (edit) this.inpaintJobId = clientJobId
+    else if (this.mobileMedia.matches) this.setMobileTab("create")
     this.send("generate", {
       profileInput,
+      inpaint: edit && { sourceImageId: edit.sourceImageId, source: edit.source, mask: edit.mask, feather: edit.feather },
       input: {
         prompt,
         negativePrompt: negativePrompt || undefined,
@@ -6742,9 +7495,9 @@ are removed when CSS is applied.</pre>
         resolvedPrompt: resolved.prompt,
         resolvedNegativePrompt: resolved.negativePrompt,
         presets: resolved.presets,
-        workflow: this.state.selectedWorkflow?.name || "",
-        initImageId: this.state.initImage?.imageId || "",
-        initImageLabel: this.state.initImage?.label || "",
+        workflow: edit ? "" : this.state.selectedWorkflow?.name || "",
+        initImageId: edit?.sourceImageId || this.state.initImage?.imageId || "",
+        initImageLabel: sourceImage?.label || this.state.initImage?.label || "",
         stack: this.stackExportItems(),
       },
       showCompletionToast: this.behavior.completionToast,
@@ -6775,7 +7528,7 @@ are removed when CSS is applied.</pre>
       )
       this.updateGenerationProgress(0, 0)
     }
-    this.get<HTMLElement>('[data-role="preview-loading"]').dataset.visible = String(value)
+    this.get<HTMLElement>('[data-role="preview-loading"]').hidden = !value
   }
 
   private updateGenerationProgress(step: number, totalSteps: number): void {
@@ -7029,6 +7782,14 @@ are removed when CSS is applied.</pre>
   }
 
   private updateAppendControls(): void {
+    const canEditOutput = Boolean(this.state.currentImage?.id && this.state.connection && this.state.permissions.imageGen && this.state.permissions.images)
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="edit-region"], [data-action="upscale-output"]')) {
+      button.disabled = !canEditOutput || (button.dataset.action === "upscale-output" && Boolean(this.upscaleRequestId))
+      if (button.dataset.action === "upscale-output") {
+        button.title = this.upscaleRequestId ? "AI enhancement running…" : "Open the model and custom ComfyUI upscale workspace"
+        if (button.classList.contains("ss-button")) button.textContent = this.upscaleRequestId ? "Enhancing…" : "AI Upscale"
+      }
+    }
     const personaButton = this.root.querySelector<HTMLButtonElement>('[data-action="set-persona-picture"]')
     if (personaButton) personaButton.disabled = !this.state.currentImage?.id || !this.state.chatVisuals?.activePersona?.id || !this.state.permissions.personas || !this.state.permissions.images || this.characterImageActionPending
     const canSend = Boolean(this.state.currentImage?.id && this.state.activeChat?.character_id && this.state.permissions.characters && this.state.permissions.images && !this.characterImageActionPending)

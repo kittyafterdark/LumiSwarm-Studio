@@ -108,6 +108,7 @@ class ChatVisualsController {
           </div>
           <label class="ss-chat-visuals-field"><span>Trigger words</span><input class="ss-input" data-role="look-triggers" placeholder="formal outfit, tailored suit" /></label>
           <div class="ss-chat-visuals-grid">
+            <label class="ss-chat-visuals-field"><span>Anima Reference Adapter</span><select class="ss-select" data-role="look-anima-reference"><option value="inherit">Inherit character setting</option><option value="on">Use Anima Reference Adapter</option><option value="off">Turn off for this look</option></select></label>
             <label class="ss-chat-visuals-field"><span>Reference / init image URL</span><input class="ss-input" data-role="look-reference-url" placeholder="Lumiverse image URL" /></label>
             <label class="ss-chat-visuals-field"><span>Thumbnail URL</span><input class="ss-input" data-role="look-thumbnail-url" placeholder="Defaults to reference" /></label>
           </div>
@@ -143,6 +144,13 @@ class ChatVisualsController {
           <div class="ss-chat-visuals-field">
             <label for="ss-chat-character-checkpoint">Checkpoint</label>
             <select id="ss-chat-character-checkpoint" class="ss-select" data-role="character-checkpoint"><option value="">Use current Studio checkpoint</option></select>
+          </div>
+          <div class="ss-anima-settings">
+            <label class="ss-toggle-line ss-anima-toggle"><input type="checkbox" data-role="character-anima-reference"><span>Use Anima Reference Adapter</span></label>
+            <label class="ss-chat-visuals-field"><span>Character reference image URL</span><input class="ss-input" data-role="character-anima-url" placeholder="Lumiverse image URL"></label>
+            <div class="ss-anima-actions">
+              <a class="ss-anima-setup" href="https://github.com/ArcAnima/ComfyUI-Anima-Ref-Adapter#quick-start" target="_blank" rel="noopener noreferrer">ComfyUI node setup</a>
+            </div>
           </div>
         </section>
 
@@ -357,6 +365,8 @@ class ChatVisualsController {
     this.get<HTMLTextAreaElement>("character-positive").value = folder?.binding?.positivePrompt || this.data.characterBasePrompt || ""
     this.get<HTMLTextAreaElement>("character-negative").value = folder?.binding?.negativePrompt || ""
     this.get<HTMLInputElement>("character-visual-enabled").checked = folder?.binding?.enabled !== false
+    this.get<HTMLInputElement>("character-anima-reference").checked = folder?.binding?.animaReference === true
+    this.get<HTMLInputElement>("character-anima-url").value = folder?.binding?.animaReferenceUrl || ""
     this.get<HTMLInputElement>("character-visual-enabled").disabled = !this.data.activeChat
     this.renderLumiverseCharacterPresets()
     const checkpoint = this.get<HTMLSelectElement>("character-checkpoint")
@@ -449,6 +459,7 @@ class ChatVisualsController {
     this.get<HTMLTextAreaElement>("look-negative").value = look?.negativePrompt || ""
     this.get<HTMLInputElement>("look-triggers").value = look?.triggerWords?.join(", ") || ""
     this.get<HTMLInputElement>("look-reference-url").value = look?.referenceImageUrl || ""
+    this.get<HTMLSelectElement>("look-anima-reference").value = look?.animaReference || "inherit"
     this.get<HTMLInputElement>("look-thumbnail-url").value = look?.thumbnailUrl || ""
     this.get<HTMLTextAreaElement>("look-notes").value = look?.notes || ""
     const checkpoint = this.get<HTMLSelectElement>("look-checkpoint")
@@ -502,6 +513,7 @@ class ChatVisualsController {
     }
     for (const role of ["look-outfit", "look-negative", "look-notes"] as const) this.get<HTMLTextAreaElement>(role).value = ""
     this.get<HTMLSelectElement>("look-checkpoint").value = ""
+    this.get<HTMLSelectElement>("look-anima-reference").value = "inherit"
     this.get<HTMLSelectElement>("look-stack").value = ""
     this.get<HTMLInputElement>("look-name").focus()
   }
@@ -519,6 +531,7 @@ class ChatVisualsController {
       checkpoint: this.get<HTMLSelectElement>("look-checkpoint").value,
       stackPresetId: presetId,
       stackSnapshot: stackValue === "__studio__" ? this.data?.studioStack || [] : [],
+      animaReference: this.get<HTMLSelectElement>("look-anima-reference").value as CharacterVisualLook["animaReference"],
       referenceImageId: existing?.referenceImageId || "",
       referenceImageUrl: this.get<HTMLInputElement>("look-reference-url").value.trim(),
       thumbnailImageId: existing?.thumbnailImageId || "",
@@ -901,6 +914,8 @@ class ChatVisualsController {
       && this.get<HTMLSelectElement>("character-checkpoint").value === binding.checkpoint
       && this.importedCharacterSourcePresetId === (binding.sourcePresetId || "")
       && this.get<HTMLInputElement>("character-visual-enabled").checked === (binding.enabled !== false)
+      && this.get<HTMLInputElement>("character-anima-reference").checked === (binding.animaReference === true)
+      && this.get<HTMLInputElement>("character-anima-url").value.trim() === (binding.animaReferenceUrl || "")
       && stackMatches,
     )
     const characterHasDraft = Boolean(
@@ -909,7 +924,9 @@ class ChatVisualsController {
       || this.get<HTMLSelectElement>("character-checkpoint").value
       || this.importedCharacterSourcePresetId
       || requestedStack.stackPresetId
-      || requestedStack.stackSnapshot.length,
+      || requestedStack.stackSnapshot.length
+      || this.get<HTMLInputElement>("character-anima-reference").checked
+      || this.get<HTMLInputElement>("character-anima-url").value.trim(),
     )
     const characterIsDirty = Boolean(this.data.activeChat && !characterIsBound && (binding || characterHasDraft))
     this.setBindingIndicator(
@@ -945,6 +962,8 @@ class ChatVisualsController {
       stackPresetId,
       stackSnapshot,
       enabled: this.get<HTMLInputElement>("character-visual-enabled").checked,
+      animaReference: this.get<HTMLInputElement>("character-anima-reference").checked,
+      animaReferenceUrl: this.get<HTMLInputElement>("character-anima-url").value.trim(),
       currentStack: this.getCurrentStack(),
     })
     this.setStatus(this.data.characterFolder ? "Saving character visuals…" : "Creating and binding the character folder…")

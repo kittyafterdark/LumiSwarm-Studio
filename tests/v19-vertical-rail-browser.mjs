@@ -39,7 +39,7 @@ async function checkRail(page, width, saveScreenshot = false) {
   if (width > 720) {
     assert.equal(await mini.getAttribute('data-rail-layout'), 'vertical')
     assert.equal(Math.round(rect.width), 66)
-    assert.equal(Math.round(rect.height), 220)
+    assert.equal(Math.round(rect.height), 360)
     const ys = []
     for (let i = 0; i < 3; i++) {
       const btn = await buttons.nth(i).boundingBox()
@@ -50,7 +50,7 @@ async function checkRail(page, width, saveScreenshot = false) {
     assert.ok(ys[0] < ys[1] && ys[1] < ys[2], 'desktop buttons stack vertically below artwork')
   } else {
     assert.equal(await mini.getAttribute('data-rail-layout'), 'horizontal')
-    assert.equal(Math.round(rect.width), 183)
+    assert.equal(Math.round(rect.width), Math.min(318, width - 16))
     assert.equal(Math.round(rect.height), 64)
     for (let i = 0; i < 3; i++) {
       const btn = await buttons.nth(i).boundingBox()
@@ -65,11 +65,11 @@ try {
     const page = await mount(width, 820)
     const mini = page.locator('[data-role="miniplayer"]')
     await mini.click({ button: 'right', position: { x: 15, y: 15 } })
-    assert.equal(await page.locator('.ss-mini-context-menu').isVisible(), true)
+    assert.equal(await page.locator('[data-role="mini-context-menu"]').isVisible(), true)
     await page.locator('[data-action="mini-menu-toggle"]').click()
     await checkRail(page, width, width === 390 || width === 1440)
     await page.locator('[data-action="mini-show-menu"]').first().click()
-    assert.equal(await page.locator('.ss-mini-context-menu').isVisible(), true, 'rail ⋯ opens menu')
+    assert.equal(await page.locator('[data-role="mini-strip-menu"]').isVisible(), true, 'rail ⋯ opens dedicated toolkit menu')
     await page.keyboard.press('Escape')
     await page.locator('[data-action="mini-compose"]').click()
     assert.equal(await mini.getAttribute('data-quick-view'), 'composer')

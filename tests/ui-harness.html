@@ -289,7 +289,7 @@
             preview: generatedSource,
             workflow: rawOverride.comfyuicustomworkflow || "",
           }}), 90)
-          setTimeout(() => later({ type: "generation_result", requestId: message.requestId, data: {
+          setTimeout(() => later({ type: "generation_result", requestId: message.requestId, clientJobId: message.input.clientJobId, data: {
             result: { imageId: generatedOutput.id, imageDataUrl: generatedSource, imageUrl: generatedSource, model: "anima-semi-v10.safetensors", provider: "swarmui" },
             record,
             outputs: historyOutputs.slice(0, 12),

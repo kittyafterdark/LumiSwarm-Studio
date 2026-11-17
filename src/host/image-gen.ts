@@ -44,7 +44,7 @@ async function upsertStudioNativePreset(input: NativeStudioPresetInput, fetcher:
   return { id: String(preset.id), warnings: Array.isArray(data.errors) ? data.errors.map(String) : [] }
 }
 
-async function studioCharacterImageAction(characterId: string, imageIds: string[], action: "avatar" | "gallery", fetcher: typeof fetch = fetch): Promise<{ saved: string[]; failed: string[] }> {
+async function studioCharacterImageAction(characterId: string, imageIds: string[], action: "avatar" | "gallery", fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<{ saved: string[]; failed: string[] }> {
   const ids = [...new Set(imageIds.filter(id => typeof id === "string" && id.trim()))]
   if (!characterId || !ids.length) throw new Error("Choose an active character and saved outputs first.")
   const base = `/api/v1/characters/${encodeURIComponent(characterId)}`
@@ -65,13 +65,14 @@ async function studioCharacterImageAction(characterId: string, imageIds: string[
     await check(response, "Lumiverse could not set the character picture.")
     return { saved: ids, failed: [] }
   }
-  const existing = await fetcher(`${base}/gallery`, { credentials: "same-origin" })
+  const existing = await fetcher(`${base}/gallery`, { credentials: "same-origin", signal })
   await check(existing, "Character galleries are unavailable in this Lumiverse host.")
   const items = await existing.json()
   if (!Array.isArray(items)) throw new Error("Lumiverse returned an invalid gallery.")
   const linked = new Set(items.map(item => String(item.image_id)))
   const saved: string[] = [], failed: string[] = []
   for (const imageId of ids) {
+    signal?.throwIfAborted()
     if (linked.has(imageId)) { saved.push(imageId); continue }
     try {
       const response = await fetcher(`${base}/gallery/link`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_id: imageId }) })
@@ -107,7 +108,50 @@ function studioCropAvatar(root: HTMLElement, original: Blob, kind: string, signa
     const dialog = document.createElement("dialog")
     dialog.className = "ss-avatar-crop"
     dialog.setAttribute("aria-labelledby", "ss-avatar-crop-title")
-    dialog.innerHTML = `<h2 id="ss-avatar-crop-title">Crop for ${kind} picture</h2><canvas width="512" height="512" aria-label="Square avatar preview"></canvas><p>Drag the image or use the sliders to position the crop.</p><label>Zoom<input data-crop="zoom" type="range" min="1" max="4" step="0.01" value="1"></label><label>Horizontal position<input data-crop="x" type="range" min="-1" max="1" step="0.01" value="0"></label><label>Vertical position<input data-crop="y" type="range" min="-1" max="1" step="0.01" value="0"></label><p data-crop="status" role="status">Loading image…</p><div class="ss-avatar-crop-actions"><button type="button" class="ss-button" data-crop="cancel">Cancel</button><button type="button" class="ss-button" data-crop="apply" disabled>Set picture</button></div>`
+    dialog.innerHTML = `
+      <header class="ss-avatar-crop-header">
+        <div class="ss-avatar-crop-heading">
+          <span class="ss-avatar-crop-eyebrow">Studio / Image tools / Avatar</span>
+          <h2 id="ss-avatar-crop-title"></h2>
+          <p>Frame a square crop for your ${kind}.</p>
+        </div>
+        <button class="ss-avatar-crop-close" type="button" data-crop="close" aria-label="Close crop editor">×</button>
+      </header>
+      <div class="ss-avatar-crop-body">
+        <section class="ss-avatar-crop-stage" aria-label="Live crop preview">
+          <div class="ss-avatar-crop-stage-top"><strong>Crop preview</strong><span>1 : 1</span></div>
+          <div class="ss-avatar-crop-canvas-wrap"><canvas width="512" height="512" aria-label="Square avatar preview; drag to reposition image" tabindex="0"></canvas></div>
+          <p class="ss-avatar-crop-hint">Drag to adjust the framing · output is always square</p>
+        </section>
+        <aside class="ss-avatar-crop-settings" aria-label="Crop controls">
+          <div class="ss-avatar-crop-panel-heading">
+            <span class="ss-avatar-crop-eyebrow">Fine adjustments</span>
+            <h3>Position &amp; scale</h3>
+            <p>Move the image within the frame, then apply your crop.</p>
+          </div>
+          <div class="ss-avatar-crop-fields">
+            <label class="ss-avatar-crop-field">
+              <span><strong>Zoom</strong><output data-crop-readout="zoom">100%</output></span>
+              <input data-crop="zoom" type="range" min="1" max="4" step="0.01" value="1">
+            </label>
+            <label class="ss-avatar-crop-field">
+              <span><strong>Horizontal</strong><output data-crop-readout="x">Center</output></span>
+              <input data-crop="x" type="range" min="-1" max="1" step="0.01" value="0">
+            </label>
+            <label class="ss-avatar-crop-field">
+              <span><strong>Vertical</strong><output data-crop-readout="y">Center</output></span>
+              <input data-crop="y" type="range" min="-1" max="1" step="0.01" value="0">
+            </label>
+          </div>
+          <button class="ss-avatar-crop-reset" type="button" data-crop="reset">↺ <span>Reset framing</span></button>
+          <div class="ss-avatar-crop-preserved"><span aria-hidden="true">✓</span><div><strong>Original preserved</strong><p>Only the profile picture is cropped; the original output stays intact.</p></div></div>
+        </aside>
+      </div>
+      <footer class="ss-avatar-crop-footer">
+        <span class="ss-avatar-crop-status" data-crop="status" role="status">Loading image…</span>
+        <div class="ss-avatar-crop-actions"><button type="button" class="ss-button" data-crop="cancel">Cancel</button><button type="button" class="ss-button ss-button-primary" data-crop="apply" disabled>Set picture</button></div>
+      </footer>`
+    dialog.querySelector<HTMLHeadingElement>("#ss-avatar-crop-title")!.textContent = `Set ${kind} picture`
     const source = new Image(), url = URL.createObjectURL(original)
     const previousFocus = document.activeElement as HTMLElement | null
     const canvas = dialog.querySelector("canvas")!
@@ -125,17 +169,26 @@ function studioCropAvatar(root: HTMLElement, original: Blob, kind: string, signa
       if (error) reject(error); else resolve(blob)
     }
     const abort = () => finish(null)
+    const readouts = ["zoom", "x", "y"].map(name => dialog.querySelector<HTMLOutputElement>(`[data-crop-readout="${name}"]`)!)
     const draw = () => {
       if (!ready || settled) return
       const [zoom, x, y] = controls.map(control => Number(control.value))
       const rect = studioAvatarCropRect(source.naturalWidth, source.naturalHeight, zoom, x, y)
       context.clearRect(0, 0, 512, 512)
       context.drawImage(source, rect.x, rect.y, rect.size, rect.size, 0, 0, 512, 512)
+      readouts[0].textContent = `${Math.round(zoom * 100)}%`
+      for (const [index, offset] of [[1, x], [2, y]] as const) {
+        readouts[index].textContent = Math.abs(offset) < 0.005 ? "Center" : `${Math.round(Math.abs(offset) * 100)}% ${index === 1 ? (offset < 0 ? "left" : "right") : (offset < 0 ? "up" : "down")}`
+      }
     }
     controls.forEach(control => control.addEventListener("input", draw))
+    dialog.querySelector('[data-crop="reset"]')!.addEventListener("click", () => {
+      controls.forEach((control, index) => { control.value = index === 0 ? "1" : "0" })
+      draw()
+    })
     let drag: { id: number; x: number; y: number; cropX: number; cropY: number } | null = null
     canvas.addEventListener("pointerdown", event => {
-      if (!ready) return
+      if (!ready || event.button !== 0) return
       drag = { id: event.pointerId, x: event.clientX, y: event.clientY, cropX: Number(controls[1].value), cropY: Number(controls[2].value) }
       canvas.setPointerCapture(event.pointerId)
     })
@@ -149,19 +202,29 @@ function studioCropAvatar(root: HTMLElement, original: Blob, kind: string, signa
     })
     canvas.addEventListener("lostpointercapture", () => { drag = null })
     canvas.addEventListener("pointerup", () => { drag = null })
+    canvas.addEventListener("pointercancel", () => { drag = null })
+    canvas.addEventListener("keydown", event => {
+      if (!ready || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return
+      event.preventDefault()
+      const index = event.key === "ArrowLeft" || event.key === "ArrowRight" ? 1 : 2
+      const delta = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -0.04 : 0.04
+      controls[index].value = String(Number(controls[index].value) + delta)
+      draw()
+    })
     dialog.addEventListener("cancel", event => { event.preventDefault(); finish(null) })
-    dialog.querySelector('[data-crop="cancel"]')!.addEventListener("click", () => finish(null))
+    for (const action of dialog.querySelectorAll('[data-crop="cancel"], [data-crop="close"]')) action.addEventListener("click", () => finish(null))
     apply.addEventListener("click", () => {
       apply.disabled = true
       canvas.toBlob(blob => { if (blob) finish(blob); else finish(null, new Error("Could not create the avatar crop.")) }, "image/png")
     })
-    root.append(dialog); dialog.showModal()
+    const modalMount = root.querySelector(".ss-shell") || root
+    modalMount.append(dialog); dialog.showModal()
     signal.addEventListener("abort", abort, { once: true })
     if (signal.aborted) { abort(); return }
     source.src = url
     void source.decode().then(() => {
       if (settled) return
-      ready = true; draw(); apply.disabled = false; status.textContent = "The original image will also be preserved."
+      ready = true; draw(); apply.disabled = false; status.textContent = "Ready · Square avatar, 512 × 512 px"
     }).catch(() => finish(null, new Error("Could not decode this output for cropping.")))
   })
 }
