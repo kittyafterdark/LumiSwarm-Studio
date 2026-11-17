@@ -782,7 +782,7 @@ class StudioController {
                           <input type="checkbox" data-role="auto-finalize-inline" ${this.behavior.autoFinalizeInline ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
                         </label>
                         <label class="ss-settings-toggle">
-                          <span class="ss-settings-toggle-copy"><strong>Delete expression drafts from Lumiverse Storage</strong><span>After sending expressions to Lumiverse, remove earlier renders replaced in this session.</span></span>
+                          <span class="ss-settings-toggle-copy"><strong>Delete drafts from Lumiverse Storage</strong><span>Remove replaced expression drafts after sending the set, and inline drafts after automatic upscaling replaces them in chat.</span></span>
                           <input type="checkbox" data-role="delete-expression-drafts" ${this.behavior.deleteExpressionDrafts ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
                         </label>
                         <p class="ss-muted ss-tiny">Configure the AI finalizer once from any output’s <strong>AI Upscale</strong> workspace. If no AI recipe is configured yet, the inline draft stays in chat as-is instead of falling back to interpolation.</p>

@@ -251,6 +251,7 @@ interface TagAutomationConfig {
   stripUserOnlyLoraStack: boolean
   autoPrintCharacterPositive: boolean
   autoFinalizeInline: boolean
+  deleteDrafts?: boolean
   requiredImageMin: number
   requiredImageMax: number
   promptMode: "multi" | "pov"
@@ -2872,6 +2873,7 @@ function cleanTagAutomationConfig(value: unknown): TagAutomationConfig {
     stripUserOnlyLoraStack: record.stripUserOnlyLoraStack === true,
     autoPrintCharacterPositive: record.autoPrintCharacterPositive === true,
     autoFinalizeInline: record.autoFinalizeInline === true,
+    deleteDrafts: typeof record.deleteDrafts === "boolean" ? record.deleteDrafts : undefined,
     requiredImageMin,
     requiredImageMax,
     promptMode: record.promptMode === "pov" ? "pov" : "multi",
@@ -4793,16 +4795,22 @@ async function runTaggedImageJob(
         if (hasConfiguredStudioUpscale(savedUpscale)) {
           const draftImage = { id: job.imageId, url: job.imageUrl }
           const final = await upscaleOutput(job.imageId, connection, userId, job, undefined, savedUpscale)
+          const deleteDraft = automation.deleteDrafts === true && spindle.permissions.has("images")
           const updated = {
             ...job,
-            draftImage,
+            draftImage: deleteDraft ? undefined : draftImage,
             finalImage: { id: final.id, url: final.url },
             imageId: final.id,
             imageUrl: final.url,
           }
-          if (await finalizeTaggedImageJob(updated, userId)) {
+          if (await finalizeTaggedImageJob(updated, userId, deleteDraft ? draftImage.id : undefined)) {
             Object.assign(job, updated)
             autoFinalized = true
+            if (deleteDraft && await spindle.images.delete(draftImage.id, userId)) {
+              await deleteGenerationRecord(draftImage.id, userId)
+              await moveOutputToFolder(draftImage.id, "", userId)
+              await setOutputsFavorite([draftImage.id], false, userId)
+            }
           } else if (!removedTaggedJobs.has(job.id)) {
             const current = (await loadTaggedImageJobs(userId)).find(item => item.id === job.id)
             if (current?.imageId === draftImage.id && current.inserted) {
