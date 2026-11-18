@@ -15,6 +15,7 @@ class ChatVisualsController {
   private selectedLookId = "default"
   private lumiversePersonaPresets: LumiversePromptPreset[] = []
   private lumiverseCharacterPresets: LumiversePromptPreset[] = []
+  private lumiverseMainPresets: LumiversePromptPreset[] = []
   private lumiversePresetLoadToken = 0
 
   constructor(
@@ -125,7 +126,7 @@ class ChatVisualsController {
             <label class="ss-toggle-line"><input type="checkbox" data-role="character-visual-enabled" checked> Active</label>
           </div>
           <div class="ss-chat-visuals-field">
-            <label for="ss-chat-lumi-character-preset">Lumiverse Image Gen character preset</label>
+            <label for="ss-chat-lumi-character-preset">Lumiverse Image Gen preset</label>
             <div class="ss-chat-visuals-row">
               <select id="ss-chat-lumi-character-preset" class="ss-select" data-role="lumiverse-character-preset"><option value="">Loading character presets…</option></select>
               <button class="ss-button" data-action="import-character-prompt">Use preset</button>
@@ -236,11 +237,13 @@ class ChatVisualsController {
   }
 
   hide(): void {
+    this.lumiversePresetLoadToken++
     this.launcher.dataset.page = "home"
     this.page.hidden = true
   }
 
   refresh(): void {
+    this.lumiversePresetLoadToken++
     this.setStatus("Reading the active chat, persona, Library folder, and Studio stack…")
     this.send("get_chat_visuals", { currentStack: this.getCurrentStack() })
     if (this.activeTab === "lore") this.visualLore.activate(true)
@@ -597,19 +600,59 @@ class ChatVisualsController {
   private renderLumiverseCharacterPresets(): void {
     const select = this.get<HTMLSelectElement>("lumiverse-character-preset")
     select.replaceChildren()
-    const blank = element("option", "", this.lumiverseCharacterPresets.length
-      ? "Choose Image Gen character preset…"
-      : "No character presets in Lumiverse Image Gen")
+    const groups = [
+      { label: "Character presets", presets: this.lumiverseCharacterPresets },
+      { label: "Main presets", presets: this.lumiverseMainPresets },
+    ]
+    const hasPresets = groups.some(group => group.presets.length)
+    const blank = element("option", "", hasPresets ? "Choose an Image Gen preset…" : "No saved Character or Main presets")
     blank.value = ""
     select.appendChild(blank)
-    for (const preset of this.lumiverseCharacterPresets) {
-      const option = element("option", "", preset.name)
-      option.value = preset.id
-      select.appendChild(option)
+    for (const { label, presets } of groups) {
+      if (!presets.length) continue
+      const group = element("optgroup")
+      group.label = label
+      for (const preset of presets) {
+        const option = element("option", "", preset.name)
+        option.value = preset.id
+        group.appendChild(option)
+      }
+      select.appendChild(group)
     }
-    select.value = this.lumiverseCharacterPresets.some((preset) => preset.id === this.importedCharacterSourcePresetId)
-      ? this.importedCharacterSourcePresetId
-      : ""
+    select.value = this.importedCharacterSourcePresetId
+    if (select.selectedIndex < 0) select.value = ""
+  }
+
+  private async readLumiversePresets(): Promise<Record<"main" | "persona" | "character", LumiversePromptPreset[]>> {
+    const response = await fetch("/api/v1/image-gen/export", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Accept": "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        include_settings: false,
+        include_presets: true,
+        include_connections: false,
+        include_parameters: false,
+      }),
+    })
+    const exported = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(String(exported?.error || `Could not read Lumiverse Image Gen presets (${response.status}).`))
+    }
+    if (!Array.isArray(exported?.presets)) {
+      throw new Error("Lumiverse did not return an Image Gen preset list.")
+    }
+
+    const readPresets = (kind: "main" | "persona" | "character"): LumiversePromptPreset[] => exported.presets
+      .filter((preset: any) => preset && (preset.kind ?? "main") === kind)
+      .map((preset: any): LumiversePromptPreset => ({
+        id: String(preset?.id || "").trim(),
+        name: String(preset?.name || "").trim(),
+        prompt: String(preset?.prompt || "").trim(),
+        negativePrompt: String(preset?.negativePrompt || "").trim(),
+      }))
+      .filter((preset: LumiversePromptPreset) => preset.id && preset.name)
+    return { main: readPresets("main"), persona: readPresets("persona"), character: readPresets("character") }
   }
 
   private async hydrateLumiversePresets(): Promise<void> {
@@ -622,45 +665,21 @@ class ChatVisualsController {
       const initialPositive = characterPositive.value
       const initialNegative = characterNegative.value
 
-      const exportResponse = await fetch("/api/v1/image-gen/export", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Accept": "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({
-          include_settings: false,
-          include_presets: true,
-          include_connections: false,
-          include_parameters: false,
-        }),
-      })
-      const exported = await exportResponse.json().catch(() => ({}))
-      if (!exportResponse.ok) {
-        throw new Error(String(exported?.error || `Could not read Lumiverse Image Gen presets (${exportResponse.status}).`))
-      }
-      if (!Array.isArray(exported?.presets)) {
-        throw new Error("Lumiverse did not return an Image Gen preset list.")
-      }
-      const exportedPresets = exported.presets
-      const readPresets = (kind: "persona" | "character"): LumiversePromptPreset[] => exportedPresets
-        .filter((preset: any) => String(preset?.kind || "main") === kind)
-        .map((preset: any): LumiversePromptPreset => ({
-          id: String(preset?.id || "").trim(),
-          name: String(preset?.name || "").trim(),
-          prompt: String(preset?.prompt || "").trim(),
-          negativePrompt: String(preset?.negativePrompt || "").trim(),
-        }))
-        .filter((preset: LumiversePromptPreset) => preset.id && preset.name)
-      const personaPresets = readPresets("persona")
-      const characterPresets = readPresets("character")
+      let presets = await this.readLumiversePresets()
       if (token !== this.lumiversePresetLoadToken) return
-      this.lumiversePersonaPresets = personaPresets
-      this.lumiverseCharacterPresets = characterPresets
-      this.renderLumiversePersonaPresets()
-      this.renderLumiverseCharacterPresets()
+      const renderPresets = () => {
+        this.lumiversePersonaPresets = presets.persona
+        this.lumiverseCharacterPresets = presets.character
+        this.lumiverseMainPresets = presets.main
+        this.renderLumiversePersonaPresets()
+        this.renderLumiverseCharacterPresets()
+      }
+      renderPresets()
 
       const readNativeBinding = async (kind: "persona" | "character", id: string): Promise<string> => {
         if (!id) return ""
         const response = await fetch(`/api/v1/image-gen/preset-bindings/${kind}/${encodeURIComponent(id)}`, {
+          cache: "no-store",
           credentials: "include",
           headers: { "Accept": "application/json" },
         })
@@ -678,10 +697,21 @@ class ChatVisualsController {
       if (token !== this.lumiversePresetLoadToken) return
       const nativePersonaBindingId = personaBinding.status === "fulfilled" ? personaBinding.value : ""
       const nativeCharacterBindingId = characterBinding.status === "fulfilled" ? characterBinding.value : ""
+      const missingBindingPreset = () =>
+        (nativeCharacterBindingId && !presets.character.some(preset => preset.id === nativeCharacterBindingId))
+        || (nativePersonaBindingId && !presets.persona.some(preset => preset.id === nativePersonaBindingId))
+      if (missingBindingPreset()) {
+        // Native Image Gen can write the binding before its debounced settings save.
+        await new Promise(resolve => setTimeout(resolve, 1750))
+        if (token !== this.lumiversePresetLoadToken) return
+        presets = await this.readLumiversePresets().catch(() => presets)
+        if (token !== this.lumiversePresetLoadToken) return
+        renderPresets()
+      }
       if (
         !this.selectedPersonaPresetId
         && !this.importedSourcePresetId
-        && personaPresets.some((preset) => preset.id === nativePersonaBindingId)
+        && presets.persona.some((preset) => preset.id === nativePersonaBindingId)
       ) {
         this.importedSourcePresetId = nativePersonaBindingId
         this.renderLumiversePersonaPresets()
@@ -692,7 +722,7 @@ class ChatVisualsController {
         && characterPositive.value === initialPositive
         && characterNegative.value === initialNegative
         && !this.importedCharacterSourcePresetId
-        && characterPresets.some((preset) => preset.id === nativeCharacterBindingId)
+        && presets.character.some((preset) => preset.id === nativeCharacterBindingId)
       ) {
         this.importedCharacterSourcePresetId = nativeCharacterBindingId
         this.renderLumiverseCharacterPresets()
@@ -701,11 +731,14 @@ class ChatVisualsController {
       this.refreshBindingIndicators()
       if (personaBinding.status === "rejected" || characterBinding.status === "rejected") {
         this.setStatus("Could not read all Lumiverse preset bindings. Available presets can still be imported manually.", true)
+      } else if (missingBindingPreset()) {
+        this.setStatus("A Lumiverse binding points to a preset missing from the export. Check the preset in Image Gen, then refresh Visuals.", true)
       }
     } catch (error) {
       if (token !== this.lumiversePresetLoadToken) return
       this.lumiversePersonaPresets = []
       this.lumiverseCharacterPresets = []
+      this.lumiverseMainPresets = []
       this.renderLumiversePersonaPresets()
       this.renderLumiverseCharacterPresets()
       this.setStatus(error instanceof Error ? error.message : "Could not read Lumiverse Image Gen presets.", true)
@@ -799,9 +832,10 @@ class ChatVisualsController {
   private importCharacterPrompt(announce = true): void {
     const presetId = this.get<HTMLSelectElement>("lumiverse-character-preset").value
       || this.importedCharacterSourcePresetId
-    const preset = this.lumiverseCharacterPresets.find((candidate) => candidate.id === presetId)
+    const preset = this.lumiverseCharacterPresets.find(candidate => candidate.id === presetId)
+      || this.lumiverseMainPresets.find(candidate => candidate.id === presetId)
     if (!preset) {
-      this.setStatus("Choose a Lumiverse character preset first.", true)
+      this.setStatus("Choose a Lumiverse Image Gen preset first.", true)
       return
     }
     this.importedCharacterSourcePresetId = preset.id

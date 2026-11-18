@@ -323,3 +323,42 @@ controller.disposed=true
 if(controller.profileSyncTimer)clearTimeout(controller.profileSyncTimer)
 dom.window.close()
 console.log('mounted Studio navigation and defaults: ok')
+
+// Exercise the compiled Visuals controller against the native export and binding contract.
+const frontendBundle = await readFile(new URL('../dist/frontend.js', import.meta.url), 'utf8')
+const visualsModule = Buffer.from(frontendBundle + '\nexport { ChatVisualsController }').toString('base64')
+const { ChatVisualsController } = await import('data:text/javascript;base64,' + visualsModule)
+const visuals = new ChatVisualsController({}, document.createElement('div'), () => [], () => {}, () => {})
+visuals.data = { activeChat: { characterId: 'char-1' }, characterFolder: { binding: {} } }
+visuals.refreshBindingIndicators = () => {}
+const presetField = visuals.get('lumiverse-character-preset')
+const positive = visuals.get('character-positive')
+const negative = visuals.get('character-negative')
+const mainPreset = { id: 'legacy-main', name: 'Legacy portrait', prompt: 'silver hair', negativePrompt: 'blur' }
+const characterPreset = { id: 'char-preset', name: 'Character portrait', kind: 'character', prompt: 'blue eyes', negativePrompt: 'noise' }
+const originalFetch = globalThis.fetch
+try {
+  globalThis.fetch = async url => url.endsWith('/export')
+    ? Response.json({ presets: [mainPreset] })
+    : new Response(null, { status: 404 })
+  await visuals.hydrateLumiversePresets()
+  assert.equal(presetField.querySelector('optgroup').label, 'Main presets')
+  assert.equal(positive.value, '')
+  presetField.value = 'legacy-main'
+  visuals.importCharacterPrompt(false)
+  assert.deepEqual([positive.value, negative.value], ['silver hair', 'blur'])
+
+  visuals.importedCharacterSourcePresetId = ''
+  positive.value = negative.value = ''
+  let reads = 0
+  globalThis.fetch = async url => {
+    if (url.endsWith('/export')) return Response.json({ presets: ++reads === 1 ? [] : [characterPreset] })
+    return Response.json({ preset_id: 'char-preset' })
+  }
+  await visuals.hydrateLumiversePresets()
+  assert.equal(reads, 2)
+  assert.deepEqual([presetField.value, positive.value, negative.value], ['char-preset', 'blue eyes', 'noise'])
+} finally {
+  globalThis.fetch = originalFetch
+}
+console.log('Visuals hydration handles legacy Main presets and delayed character preset persistence: ok')
