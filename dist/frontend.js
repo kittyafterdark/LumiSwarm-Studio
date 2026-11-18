@@ -544,7 +544,7 @@ const STYLES = `
 /* Swarm Studio | authored surface v6.
    Replaces the original Studio cascade. One definition per component; no appended override stratum.
    Auxiliary launcher, inline-image and mini-player components are isolated below. */
- .ss-shell {
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) {
   --ss-canvas-bg: var(--lumiverse-bg, #111218);
   --ss-surface-base: var(--lumiverse-surface, var(--lumiverse-fill, #1c1d26));
   --ss-panel-bg: var(--ss-surface-base);
@@ -571,6 +571,8 @@ const STYLES = `
   --ss-panel-radius: 13px;
   --ss-slider-radius: 999px;
   --ss-backdrop-blur: 12px;
+}
+.ss-shell {
   --ss-generation-width: 358px;
   --ss-history-width: 268px;
   --ss-prompt-height: 210px;
@@ -611,14 +613,14 @@ const STYLES = `
 }
 .ss-shell *, .ss-shell *::before, .ss-shell *::after { box-sizing: border-box; }
 .ss-shell [hidden], .ss-shell [data-studio-page][hidden], .ss-shell [data-mobile-pane][hidden] { display: none !important; }
-.ss-shell :is(button, input, select, textarea) { font: inherit; color: inherit; }
-.ss-shell button { cursor: pointer; }
-.ss-shell button:disabled { opacity: .38; cursor: not-allowed; }
-.ss-shell :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--ss-violet); outline-offset: 2px; }
-.ss-shell :is(input,select,textarea) { min-width: 0; }
-.ss-shell :is(.ss-button,.ss-icon-button,.ss-input,.ss-select,.ss-textarea) { border-radius: var(--ss-control-radius); }
-.ss-shell .ss-button,
-.ss-shell .ss-icon-button {
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) :is(button, input, select, textarea) { font: inherit; color: inherit; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) button { cursor: pointer; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) button:disabled { opacity: .38; cursor: not-allowed; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--ss-violet); outline-offset: 2px; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) :is(input,select,textarea) { min-width: 0; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) :is(.ss-button,.ss-icon-button,.ss-input,.ss-select,.ss-textarea) { border-radius: var(--ss-control-radius); }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-button,
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-icon-button {
   border: 1px solid var(--ss-outline);
   background: var(--ss-button-bg);
   color: var(--ss-button-ink);
@@ -632,34 +634,35 @@ const STYLES = `
   text-align: center;
   transition: background .16s, border-color .16s, color .16s;
 }
-.ss-shell :is(.ss-button,.ss-icon-button):hover:not(:disabled) { color: var(--ss-button-ink); background: var(--ss-button-hover); border-color: var(--ss-accent-line); }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) :is(.ss-button,.ss-icon-button):hover:not(:disabled) { color: var(--ss-button-ink); background: var(--ss-button-hover); border-color: var(--ss-accent-line); }
+:is(.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-button-primary,
 .ss-shell .ss-button-primary { background: var(--ss-primary-bg); border-color: color-mix(in srgb, var(--ss-primary-bg) 55%, var(--ss-outline)); color: var(--ss-primary-ink); font-weight: 700; }
-.ss-shell .ss-button-primary:hover:not(:disabled) { background: var(--ss-primary-hover); color: var(--ss-primary-ink); }
-.ss-shell .ss-button-danger { color: #e6a5b4; }
-.ss-shell .ss-icon-button { width: 34px; padding: 7px; flex: none; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-button-primary:hover:not(:disabled) { background: var(--ss-primary-hover); color: var(--ss-primary-ink); }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-button-danger { color: #e6a5b4; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-icon-button { width: 34px; padding: 7px; flex: none; }
 /* Line icons are stroke-only by default. Filled logos/carets explicitly opt in via fill attributes or component rules. */
-.ss-shell svg { width: 16px; height: 16px; flex: 0 0 auto; }
-.ss-shell svg:not([fill]) { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
-.ss-shell .ss-field, .ss-shell .ss-saved-style-editor label { display: grid; gap: 7px; min-width: 0; align-content: start; }
-.ss-shell .ss-field > label, .ss-shell .ss-field > span:first-child,
-.ss-shell .ss-saved-style-editor label, .ss-shell .ss-eyebrow {
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) svg { width: 16px; height: 16px; flex: 0 0 auto; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) svg:not([fill]) { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-field, :is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-saved-style-editor label { display: grid; gap: 7px; min-width: 0; align-content: start; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-field > label, :is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-field > span:first-child,
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-saved-style-editor label, :is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-eyebrow {
   color: var(--ss-muted); font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .055em;
 }
-.ss-shell .ss-input,.ss-shell .ss-select,.ss-shell .ss-textarea {
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-input,:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-select,:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-textarea {
   width: 100%; min-height: 36px; padding: 8px 10px;
   background: var(--ss-field-bg); color: var(--ss-text);
   border: 1px solid var(--ss-outline); outline: none; font-size: 12px;
 }
-.ss-shell :is(.ss-input,.ss-select,.ss-textarea):focus { border-color: var(--ss-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-accent) 19%, transparent); }
-.ss-shell .ss-textarea { min-height: 66px; resize: vertical; line-height: 1.5; }
-.ss-shell .ss-select { padding-right: 24px; }
-.ss-shell .ss-select option { background: var(--ss-panel-bg); color: var(--ss-text); }
-.ss-shell input[type='checkbox'],.ss-shell input[type='radio'] { accent-color: var(--ss-accent); }
-.ss-shell input[type='range'] { width: 100%; min-width: 0; accent-color: var(--ss-accent); cursor: pointer; }
-.ss-shell :is(.ss-muted,.ss-field-help,.ss-tiny) { color: var(--ss-dim); }
-.ss-shell .ss-tiny { font-size: 10px; }
-.ss-shell .ss-field-help { font-size: 10px; line-height: 1.5; }
-.ss-shell .ss-empty { padding: 20px 12px; color: var(--ss-dim); font-size: 12px; text-align: center; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) :is(.ss-input,.ss-select,.ss-textarea):focus { border-color: var(--ss-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-accent) 19%, transparent); }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-textarea { min-height: 66px; resize: vertical; line-height: 1.5; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-select { padding-right: 24px; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-select option { background: var(--ss-panel-bg); color: var(--ss-text); }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) input[type='checkbox'],:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) input[type='radio'] { accent-color: var(--ss-accent); }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) input[type='range'] { width: 100%; min-width: 0; accent-color: var(--ss-accent); cursor: pointer; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) :is(.ss-muted,.ss-field-help,.ss-tiny) { color: var(--ss-dim); }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-tiny { font-size: 10px; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-field-help { font-size: 10px; line-height: 1.5; }
+:is(.ss-shell,.ss-host-visual-canon,.ss-visual-lorebook-host) .ss-empty { padding: 20px 12px; color: var(--ss-dim); font-size: 12px; text-align: center; }
 .ss-shell .ss-section-head,.ss-shell .ss-section-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
 .ss-shell .ss-section-title strong { font-size: 12px; font-weight: 760; color: var(--ss-text); }
 .ss-shell .ss-section-title span { font-size: 10px; }
@@ -17098,7 +17101,7 @@ class ChatVisualsController {
     renderLumiverseCharacterPresets() {
         const select = this.get("lumiverse-character-preset");
         select.replaceChildren();
-        const blank = element("option", "", this.lumiverseCharacterPresets.length ? "Choose Image Gen character preset…" : "No Image Gen character presets");
+        const blank = element("option", "", this.lumiverseCharacterPresets.length ? "Choose Image Gen character preset…" : "No character presets in Lumiverse Image Gen");
         blank.value = "";
         select.appendChild(blank);
         for (const preset of this.lumiverseCharacterPresets){
@@ -17111,6 +17114,12 @@ class ChatVisualsController {
     async hydrateLumiversePresets() {
         const token = ++this.lumiversePresetLoadToken;
         try {
+            const characterPositive = this.get("character-positive");
+            const characterNegative = this.get("character-negative");
+            const binding = this.data?.characterFolder?.binding;
+            const canHydrateCharacter = !binding?.positivePrompt && !binding?.negativePrompt;
+            const initialPositive = characterPositive.value;
+            const initialNegative = characterNegative.value;
             const exportResponse = await fetch("/api/v1/image-gen/export", {
                 method: "POST",
                 credentials: "include",
@@ -17129,7 +17138,10 @@ class ChatVisualsController {
             if (!exportResponse.ok) {
                 throw new Error(String(exported?.error || `Could not read Lumiverse Image Gen presets (${exportResponse.status}).`));
             }
-            const exportedPresets = Array.isArray(exported?.presets) ? exported.presets : [];
+            if (!Array.isArray(exported?.presets)) {
+                throw new Error("Lumiverse did not return an Image Gen preset list.");
+            }
+            const exportedPresets = exported.presets;
             const readPresets = (kind)=>exportedPresets.filter((preset)=>String(preset?.kind || "main") === kind).map((preset)=>({
                         id: String(preset?.id || "").trim(),
                         name: String(preset?.name || "").trim(),
@@ -17141,6 +17153,8 @@ class ChatVisualsController {
             if (token !== this.lumiversePresetLoadToken) return;
             this.lumiversePersonaPresets = personaPresets;
             this.lumiverseCharacterPresets = characterPresets;
+            this.renderLumiversePersonaPresets();
+            this.renderLumiverseCharacterPresets();
             const readNativeBinding = async (kind, id)=>{
                 if (!id) return "";
                 const response = await fetch(`/api/v1/image-gen/preset-bindings/${kind}/${encodeURIComponent(id)}`, {
@@ -17149,30 +17163,34 @@ class ChatVisualsController {
                         "Accept": "application/json"
                     }
                 });
-                if (!response.ok) return "";
-                const binding = await response.json().catch(()=>({}));
+                if (response.status === 404) return "";
+                if (!response.ok) throw new Error(`Could not read the Lumiverse ${kind} preset binding (${response.status}).`);
+                const binding = await response.json();
                 return String(binding?.preset_id || "");
             };
             const personaId = this.data?.activePersona?.id || "";
             const characterId = this.data?.activeChat?.characterId || "";
-            const [nativePersonaBindingId, nativeCharacterBindingId] = await Promise.all([
+            const [personaBinding, characterBinding] = await Promise.allSettled([
                 readNativeBinding("persona", personaId),
                 readNativeBinding("character", characterId)
             ]);
             if (token !== this.lumiversePresetLoadToken) return;
-            this.renderLumiversePersonaPresets();
-            this.renderLumiverseCharacterPresets();
+            const nativePersonaBindingId = personaBinding.status === "fulfilled" ? personaBinding.value : "";
+            const nativeCharacterBindingId = characterBinding.status === "fulfilled" ? characterBinding.value : "";
             if (!this.selectedPersonaPresetId && !this.importedSourcePresetId && personaPresets.some((preset)=>preset.id === nativePersonaBindingId)) {
                 this.importedSourcePresetId = nativePersonaBindingId;
                 this.renderLumiversePersonaPresets();
                 this.importPersonaPrompt(false);
             }
-            if (!this.data?.characterFolder && !this.importedCharacterSourcePresetId && characterPresets.some((preset)=>preset.id === nativeCharacterBindingId)) {
+            if (canHydrateCharacter && characterPositive.value === initialPositive && characterNegative.value === initialNegative && !this.importedCharacterSourcePresetId && characterPresets.some((preset)=>preset.id === nativeCharacterBindingId)) {
                 this.importedCharacterSourcePresetId = nativeCharacterBindingId;
                 this.renderLumiverseCharacterPresets();
                 this.importCharacterPrompt(false);
             }
             this.refreshBindingIndicators();
+            if (personaBinding.status === "rejected" || characterBinding.status === "rejected") {
+                this.setStatus("Could not read all Lumiverse preset bindings. Available presets can still be imported manually.", true);
+            }
         } catch (error) {
             if (token !== this.lumiversePresetLoadToken) return;
             this.lumiversePersonaPresets = [];

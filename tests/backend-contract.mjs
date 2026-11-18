@@ -1019,6 +1019,32 @@ assert.equal(macroValues.get("char_profile"), "/api/v1/images/char-avatar?size=s
 assert.equal(macroValues.get("user_profile"), "/api/v1/images/user-avatar?size=sm")
 assert.match(completionToast, /Swarm Studio finished/)
 
+const getActiveChat = spindle.chats.getActive
+const getProfileImage = spindle.images.get
+try {
+  spindle.images.get = async (id, options) => id === "alt-avatar"
+    ? { id, url: "/api/v1/images/alt-avatar?size=sm" }
+    : getProfileImage(id, options)
+  spindle.chats.getActive = async () => ({
+    ...await getActiveChat(),
+    metadata: { active_avatar_id: "alt-avatar" },
+  })
+  await eventHandlers.get("CHARACTER_AVATAR_CHANGED")({}, "user-1")
+  assert.equal(macroValues.get("char_profile"), "/api/v1/images/alt-avatar?size=sm")
+
+  spindle.chats.getActive = async () => ({
+    ...await getActiveChat(),
+    metadata: { group: true, group_active_avatar_ids: { "char-1": "alt-avatar" } },
+  })
+  await eventHandlers.get("CHAT_SWITCHED")({}, "user-1")
+  assert.equal(macroValues.get("char_profile"), "/api/v1/images/alt-avatar?size=sm")
+} finally {
+  spindle.chats.getActive = getActiveChat
+  spindle.images.get = getProfileImage
+}
+await eventHandlers.get("CHARACTER_AVATAR_CHANGED")({}, "user-1")
+assert.equal(macroValues.get("char_profile"), "/api/v1/images/char-avatar?size=sm")
+
 const nativeGenerateStream = globalThis.spindle.imageGen.generateStream
 delete globalThis.spindle.imageGen.generateStream
 let legacyGenerated

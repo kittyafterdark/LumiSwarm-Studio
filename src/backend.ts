@@ -3328,11 +3328,18 @@ async function imageUrlForMacro(imageId: string, userId?: string): Promise<strin
 
 async function refreshContextMacros(userId?: string): Promise<void> {
   let character: any = null
+  let activeAvatarId = ""
   let persona: any = null
   if (spindle.permissions.has("chats") && spindle.permissions.has("characters")) {
     try {
       const chat = await spindle.chats.getActive(userId)
-      if (chat?.character_id) character = await spindle.characters.get(chat.character_id, userId)
+      if (chat?.character_id) {
+        character = await spindle.characters.get(chat.character_id, userId)
+        const metadata = asRecord(chat.metadata)
+        activeAvatarId = asString(metadata.group === true
+          ? asRecord(metadata.group_active_avatar_ids)[chat.character_id]
+          : metadata.active_avatar_id)
+      }
     } catch {
       character = null
     }
@@ -3373,7 +3380,9 @@ async function refreshContextMacros(userId?: string): Promise<void> {
   swarmProtocolContexts.set(protocolContextKey(userId), protocolContext)
   spindle.updateMacroValue("char_base", characterTags)
   spindle.updateMacroValue("persona_base", personaTags)
-  spindle.updateMacroValue("char_profile", await imageUrlForMacro(asString(character?.image_id), userId))
+  const characterAvatarUrl = await imageUrlForMacro(activeAvatarId, userId)
+    || await imageUrlForMacro(asString(character?.image_id), userId)
+  spindle.updateMacroValue("char_profile", characterAvatarUrl)
   spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId))
   spindle.updateMacroValue(
     "swarm_image_protocol",

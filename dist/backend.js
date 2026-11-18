@@ -2957,11 +2957,16 @@ async function imageUrlForMacro(imageId, userId) {
 }
 async function refreshContextMacros(userId) {
     let character = null;
+    let activeAvatarId = "";
     let persona = null;
     if (spindle.permissions.has("chats") && spindle.permissions.has("characters")) {
         try {
             const chat = await spindle.chats.getActive(userId);
-            if (chat?.character_id) character = await spindle.characters.get(chat.character_id, userId);
+            if (chat?.character_id) {
+                character = await spindle.characters.get(chat.character_id, userId);
+                const metadata = asRecord(chat.metadata);
+                activeAvatarId = asString(metadata.group === true ? asRecord(metadata.group_active_avatar_ids)[chat.character_id] : metadata.active_avatar_id);
+            }
         } catch  {
             character = null;
         }
@@ -2998,7 +3003,8 @@ async function refreshContextMacros(userId) {
     swarmProtocolContexts.set(protocolContextKey(userId), protocolContext);
     spindle.updateMacroValue("char_base", characterTags);
     spindle.updateMacroValue("persona_base", personaTags);
-    spindle.updateMacroValue("char_profile", await imageUrlForMacro(asString(character?.image_id), userId));
+    const characterAvatarUrl = await imageUrlForMacro(activeAvatarId, userId) || await imageUrlForMacro(asString(character?.image_id), userId);
+    spindle.updateMacroValue("char_profile", characterAvatarUrl);
     spindle.updateMacroValue("user_profile", await imageUrlForMacro(asString(persona?.image_id), userId));
     spindle.updateMacroValue("swarm_image_protocol", buildInjectedSwarmProtocol(await loadStudioGenerationProfile(userId), protocolContext, await loadTagAutomationConfig(userId)));
 }
