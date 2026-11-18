@@ -4330,6 +4330,14 @@ function openCharacterExpressions(root, options) {
         ]
     ]);
     const enhanceFactorField = fields("Output scale", enhanceFactor);
+    const sendPrefix = element("input", "ss-input");
+    sendPrefix.type = "text";
+    sendPrefix.placeholder = "shoto";
+    const sendPrefixField = fields("Expression name prefix (optional)", sendPrefix);
+    const sendPrefixExample = element("small", "ss-muted", "For example, shoto sends joy as shoto-joy.");
+    sendPrefixExample.id = "ss-expression-prefix-example";
+    sendPrefix.setAttribute("aria-describedby", sendPrefixExample.id);
+    sendPrefixField.append(sendPrefixExample);
     let enhanceMode = null;
     let loadingEnhance = false;
     let enhanceLoadFailed = false;
@@ -4909,6 +4917,11 @@ function openCharacterExpressions(root, options) {
     };
     const publish = ()=>void run(async (signal)=>{
             const ready = rows.filter((row)=>row.selected && row.image);
+            const prefix = sendPrefix.value.trim();
+            const mappings = Object.fromEntries(ready.map((row)=>[
+                    prefix ? prefix + "-" + row.label : row.label,
+                    row.image.id
+                ]));
             status.textContent = "Sending selected expressions to Lumiverse…";
             const images = ready.map((row)=>row.image.id);
             const linked = await studioCharacterImageAction(binding.characterId, images, "gallery", fetch, signal);
@@ -4921,10 +4934,7 @@ function openCharacterExpressions(root, options) {
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                    mappings: Object.fromEntries(ready.map((row)=>[
-                            row.label,
-                            row.image.id
-                        ]))
+                    mappings
                 })
             });
             if (!response.ok) {
@@ -5082,13 +5092,16 @@ function openCharacterExpressions(root, options) {
             if (backgroundMode.value === "builtin") controls.append(modelSetup);
             else if (backgroundMode.value === "custom") controls.append(backgroundGraphField);
             else controls.append(fields("Saved workflow", backgroundWorkflow), fields("Source image input", imageInput));
+        } else {
+            controls.append(sendPrefixField);
         }
         for (const control of [
             method,
             backgroundMode,
             backgroundWorkflow,
             imageInput,
-            backgroundGraph
+            backgroundGraph,
+            sendPrefix
         ])control.disabled = disabled;
         installModel.disabled = disabled || Boolean(installTask);
         recheckModel.disabled = disabled || checkingModel || Boolean(installTask);

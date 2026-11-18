@@ -123,6 +123,14 @@ function openCharacterExpressions(
   const method = select(adapter ? [[options.family, adapter], ["", "Prompt only"]] : [["", "Prompt only"]])
   const enhanceFactor = select([["2", "2×"], ["3", "3×"], ["4", "4×"]])
   const enhanceFactorField = fields("Output scale", enhanceFactor)
+  const sendPrefix = element("input", "ss-input")
+  sendPrefix.type = "text"
+  sendPrefix.placeholder = "shoto"
+  const sendPrefixField = fields("Expression name prefix (optional)", sendPrefix)
+  const sendPrefixExample = element("small", "ss-muted", "For example, shoto sends joy as shoto-joy.")
+  sendPrefixExample.id = "ss-expression-prefix-example"
+  sendPrefix.setAttribute("aria-describedby", sendPrefixExample.id)
+  sendPrefixField.append(sendPrefixExample)
   let enhanceMode: "model" | "saved" | "custom" | "" | null = null
   let loadingEnhance = false
   let enhanceLoadFailed = false
@@ -580,6 +588,8 @@ function openCharacterExpressions(
   }
   const publish = () => void run(async signal => {
     const ready = rows.filter(row => row.selected && row.image)
+    const prefix = sendPrefix.value.trim()
+    const mappings = Object.fromEntries(ready.map(row => [prefix ? prefix + "-" + row.label : row.label, row.image!.id]))
     status.textContent = "Sending selected expressions to Lumiverse…"
     const images = ready.map(row => row.image!.id)
     const linked = await studioCharacterImageAction(binding.characterId, images, "gallery", fetch, signal)
@@ -587,7 +597,7 @@ function openCharacterExpressions(
     if (linked.failed.length) throw new Error("Some outputs could not be linked to the gallery. Retry Send selected.")
     const response = await fetch(`/api/v1/characters/${encodeURIComponent(binding.characterId)}/expressions/from-gallery`, {
       method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mappings: Object.fromEntries(ready.map(row => [row.label, row.image!.id])) }),
+      body: JSON.stringify({ mappings }),
     })
     if (!response.ok) {
       const data = await response.json().catch(() => null)
@@ -730,8 +740,10 @@ function openCharacterExpressions(
       if (backgroundMode.value === "builtin") controls.append(modelSetup)
       else if (backgroundMode.value === "custom") controls.append(backgroundGraphField)
       else controls.append(fields("Saved workflow", backgroundWorkflow), fields("Source image input", imageInput))
+    } else {
+      controls.append(sendPrefixField)
     }
-    for (const control of [method, backgroundMode, backgroundWorkflow, imageInput, backgroundGraph]) control.disabled = disabled
+    for (const control of [method, backgroundMode, backgroundWorkflow, imageInput, backgroundGraph, sendPrefix]) control.disabled = disabled
     installModel.disabled = disabled || Boolean(installTask)
     recheckModel.disabled = disabled || checkingModel || Boolean(installTask)
     if (stage !== 0 && selectable.length) {
