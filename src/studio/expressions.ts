@@ -6,6 +6,8 @@ type StudioExpressionAction = "selected" | "all" | "failed" | "send" | StudioExp
 interface StudioExpressionRow {
   label: string
   direction: string
+  originalDirection?: string
+  bankId?: string
   selected: boolean
   image: StudioExpressionImage | null
   drafts: Set<string>
@@ -64,18 +66,32 @@ function openCharacterExpressions(
   }
   const close = action("Close", () => void closeDialog())
   const header = element("header", "ss-expression-header")
-  header.append(heading, close)
+  const headerCopy = element("div", "ss-expression-header-copy")
+  headerCopy.append(element("small", "", "Output library  /  " + options.folder.name), heading)
+  heading.textContent = "Expression Studio"
+  const headerIdentity = element("div", "ss-expression-identity")
+  const mark = element("span", "ss-expression-mark", "✦")
+  mark.setAttribute("aria-hidden", "true")
+  headerIdentity.append(mark, headerCopy)
+  header.append(headerIdentity, close)
   const steps = element("nav", "ss-expression-steps")
   steps.setAttribute("aria-label", "Expression stages")
   const controls = element("div", "ss-expression-controls")
   const cards = element("div", "ss-expression-cards")
+  const galleryHead = element("div", "ss-expression-gallery-head")
   const scroll = element("div", "ss-expression-scroll")
-  scroll.append(controls, cards)
+  scroll.append(controls, galleryHead, cards)
   const footer = element("footer", "ss-expression-footer")
   const status = element("p", "", "")
   status.setAttribute("role", "status")
+  const footerIdentity = element("div", "ss-expression-footer-identity")
+  const footerMark = element("span", "ss-expression-footer-mark", "◇")
+  footerMark.setAttribute("aria-hidden", "true")
+  const footerCopy = element("div", "ss-expression-footer-copy")
+  footerIdentity.append(footerMark, footerCopy)
+  footerCopy.append(status)
   const actions = element("div", "ss-expression-actions")
-  footer.append(status, actions)
+  footer.append(footerIdentity, actions)
   dialog.append(header, steps, scroll, footer)
   const fields = (label: string, control: HTMLElement) => {
     const field = element("label", "ss-field")
@@ -227,7 +243,6 @@ function openCharacterExpressions(
   const makeRow = (label: string, direction: string, selected: boolean): StudioExpressionRow =>
     ({ label, direction, selected, image: null, drafts: new Set() })
   let generation = cleanExpressionGeneration(null)
-  let showAll = false
   let loading = true
   let settingsAvailable = false
   let saved = ""
@@ -236,41 +251,13 @@ function openCharacterExpressions(
   const saveStatus = element("span", "ss-muted")
   saveStatus.setAttribute("role", "status")
   const progressTiles = new Map<StudioExpressionRow, { bar: HTMLProgressElement; caption: HTMLElement; image: HTMLImageElement }>()
-  const settingsPanel = element("details", "ss-expression-settings")
-  settingsPanel.append(element("summary", "", "Set generation settings"))
   const settingsFields = element("div", "ss-expression-settings-fields")
-  settingsPanel.append(settingsFields)
-  const setToolbar = element("div", "ss-expression-toolbar")
-  const custom = element("input", "ss-input")
-  custom.placeholder = "e.g. Wistful"
-  custom.maxLength = 40
-  custom.required = true
-  const customForm = element("form", "ss-expression-custom")
-  const add = element("button", "ss-button", "Add custom slot")
-  add.type = "submit"
-  customForm.append(fields("Custom expression", custom), add)
-  custom.addEventListener("input", () => custom.setCustomValidity(""))
-  customForm.addEventListener("submit", event => {
-    event.preventDefault()
-    const label = cleanExpressionLabel(custom.value)
-    if (!label || rows.some(row => row.label.toLowerCase() === label.toLowerCase())) {
-      custom.setCustomValidity(label ? "That expression already exists." : "Enter a name using letters, numbers, spaces, or hyphens.")
-      custom.reportValidity()
-      return
-    }
-    if (rows.length >= EXPRESSION_SPREAD.length + EXPRESSION_CUSTOM_LIMIT) return
-    const row = makeRow(label, label.toLowerCase(), true)
-    rows.push(row)
-    custom.value = ""
-    saveSet()
-    render()
-    directionInputs.get(row)?.focus()
-  })
+  footerCopy.append(saveStatus)
 
   const getSettings = () => ({
     generation: { ...generation, recipe: { ...generation.recipe } },
     selected: rows.filter(row => row.selected).map(row => row.label.toLowerCase()),
-    slots: rows.map(({ label, direction }) => ({ label, direction })),
+    slots: rows.map(({ label, direction, bankId }) => ({ label, direction, ...(bankId ? { bankId } : {}) })),
   })
   const saveSet = () => {
     if (!settingsAvailable) return
@@ -297,11 +284,11 @@ function openCharacterExpressions(
     if (dialog.contains(document.activeElement) && document.activeElement instanceof HTMLElement) document.activeElement.blur()
     saveSet()
     render()
-    await saveTask
+    await Promise.all([saveTask, bankSaveTask])
     if (!disposed && dialog.open) {
-      if (settingsAvailable && !saved && close.textContent !== "Close without saving") {
+      if (((settingsAvailable && !saved) || (bankAvailable && !bankSnapshot)) && close.textContent !== "Close without saving") {
         close.textContent = "Close without saving"
-        status.textContent = "The set could not be saved to your account."
+        status.textContent = "The expression set or bank could not be saved to your account."
       } else dialog.close()
     }
     closing = false
@@ -310,124 +297,433 @@ function openCharacterExpressions(
       close.focus({ preventScroll: true })
     }
   }
-  const directionInputs = new Map<StudioExpressionRow, HTMLTextAreaElement>()
+  // The reusable bank is intentionally account-backed, not tied to this character's slots.
+  let bank: StudioExpressionBankEntry[] = []
+  let bankLoaded = false
+  let bankAvailable = false
+  let bankSnapshot = ""
+  let bankSaveTask = Promise.resolve()
+  let bankSearch = ""
+  let galleryFilter: "all" | "selected" | "ready" | "empty" = "all"
+  let previewMode: "portrait" | "closeup" = "portrait"
+  let linkedSize = true
+  let currentRatio = 0
+  // Only the active card edits its direction. Draft text is deliberately not persisted
+  // until Save; Cancel and a stage change discard it without touching the saved set.
+  let inlineEdit: { row: StudioExpressionRow; draft: string; bankId?: string; bankLabel?: string } | null = null
+  let overlayFocus: HTMLElement | null = null
+  const overlay = element("div", "ss-expression-overlay")
+  overlay.hidden = true
+  overlay.setAttribute("role", "dialog")
+  overlay.setAttribute("aria-modal", "true")
+  const overlayScrim = element("button", "ss-expression-overlay-scrim")
+  overlayScrim.type = "button"
+  overlayScrim.setAttribute("aria-label", "Close panel")
+  const overlayPanel = element("div", "ss-expression-overlay-panel")
+  overlay.append(overlayScrim, overlayPanel)
+  dialog.append(overlay)
+  const closeOverlay = () => {
+    overlay.hidden = true
+    overlayPanel.replaceChildren()
+    overlayFocus?.focus({ preventScroll: true })
+    overlayFocus = null
+  }
+  overlayScrim.addEventListener("click", closeOverlay)
+  const openOverlay = (title: string, kicker: string, wide = false) => {
+    if (overlay.hidden) overlayFocus = dialog.ownerDocument.activeElement as HTMLElement | null
+    overlay.hidden = false
+    overlayPanel.classList.toggle("ss-expression-overlay-wide", wide)
+    const head = element("header", "ss-expression-overlay-head")
+    const copy = element("div", "ss-expression-overlay-heading")
+    copy.append(element("small", "ss-expression-kicker", kicker), element("h3", "", title))
+    const exit = action("Close", closeOverlay)
+    exit.classList.add("ss-expression-overlay-close")
+    head.append(copy, exit)
+    const body = element("div", "ss-expression-overlay-body")
+    const bottom = element("footer", "ss-expression-overlay-bottom")
+    overlayPanel.replaceChildren(head, body, bottom)
+    exit.focus({ preventScroll: true })
+    return { body, bottom }
+  }
+  const defaultDirection = (row: StudioExpressionRow) => {
+    const builtin = EXPRESSION_SPREAD.find(([name]) => name === row.label.toLowerCase())
+    if (builtin) return builtin[1] as string
+    return bank.find(item => item.id === row.bankId)?.direction ?? row.originalDirection ?? row.direction
+  }
+  const saveBank = () => {
+    if (!bankAvailable) return
+    const snapshot = JSON.stringify(bank)
+    if (bankSnapshot === snapshot) return
+    bankSnapshot = snapshot
+    bankSaveTask = bankSaveTask.then(async () => {
+      try {
+        await options.request("save_expression_bank", { templates: JSON.parse(snapshot) })
+      } catch {
+        if (bankSnapshot === snapshot) {
+          bankSnapshot = ""
+          status.textContent = "Could not save the custom expression bank. Retry by editing a template."
+        }
+      }
+    })
+  }
+  const bankId = () => `bank-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  const upsertBank = (label: string, direction: string): StudioExpressionBankEntry | null => {
+    if (!bankAvailable) return null
+    if (EXPRESSION_SPREAD.some(([name]) => name === label.toLowerCase())) return null
+    const entry = bank.find(item => item.label.toLowerCase() === label.toLowerCase())
+    if (entry) entry.direction = direction.slice(0, EXPRESSION_DIRECTION_LIMIT)
+    else {
+      if (bank.length >= 150) return null
+      bank.push({ id: bankId(), label, direction: direction.slice(0, EXPRESSION_DIRECTION_LIMIT) })
+    }
+    saveBank()
+    return bank.find(item => item.label.toLowerCase() === label.toLowerCase()) ?? null
+  }
+  const addCustomSlot = (label: string, direction: string, template?: StudioExpressionBankEntry) => {
+    const name = cleanExpressionLabel(label)
+    if (!name || rows.some(row => row.label.toLowerCase() === name.toLowerCase()) || rows.length >= EXPRESSION_SPREAD.length + EXPRESSION_CUSTOM_LIMIT) return false
+    const row = makeRow(name, direction.slice(0, EXPRESSION_DIRECTION_LIMIT), true)
+    row.bankId = template?.id
+    row.originalDirection = row.direction
+    rows.push(row)
+    galleryFilter = "all"
+    saveSet()
+    render()
+    return true
+  }
+  const openCustomSlot = () => {
+    const { body, bottom } = openOverlay("New expression", "Custom slot")
+    const name = element("input", "ss-input")
+    name.placeholder = "e.g. Wistful"
+    name.maxLength = 40
+    const direction = element("textarea", "ss-textarea")
+    direction.rows = 5
+    direction.maxLength = EXPRESSION_DIRECTION_LIMIT
+    direction.placeholder = "Describe the expression, gaze, and body language"
+    const checkbox = element("input")
+    checkbox.type = "checkbox"
+    checkbox.checked = bankAvailable
+    checkbox.disabled = !bankAvailable
+    const persist = element("label", "ss-expression-checkline")
+    persist.append(checkbox, element("span", "", "Also save as a reusable bank template"))
+    body.append(fields("Expression name", name), fields("Direction", direction), persist)
+    const create = action("Add expression", () => {
+      const label = cleanExpressionLabel(name.value)
+      if (!label) { name.setCustomValidity("Use a valid name up to 40 characters."); name.reportValidity(); name.setCustomValidity(""); return }
+      if (rows.some(row => row.label.toLowerCase() === label.toLowerCase())) { status.textContent = "That expression already exists in this set."; name.focus(); return }
+      if (checkbox.checked && bank.some(item => item.label.toLowerCase() === label.toLowerCase())) {
+        status.textContent = "This name already exists in the bank. Use its existing template instead."
+        return
+      }
+      const content = direction.value.trim() || label.toLowerCase()
+      const template = checkbox.checked ? upsertBank(label, content) ?? undefined : undefined
+      if (!addCustomSlot(label, content, template)) { status.textContent = "The custom slot limit has been reached."; return }
+      closeOverlay()
+    }, true)
+    bottom.append(create)
+  }
+  const beginInlineEdit = (row: StudioExpressionRow) => {
+    if (busy || closing || stage !== 0) return
+    inlineEdit = { row, draft: row.direction, bankId: row.bankId }
+    render()
+    cards.querySelector<HTMLTextAreaElement>("[data-expression-inline-editor]")?.focus({ preventScroll: true })
+  }
+  const focusCardEditorButton = (row: StudioExpressionRow | undefined) => {
+    if (!row) return
+    const button = [...cards.querySelectorAll<HTMLElement>("[data-expression-focus]")]
+      .find(item => item.dataset.expressionFocus === `edit-${row.label}`)
+    button?.focus({ preventScroll: true })
+  }
+  const cancelInlineEdit = () => {
+    const row = inlineEdit?.row
+    inlineEdit = null
+    render()
+    focusCardEditorButton(row)
+  }
+  const commitInlineEdit = () => {
+    if (!inlineEdit) return
+    const { row, draft, bankId } = inlineEdit
+    row.direction = draft.slice(0, EXPRESSION_DIRECTION_LIMIT)
+    if (bankId) {
+      row.bankId = bankId
+      if (!EXPRESSION_SPREAD.some(([label]) => label === row.label.toLowerCase())) {
+        row.originalDirection = bank.find(item => item.id === bankId)?.direction ?? row.originalDirection
+      }
+    }
+    inlineEdit = null
+    saveSet()
+    render()
+    focusCardEditorButton(row)
+  }
+  const saveInlineToBank = () => {
+    if (!inlineEdit || !bankAvailable) return
+    const { row, draft, bankId: pendingId } = inlineEdit
+    const builtIn = EXPRESSION_SPREAD.some(([label]) => label === row.label.toLowerCase())
+    let label = row.label
+    if (builtIn) {
+      // The bank validator deliberately reserves built-in labels. Store a uniquely
+      // named variant so a stoic Neutral cannot silently overwrite the default.
+      const existing = bank.find(item => item.id === pendingId)
+      if (existing) label = existing.label
+      else {
+        let index = 1
+        label = `${row.label} variant`
+        while (bank.some(item => item.label.toLowerCase() === label.toLowerCase())) {
+          index++
+          label = `${row.label} variant ${index}`
+        }
+      }
+    }
+    const template = upsertBank(label, draft)
+    if (!template) {
+      status.textContent = "The expression bank is full or unavailable."
+      return
+    }
+    inlineEdit.bankId = template.id
+    inlineEdit.bankLabel = template.label
+    render()
+    cards.querySelector<HTMLTextAreaElement>("[data-expression-inline-editor]")?.focus({ preventScroll: true })
+  }
+  const openInspector = (row: StudioExpressionRow) => {
+    if (!row.image) return
+    const { body, bottom } = openOverlay(row.label, "Image inspector", true)
+    const frame = element("div", "ss-expression-inspector-image")
+    const image = element("img")
+    image.src = row.image.url
+    image.alt = `${row.label} expression, full image`
+    frame.append(image)
+    const info = element("div", "ss-expression-inspector-meta")
+    info.append(element("strong", "", row.label), element("p", "", row.direction), element("small", "", `Output · ${row.image.id}`))
+    body.append(frame, info)
+    const available = rows.filter(item => item.image)
+    const index = available.indexOf(row)
+    for (const [label, offset] of [["Previous", -1], ["Next", 1]] as const) {
+      const button = action(label, () => openInspector(available[(index + offset + available.length) % available.length]))
+      button.disabled = available.length < 2
+      bottom.append(button)
+    }
+    bottom.append(action("Choose saved image", () => options.pickImage("saved", row.image?.id || "", image => {
+      setImage(row, image)
+      closeOverlay()
+      render()
+    })))
+  }
+  const openBank = () => {
+    const { body, bottom } = openOverlay("Expression bank", "Reusable directions", true)
+    const search = element("input", "ss-input")
+    search.type = "search"
+    search.value = bankSearch
+    search.placeholder = "Find a saved expression…"
+    const list = element("div", "ss-expression-bank-list")
+    const paint = () => {
+      list.replaceChildren()
+      if (!bankLoaded) { list.append(element("p", "ss-muted", "Loading your account bank…")); return }
+      for (const entry of bank.filter(item => item.label.toLowerCase().includes(bankSearch.toLowerCase()))) {
+        const item = element("div", "ss-expression-bank-item")
+        const description = element("div")
+        description.append(element("strong", "", entry.label), element("p", "", entry.direction))
+        const use = action("Use", () => {
+          if (!addCustomSlot(entry.label, entry.direction, entry)) { status.textContent = "This expression is already in the set or the custom slot limit is reached."; return }
+          closeOverlay()
+        }, true)
+        const edit = action("Edit", () => {
+          const { body: editBody, bottom: editBottom } = openOverlay(entry.label, "Bank template")
+          const name = element("input", "ss-input")
+          name.value = entry.label
+          name.maxLength = 40
+          const text = element("textarea", "ss-textarea")
+          text.rows = 6
+          text.maxLength = EXPRESSION_DIRECTION_LIMIT
+          text.value = entry.direction
+          editBody.append(fields("Template name", name), fields("Default direction", text))
+          editBottom.append(action("Back to bank", openBank), action("Save template", () => {
+            const label = cleanExpressionLabel(name.value)
+            if (!label || EXPRESSION_SPREAD.some(([builtin]) => builtin === label.toLowerCase()) || bank.some(item => item !== entry && item.label.toLowerCase() === label.toLowerCase())) {
+              status.textContent = "That bank name is invalid or already in use."
+              return
+            }
+            entry.label = label
+            entry.direction = text.value
+            saveBank()
+            openBank()
+          }, true))
+        })
+        const drop = action("Delete", () => {
+          if (!window.confirm(`Delete ${entry.label} from the reusable bank? Existing character slots will remain.`)) return
+          bank = bank.filter(item => item !== entry)
+          saveBank()
+          paint()
+        })
+        drop.classList.add("ss-button-danger")
+        item.append(description, use, edit, drop)
+        list.append(item)
+      }
+      if (!list.childElementCount) list.append(element("p", "ss-muted", "No saved expressions found. Create one using New expression."))
+    }
+    search.addEventListener("input", () => { bankSearch = search.value; paint() })
+    body.append(element("p", "ss-muted", "Save custom directions once, then reuse them across characters. Removing a slot never deletes its bank template."), search, list)
+    paint()
+    const reset = action("Reset built-in directions", () => {
+      if (!window.confirm("Restore defaults for the 20 built-in expressions? Custom slots and images stay intact.")) return
+      for (const row of rows) if (EXPRESSION_SPREAD.some(([label]) => label === row.label.toLowerCase())) row.direction = defaultDirection(row)
+      saveSet()
+      render()
+      status.textContent = "Built-in directions restored to defaults."
+    })
+    const importFile = element("input")
+    importFile.type = "file"
+    importFile.accept = ".json,application/json"
+    importFile.hidden = true
+    importFile.addEventListener("change", () => {
+      const file = importFile.files?.[0]
+      if (!file) return
+      if (file.size > 1024 * 1024) { status.textContent = "Bank import must be under 1 MB."; return }
+      void file.text().then(text => {
+        const parsed: unknown = JSON.parse(text)
+        const record = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {}
+        if (record.format !== "lumiswarm-expression-bank-v1" || !Array.isArray(record.expressions) || record.expressions.length > 150) throw new Error("Invalid expression bank format.")
+        const entries = cleanStudioExpressionBank(record.expressions)
+        if (entries.length !== record.expressions.length) throw new Error("One or more template names are invalid or duplicated.")
+        if (bank.length + entries.filter(item => !bank.some(existing => existing.label.toLowerCase() === item.label.toLowerCase())).length > 150) throw new Error("Bank limit of 150 templates exceeded.")
+        for (const item of entries) upsertBank(item.label, item.direction)
+        saveBank()
+        paint()
+      }).catch(error => { status.textContent = `Import failed: ${error instanceof Error ? error.message : String(error)}` })
+    })
+    const importButton = action("Import JSON", () => importFile.click())
+    const exportButton = action("Export JSON", () => {
+      const blob = new Blob([JSON.stringify({ format: "lumiswarm-expression-bank-v1", expressions: bank }, null, 2)], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const link = element("a")
+      link.href = url
+      link.download = "lumiswarm-expression-bank.json"
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    })
+    bottom.append(importFile, importButton, exportButton, reset, action("New expression", openCustomSlot, true))
+  }
+
   const renderCanvasSettings = () => {
     const canvas = element("section", "ss-expression-canvas")
-    const shape = element("span", "ss-expression-canvas-shape")
+    const head = element("div", "ss-expression-canvas-head")
+    const title = element("strong", "", "Canvas dimensions")
     const size = element("output", "ss-expression-canvas-size")
-    const preview = element("div", "ss-expression-canvas-preview")
-    preview.append(shape, size)
-    const controls = element("div", "ss-expression-canvas-controls")
-    const presets = element("div", "ss-expression-presets")
+    head.append(title, size)
+    const presets = element("div", "ss-expression-ratio-presets")
     presets.setAttribute("role", "group")
-    presets.setAttribute("aria-label", "Canvas aspect ratio")
-    const orientations = element("div", "ss-expression-presets")
-    orientations.setAttribute("role", "group")
-    orientations.setAttribute("aria-label", "Canvas orientation")
-    const toolbar = element("div", "ss-expression-canvas-toolbar")
+    presets.setAttribute("aria-label", "Aspect ratio presets")
     const axes = ["width", "height"] as const
     const getSize = (axis: typeof axes[number]) => Math.round(generation.recipe[axis] ?? options.inheritedRecipe[axis] ?? EXPRESSION_DEFAULT_RECIPE[axis])
-    let preferVertical = getSize("height") > getSize("width")
-    const sliders = axes.map((axis, index) => {
-      const [, min, max] = GENERATION_NUMBER_LIMITS[index]
-      const label = axis === "width" ? "Width" : "Height"
-      const slider = element("input")
-      slider.type = "range"
-      slider.min = String(min)
-      slider.max = String(max)
-      slider.step = "any"
-      slider.setAttribute("aria-label", label + " slider")
-      const exact = element("input", "ss-input")
-      exact.type = "number"
-      exact.min = String(min)
-      exact.max = String(max)
-      exact.step = "1"
-      exact.placeholder = String(options.inheritedRecipe[axis] ?? EXPRESSION_DEFAULT_RECIPE[axis])
-      exact.setAttribute("aria-label", label)
-      const row = element("div", "ss-expression-axis")
-      row.append(element("span", "", label), slider, exact)
-      slider.addEventListener("input", () => {
-        generation.recipe[axis] = clamp(Math.round(slider.valueAsNumber / 8) * 8, min, max)
-        syncCanvas()
-      })
-      slider.addEventListener("change", saveSet)
-      slider.addEventListener("keydown", event => {
-        const dir = event.key === "ArrowRight" || event.key === "ArrowUp" ? 1
-          : event.key === "ArrowLeft" || event.key === "ArrowDown" ? -1 : 0
-        if (!dir) return
-        event.preventDefault()
-        generation.recipe[axis] = clamp(getSize(axis) + dir * 8, min, max)
-        syncCanvas()
-        saveSet()
-      })
-      exact.addEventListener("change", () => {
-        if (!exact.checkValidity()) exact.reportValidity()
-        else if (exact.value) generation.recipe[axis] = exact.valueAsNumber
-        else delete generation.recipe[axis]
-        syncCanvas()
-        saveSet()
-      })
-      return { axis, slider, exact, row }
-    })
-    const aspectChoices = [["1:1", 1], ["4:3", 4 / 3], ["16:9", 16 / 9]] as const
-    const setSize = (width: number, height: number) => {
-      Object.assign(generation.recipe, { width, height })
-      syncCanvas()
+    currentRatio = linkedSize && Number.isFinite(currentRatio) && currentRatio > 0 ? currentRatio : getSize("width") / getSize("height")
+    const ratioChoices = [["1:1", 1], ["3:4", 3 / 4], ["2:3", 2 / 3], ["9:16", 9 / 16], ["4:3", 4 / 3], ["16:9", 16 / 9]] as const
+    const ratioButtons: Array<{ ratio: number; button: HTMLButtonElement }> = []
+    const dimensionFields = element("div", "ss-expression-dimension-fields")
+    const sliders: Array<{ axis: "width" | "height"; slider: HTMLInputElement; exact: HTMLInputElement }> = []
+    const nearest64 = (value: number) => clamp(Math.round(value / 64) * 64, 64, 4096)
+    const sizeChange = (axis: "width" | "height", value: number, snap: boolean) => {
+      if (!Number.isFinite(value)) return
+      const changed = clamp(snap ? nearest64(value) : Math.round(value), 64, 4096)
+      const other: "width" | "height" = axis === "width" ? "height" : "width"
+      generation.recipe[axis] = changed
+      if (linkedSize) generation.recipe[other] = clamp(Math.round((axis === "width" ? changed / currentRatio : changed * currentRatio) / 8) * 8, 64, 4096)
+      else currentRatio = getSize("width") / getSize("height")
+      sync()
       saveSet()
     }
-    const applyRatio = (ratio: number, vertical: boolean) => {
-      const long = Math.max(getSize("width"), getSize("height"))
-      const short = ratio === 1 ? long : Math.max(64, Math.round(long / ratio / 8) * 8)
-      setSize(vertical ? short : long, vertical ? long : short)
-    }
-    const ratios = aspectChoices.map(([label, ratio]) => {
-      const button = action(label, () => applyRatio(ratio, preferVertical))
-      presets.append(button)
-      return { button, ratio }
-    })
-    const directions = [false, true].map(vertical => {
-      const button = action(vertical ? "Vertical" : "Horizontal", () => {
-        const width = getSize("width")
-        const height = getSize("height")
-        if (width === height) applyRatio(4 / 3, vertical)
-        else if ((height > width) !== vertical) setSize(height, width)
+    for (const axis of axes) {
+      const field = element("div", "ss-expression-dimension-field")
+      const label = element("label", "", axis === "width" ? "Width" : "Height")
+      const exact = element("input", "ss-input")
+      exact.type = "number"
+      exact.min = "64"
+      exact.max = "4096"
+      exact.step = "1"
+      exact.setAttribute("aria-label", `${axis} in pixels`)
+      label.append(exact, element("span", "ss-expression-unit", "px"))
+      const slider = element("input")
+      slider.type = "range"
+      slider.min = "64"
+      slider.max = "4096"
+      slider.step = "64"
+      slider.setAttribute("aria-label", `${axis} slider`)
+      slider.addEventListener("input", () => sizeChange(axis, slider.valueAsNumber, true))
+      // Do not alter the exact field while typing. Commit once the number is complete.
+      exact.addEventListener("change", () => {
+        if (!exact.value || !exact.checkValidity()) {
+          exact.reportValidity()
+          exact.value = String(getSize(axis))
+          return
+        }
+        sizeChange(axis, exact.valueAsNumber, false)
       })
-      orientations.append(button)
-      return button
+      exact.addEventListener("keydown", event => {
+        if (event.key === "Enter") { event.preventDefault(); exact.blur() }
+      })
+      const sliderWrap = element("div", "ss-expression-dimension-range")
+      sliderWrap.append(slider)
+      field.append(label, sliderWrap)
+      dimensionFields.append(field)
+      sliders.push({ axis, slider, exact })
+    }
+    const linked = action("", () => {
+      linkedSize = !linkedSize
+      currentRatio = getSize("width") / getSize("height")
+      sync()
     })
+    linked.classList.add("ss-expression-size-link")
+    linked.setAttribute("title", "Toggle linked dimensions")
+    linked.setAttribute("aria-label", "Keep width and height at the current aspect ratio")
+    linked.setAttribute("aria-pressed", String(linkedSize))
+    linked.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13.5 14 9.5m-7.5 7h-1a4.5 4.5 0 0 1 0-9h3m7 0h3a4.5 4.5 0 0 1 0 9h-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`
+    dimensionFields.insertBefore(linked, dimensionFields.children[1])
+    const sync = (updateExact = true) => {
+      const width = getSize("width"), height = getSize("height")
+      size.textContent = `${width} × ${height}`
+      for (const { axis, slider, exact } of sliders) {
+        const value = getSize(axis)
+        slider.value = String(nearest64(value))
+        slider.setAttribute("aria-valuetext", `${value} pixels`)
+        if (updateExact || document.activeElement !== exact) exact.value = String(value)
+      }
+      linked.setAttribute("aria-pressed", String(linkedSize))
+      linked.setAttribute("aria-label", linkedSize ? "Unlink width and height" : "Link width and height")
+      for (const { ratio, button } of ratioButtons) {
+        const active = Math.abs(width / height - ratio) < 0.018
+        button.setAttribute("aria-pressed", String(active))
+      }
+    }
+    for (const [label, ratio] of ratioChoices) {
+      const button = action("", () => {
+        const long = nearest64(Math.max(getSize("width"), getSize("height")))
+        linkedSize = true
+        currentRatio = ratio
+        generation.recipe.width = ratio >= 1 ? long : Math.max(64, Math.round(long * ratio / 8) * 8)
+        generation.recipe.height = ratio <= 1 ? long : Math.max(64, Math.round(long / ratio / 8) * 8)
+        sync()
+        saveSet()
+      })
+      button.classList.add("ss-expression-ratio-button")
+      button.setAttribute("aria-label", `${label} aspect ratio`)
+      const graphic = element("span", "ss-expression-ratio-shape")
+      graphic.style.width = `${Math.round(ratio >= 1 ? 19 : 19 * ratio)}px`
+      graphic.style.height = `${Math.round(ratio <= 1 ? 19 : 19 / ratio)}px`
+      button.append(graphic, element("span", "", label))
+      presets.append(button)
+      ratioButtons.push({ button, ratio })
+    }
+    const tip = element("p", "ss-muted", "64 px slider increments · Link preserves the selected ratio. Unlink to resize freely.")
     const reset = action("Use inherited size", () => {
       delete generation.recipe.width
       delete generation.recipe.height
-      syncCanvas()
+      currentRatio = getSize("width") / getSize("height")
+      sync()
       saveSet()
     })
-    const syncCanvas = () => {
-      const width = getSize("width")
-      const height = getSize("height")
-      const long = Math.max(width, height)
-      const short = Math.min(width, height)
-      if (width !== height) preferVertical = height > width
-      for (const { axis, slider, exact } of sliders) {
-        slider.value = String(getSize(axis))
-        slider.setAttribute("aria-valuetext", getSize(axis) + " pixels")
-        exact.value = String(generation.recipe[axis] ?? "")
-      }
-      for (const { button, ratio } of ratios) {
-        button.setAttribute("aria-pressed", String(ratio === 1 ? width === height : Math.abs(short - long / ratio) <= 4))
-      }
-      directions[0].setAttribute("aria-pressed", String(width > height))
-      directions[1].setAttribute("aria-pressed", String(height > width))
-      shape.style.width = (width / long * 44) + "px"
-      shape.style.height = (height / long * 44) + "px"
-      size.textContent = width + " × " + height
-    }
-    syncCanvas()
-    toolbar.append(presets, orientations, reset)
-    controls.append(element("h3", "", "Canvas size"), toolbar, ...sliders.map(item => item.row))
-    canvas.append(preview, controls)
+    reset.classList.add("ss-expression-inherited-size")
+    canvas.append(head, presets, dimensionFields, tip, reset)
+    sync()
     return canvas
   }
-
   const renderSettings = () => {
     const parameters = element("div", "ss-expression-parameters")
     for (const [key, min, max] of GENERATION_NUMBER_LIMITS.slice(2)) {
@@ -644,6 +940,7 @@ function openCharacterExpressions(
     }
   })
   const changeStage = (index: number) => {
+    inlineEdit = null
     stage = index
     if (stage === 1) void loadEnhanceOptions()
     if (stage === 2 && backgroundMode.value === "builtin" && !modelChecked) void checkModel()
@@ -663,6 +960,12 @@ function openCharacterExpressions(
   })
   steps.append(...stepButtons)
 
+  const stageHeadings = [
+    ["01 / Build your set", "Expression gallery", "Choose expressions, refine their directions, and render or attach a saved portrait."],
+    ["02 / Enhance", "Refine your portraits", "Enhance selected outputs with the active AI Upscale setup."],
+    ["03 / Background removal", "Prepare clean cutouts", "Remove backgrounds from finished portraits, or skip this step."],
+    ["04 / Publish expressions", "Ready for your character", "Review your expression names and send selected portraits to Lumiverse."],
+  ] as const
   const render = () => {
     const focused = dialog.ownerDocument.activeElement as HTMLElement | null
     const key = focused?.dataset.expressionFocus
@@ -674,114 +977,187 @@ function openCharacterExpressions(
       else button.removeAttribute("aria-current")
     })
     controls.replaceChildren()
+    galleryHead.replaceChildren()
     if (loading) {
       controls.append(element("p", "ss-muted", "Loading your expression set…"))
       return
     }
     const selectable = stage === 0 ? rows : rows.filter(row => row.image)
-    const hasSelection = selectable.some(row => row.selected)
-    const toggleSelection = action(hasSelection ? "Deselect all" : "Select all", () => {
-      for (const row of selectable) row.selected = !hasSelection
-      if (stage === 0 && hasSelection) showAll = true
-      saveSet()
-      render()
-    })
-    toggleSelection.disabled = disabled || !selectable.length
-    toggleSelection.dataset.expressionFocus = "toggle-selection"
+    const selected = selectable.filter(row => row.selected)
+    const ready = rows.filter(row => row.image).length
+    const overview = element("div", "ss-expression-overview")
+    const headingText = element("div", "ss-expression-overview-copy")
+    headingText.append(element("small", "ss-expression-kicker", stageHeadings[stage][0]),
+      element("h3", "", stageHeadings[stage][1]), element("p", "ss-muted", stageHeadings[stage][2]))
+    const count = element("span", "ss-expression-count", `${ready} / ${rows.length} portraits · ${selected.length} selected`)
+    overview.append(headingText, count)
+    controls.append(overview)
+    const config = element("div", "ss-expression-config")
     if (stage === 0) {
-      const presets = element("div", "ss-expression-presets")
-      const builtIns = rows.slice(0, EXPRESSION_SPREAD.length)
-      for (const [label, slots] of [["Basics", EXPRESSION_BASICS], ["Full spread", EXPRESSION_SPREAD]] as const) {
-        const inclusion = new Set<string>(slots.map(([slot]) => slot))
-        const preset = action(label, () => {
-          for (const row of builtIns) row.selected = inclusion.has(row.label)
-          saveSet()
-          render()
-        })
-        preset.disabled = disabled
-        preset.dataset.expressionFocus = label
-        preset.setAttribute("aria-pressed", String(builtIns.every(row => row.selected === inclusion.has(row.label))))
-        presets.append(preset)
-      }
-      const toggle = action(showAll ? "Show selected slots" : "Show all slots", () => { showAll = !showAll; render() })
-      toggle.disabled = disabled
-      toggle.dataset.expressionFocus = "show-slots"
-      const count = element("span", "ss-muted", `${rows.filter(row => row.selected).length} selected · ${rows.length} slots`)
-      setToolbar.replaceChildren(presets, toggle, toggleSelection, count, saveStatus)
-      custom.disabled = disabled
-      add.disabled = disabled || rows.length >= EXPRESSION_SPREAD.length + EXPRESSION_CUSTOM_LIMIT
-      for (const input of settingsFields.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>("input, select, textarea, button")) input.disabled = disabled
-      const sources = element("div", "ss-expression-sources")
-      const syncReferenceAvailability = () => {
+      const methodField = fields("Reference method", method)
+      methodField.classList.add("ss-expression-config-method")
+      const syncReference = () => {
         chooseReference.disabled = disabled || !method.value
         clearReference.disabled = disabled || !method.value
       }
-      method.onchange = syncReferenceAvailability
-      syncReferenceAvailability()
-      sources.append(fields("Reference method", method), referenceField,
-        element("p", "ss-muted", options.model || "Current SwarmUI checkpoint"))
-      controls.append(setToolbar, sources, settingsPanel, customForm)
+      method.onchange = syncReference
+      syncReference()
+      referenceField.classList.add("ss-expression-config-reference")
+      config.append(methodField, element("span", "ss-expression-config-divider"), referenceField, element("span", "ss-expression-config-divider"))
+      const modelInfo = element("div", "ss-expression-config-model")
+      modelInfo.append(element("small", "", "Checkpoint"), element("strong", "", options.model || "Current SwarmUI checkpoint"),
+        element("span", "ss-muted", `${generation.recipe.width ?? options.inheritedRecipe.width ?? 768} × ${generation.recipe.height ?? options.inheritedRecipe.height ?? 768} · ${generation.recipe.steps ?? options.inheritedRecipe.steps ?? 24} steps`))
+      config.append(modelInfo)
+      const settings = action("Generation settings", () => {
+        renderSettings()
+        const { body, bottom } = openOverlay("Generation settings", "Shared rendering", true)
+        body.append(settingsFields)
+        bottom.append(action("Done", () => { closeOverlay(); render() }, true))
+      })
+      settings.classList.add("ss-expression-config-settings")
+      config.append(settings)
     } else if (stage === 1) {
-      if (enhanceMode === "model") {
-        enhanceFactor.disabled = disabled
-        controls.append(enhanceFactorField)
-      } else {
-        controls.append(element("p", "ss-muted", loadingEnhance ? "Loading upscale settings…"
-          : enhanceLoadFailed ? "Could not load upscale settings."
-          : enhanceMode ? "The configured workflow sets the output resolution."
-          : "Save an AI Upscale setup for this connection to enhance expressions."))
-        if (enhanceLoadFailed) controls.append(action("Retry loading settings", () => {
-          void loadEnhanceOptions()
-          render()
-        }))
-      }
+      const copy = element("div", "ss-expression-config-copy")
+      copy.append(element("strong", "", "AI Upscale"), element("p", "ss-muted", loadingEnhance ? "Loading your enhancement setup…"
+        : enhanceLoadFailed ? "Could not read upscale settings."
+        : enhanceMode === "model" ? "Connected model enhancement" : enhanceMode ? "Resolution set by your saved workflow" : "Configure AI Upscale for this connection first."))
+      config.append(copy)
+      if (enhanceMode === "model") { enhanceFactor.disabled = disabled; config.append(enhanceFactorField) }
+      if (enhanceLoadFailed) config.append(action("Retry", () => { enhanceMode = null; void loadEnhanceOptions() }))
     } else if (stage === 2) {
-      controls.append(fields("Background-removal workflow", backgroundMode))
-      if (backgroundMode.value === "builtin") controls.append(modelSetup)
-      else if (backgroundMode.value === "custom") controls.append(backgroundGraphField)
-      else controls.append(fields("Saved workflow", backgroundWorkflow), fields("Source image input", imageInput))
+      config.append(fields("Background-removal workflow", backgroundMode))
+      if (backgroundMode.value === "builtin") config.append(modelSetup)
+      else if (backgroundMode.value === "custom") config.append(backgroundGraphField)
+      else config.append(fields("Saved workflow", backgroundWorkflow), fields("Source image input", imageInput))
     } else {
-      controls.append(sendPrefixField)
+      const destination = element("div", "ss-expression-config-copy")
+      destination.append(element("strong", "", "Lumiverse character expressions"), element("p", "ss-muted", options.folder.name))
+      const mapping = element("div", "ss-expression-naming")
+      const example = element("code", "", "joy")
+      const update = () => {
+        const prefix = sendPrefix.value.trim()
+        example.textContent = prefix ? `${prefix}-joy` : "joy"
+        for (const target of cards.querySelectorAll<HTMLElement>("[data-expression-map-name]")) {
+          target.textContent = prefix ? `${prefix}-${target.dataset.expressionMapName}` : String(target.dataset.expressionMapName || "")
+        }
+      }
+      sendPrefix.oninput = update
+      update()
+      const exampleWrap = element("div", "ss-expression-naming-example")
+      exampleWrap.append(element("span", "", "Naming example"), example)
+      mapping.append(sendPrefixField, exampleWrap)
+      config.append(destination, mapping)
     }
+    controls.append(config)
+    const toolbar = element("div", "ss-expression-gallery-toolbar")
+    const left = element("div", "ss-expression-gallery-left")
+    if (stage === 0) {
+      const presets = element("div", "ss-expression-presets")
+      const builtins = rows.slice(0, EXPRESSION_SPREAD.length)
+      for (const [label, pairs] of [["Basics", EXPRESSION_BASICS], ["Full spread", EXPRESSION_SPREAD]] as const) {
+        const inclusion = new Set<string>(pairs.map(([name]) => name))
+        const button = action(label, () => {
+          for (const row of builtins) row.selected = inclusion.has(row.label.toLowerCase())
+          saveSet()
+          render()
+        })
+        button.disabled = disabled
+        button.dataset.expressionFocus = label
+        button.setAttribute("aria-pressed", String(builtins.every(row => row.selected === inclusion.has(row.label.toLowerCase()))))
+        presets.append(button)
+      }
+      left.append(presets)
+    }
+    const filters = element("div", "ss-expression-filters")
+    for (const [value, caption] of [["all", "All"], ["selected", "Selected"], ["ready", "Ready"], ["empty", "Empty"]] as const) {
+      const filterButton = action(caption, () => { inlineEdit = null; galleryFilter = value; render() })
+      filterButton.disabled = disabled
+      filterButton.dataset.expressionFocus = `filter-${value}`
+      filterButton.setAttribute("aria-pressed", String(galleryFilter === value))
+      filters.append(filterButton)
+    }
+    left.append(filters)
+    const toggle = action(selected.length ? "Deselect all" : "Select all", () => {
+      const value = !selectable.some(row => row.selected)
+      for (const row of selectable) row.selected = value
+      saveSet()
+      render()
+    })
+    toggle.disabled = disabled || !selectable.length
+    toggle.dataset.expressionFocus = "toggle-selection"
+    const right = element("div", "ss-expression-gallery-right")
+    right.append(element("span", "ss-expression-toolbar-count", `${selected.length} selected · ${selectable.length} available`))
+    const view = action(previewMode === "portrait" ? "Full portrait" : "Face close-up", () => {
+      previewMode = previewMode === "portrait" ? "closeup" : "portrait"
+      render()
+    })
+    view.setAttribute("aria-pressed", String(previewMode === "closeup"))
+    view.dataset.expressionFocus = "preview-mode"
+    if (stage === 0) {
+      const addButton = action("+ Add custom", openCustomSlot)
+      addButton.disabled = disabled || !bankLoaded || rows.length >= EXPRESSION_SPREAD.length + EXPRESSION_CUSTOM_LIMIT
+      right.append(toggle, addButton)
+      const bankButton = action(`Bank${bankLoaded ? ` · ${bank.length}` : ""}`, openBank)
+      bankButton.disabled = disabled || !bankLoaded
+      bankButton.dataset.expressionFocus = "bank"
+      bankButton.setAttribute("aria-label", "Expression bank")
+      right.append(bankButton)
+    } else right.append(toggle)
+    right.append(view)
+    toolbar.append(left, right)
+    galleryHead.append(toolbar)
     for (const control of [method, backgroundMode, backgroundWorkflow, imageInput, backgroundGraph, sendPrefix]) control.disabled = disabled
     installModel.disabled = disabled || Boolean(installTask)
     recheckModel.disabled = disabled || checkingModel || Boolean(installTask)
-    if (stage !== 0 && selectable.length) {
-      setToolbar.replaceChildren(toggleSelection)
-      controls.append(setToolbar)
-    }
-    const all = stage === 0 && !showAll ? selectable.filter(row => row.selected) : selectable
-    const selected = all.filter(row => row.selected)
-    directionInputs.clear()
+    const filterRows = selectable.filter(row => galleryFilter === "all" ? true
+      : galleryFilter === "selected" ? row.selected
+        : galleryFilter === "ready" ? Boolean(row.image) : !row.image)
     progressTiles.clear()
-    const tiles = all.map(row => {
+    const tiles = filterRows.map(row => {
       const card = element("article", "ss-expression-card")
+      const isEditing = stage === 0 && inlineEdit?.row === row
+      card.classList.toggle("ss-expression-card-editing", isEditing)
+      card.dataset.selected = String(row.selected)
+      card.dataset.state = row.state || (row.image ? "ready" : "empty")
+      const cardHead = element("div", "ss-expression-card-head")
       const checkbox = element("input")
       checkbox.type = "checkbox"
       checkbox.checked = row.selected
       checkbox.disabled = disabled
       checkbox.dataset.expressionFocus = `select-${row.label}`
+      checkbox.setAttribute("aria-label", `Select ${row.label}`)
       checkbox.addEventListener("change", () => {
         row.selected = checkbox.checked
-        if (!showAll && stage === 0 && !row.selected) checkbox.dataset.expressionFocus = "show-slots"
         saveSet()
         render()
       })
       const label = element("label", "ss-expression-select")
-      label.append(checkbox, element("span", "", row.label))
+      label.title = `Select ${row.label}`
+      label.append(checkbox, element("span", "", "Select"))
+      const chip = element("span", "ss-expression-state-label", row.state === "working" ? "Working" : row.state === "queued" ? "Queued" : row.state === "failed" ? "Failed" : row.image ? "Ready" : "Empty")
+      cardHead.append(label, chip)
+      const art = element("div", "ss-expression-art")
       const preview = element("div", "ss-expression-preview")
+      preview.dataset.view = previewMode
       const image = element("img")
       if (row.image || row.state === "working") {
-        image.alt = row.label + " expression"
+        image.alt = `${row.label} expression`
         image.loading = row.state === "working" ? "eager" : "lazy"
         if (row.image) image.src = row.image.url
         else image.hidden = true
         preview.append(image)
-      } else if (!row.state) preview.append(element("span", "", "Awaiting render"))
+      } else preview.append(element("span", "ss-expression-placeholder", "Awaiting portrait"))
+      if (row.image) {
+        preview.classList.add("ss-expression-inspectable")
+        preview.tabIndex = 0
+        preview.setAttribute("role", "button")
+        preview.setAttribute("aria-label", `Inspect ${row.label} image`)
+        preview.addEventListener("click", () => openInspector(row))
+        preview.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openInspector(row) } })
+      }
       if (row.state) {
         const feedback = element("div", "ss-expression-tile-feedback")
-        const caption = element("span", "", row.state === "queued" ? "Queued" :
-          row.state === "failed" ? "Failed" : stage === 0 ? "Rendering…" : `${names[stage]}…`)
+        const caption = element("span", "", row.state === "queued" ? "Queued" : row.state === "failed" ? "Failed" : stage === 0 ? "Rendering…" : `${names[stage]}…`)
         feedback.append(caption)
         if (row.state === "working") {
           const bar = element("progress")
@@ -791,78 +1167,140 @@ function openCharacterExpressions(
         }
         preview.append(feedback)
       }
-      card.append(label, preview)
+      art.append(preview, cardHead)
+      const body = element("div", "ss-expression-card-info")
+      const bodyTitle = element("div", "ss-expression-card-title")
+      bodyTitle.append(element("strong", "", row.label))
+      if (stage === 0 && row.originalDirection && row.direction !== row.originalDirection) bodyTitle.append(element("span", "ss-expression-edited-tag", "Edited"))
+      if (row.bankId && !EXPRESSION_SPREAD.some(([label]) => label === row.label.toLowerCase())) bodyTitle.append(element("span", "ss-expression-edited-tag", "Custom"))
+      if (isEditing && inlineEdit) {
+        // Keep the card's normal geometry: the edit panel rises into the lower
+        // portion of its artwork rather than stretching its grid row downward.
+        const editPanel = element("div", "ss-expression-card-edit-panel")
+        editPanel.append(bodyTitle)
+        const field = element("textarea", "ss-textarea ss-expression-card-editarea")
+        field.value = inlineEdit.draft
+        field.rows = 4
+        field.maxLength = EXPRESSION_DIRECTION_LIMIT
+        field.dataset.expressionFocus = `direction-${row.label}`
+        field.dataset.expressionInlineEditor = row.label
+        field.setAttribute("aria-label", `Generation direction for ${row.label}`)
+        const tools = element("div", "ss-expression-card-edit-tools")
+        const bankButton = action(inlineEdit.bankLabel ? `Banked: ${inlineEdit.bankLabel}` : "Save to bank", saveInlineToBank)
+        bankButton.classList.add("ss-expression-card-bank")
+        bankButton.disabled = !bankAvailable
+        bankButton.title = bankAvailable ? "Save the current draft as an account-wide reusable template" : "Expression bank is unavailable"
+        const restore = action("Restore default", () => {
+          if (!inlineEdit || inlineEdit.row !== row) return
+          inlineEdit.draft = defaultDirection(row)
+          field.value = inlineEdit.draft
+          restore.disabled = field.value === defaultDirection(row)
+          field.focus({ preventScroll: true })
+        })
+        restore.classList.add("ss-expression-card-restore")
+        restore.title = "Restore default direction (draft only until saved)"
+        restore.setAttribute("aria-label", `Restore default direction for ${row.label}`)
+        restore.replaceChildren()
+        restore.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.9 6.65"/><path d="M3 4v7h7"/></svg>'
+        restore.disabled = field.value === defaultDirection(row)
+        field.addEventListener("input", () => {
+          if (inlineEdit?.row === row) inlineEdit.draft = field.value
+          restore.disabled = field.value === defaultDirection(row)
+        })
+        field.addEventListener("keydown", event => {
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault()
+            commitInlineEdit()
+          }
+        })
+        tools.append(bankButton, restore)
+        editPanel.append(field, tools)
+        body.append(editPanel)
+      } else {
+        body.append(bodyTitle)
+        body.append(element("p", "ss-muted", stage === 0 ? row.direction : row.image ? `Output · ${row.image.id}` : "No output"))
+      }
+      if (stage === 3) {
+        const mapping = element("div", "ss-expression-card-mapping")
+        const outputName = element("code", "", sendPrefix.value.trim() ? `${sendPrefix.value.trim()}-${row.label}` : row.label)
+        outputName.dataset.expressionMapName = row.label
+        mapping.append(element("span", "", "Maps as"), outputName)
+        body.append(mapping)
+      }
+      const cardActions = element("div", "ss-expression-card-actions")
       if (stage === 0) {
-        const input = element("textarea", "ss-textarea")
-        input.value = row.direction
-        input.disabled = disabled
-        input.maxLength = EXPRESSION_DIRECTION_LIMIT
-        input.addEventListener("input", () => { row.direction = input.value })
-        input.addEventListener("change", saveSet)
-        directionInputs.set(row, input)
-        const generate = runButton(row.image ? "Regenerate" : "Render", row, () => process([row], row), disabled)
-        input.setAttribute("aria-label", `Direction for ${row.label}`)
-        const slotActions = element("div", "ss-expression-slot-actions")
-        slotActions.append(generate)
-        if (rows.indexOf(row) >= EXPRESSION_SPREAD.length) {
-          const remove = action("Remove slot", () => {
-            rows.splice(rows.indexOf(row), 1)
-            saveSet()
-            render()
-            custom.focus()
-          })
-          remove.disabled = disabled
-          remove.setAttribute("aria-label", `Remove ${row.label} custom slot`)
-          slotActions.append(remove)
+        if (isEditing) {
+          const save = action("Save", commitInlineEdit, true)
+          save.classList.add("ss-expression-card-edit")
+          save.dataset.expressionFocus = "save-" + row.label
+          const cancel = action("Cancel", cancelInlineEdit)
+          cancel.classList.add("ss-expression-card-render")
+          cardActions.append(save, cancel)
+        } else {
+        const edit = action("Edit", () => beginInlineEdit(row))
+        edit.classList.add("ss-expression-card-edit")
+        edit.dataset.expressionFocus = "edit-" + row.label
+        edit.disabled = disabled
+        cardActions.append(edit)
+        // The narrow portrait cards cannot fit "Regenerate" beside Edit and Attach.
+        const generate = runButton(row.image ? "Redo" : "Render", row, () => process([row], row), disabled)
+        if (row.image) {
+          generate.title = `Regenerate ${row.label} portrait`
+          generate.setAttribute("aria-label", `Regenerate ${row.label} portrait`)
         }
-        card.append(fields("Direction", input), slotActions)
-        const useSaved = action("Choose saved image", () => options.pickImage("saved", row.image?.id || "", image => {
+        generate.classList.add("ss-expression-card-render")
+        cardActions.append(generate)
+        const saved = action("Attach saved image", () => options.pickImage("saved", row.image?.id || "", image => {
           if (row.image?.id === image.id) return
-          if (row.image && created.has(row.image.id)) row.drafts.add(row.image.id)
-          row.image = image
+          setImage(row, image)
           row.state = undefined
           render()
         }))
-        useSaved.dataset.expressionFocus = "saved-image-" + row.label
-        useSaved.setAttribute("aria-label", "Choose saved image for " + row.label)
-        useSaved.setAttribute("aria-haspopup", "dialog")
-        useSaved.disabled = disabled
-        card.append(useSaved)
-      }
+        saved.classList.add("ss-expression-card-attach")
+        saved.replaceChildren()
+        saved.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>'
+        saved.title = `Attach saved image to ${row.label}`
+        saved.setAttribute("aria-label", `Attach saved image to ${row.label}`)
+        saved.dataset.expressionFocus = "saved-image-" + row.label
+        saved.setAttribute("aria-haspopup", "dialog")
+        saved.disabled = disabled
+        cardActions.append(saved)
+        }
+      } else if (row.image) cardActions.append(action("Inspect image", () => openInspector(row)))
+      card.append(art, body, cardActions)
       return card
     })
-    cards.replaceChildren(...(tiles.length ? tiles : [element("p", "ss-muted", stage === 0
-      ? "Choose a preset or show all slots to make a selection."
-      : "Render or choose a saved image in Generate to continue.")]))
+    cards.replaceChildren(...(tiles.length ? tiles : [element("p", "ss-expression-empty-gallery", "No expressions match this filter. Try All slots or select a different preset.")]))
     actions.replaceChildren()
     if (stage < 3) {
       const customBackground = stage === 2 && backgroundMode.value === "custom"
       const canProcess = stage === 1 ? Boolean(enhanceMode) : stage !== 2 || (backgroundMode.value === "builtin" ? !installTask
         : customBackground ? Boolean(backgroundGraph.value.trim()) : Boolean(backgroundWorkflow.value && imageInput.value))
       const runSelected = runButton(`${names[stage]} selected`, "selected", () => process(selected, "selected"), disabled || !selected.length || !canProcess, true)
-      const runAll = runButton(`${names[stage]} all`, "all", () => process(all, "all"), disabled || !all.length || !canProcess)
+      const runAll = runButton(`${names[stage]} all`, "all", () => process(selectable, "all"), disabled || !selectable.length || !canProcess)
       if (customBackground) {
         runSelected.dataset.backgroundAction = selected.length ? "ready" : "empty"
-        runAll.dataset.backgroundAction = all.length ? "ready" : "empty"
+        runAll.dataset.backgroundAction = selectable.length ? "ready" : "empty"
       }
       const failed = selectable.filter(row => row.state === "failed")
-      const retry = runButton("Retry failed", "failed", () => process(failed, "failed"), disabled || !canProcess)
-      if (customBackground) retry.dataset.backgroundAction = "ready"
+      const retry = runButton("Retry failed", "failed", () => process(failed, "failed"), disabled || !canProcess || !failed.length)
       const next = action("Next / Skip", () => changeStage(stage + 1))
       next.disabled = disabled
-      actions.append(runSelected)
-      if (stage !== 0 || showAll) actions.append(runAll)
+      actions.append(runSelected, runAll)
       if (failed.length || activeRun?.source === "failed") actions.append(retry)
       actions.append(next)
     } else {
       actions.append(runButton("Send selected", "send", publish, disabled || !selected.length, true))
     }
+    status.textContent = `${selected.length} selected of ${rows.length} expressions · ${ready} ready`
     if (key) [...dialog.querySelectorAll<HTMLElement>("[data-expression-focus]")].find(node => node.dataset.expressionFocus === key)?.focus({ preventScroll: true })
   }
   const previousFocus = document.activeElement as HTMLElement | null
   dialog.addEventListener("cancel", event => {
     event.preventDefault()
-    void closeDialog()
+    if (!overlay.hidden) closeOverlay()
+    else if (inlineEdit) cancelInlineEdit()
+    else void closeDialog()
   })
   dialog.addEventListener("close", () => {
     disposed = true
@@ -879,13 +1317,29 @@ function openCharacterExpressions(
     if (disposed || !dialog.open) return
     const settings = cleanStudioExpressionSet(value)
     const selected = new Set(settings.selected)
-    for (const { label, direction } of settings.slots) rows.push(makeRow(label, direction, selected.has(label.toLowerCase())))
+    for (const { label, direction, bankId } of settings.slots) {
+      const row = makeRow(label, direction, selected.has(label.toLowerCase()))
+      row.bankId = bankId
+      row.originalDirection = direction
+      rows.push(row)
+    }
     generation = settings.generation
     saved = JSON.stringify(getSettings())
     loading = false
     renderSettings()
     render()
   }
+  void options.request("load_expression_bank", {}).then(value => {
+    bank = cleanStudioExpressionBank(value)
+    bankLoaded = true
+    bankAvailable = true
+    bankSnapshot = JSON.stringify(bank)
+    if (!disposed) render()
+  }, () => {
+    bankLoaded = true
+    bankAvailable = false
+    if (!disposed) status.textContent = "Expression bank is unavailable; templates cannot be saved this session."
+  })
   void options.request("load_expression_set", {}).then(value => {
     settingsAvailable = true
     useSet(value)

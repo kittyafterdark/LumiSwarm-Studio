@@ -2473,6 +2473,17 @@ console.log("v28: concurrent image-tag creation is serialized: ok")
     const saved = (await request("load_expression_set")).data
     assert.deepEqual(saved.selected, ["neutral", "wistful"])
     assert.deepEqual(saved.slots.at(-1), { label: "Wistful", direction: "distant eyes and a soft smile" })
+    // The reusable custom-direction bank is stored per account, independently
+    // from the character expression set and its selected slots.
+    const initialBank = (await request("load_expression_bank")).data
+    assert.deepEqual(initialBank, [])
+    await request("save_expression_bank", { templates: [
+      { id: "stoic-1", label: "Stoic", direction: "unreadable gaze" },
+      { id: "bad", label: "neutral", direction: "must not replace built-ins" },
+      { id: "duplicate", label: "stoic", direction: "duplicate template" },
+    ] })
+    const savedBank = (await request("load_expression_bank")).data
+    assert.deepEqual(savedBank, [{ id: "stoic-1", label: "Stoic", direction: "unreadable gaze" }])
     const base = { folderId: "character:char-1", connectionId: "swarm-1", model: "anima-base.safetensors", direction: "furrowed brows" }
     const plain = await request("render_folder_expression", base)
     assert.equal(plain.data.id, "expression-fixture-1")

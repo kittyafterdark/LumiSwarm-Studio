@@ -1,3 +1,17 @@
+## V6 · Expression direction editor contained within portrait cards
+
+- Card direction edit panel rises over the lower portrait instead of increasing the card height or shifting sibling rows.
+- The card maintains its original image/details/action footprint, with Studio-token colors and single authored CSS rules.
+- Exact textarea drafts, restore, bank saves, keyboard shortcuts, Save and Cancel remain unchanged.
+- Narrow cards show **Redo** instead of **Regenerate**, retaining an accessible full action name.
+
+## Expression Studio V5 inline direction editing (2026-11-19)
+
+- Removed the direction-editing side drawer and inspector edit shortcut. The active gallery card now contains a textarea plus Save to bank / Restore controls, while its usual Edit / Render buttons temporarily become Save / Cancel.
+- Edits and default restores stay in a draft until Save; Cancel/Escape discards them. The account-backed expression bank remains independent, with uniquely named variants for built-in names to preserve canonical defaults.
+- Kept the centered five-column portrait gallery, full-size inspector, responsive two-column mobile layout, Studio theme tokens, and original Swarm generation/backend contracts intact.
+- Added inline editing regression coverage and Chromium mobile/desktop interaction checks. Rebuilt the frontend bundle.
+
 ## Expressions, image editing, and Studio polish (2026-11-17)
 
 - **Character Expressions** — Generate with Basics, Full Spread, or reusable custom slots. Set canvas size, sampling, and shared prompts. Pick references and saved renders visually. Use IPAdapter PLUS on Illustrious or Anima Ref Adapter on Anima when configured.

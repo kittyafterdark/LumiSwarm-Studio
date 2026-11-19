@@ -38,9 +38,29 @@ interface StudioExpressionGeneration {
 }
 
 interface StudioExpressionSet {
-  slots: Array<{ label: string; direction: string }>
+  slots: Array<{ label: string; direction: string; bankId?: string }>
   selected: string[]
   generation: StudioExpressionGeneration
+}
+
+interface StudioExpressionBankEntry { id: string; label: string; direction: string }
+
+/** Reusable user-level templates live separately from the active character expression set. */
+function cleanStudioExpressionBank(value: unknown): StudioExpressionBankEntry[] {
+  if (!Array.isArray(value)) return []
+  const bank = new Map<string, StudioExpressionBankEntry>()
+  const builtIns = new Set<string>(EXPRESSION_SPREAD.map(([label]) => label))
+  for (const raw of value.slice(0, 150)) {
+    const data = recipeRecord(raw)
+    const label = cleanExpressionLabel(data.label)
+    if (!label || builtIns.has(label.toLowerCase()) || typeof data.direction !== "string") continue
+    const key = label.toLowerCase()
+    if (bank.has(key)) continue
+    const id = typeof data.id === "string" && /^[a-zA-Z0-9_-]{1,96}$/.test(data.id)
+      ? data.id : `expression-${bank.size + 1}`
+    bank.set(key, { id, label, direction: data.direction.slice(0, EXPRESSION_DIRECTION_LIMIT) })
+  }
+  return [...bank.values()]
 }
 
 function cleanExpressionLabel(value: unknown): string {
@@ -68,7 +88,8 @@ function cleanStudioExpressionSet(value: unknown): StudioExpressionSet {
     const key = label.toLowerCase()
     const existing = slots.get(key)
     if (!label || typeof slot.direction !== "string") continue
-    slots.set(key, { label: existing?.label || label, direction: slot.direction.slice(0, EXPRESSION_DIRECTION_LIMIT) })
+    slots.set(key, { label: existing?.label || label, direction: slot.direction.slice(0, EXPRESSION_DIRECTION_LIMIT),
+      ...(typeof slot.bankId === "string" && /^[a-zA-Z0-9_-]{1,96}$/.test(slot.bankId) ? { bankId: slot.bankId } : {}) })
   }
   const selected = Array.isArray(input.selected) ? input.selected : EXPRESSION_BASICS.map(([label]) => label)
   return {

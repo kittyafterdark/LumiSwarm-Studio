@@ -196,6 +196,27 @@ const EXPRESSION_DEFAULT_RECIPE = {
 const EXPRESSION_DEFAULT_PREFIX = "solo, head and shoulders portrait, facing viewer, plain background";
 const EXPRESSION_PROMPT_LIMIT = 4000;
 const EXPRESSION_DIRECTION_LIMIT = 1000;
+function cleanStudioExpressionBank(value) {
+    if (!Array.isArray(value)) return [];
+    const bank = new Map();
+    const builtIns = new Set(EXPRESSION_SPREAD.map(([label])=>label));
+    for (const raw of value.slice(0, 150)){
+        const data = recipeRecord(raw);
+        const label = cleanExpressionLabel(data.label);
+        if (!label || builtIns.has(label.toLowerCase()) || typeof data.direction !== "string") continue;
+        const key = label.toLowerCase();
+        if (bank.has(key)) continue;
+        const id = typeof data.id === "string" && /^[a-zA-Z0-9_-]{1,96}$/.test(data.id) ? data.id : `expression-${bank.size + 1}`;
+        bank.set(key, {
+            id,
+            label,
+            direction: data.direction.slice(0, EXPRESSION_DIRECTION_LIMIT)
+        });
+    }
+    return [
+        ...bank.values()
+    ];
+}
 function cleanExpressionLabel(value) {
     const label = typeof value === "string" ? value.trim() : "";
     return label.length <= 40 && /^[\p{L}\p{N}][\p{L}\p{N} _'-]*$/u.test(label) ? label : "";
@@ -225,7 +246,10 @@ function cleanStudioExpressionSet(value) {
         if (!label || typeof slot.direction !== "string") continue;
         slots.set(key, {
             label: existing?.label || label,
-            direction: slot.direction.slice(0, EXPRESSION_DIRECTION_LIMIT)
+            direction: slot.direction.slice(0, EXPRESSION_DIRECTION_LIMIT),
+            ...typeof slot.bankId === "string" && /^[a-zA-Z0-9_-]{1,96}$/.test(slot.bankId) ? {
+                bankId: slot.bankId
+            } : {}
         });
     }
     const selected = Array.isArray(input.selected) ? input.selected : EXPRESSION_BASICS.map(([label])=>label);
@@ -1045,6 +1069,96 @@ const STYLES = `
 .ss-workflow-modal-title strong { font-size:16px; }
 .ss-workflow-modal-description { color:var(--ss-muted); font-size:11px; }
 .ss-workflow-modal-actions { display:flex; justify-content:flex-end; gap:8px; }
+/* Swarm preset sheet | condensed parameter grid, actual values available on demand. */
+.ss-workflow-modal[data-role='save-preset-modal'] .ss-workflow-modal-card {
+  width:min(860px,100%); max-height:min(810px,calc(100% - 24px),calc(100dvh - 30px)); min-width:0; min-height:0;
+  grid-template-rows:auto minmax(0,1fr) auto; gap:0; padding:0; overflow:hidden;
+}
+.ss-workflow-modal[data-role='save-preset-modal'] .ss-workflow-modal-head {
+  padding:19px 22px 13px; align-items:center; border-bottom:1px solid var(--ss-border-subtle);
+}
+.ss-save-preset-fields {
+  display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; gap:0;
+  min-width:0; min-height:0; overflow:hidden; padding:0 22px;
+}
+.ss-save-preset-basics {
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px;
+  min-width:0; padding:16px 0 15px;
+}
+.ss-save-preset-basics .ss-field { min-width:0; }
+.ss-save-preset-toolbar {
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;
+  min-height:44px; border-top:1px solid var(--ss-border-subtle); border-bottom:1px solid var(--ss-border-subtle);
+}
+.ss-save-preset-toolbar-copy { display:flex; align-items:baseline; gap:10px; min-width:0; }
+.ss-save-preset-toolbar-copy strong { font-size:12px; font-weight:740; }
+.ss-save-preset-toolbar-copy span { font-size:11px; color:var(--ss-muted); font-variant-numeric:tabular-nums; }
+.ss-save-preset-bulk { display:flex; align-items:center; gap:3px; }
+.ss-workflow-modal[data-role='save-preset-modal'] .ss-save-preset-bulk .ss-button {
+  min-height:29px; padding:4px 9px; border:0; background:transparent; color:var(--ss-muted); font-size:11px;
+}
+.ss-workflow-modal[data-role='save-preset-modal'] .ss-save-preset-bulk .ss-button:hover { color:var(--ss-accent); background:var(--ss-accent-soft); }
+.ss-save-param-list {
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:max-content;
+  align-content:start; column-gap:22px; min-width:0; min-height:0;
+  overflow-x:hidden; overflow-y:auto; padding:3px 0 12px; scrollbar-width:thin;
+  overscroll-behavior:contain;
+}
+.ss-save-param {
+  display:grid; grid-template-columns:minmax(0,1fr) auto; align-content:start; align-items:center;
+  min-width:0; min-height:61px; border-bottom:1px solid var(--ss-border-subtle);
+  color:var(--ss-text);
+}
+.ss-save-param:focus-within { background:var(--ss-accent-soft); }
+.ss-save-param-line {
+  display:grid; grid-template-columns:17px minmax(0,1fr); align-items:start; gap:9px;
+  min-width:0; padding:10px 3px; cursor:pointer;
+}
+.ss-save-param-line input[type='checkbox'] { width:15px; height:15px; margin:2px 0 0; cursor:pointer; }
+.ss-save-param-copy { display:grid; gap:3px; min-width:0; }
+.ss-save-param-copy strong { color:var(--ss-text); font-size:12px; font-weight:710; line-height:1.25; }
+.ss-save-param-copy > span {
+  min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+  color:var(--ss-muted); font:11px/1.45 ui-monospace,Consolas,monospace;
+}
+.ss-save-param-expand {
+  padding:3px 5px; margin-right:1px; min-width:36px; min-height:26px;
+  border:0; border-radius:6px; color:var(--ss-accent); background:transparent;
+  font-size:10px; cursor:pointer;
+}
+.ss-save-param-expand:hover { background:var(--ss-accent-soft); }
+.ss-save-param-full {
+  grid-column:1/-1; max-height:160px; overflow:auto; margin:0 2px 10px 26px;
+  padding:9px 10px; border:1px solid var(--ss-border-subtle); border-radius:7px;
+  background:var(--ss-field-bg); color:var(--ss-text); white-space:pre-wrap;
+  word-break:break-word; overflow-wrap:anywhere; font:11px/1.55 ui-monospace,Consolas,monospace;
+}
+.ss-save-preset-note { margin:0; padding:10px 0 12px; color:var(--ss-muted); font-size:10px; line-height:1.45; }
+.ss-workflow-modal[data-role='save-preset-modal'] .ss-workflow-modal-actions {
+  flex:none; align-items:center; padding:12px 22px max(12px,env(safe-area-inset-bottom,0px));
+  border-top:1px solid var(--ss-border-subtle);
+}
+/* Preset manager uses a matching quiet list, not nested bordered cards. */
+.ss-preset-manager-list { display:grid; gap:0; min-width:0; max-height:min(450px,50dvh); overflow:auto; scrollbar-width:thin; }
+.ss-preset-manager-row {
+  display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px;
+  min-width:0; padding:12px 2px; border-bottom:1px solid var(--ss-border-subtle);
+}
+.ss-preset-manager-copy { display:grid; gap:4px; min-width:0; }
+.ss-preset-manager-copy strong { color:var(--ss-text); font-size:12px; overflow-wrap:anywhere; }
+.ss-preset-manager-copy span { color:var(--ss-muted); font-size:11px; line-height:1.4; overflow-wrap:anywhere; }
+@media(max-width:630px) {
+  .ss-workflow-modal[data-role='save-preset-modal'] .ss-workflow-modal-head { padding:14px 15px 12px; }
+  .ss-save-preset-fields { padding:0 15px; }
+  .ss-save-preset-basics { grid-template-columns:minmax(0,1fr); gap:10px; padding:12px 0; }
+  .ss-save-param-list { grid-template-columns:minmax(0,1fr); }
+  .ss-workflow-modal[data-role='save-preset-modal'] .ss-workflow-modal-actions { padding:10px 15px max(10px,env(safe-area-inset-bottom,0px)); }
+}
+@media(max-width:365px) {
+  .ss-save-preset-toolbar { align-items:flex-start; flex-direction:column; gap:1px; padding-top:7px; }
+  .ss-save-preset-bulk { align-self:flex-end; }
+}
+
 .ss-workflow-fields,.ss-workflow-field-grid { display:grid; gap:10px; }
 .ss-workflow-field-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .ss-workflow-field { display:grid; gap:7px; padding:10px; background:var(--ss-panel-hi); border-radius:8px; }
@@ -1479,140 +1593,248 @@ const STYLES = `
 .ss-library-new-folder-card > span:last-child { max-width:185px; font-size:10px; line-height:1.4; }
 .ss-library-folder-note { margin:0; padding-bottom:8px; text-align:center; }
 .ss-library-folder-empty { grid-column:1/-1; }
+/* Expression Studio V3. One authored ruleset, using Studio's semantic --ss-* tokens. */
 .ss-expression-dialog,.ss-expression-picker {
-  position:fixed; inset:var(--app-interactive-safe-top,0px) 0 0; margin:0; padding:0; border:0;
-  width:var(--app-scaled-viewport-width,100vw); height:var(--app-interactive-viewport-height,var(--app-scaled-viewport-height,100dvh));
-  max-width:none; max-height:none; color:var(--ss-text); background:var(--ss-panel-bg);
+  position:fixed; inset:0; margin:0; padding:0; border:0;
+  width:var(--app-scaled-viewport-width,100vw); height:var(--app-scaled-viewport-height,100dvh);
+  max-width:none; max-height:none; color:var(--ss-text); background:var(--ss-canvas-bg);
 }
 .ss-expression-dialog[open] { display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; }
-.ss-expression-dialog::backdrop,.ss-expression-picker::backdrop { background:#0a0912c9; }
-.ss-expression-header,.ss-expression-footer,.ss-expression-steps { padding:10px clamp(12px,3vw,32px); background:var(--ss-header-bg); }
-.ss-expression-header,.ss-expression-footer { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.ss-expression-header { justify-content:space-between; border-bottom:1px solid var(--ss-outline); }
-.ss-expression-header h2 { margin:0; font-size:17px; }
-.ss-expression-steps {
-  --ss-expression-step-gap:10px;
-  display:grid; grid-template-columns:repeat(4,minmax(0,180px)); gap:var(--ss-expression-step-gap);
-  border-bottom:1px solid var(--ss-outline);
-}
-.ss-expression-steps .ss-expression-step {
-  position:relative; display:flex; align-items:center; gap:7px; min-width:0;
-  padding:7px 9px; text-align:left; white-space:normal; line-height:1.2;
-}
-.ss-expression-step:not(:last-child)::after {
-  content:""; position:absolute; inset-inline-start:calc(100% + 1px); inset-block-start:50%;
-  width:var(--ss-expression-step-gap); border-top:1px solid var(--ss-outline); pointer-events:none;
-}
-.ss-expression-step-number {
-  display:grid; place-items:center; flex:none; width:24px; height:24px;
-  border:1px solid var(--ss-outline); border-radius:50%; background:var(--ss-field-bg); font-weight:700;
-}
-.ss-expression-steps [aria-current="step"] { color:var(--ss-accent); border-color:var(--ss-accent-line); background:var(--ss-accent-soft); font-weight:700; }
-.ss-expression-step[aria-current="step"] .ss-expression-step-number {
-  color:var(--ss-primary-ink); background:var(--ss-primary-bg); border-color:var(--ss-primary-bg);
-}
-.ss-expression-scroll { overflow:auto; scrollbar-gutter:stable; padding:14px clamp(12px,3vw,32px); }
-.ss-expression-controls,.ss-expression-actions,.ss-expression-toolbar,.ss-expression-sources,.ss-expression-custom,.ss-expression-presets {
-  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
-}
-.ss-expression-controls { margin-bottom:14px; align-items:start; }
-.ss-expression-controls > label,.ss-expression-sources > .ss-field { flex:1 1 180px; max-width:400px; }
-.ss-expression-toolbar,.ss-expression-sources,.ss-expression-settings,.ss-expression-custom { width:100%; min-width:0; }
-.ss-expression-toolbar { padding-bottom:10px; border-bottom:1px solid var(--ss-outline); }
-.ss-expression-toolbar .ss-muted { font-size:11px; }
-.ss-expression-presets { gap:4px; padding:3px; border:1px solid var(--ss-outline); border-radius:10px; background:var(--ss-field-bg); }
-.ss-expression-presets .ss-button { border-color:transparent; background:transparent; }
-.ss-expression-presets [aria-pressed="true"] { color:var(--ss-accent); border-color:var(--ss-accent-line); background:var(--ss-accent-soft); }
-.ss-expression-custom { align-items:end; }
-.ss-expression-sources { align-items:start; gap:12px; }
-.ss-expression-sources > p { align-self:center; overflow-wrap:anywhere; padding:6px 0; }
-.ss-expression-reference { grid-template-columns:minmax(0,1fr) auto; }
-.ss-expression-reference > span { grid-column:1/-1; }
-.ss-expression-reference .ss-expression-reference-button { display:flex; gap:9px; min-width:0; align-items:center; text-align:left; }
-.ss-expression-reference-picture {
-  display:grid; place-items:center; width:34px; height:34px; flex:none;
-  border:1px solid var(--ss-outline); border-radius:6px; overflow:hidden; background:var(--ss-field-bg); color:var(--ss-accent);
-}
-.ss-expression-reference-picture img { width:100%; height:100%; object-fit:cover; }
+.ss-expression-dialog [hidden] { display:none !important; }
+.ss-expression-dialog::backdrop,.ss-expression-picker::backdrop { background:color-mix(in srgb,var(--ss-canvas-bg) 80%,transparent); }
+.ss-expression-header,.ss-expression-footer,.ss-expression-steps { padding:8px clamp(14px,2vw,30px); background:var(--ss-panel-bg); }
+.ss-expression-header,.ss-expression-footer { display:flex; align-items:center; gap:14px; }
+.ss-expression-header { justify-content:space-between; min-height:49px; padding-top:max(7px,env(safe-area-inset-top,0px)); border-bottom:1px solid var(--ss-border-subtle); }
+.ss-expression-identity { display:flex; align-items:center; min-width:0; gap:10px; }
+.ss-expression-mark { display:grid; place-items:center; width:29px; height:29px; flex:none; border:1px solid var(--ss-accent-line); border-radius:9px; background:var(--ss-accent-soft); color:var(--ss-accent); font-size:19px; }
+.ss-expression-header-copy { display:grid; min-width:0; gap:3px; }
+.ss-expression-header-copy small { color:var(--ss-muted); font-size:10px; }
+.ss-expression-header-copy h2 { overflow:hidden; margin:0; font-size:13px; font-weight:750; white-space:nowrap; text-overflow:ellipsis; }
+.ss-expression-kicker { display:block; color:var(--ss-accent); font-size:9px; font-weight:760; text-transform:uppercase; letter-spacing:.11em; }
+.ss-expression-steps { display:flex; gap:8px; align-items:center; min-height:46px; padding-inline:max(16px,calc((100% - 1280px) / 2)); border-bottom:1px solid var(--ss-border-subtle); overflow-x:auto; scrollbar-width:thin; }
+.ss-expression-steps .ss-expression-step { flex:1 0 150px; max-width:310px; min-width:0; display:flex; align-items:center; gap:7px; padding:5px 9px; background:transparent; border:1px solid transparent; border-radius:8px; color:var(--ss-muted); text-align:left; font-size:11px; font-weight:650; white-space:nowrap; }
+.ss-expression-step:not(:last-child)::after { content:none; }
+.ss-expression-step-number { width:21px; height:21px; flex:none; display:grid; place-items:center; border:1px solid var(--ss-accent-line); border-radius:7px; color:var(--ss-accent); font-size:10px; }
+.ss-expression-steps .ss-expression-step[aria-current='step'] { color:var(--ss-accent); border-color:var(--ss-accent-line); background:var(--ss-accent-soft); }
+.ss-expression-step[aria-current='step'] .ss-expression-step-number { color:var(--ss-primary-ink); background:var(--ss-primary-bg); border-color:var(--ss-primary-bg); }
+.ss-expression-scroll { min-width:0; min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-gutter:stable; padding:16px clamp(12px,2vw,28px) 28px; }
+.ss-expression-controls,.ss-expression-gallery-head,.ss-expression-cards { width:100%; max-width:1280px; margin-inline:auto; }
+.ss-expression-controls { display:grid; gap:12px; margin-bottom:10px; }
+.ss-expression-overview { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.ss-expression-overview-copy { display:grid; gap:4px; min-width:0; }
+.ss-expression-overview-copy h3 { margin:0; font-size:clamp(19px,1.65vw,23px); letter-spacing:-.035em; line-height:1.15; }
+.ss-expression-overview-copy p { margin:0; font-size:11px; line-height:1.35; }
+.ss-expression-count { flex:none; padding:7px 12px; border:1px solid var(--ss-outline); border-radius:999px; background:var(--ss-panel-hi); color:var(--ss-muted); font-size:11px; }
+.ss-expression-config { display:flex; align-items:center; gap:12px; min-width:0; flex-wrap:wrap; padding:10px 14px; border:1px solid var(--ss-outline); border-radius:12px; background:var(--ss-panel-bg); }
+.ss-expression-config-divider { height:37px; width:1px; flex:none; background:var(--ss-border-subtle); }
+.ss-expression-config .ss-field { flex:0 1 200px; min-width:120px; max-width:330px; }
+.ss-expression-config .ss-field > span:first-child { color:var(--ss-muted); font-size:10px; }
+.ss-expression-config :is(.ss-input,.ss-select,.ss-textarea) { width:100%; min-width:0; }
+.ss-expression-config-method .ss-select { border:0; background:transparent; padding:0 24px 0 0; min-height:25px; font-weight:700; }
+.ss-expression-config-method .ss-select:focus { box-shadow:none; }
+.ss-expression-config .ss-expression-config-method { flex-basis:158px; }
+.ss-expression-config .ss-expression-config-reference { flex:0 1 260px; min-width:170px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; }
+.ss-expression-config-reference > span:first-child { grid-column:1/-1; }
+.ss-expression-config-reference .ss-expression-reference-button { display:flex; align-items:center; gap:8px; min-width:0; text-align:left; }
+.ss-expression-reference-picture { display:grid; place-items:center; flex:none; width:32px; height:32px; overflow:hidden; border:1px solid var(--ss-outline); border-radius:8px; color:var(--ss-accent); background:var(--ss-field-bg); }
+.ss-expression-reference-picture :is(img,svg) { width:100%; height:100%; object-fit:cover; }
 .ss-expression-reference-picture svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.6; }
-.ss-expression-reference-copy { min-width:0; display:grid; gap:2px; white-space:normal; }
-.ss-expression-reference-copy small { color:var(--ss-muted); font-weight:400; }
-.ss-expression-reference > .ss-button:last-child:not(.ss-expression-reference-button) { align-self:center; }
-.ss-expression-custom > label { flex:1 1 136px; max-width:260px; }
-.ss-expression-controls > .ss-expression-background-graph { flex:1 1 390px; max-width:660px; }
-.ss-expression-background-graph .ss-textarea { width:100%; min-width:0; font-family:ui-monospace,monospace; }
-.ss-expression-model-setup {
-  flex:1 1 350px; max-width:580px; min-width:0; display:grid; gap:7px;
-  padding:10px 12px; border:1px solid var(--ss-outline); border-radius:10px; background:var(--ss-field-bg);
-}
+.ss-expression-reference-copy { display:grid; min-width:0; gap:2px; }
+.ss-expression-reference-copy strong { font-size:11px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; }
+.ss-expression-reference-copy small { color:var(--ss-muted); font-size:10px; }
+.ss-expression-config-model { display:grid; flex:1 1 170px; min-width:120px; max-width:360px; gap:4px; }
+.ss-expression-config-model small { color:var(--ss-muted); font-size:10px; }
+.ss-expression-config-model strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.ss-expression-config-model span { font-size:10px; }
+.ss-expression-config-settings { margin-left:auto; }
+.ss-expression-config-copy { display:grid; min-width:150px; gap:5px; }
+.ss-expression-config-copy strong { font-size:12px; }
+.ss-expression-config-copy p { margin:0; font-size:11px; }
+.ss-expression-config > .ss-expression-model-setup { max-width:none; }
+.ss-expression-naming { display:grid; grid-template-columns:minmax(0,240px) minmax(110px,1fr); align-items:end; gap:14px; flex:1 1 470px; min-width:0; }
+.ss-expression-naming .ss-field { min-width:0; }
+.ss-expression-naming-example { display:grid; justify-items:start; align-content:end; gap:7px; min-width:0; }
+.ss-expression-naming #ss-expression-prefix-example { display:none; }
+.ss-expression-naming-example > span { color:var(--ss-muted); font-size:10px; }
+.ss-expression-naming code { padding:8px 12px; min-width:65px; border:1px solid var(--ss-accent-line); border-radius:8px; background:var(--ss-field-bg); color:var(--ss-accent); font:650 12px ui-monospace,monospace; }
+.ss-expression-gallery-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:12px 0 11px; flex-wrap:wrap; }
+.ss-expression-gallery-left,.ss-expression-gallery-right,.ss-expression-presets { display:flex; align-items:center; flex-wrap:wrap; gap:7px; min-width:0; }
+.ss-expression-filters { display:flex; flex-wrap:wrap; gap:2px; padding:3px; border:1px solid var(--ss-outline); border-radius:9px; background:var(--ss-field-bg); }
+.ss-expression-toolbar-count { color:var(--ss-muted); font-size:10px; white-space:nowrap; }
+.ss-expression-filters .ss-button { border:0; background:transparent; color:var(--ss-muted); }
+.ss-expression-filters .ss-button[aria-pressed='true'] { border:1px solid var(--ss-accent-line); background:var(--ss-accent-soft); color:var(--ss-accent); }
+.ss-expression-gallery-right { margin-left:auto; }
+.ss-expression-gallery-toolbar :is(.ss-button,.ss-select) { min-height:33px; padding:6px 10px; font-size:11px; }
+.ss-expression-gallery-toolbar .ss-select { width:auto; max-width:130px; }
+.ss-expression-presets { padding:3px; border:1px solid var(--ss-outline); border-radius:10px; background:var(--ss-field-bg); gap:3px; }
+.ss-expression-presets .ss-button { border-color:transparent; background:transparent; }
+.ss-expression-presets [aria-pressed='true'] { color:var(--ss-accent); background:var(--ss-accent-soft); border-color:var(--ss-accent-line); }
+.ss-expression-cards { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); align-items:start; gap:12px; min-width:0; }
+.ss-expression-card { position:relative; min-width:0; display:grid; grid-template-rows:auto auto auto; align-content:start; gap:0; overflow:hidden; padding:0; border:1px solid var(--ss-outline); border-radius:12px; background:var(--ss-panel-hi); }
+.ss-expression-card[data-selected='true'] { border-color:var(--ss-accent-line); }
+.ss-expression-art { position:relative; min-width:0; width:calc(100% - 8px); margin:4px 4px 0; aspect-ratio:9/16; border-radius:9px; overflow:hidden; background:var(--ss-canvas-bg); }
+.ss-expression-card-head { position:absolute; z-index:2; inset:12px 10px auto; display:flex; align-items:start; justify-content:space-between; gap:5px; pointer-events:none; }
+.ss-expression-card-head > * { pointer-events:auto; }
+.ss-expression-select { display:flex; align-items:center; gap:6px; min-width:0; padding:5px 7px; border:1px solid var(--ss-outline); border-radius:7px; background:var(--ss-panel-bg); color:var(--ss-text); font-weight:600; font-size:10px; cursor:pointer; }
+.ss-expression-select input { flex:none; accent-color:var(--ss-accent); }
+.ss-expression-state-label { font-size:9px; color:var(--ss-muted); padding:4px 7px; border:1px solid var(--ss-outline); border-radius:999px; white-space:nowrap; background:var(--ss-panel-bg); }
+.ss-expression-card[data-state='ready'] .ss-expression-state-label { color:var(--ss-accent); border-color:var(--ss-accent-line); background:var(--ss-accent-soft); }
+.ss-expression-card[data-state='failed'] .ss-expression-state-label { color:var(--ss-danger); }
+.ss-expression-preview { position:absolute; inset:0; width:100%; height:100%; min-width:0; display:grid; place-items:center; overflow:hidden; background:var(--ss-canvas-bg); color:var(--ss-muted); }
+.ss-expression-preview img { display:block; width:100%; height:100%; object-fit:contain; object-position:center center; }
+.ss-expression-preview[data-view='closeup'] img { object-fit:cover; object-position:center 0%; }
+.ss-expression-preview.ss-expression-inspectable { cursor:zoom-in; }
+.ss-expression-inspectable::after { content:'↗'; display:grid; place-items:center; position:absolute; right:9px; bottom:9px; width:28px; height:28px; border:1px solid var(--ss-outline); border-radius:7px; background:var(--ss-panel-bg); color:var(--ss-accent); font-size:16px; opacity:0; transition:opacity .15s; }
+.ss-expression-inspectable:hover::after,.ss-expression-inspectable:focus-visible::after { opacity:1; }
+.ss-expression-preview.ss-expression-inspectable:hover { outline:2px solid var(--ss-accent-line); outline-offset:-2px; }
+.ss-expression-placeholder { display:grid; place-items:center; width:100%; height:100%; font-size:11px; text-align:center; background:repeating-linear-gradient(45deg,transparent,transparent 9px,color-mix(in srgb,var(--ss-outline) 18%,transparent) 9px,color-mix(in srgb,var(--ss-outline) 18%,transparent) 10px); }
+.ss-expression-tile-feedback { position:absolute; z-index:2; inset:auto 8px 8px; display:grid; gap:6px; padding:8px; border:1px solid var(--ss-outline); border-radius:8px; background:var(--ss-panel-hi); color:var(--ss-text); font-size:11px; pointer-events:none; }
+.ss-expression-tile-feedback progress { width:100%; height:6px; accent-color:var(--ss-accent); }
+.ss-expression-card-info { display:grid; gap:6px; min-width:0; padding:12px 12px 9px; }
+.ss-expression-card-title { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; }
+.ss-expression-edited-tag { padding:2px 5px; border-radius:4px; color:var(--ss-accent); background:var(--ss-accent-soft); text-transform:uppercase; font-size:8px; letter-spacing:.04em; }
+.ss-expression-card-info strong { text-transform:capitalize; font-size:13px; }
+.ss-expression-card-info p { min-width:0; overflow:hidden; margin:0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.45; min-height:29px; font-size:11px; }
+.ss-expression-card-editing { border-color:var(--ss-accent-line); }
+/* The editor occupies the normal details row, then rises over the portrait.
+   The card's height never changes, so adjacent cards remain aligned. */
+.ss-expression-card-editing .ss-expression-card-info { position:relative; z-index:3; display:block; height:72px; padding:0; }
+.ss-expression-card-edit-panel { position:absolute; inset:auto 0 0; display:grid; gap:6px; min-width:0; padding:12px 12px 9px; border-top:1px solid var(--ss-accent-line); border-radius:10px 10px 0 0; background:var(--ss-panel-hi); box-shadow:0 -13px 28px color-mix(in srgb,var(--ss-canvas-bg) 75%,transparent); }
+
+.ss-expression-card-editarea { display:block; box-sizing:border-box; width:100%; min-width:0; height:112px; min-height:112px; max-height:112px; padding:9px; resize:none; overflow-y:auto; font:inherit; font-size:11px; line-height:1.5; }
+.ss-expression-card-edit-tools { display:grid; grid-template-columns:minmax(0,1fr) 32px; align-items:stretch; gap:6px; min-width:0; }
+.ss-expression-card-edit-tools .ss-button { min-width:0; min-height:31px; padding:5px 8px; font-size:10px; }
+.ss-expression-card-edit-tools .ss-expression-card-bank { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ss-expression-card-edit-tools .ss-expression-card-restore { display:grid; place-items:center; padding:5px; }
+.ss-expression-card-edit-tools .ss-expression-card-restore svg { width:16px; height:16px; }
+.ss-expression-card-mapping { display:grid; gap:5px; min-width:0; margin-top:5px; }
+.ss-expression-card-mapping span { color:var(--ss-muted); font-size:9px; }
+.ss-expression-card-mapping code { padding:6px 8px; min-width:0; overflow:hidden; text-overflow:ellipsis; border:1px solid var(--ss-accent-line); border-radius:7px; color:var(--ss-accent); background:var(--ss-field-bg); font:600 11px ui-monospace,monospace; }
+.ss-expression-card-actions { display:flex; align-items:center; gap:6px; min-width:0; margin:0 12px; padding:10px 0 12px; border-top:1px solid var(--ss-border-subtle); }
+.ss-expression-card-actions .ss-button { flex:1 1 0; min-width:0; min-height:31px; padding:5px 8px; font-size:11px; }
+.ss-expression-card-actions .ss-expression-card-render { background:var(--ss-accent-soft); border-color:var(--ss-accent-line); color:var(--ss-accent); }
+.ss-expression-card-actions .ss-expression-card-attach { flex:0 0 32px; width:32px; padding:5px; }
+.ss-expression-card-actions .ss-expression-card-attach svg { width:15px; height:15px; }
+.ss-expression-empty-gallery { grid-column:1/-1; padding:50px 15px; margin:0; text-align:center; border:1px dashed var(--ss-outline); border-radius:12px; color:var(--ss-muted); }
+.ss-expression-footer { justify-content:space-between; flex-wrap:wrap; min-height:52px; border-top:1px solid var(--ss-border-subtle); padding-bottom:max(8px,env(safe-area-inset-bottom,0px)); }
+.ss-expression-footer-identity { display:flex; align-items:center; gap:10px; flex:1 1 180px; min-width:0; }
+.ss-expression-footer-mark { display:grid; place-items:center; flex:none; width:30px; height:30px; border:1px solid var(--ss-accent-line); border-radius:9px; background:var(--ss-accent-soft); color:var(--ss-accent); font-size:20px; }
+.ss-expression-footer-copy { display:grid; gap:3px; min-width:0; }
+.ss-expression-footer-copy > p { margin:0; font-size:11px; font-weight:700; }
+.ss-expression-footer-copy > span { font-size:10px; color:var(--ss-muted); }
+.ss-expression-actions { display:flex; flex-wrap:wrap; gap:7px; justify-content:flex-end; }
+.ss-expression-actions .ss-button { font-size:11px; }
+.ss-expression-model-setup { flex:1 1 330px; min-width:0; display:grid; gap:7px; padding:10px 12px; border:1px solid var(--ss-outline); border-radius:10px; background:var(--ss-field-bg); }
 .ss-expression-model-details:not([hidden]) { display:grid; gap:7px; }
 .ss-expression-model-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 .ss-expression-model-actions a { display:inline-flex; align-items:center; text-decoration:none; }
-.ss-expression-settings { border:1px solid var(--ss-outline); border-radius:10px; background:var(--ss-panel-hi); }
-.ss-expression-settings > summary {
-  list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px;
-  padding:10px 12px; border-radius:inherit; font-weight:650;
-}
-.ss-expression-settings > summary::-webkit-details-marker { display:none; }
-.ss-expression-settings > summary::after {
-  content:""; width:6px; height:6px; margin-right:4px;
-  border:solid var(--ss-muted); border-width:0 1.5px 1.5px 0; transform:rotate(45deg);
-}
-.ss-expression-settings[open] > summary::after { transform:rotate(225deg); }
-.ss-expression-settings-fields { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:12px; padding:12px; border-top:1px solid var(--ss-outline); }
-.ss-expression-settings-fields > p { grid-column:1/-1; }
-.ss-expression-canvas {
-  display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:12px; padding:10px;
-  box-sizing:border-box; width:fit-content; max-width:100%; min-width:0;
-  border:1px solid var(--ss-outline); border-radius:10px; background:var(--ss-field-bg);
-}
-.ss-expression-canvas-preview {
-  display:grid; place-items:center; gap:6px; min-width:96px; padding:8px;
-  color:var(--ss-muted); font-size:11px; font-variant-numeric:tabular-nums;
-}
-.ss-expression-canvas-shape { box-sizing:border-box; border:1px solid var(--ss-accent-line); border-radius:3px; background:var(--ss-accent-soft); }
-.ss-expression-canvas-controls { display:grid; gap:8px; min-width:0; }
-.ss-expression-canvas-controls h3 { margin:0; font-size:12px; }
-.ss-expression-canvas-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
-.ss-expression-axis { display:grid; grid-template-columns:42px minmax(0,1fr) 74px; align-items:center; gap:8px; }
-.ss-expression-axis span { color:var(--ss-muted); font-size:11px; }
-.ss-expression-axis input[type='range'] { margin:0; }
-@media (max-width:600px) {
-  .ss-expression-steps { --ss-expression-step-gap:6px; }
-  .ss-expression-steps .ss-expression-step { flex-direction:column; padding:6px 4px; text-align:center; }
-  .ss-expression-step:not(:last-child)::after { inset-block-start:18px; }
-  .ss-expression-canvas { grid-template-columns:minmax(0,1fr); gap:6px; }
-  .ss-expression-canvas-preview { grid-row:2; grid-auto-flow:column; justify-content:start; min-width:0; padding:0; }
-  .ss-expression-sources > .ss-field { flex-basis:100%; }
-  .ss-expression-reference { grid-template-columns:minmax(0,1fr); }
-  .ss-expression-reference > .ss-button:last-child:not(.ss-expression-reference-button) { justify-self:start; }
-}
-.ss-expression-render-fields { display:grid; gap:10px; min-width:0; container:expression-render / inline-size; }
-.ss-expression-parameters,.ss-expression-prompts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.ss-expression-config .ss-expression-background-graph { flex:1 1 300px; }
+.ss-expression-background-graph .ss-textarea { width:100%; min-width:0; font-family:ui-monospace,monospace; }
+.ss-expression-overlay { position:absolute; z-index:8; inset:0; display:grid; align-items:stretch; justify-content:end; isolation:isolate; }
+.ss-expression-overlay-scrim { position:absolute; z-index:-1; inset:0; width:100%; padding:0; border:0; border-radius:0; background:color-mix(in srgb,var(--ss-canvas-bg) 78%,transparent); cursor:default; }
+.ss-expression-overlay-panel { width:min(470px,100vw); height:100%; min-width:0; display:grid; grid-template-rows:auto minmax(0,1fr) auto; background:var(--ss-panel-bg); border-left:1px solid var(--ss-outline); box-shadow:-20px 0 50px #0005; }
+.ss-expression-overlay-panel.ss-expression-overlay-wide { width:min(840px,100vw); }
+.ss-expression-overlay-head { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:54px; padding:10px 18px; border-bottom:1px solid var(--ss-outline); }
+.ss-expression-overlay-heading { min-width:0; display:grid; gap:4px; }
+.ss-expression-overlay-head h3 { min-width:0; overflow:hidden; margin:0; font-size:14px; text-overflow:ellipsis; white-space:nowrap; }
+.ss-expression-overlay-body { display:grid; align-content:start; gap:15px; min-width:0; min-height:0; overflow:auto; padding:20px; }
+.ss-expression-overlay-body .ss-field { display:grid; gap:6px; min-width:0; }
+.ss-expression-overlay-body :is(.ss-input,.ss-textarea,.ss-select) { width:100%; min-width:0; }
+.ss-expression-overlay-body p { margin:0; }
+.ss-expression-overlay-bottom { display:flex; gap:7px; justify-content:flex-end; align-items:center; flex-wrap:wrap; padding:14px 20px max(15px,env(safe-area-inset-bottom)); border-top:1px solid var(--ss-outline); background:var(--ss-header-bg); }
+.ss-expression-checkline { display:flex; align-items:center; gap:8px; font-size:12px; }
+.ss-expression-checkline input { accent-color:var(--ss-accent); }
+.ss-expression-bank-list { display:grid; gap:8px; min-width:0; }
+.ss-expression-bank-item { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; padding:12px; border:1px solid var(--ss-outline); border-radius:11px; background:var(--ss-panel-hi); }
+.ss-expression-bank-item > div { flex:1 1 160px; min-width:0; display:grid; gap:6px; }
+.ss-expression-bank-item strong { font-size:12px; }
+.ss-expression-bank-item p { color:var(--ss-muted); font-size:11px; line-height:1.4; overflow-wrap:anywhere; }
+.ss-expression-bank-item .ss-button { min-height:30px; font-size:10px; padding:5px 9px; }
+.ss-expression-inspector-image { position:relative; display:block; min-width:0; min-height:0; height:min(62dvh,640px); overflow:hidden; border:1px solid var(--ss-outline); border-radius:12px; background:var(--ss-canvas-bg); }
+.ss-expression-inspector-image img { position:absolute; inset:0; display:block; width:100%; height:100%; min-width:0; min-height:0; max-width:100%; max-height:100%; padding:12px; object-fit:contain; object-position:center; box-sizing:border-box; }
+.ss-expression-inspector-meta { display:grid; gap:8px; min-width:0; }
+.ss-expression-inspector-meta strong { text-transform:capitalize; font-size:14px; }
+.ss-expression-inspector-meta p { font-size:11px; color:var(--ss-muted); overflow-wrap:anywhere; }
+.ss-expression-inspector-meta small { overflow-wrap:anywhere; color:var(--ss-muted); font-size:10px; }
+.ss-expression-settings-fields { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:14px; min-width:0; }
+.ss-expression-render-fields { display:grid; gap:14px; min-width:0; container:expression-render / inline-size; }
+.ss-expression-parameters,.ss-expression-prompts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
 .ss-expression-prompts { grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); }
-@container expression-render (min-width:560px) {
-  .ss-expression-parameters { grid-template-columns:repeat(4,minmax(0,1fr)); }
+@container expression-render (min-width:540px) { .ss-expression-parameters { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+.ss-expression-canvas { display:grid; gap:14px; max-width:720px; width:100%; min-width:0; padding:16px; border:1px solid var(--ss-outline); border-radius:12px; background:var(--ss-panel-hi); }
+.ss-expression-canvas-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.ss-expression-canvas-head strong { font-size:12px; }
+.ss-expression-canvas-size { color:var(--ss-muted); font:550 11px ui-monospace,monospace; }
+.ss-expression-ratio-presets { display:flex; flex-wrap:wrap; gap:7px; }
+.ss-expression-ratio-button { min-width:67px; min-height:63px; display:grid; justify-items:center; align-content:center; gap:7px; padding:8px; background:var(--ss-field-bg); border:1px solid var(--ss-outline); border-radius:9px; color:var(--ss-muted); font-size:10px; font-weight:650; }
+.ss-expression-ratio-button:hover,.ss-expression-ratio-button[aria-pressed='true'] { border-color:var(--ss-accent-line); background:var(--ss-accent-soft); color:var(--ss-accent); }
+.ss-expression-ratio-shape { display:block; flex:none; max-width:29px; max-height:25px; min-width:9px; min-height:9px; border:1.5px solid currentColor; border-radius:3px; }
+.ss-expression-dimension-fields { display:grid; grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr); align-items:end; gap:8px; }
+.ss-expression-dimension-field { display:grid; gap:9px; min-width:0; }
+.ss-expression-dimension-field label { display:flex; align-items:center; justify-content:space-between; gap:7px; font-size:11px; font-weight:650; }
+.ss-expression-dimension-field label .ss-input { width:min(110px,62%); height:33px; padding:7px 26px 7px 9px; font-size:12px; font-variant-numeric:tabular-nums; }
+.ss-expression-dimension-field label { position:relative; }
+.ss-expression-unit { position:absolute; right:8px; color:var(--ss-muted); font-size:10px; pointer-events:none; }
+.ss-expression-dimension-range { padding:4px 0; }
+.ss-expression-dimension-range input { display:block; width:100%; margin:0; accent-color:var(--ss-accent); }
+.ss-expression-size-link { display:grid; place-items:center; width:35px; height:35px; padding:0; margin-bottom:1px; border:1px solid var(--ss-outline); border-radius:9px; background:var(--ss-field-bg); color:var(--ss-muted); }
+.ss-expression-size-link[aria-pressed='true'] { border-color:var(--ss-accent-line); background:var(--ss-accent-soft); color:var(--ss-accent); }
+.ss-expression-size-link svg { width:17px; height:17px; }
+.ss-expression-canvas > p { margin:0; font-size:10px; line-height:1.4; }
+.ss-expression-inherited-size { justify-self:start; font-size:11px; }
+@media (max-width:1350px) {
+  .ss-expression-cards { grid-template-columns:repeat(4,minmax(0,1fr)); }
 }
-@media (min-width:980px) {
-  .ss-expression-settings-fields { grid-template-columns:fit-content(66%) minmax(0,1fr); }
+@media (max-width:1000px) {
+  .ss-expression-cards { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .ss-expression-config-divider { display:none; }
+  .ss-expression-toolbar-count { display:none; }
 }
-.ss-expression-settings :is(.ss-input,.ss-select,.ss-textarea),.ss-expression-custom .ss-input { width:100%; min-width:0; }
-.ss-expression-controls p,.ss-expression-footer p { margin:0; color:var(--ss-muted); }
-.ss-expression-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr)); gap:12px; }
-.ss-expression-card { min-width:0; display:grid; gap:8px; align-content:start; padding:10px; border:1px solid var(--ss-outline); border-radius:12px; background:var(--ss-panel-hi); }
-.ss-expression-select { display:flex; align-items:center; gap:8px; font-weight:650; text-transform:capitalize; overflow-wrap:anywhere; }
-.ss-expression-select input { accent-color:var(--ss-accent); flex:none; }
-.ss-expression-preview { position:relative; aspect-ratio:1; display:grid; place-items:center; min-width:0; overflow:hidden; border-radius:8px; color:var(--ss-muted); background:var(--ss-canvas-bg); }
-.ss-expression-preview img { width:100%; height:100%; min-height:0; object-fit:contain; }
-.ss-expression-tile-feedback {
-  position:absolute; inset:auto 8px 8px; display:grid; gap:6px; padding:8px;
-  border:1px solid var(--ss-outline); border-radius:8px; background:var(--ss-panel-hi); color:var(--ss-text); font-size:11px;
+@media (max-width:750px) {
+  .ss-expression-scroll { padding-top:18px; }
+  .ss-expression-steps .ss-expression-step { flex:0 0 147px; }
+  .ss-expression-config { gap:10px; }
+  .ss-expression-config-settings { margin-left:0; }
+  .ss-expression-cards { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 }
-.ss-expression-tile-feedback progress { width:100%; height:6px; accent-color:var(--ss-accent); }
-.ss-expression-slot-actions { display:flex; gap:6px; flex-wrap:wrap; }
-.ss-expression-slot-actions .ss-button { flex:1; }
-.ss-expression-card :is(.ss-select,.ss-textarea) { width:100%; min-width:0; }
-.ss-expression-footer { justify-content:space-between; border-top:1px solid var(--ss-outline); padding-bottom:max(10px,env(safe-area-inset-bottom,0px)); }
+@media (max-width:600px) {
+  .ss-expression-header { min-height:55px; padding:8px 14px; }
+  .ss-expression-steps { padding:7px 12px; min-height:50px; }
+  .ss-expression-steps .ss-expression-step { flex:0 0 128px; min-height:34px; padding:5px 6px; font-size:10px; }
+  .ss-expression-step-number { width:22px; height:22px; }
+  .ss-expression-overview-copy h3 { font-size:19px; }
+  .ss-expression-naming { grid-template-columns:minmax(0,1fr) minmax(90px,auto); }
+  .ss-expression-count { font-size:10px; }
+  .ss-expression-config { padding:12px; }
+  .ss-expression-config :is(.ss-field,.ss-expression-config-reference) { flex:1 1 100%; max-width:none; }
+  .ss-expression-config-model { flex:1 1 140px; }
+  .ss-expression-gallery-left,.ss-expression-gallery-right { width:100%; }
+  .ss-expression-gallery-right { margin-left:0; }
+  .ss-expression-gallery-toolbar .ss-button { padding:6px 7px; }
+  .ss-expression-cards { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .ss-expression-card-head { inset:8px 6px auto; }
+  .ss-expression-select { font-size:10px; gap:4px; padding:4px 5px; }
+  .ss-expression-select span { display:none; }
+  .ss-expression-state-label { font-size:8px; padding:3px 5px; }
+  .ss-expression-card-info { padding:9px 8px 7px; }
+  .ss-expression-card-editing .ss-expression-card-info { height:67px; }
+  .ss-expression-card-edit-panel { padding:9px 8px 7px; }
+  .ss-expression-card-actions { margin:0 8px; padding:8px 0; gap:4px; }
+  .ss-expression-card-actions .ss-button { font-size:10px; min-height:29px; padding:5px 4px; }
+  .ss-expression-card-actions .ss-expression-card-attach { flex-basis:28px; width:28px; }
+  .ss-expression-footer { padding:9px 12px max(9px,env(safe-area-inset-bottom)); }
+  .ss-expression-footer-identity { flex-basis:100%; }
+  .ss-expression-actions { width:100%; }
+  .ss-expression-actions .ss-button { flex:1 1 auto; padding:7px; font-size:10px; }
+  .ss-expression-overlay-panel { width:100vw; }
+  .ss-expression-overlay-panel.ss-expression-overlay-wide { width:100vw; }
+  .ss-expression-overlay-body { padding:15px; }
+  .ss-expression-overlay-bottom { padding:10px 14px max(10px,env(safe-area-inset-bottom)); }
+  .ss-expression-canvas { padding:12px; }
+  .ss-expression-ratio-button { flex:1 1 27%; min-width:0; }
+  .ss-expression-parameters { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+
 .ss-library-folder-view {
   min-width:0; min-height:0; overflow:hidden;
   display:grid; grid-template-rows:auto auto minmax(0,1fr);
@@ -4241,18 +4463,32 @@ function openCharacterExpressions(root, options) {
     };
     const close = action("Close", ()=>void closeDialog());
     const header = element("header", "ss-expression-header");
-    header.append(heading, close);
+    const headerCopy = element("div", "ss-expression-header-copy");
+    headerCopy.append(element("small", "", "Output library  /  " + options.folder.name), heading);
+    heading.textContent = "Expression Studio";
+    const headerIdentity = element("div", "ss-expression-identity");
+    const mark = element("span", "ss-expression-mark", "✦");
+    mark.setAttribute("aria-hidden", "true");
+    headerIdentity.append(mark, headerCopy);
+    header.append(headerIdentity, close);
     const steps = element("nav", "ss-expression-steps");
     steps.setAttribute("aria-label", "Expression stages");
     const controls = element("div", "ss-expression-controls");
     const cards = element("div", "ss-expression-cards");
+    const galleryHead = element("div", "ss-expression-gallery-head");
     const scroll = element("div", "ss-expression-scroll");
-    scroll.append(controls, cards);
+    scroll.append(controls, galleryHead, cards);
     const footer = element("footer", "ss-expression-footer");
     const status = element("p", "", "");
     status.setAttribute("role", "status");
+    const footerIdentity = element("div", "ss-expression-footer-identity");
+    const footerMark = element("span", "ss-expression-footer-mark", "◇");
+    footerMark.setAttribute("aria-hidden", "true");
+    const footerCopy = element("div", "ss-expression-footer-copy");
+    footerIdentity.append(footerMark, footerCopy);
+    footerCopy.append(status);
     const actions = element("div", "ss-expression-actions");
-    footer.append(status, actions);
+    footer.append(footerIdentity, actions);
     dialog.append(header, steps, scroll, footer);
     const fields = (label, control)=>{
         const field = element("label", "ss-field");
@@ -4464,7 +4700,6 @@ function openCharacterExpressions(root, options) {
             drafts: new Set()
         });
     let generation = cleanExpressionGeneration(null);
-    let showAll = false;
     let loading = true;
     let settingsAvailable = false;
     let saved = "";
@@ -4473,36 +4708,8 @@ function openCharacterExpressions(root, options) {
     const saveStatus = element("span", "ss-muted");
     saveStatus.setAttribute("role", "status");
     const progressTiles = new Map();
-    const settingsPanel = element("details", "ss-expression-settings");
-    settingsPanel.append(element("summary", "", "Set generation settings"));
     const settingsFields = element("div", "ss-expression-settings-fields");
-    settingsPanel.append(settingsFields);
-    const setToolbar = element("div", "ss-expression-toolbar");
-    const custom = element("input", "ss-input");
-    custom.placeholder = "e.g. Wistful";
-    custom.maxLength = 40;
-    custom.required = true;
-    const customForm = element("form", "ss-expression-custom");
-    const add = element("button", "ss-button", "Add custom slot");
-    add.type = "submit";
-    customForm.append(fields("Custom expression", custom), add);
-    custom.addEventListener("input", ()=>custom.setCustomValidity(""));
-    customForm.addEventListener("submit", (event)=>{
-        event.preventDefault();
-        const label = cleanExpressionLabel(custom.value);
-        if (!label || rows.some((row)=>row.label.toLowerCase() === label.toLowerCase())) {
-            custom.setCustomValidity(label ? "That expression already exists." : "Enter a name using letters, numbers, spaces, or hyphens.");
-            custom.reportValidity();
-            return;
-        }
-        if (rows.length >= EXPRESSION_SPREAD.length + EXPRESSION_CUSTOM_LIMIT) return;
-        const row = makeRow(label, label.toLowerCase(), true);
-        rows.push(row);
-        custom.value = "";
-        saveSet();
-        render();
-        directionInputs.get(row)?.focus();
-    });
+    footerCopy.append(saveStatus);
     const getSettings = ()=>({
             generation: {
                 ...generation,
@@ -4511,9 +4718,12 @@ function openCharacterExpressions(root, options) {
                 }
             },
             selected: rows.filter((row)=>row.selected).map((row)=>row.label.toLowerCase()),
-            slots: rows.map(({ label, direction })=>({
+            slots: rows.map(({ label, direction, bankId })=>({
                     label,
-                    direction
+                    direction,
+                    ...bankId ? {
+                        bankId
+                    } : {}
                 }))
         });
     const saveSet = ()=>{
@@ -4543,11 +4753,14 @@ function openCharacterExpressions(root, options) {
         if (dialog.contains(document.activeElement) && document.activeElement instanceof HTMLElement) document.activeElement.blur();
         saveSet();
         render();
-        await saveTask;
+        await Promise.all([
+            saveTask,
+            bankSaveTask
+        ]);
         if (!disposed && dialog.open) {
-            if (settingsAvailable && !saved && close.textContent !== "Close without saving") {
+            if ((settingsAvailable && !saved || bankAvailable && !bankSnapshot) && close.textContent !== "Close without saving") {
                 close.textContent = "Close without saving";
-                status.textContent = "The set could not be saved to your account.";
+                status.textContent = "The expression set or bank could not be saved to your account.";
             } else dialog.close();
         }
         closing = false;
@@ -4558,76 +4771,403 @@ function openCharacterExpressions(root, options) {
             });
         }
     };
-    const directionInputs = new Map();
+    let bank = [];
+    let bankLoaded = false;
+    let bankAvailable = false;
+    let bankSnapshot = "";
+    let bankSaveTask = Promise.resolve();
+    let bankSearch = "";
+    let galleryFilter = "all";
+    let previewMode = "portrait";
+    let linkedSize = true;
+    let currentRatio = 0;
+    let inlineEdit = null;
+    let overlayFocus = null;
+    const overlay = element("div", "ss-expression-overlay");
+    overlay.hidden = true;
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    const overlayScrim = element("button", "ss-expression-overlay-scrim");
+    overlayScrim.type = "button";
+    overlayScrim.setAttribute("aria-label", "Close panel");
+    const overlayPanel = element("div", "ss-expression-overlay-panel");
+    overlay.append(overlayScrim, overlayPanel);
+    dialog.append(overlay);
+    const closeOverlay = ()=>{
+        overlay.hidden = true;
+        overlayPanel.replaceChildren();
+        overlayFocus?.focus({
+            preventScroll: true
+        });
+        overlayFocus = null;
+    };
+    overlayScrim.addEventListener("click", closeOverlay);
+    const openOverlay = (title, kicker, wide = false)=>{
+        if (overlay.hidden) overlayFocus = dialog.ownerDocument.activeElement;
+        overlay.hidden = false;
+        overlayPanel.classList.toggle("ss-expression-overlay-wide", wide);
+        const head = element("header", "ss-expression-overlay-head");
+        const copy = element("div", "ss-expression-overlay-heading");
+        copy.append(element("small", "ss-expression-kicker", kicker), element("h3", "", title));
+        const exit = action("Close", closeOverlay);
+        exit.classList.add("ss-expression-overlay-close");
+        head.append(copy, exit);
+        const body = element("div", "ss-expression-overlay-body");
+        const bottom = element("footer", "ss-expression-overlay-bottom");
+        overlayPanel.replaceChildren(head, body, bottom);
+        exit.focus({
+            preventScroll: true
+        });
+        return {
+            body,
+            bottom
+        };
+    };
+    const defaultDirection = (row)=>{
+        const builtin = EXPRESSION_SPREAD.find(([name])=>name === row.label.toLowerCase());
+        if (builtin) return builtin[1];
+        return bank.find((item)=>item.id === row.bankId)?.direction ?? row.originalDirection ?? row.direction;
+    };
+    const saveBank = ()=>{
+        if (!bankAvailable) return;
+        const snapshot = JSON.stringify(bank);
+        if (bankSnapshot === snapshot) return;
+        bankSnapshot = snapshot;
+        bankSaveTask = bankSaveTask.then(async ()=>{
+            try {
+                await options.request("save_expression_bank", {
+                    templates: JSON.parse(snapshot)
+                });
+            } catch  {
+                if (bankSnapshot === snapshot) {
+                    bankSnapshot = "";
+                    status.textContent = "Could not save the custom expression bank. Retry by editing a template.";
+                }
+            }
+        });
+    };
+    const bankId = ()=>`bank-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const upsertBank = (label, direction)=>{
+        if (!bankAvailable) return null;
+        if (EXPRESSION_SPREAD.some(([name])=>name === label.toLowerCase())) return null;
+        const entry = bank.find((item)=>item.label.toLowerCase() === label.toLowerCase());
+        if (entry) entry.direction = direction.slice(0, EXPRESSION_DIRECTION_LIMIT);
+        else {
+            if (bank.length >= 150) return null;
+            bank.push({
+                id: bankId(),
+                label,
+                direction: direction.slice(0, EXPRESSION_DIRECTION_LIMIT)
+            });
+        }
+        saveBank();
+        return bank.find((item)=>item.label.toLowerCase() === label.toLowerCase()) ?? null;
+    };
+    const addCustomSlot = (label, direction, template)=>{
+        const name = cleanExpressionLabel(label);
+        if (!name || rows.some((row)=>row.label.toLowerCase() === name.toLowerCase()) || rows.length >= EXPRESSION_SPREAD.length + EXPRESSION_CUSTOM_LIMIT) return false;
+        const row = makeRow(name, direction.slice(0, EXPRESSION_DIRECTION_LIMIT), true);
+        row.bankId = template?.id;
+        row.originalDirection = row.direction;
+        rows.push(row);
+        galleryFilter = "all";
+        saveSet();
+        render();
+        return true;
+    };
+    const openCustomSlot = ()=>{
+        const { body, bottom } = openOverlay("New expression", "Custom slot");
+        const name = element("input", "ss-input");
+        name.placeholder = "e.g. Wistful";
+        name.maxLength = 40;
+        const direction = element("textarea", "ss-textarea");
+        direction.rows = 5;
+        direction.maxLength = EXPRESSION_DIRECTION_LIMIT;
+        direction.placeholder = "Describe the expression, gaze, and body language";
+        const checkbox = element("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = bankAvailable;
+        checkbox.disabled = !bankAvailable;
+        const persist = element("label", "ss-expression-checkline");
+        persist.append(checkbox, element("span", "", "Also save as a reusable bank template"));
+        body.append(fields("Expression name", name), fields("Direction", direction), persist);
+        const create = action("Add expression", ()=>{
+            const label = cleanExpressionLabel(name.value);
+            if (!label) {
+                name.setCustomValidity("Use a valid name up to 40 characters.");
+                name.reportValidity();
+                name.setCustomValidity("");
+                return;
+            }
+            if (rows.some((row)=>row.label.toLowerCase() === label.toLowerCase())) {
+                status.textContent = "That expression already exists in this set.";
+                name.focus();
+                return;
+            }
+            if (checkbox.checked && bank.some((item)=>item.label.toLowerCase() === label.toLowerCase())) {
+                status.textContent = "This name already exists in the bank. Use its existing template instead.";
+                return;
+            }
+            const content = direction.value.trim() || label.toLowerCase();
+            const template = checkbox.checked ? upsertBank(label, content) ?? undefined : undefined;
+            if (!addCustomSlot(label, content, template)) {
+                status.textContent = "The custom slot limit has been reached.";
+                return;
+            }
+            closeOverlay();
+        }, true);
+        bottom.append(create);
+    };
+    const beginInlineEdit = (row)=>{
+        if (busy || closing || stage !== 0) return;
+        inlineEdit = {
+            row,
+            draft: row.direction,
+            bankId: row.bankId
+        };
+        render();
+        cards.querySelector("[data-expression-inline-editor]")?.focus({
+            preventScroll: true
+        });
+    };
+    const focusCardEditorButton = (row)=>{
+        if (!row) return;
+        const button = [
+            ...cards.querySelectorAll("[data-expression-focus]")
+        ].find((item)=>item.dataset.expressionFocus === `edit-${row.label}`);
+        button?.focus({
+            preventScroll: true
+        });
+    };
+    const cancelInlineEdit = ()=>{
+        const row = inlineEdit?.row;
+        inlineEdit = null;
+        render();
+        focusCardEditorButton(row);
+    };
+    const commitInlineEdit = ()=>{
+        if (!inlineEdit) return;
+        const { row, draft, bankId } = inlineEdit;
+        row.direction = draft.slice(0, EXPRESSION_DIRECTION_LIMIT);
+        if (bankId) {
+            row.bankId = bankId;
+            if (!EXPRESSION_SPREAD.some(([label])=>label === row.label.toLowerCase())) {
+                row.originalDirection = bank.find((item)=>item.id === bankId)?.direction ?? row.originalDirection;
+            }
+        }
+        inlineEdit = null;
+        saveSet();
+        render();
+        focusCardEditorButton(row);
+    };
+    const saveInlineToBank = ()=>{
+        if (!inlineEdit || !bankAvailable) return;
+        const { row, draft, bankId: pendingId } = inlineEdit;
+        const builtIn = EXPRESSION_SPREAD.some(([label])=>label === row.label.toLowerCase());
+        let label = row.label;
+        if (builtIn) {
+            const existing = bank.find((item)=>item.id === pendingId);
+            if (existing) label = existing.label;
+            else {
+                let index = 1;
+                label = `${row.label} variant`;
+                while(bank.some((item)=>item.label.toLowerCase() === label.toLowerCase())){
+                    index++;
+                    label = `${row.label} variant ${index}`;
+                }
+            }
+        }
+        const template = upsertBank(label, draft);
+        if (!template) {
+            status.textContent = "The expression bank is full or unavailable.";
+            return;
+        }
+        inlineEdit.bankId = template.id;
+        inlineEdit.bankLabel = template.label;
+        render();
+        cards.querySelector("[data-expression-inline-editor]")?.focus({
+            preventScroll: true
+        });
+    };
+    const openInspector = (row)=>{
+        if (!row.image) return;
+        const { body, bottom } = openOverlay(row.label, "Image inspector", true);
+        const frame = element("div", "ss-expression-inspector-image");
+        const image = element("img");
+        image.src = row.image.url;
+        image.alt = `${row.label} expression, full image`;
+        frame.append(image);
+        const info = element("div", "ss-expression-inspector-meta");
+        info.append(element("strong", "", row.label), element("p", "", row.direction), element("small", "", `Output · ${row.image.id}`));
+        body.append(frame, info);
+        const available = rows.filter((item)=>item.image);
+        const index = available.indexOf(row);
+        for (const [label, offset] of [
+            [
+                "Previous",
+                -1
+            ],
+            [
+                "Next",
+                1
+            ]
+        ]){
+            const button = action(label, ()=>openInspector(available[(index + offset + available.length) % available.length]));
+            button.disabled = available.length < 2;
+            bottom.append(button);
+        }
+        bottom.append(action("Choose saved image", ()=>options.pickImage("saved", row.image?.id || "", (image)=>{
+                setImage(row, image);
+                closeOverlay();
+                render();
+            })));
+    };
+    const openBank = ()=>{
+        const { body, bottom } = openOverlay("Expression bank", "Reusable directions", true);
+        const search = element("input", "ss-input");
+        search.type = "search";
+        search.value = bankSearch;
+        search.placeholder = "Find a saved expression…";
+        const list = element("div", "ss-expression-bank-list");
+        const paint = ()=>{
+            list.replaceChildren();
+            if (!bankLoaded) {
+                list.append(element("p", "ss-muted", "Loading your account bank…"));
+                return;
+            }
+            for (const entry of bank.filter((item)=>item.label.toLowerCase().includes(bankSearch.toLowerCase()))){
+                const item = element("div", "ss-expression-bank-item");
+                const description = element("div");
+                description.append(element("strong", "", entry.label), element("p", "", entry.direction));
+                const use = action("Use", ()=>{
+                    if (!addCustomSlot(entry.label, entry.direction, entry)) {
+                        status.textContent = "This expression is already in the set or the custom slot limit is reached.";
+                        return;
+                    }
+                    closeOverlay();
+                }, true);
+                const edit = action("Edit", ()=>{
+                    const { body: editBody, bottom: editBottom } = openOverlay(entry.label, "Bank template");
+                    const name = element("input", "ss-input");
+                    name.value = entry.label;
+                    name.maxLength = 40;
+                    const text = element("textarea", "ss-textarea");
+                    text.rows = 6;
+                    text.maxLength = EXPRESSION_DIRECTION_LIMIT;
+                    text.value = entry.direction;
+                    editBody.append(fields("Template name", name), fields("Default direction", text));
+                    editBottom.append(action("Back to bank", openBank), action("Save template", ()=>{
+                        const label = cleanExpressionLabel(name.value);
+                        if (!label || EXPRESSION_SPREAD.some(([builtin])=>builtin === label.toLowerCase()) || bank.some((item)=>item !== entry && item.label.toLowerCase() === label.toLowerCase())) {
+                            status.textContent = "That bank name is invalid or already in use.";
+                            return;
+                        }
+                        entry.label = label;
+                        entry.direction = text.value;
+                        saveBank();
+                        openBank();
+                    }, true));
+                });
+                const drop = action("Delete", ()=>{
+                    if (!window.confirm(`Delete ${entry.label} from the reusable bank? Existing character slots will remain.`)) return;
+                    bank = bank.filter((item)=>item !== entry);
+                    saveBank();
+                    paint();
+                });
+                drop.classList.add("ss-button-danger");
+                item.append(description, use, edit, drop);
+                list.append(item);
+            }
+            if (!list.childElementCount) list.append(element("p", "ss-muted", "No saved expressions found. Create one using New expression."));
+        };
+        search.addEventListener("input", ()=>{
+            bankSearch = search.value;
+            paint();
+        });
+        body.append(element("p", "ss-muted", "Save custom directions once, then reuse them across characters. Removing a slot never deletes its bank template."), search, list);
+        paint();
+        const reset = action("Reset built-in directions", ()=>{
+            if (!window.confirm("Restore defaults for the 20 built-in expressions? Custom slots and images stay intact.")) return;
+            for (const row of rows)if (EXPRESSION_SPREAD.some(([label])=>label === row.label.toLowerCase())) row.direction = defaultDirection(row);
+            saveSet();
+            render();
+            status.textContent = "Built-in directions restored to defaults.";
+        });
+        const importFile = element("input");
+        importFile.type = "file";
+        importFile.accept = ".json,application/json";
+        importFile.hidden = true;
+        importFile.addEventListener("change", ()=>{
+            const file = importFile.files?.[0];
+            if (!file) return;
+            if (file.size > 1024 * 1024) {
+                status.textContent = "Bank import must be under 1 MB.";
+                return;
+            }
+            void file.text().then((text)=>{
+                const parsed = JSON.parse(text);
+                const record = parsed && typeof parsed === "object" ? parsed : {};
+                if (record.format !== "lumiswarm-expression-bank-v1" || !Array.isArray(record.expressions) || record.expressions.length > 150) throw new Error("Invalid expression bank format.");
+                const entries = cleanStudioExpressionBank(record.expressions);
+                if (entries.length !== record.expressions.length) throw new Error("One or more template names are invalid or duplicated.");
+                if (bank.length + entries.filter((item)=>!bank.some((existing)=>existing.label.toLowerCase() === item.label.toLowerCase())).length > 150) throw new Error("Bank limit of 150 templates exceeded.");
+                for (const item of entries)upsertBank(item.label, item.direction);
+                saveBank();
+                paint();
+            }).catch((error)=>{
+                status.textContent = `Import failed: ${error instanceof Error ? error.message : String(error)}`;
+            });
+        });
+        const importButton = action("Import JSON", ()=>importFile.click());
+        const exportButton = action("Export JSON", ()=>{
+            const blob = new Blob([
+                JSON.stringify({
+                    format: "lumiswarm-expression-bank-v1",
+                    expressions: bank
+                }, null, 2)
+            ], {
+                type: "application/json"
+            });
+            const url = URL.createObjectURL(blob);
+            const link = element("a");
+            link.href = url;
+            link.download = "lumiswarm-expression-bank.json";
+            link.click();
+            window.setTimeout(()=>URL.revokeObjectURL(url), 1000);
+        });
+        bottom.append(importFile, importButton, exportButton, reset, action("New expression", openCustomSlot, true));
+    };
     const renderCanvasSettings = ()=>{
         const canvas = element("section", "ss-expression-canvas");
-        const shape = element("span", "ss-expression-canvas-shape");
+        const head = element("div", "ss-expression-canvas-head");
+        const title = element("strong", "", "Canvas dimensions");
         const size = element("output", "ss-expression-canvas-size");
-        const preview = element("div", "ss-expression-canvas-preview");
-        preview.append(shape, size);
-        const controls = element("div", "ss-expression-canvas-controls");
-        const presets = element("div", "ss-expression-presets");
+        head.append(title, size);
+        const presets = element("div", "ss-expression-ratio-presets");
         presets.setAttribute("role", "group");
-        presets.setAttribute("aria-label", "Canvas aspect ratio");
-        const orientations = element("div", "ss-expression-presets");
-        orientations.setAttribute("role", "group");
-        orientations.setAttribute("aria-label", "Canvas orientation");
-        const toolbar = element("div", "ss-expression-canvas-toolbar");
+        presets.setAttribute("aria-label", "Aspect ratio presets");
         const axes = [
             "width",
             "height"
         ];
         const getSize = (axis)=>Math.round(generation.recipe[axis] ?? options.inheritedRecipe[axis] ?? EXPRESSION_DEFAULT_RECIPE[axis]);
-        let preferVertical = getSize("height") > getSize("width");
-        const sliders = axes.map((axis, index)=>{
-            const [, min, max] = GENERATION_NUMBER_LIMITS[index];
-            const label = axis === "width" ? "Width" : "Height";
-            const slider = element("input");
-            slider.type = "range";
-            slider.min = String(min);
-            slider.max = String(max);
-            slider.step = "any";
-            slider.setAttribute("aria-label", label + " slider");
-            const exact = element("input", "ss-input");
-            exact.type = "number";
-            exact.min = String(min);
-            exact.max = String(max);
-            exact.step = "1";
-            exact.placeholder = String(options.inheritedRecipe[axis] ?? EXPRESSION_DEFAULT_RECIPE[axis]);
-            exact.setAttribute("aria-label", label);
-            const row = element("div", "ss-expression-axis");
-            row.append(element("span", "", label), slider, exact);
-            slider.addEventListener("input", ()=>{
-                generation.recipe[axis] = clamp(Math.round(slider.valueAsNumber / 8) * 8, min, max);
-                syncCanvas();
-            });
-            slider.addEventListener("change", saveSet);
-            slider.addEventListener("keydown", (event)=>{
-                const dir = event.key === "ArrowRight" || event.key === "ArrowUp" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowDown" ? -1 : 0;
-                if (!dir) return;
-                event.preventDefault();
-                generation.recipe[axis] = clamp(getSize(axis) + dir * 8, min, max);
-                syncCanvas();
-                saveSet();
-            });
-            exact.addEventListener("change", ()=>{
-                if (!exact.checkValidity()) exact.reportValidity();
-                else if (exact.value) generation.recipe[axis] = exact.valueAsNumber;
-                else delete generation.recipe[axis];
-                syncCanvas();
-                saveSet();
-            });
-            return {
-                axis,
-                slider,
-                exact,
-                row
-            };
-        });
-        const aspectChoices = [
+        currentRatio = linkedSize && Number.isFinite(currentRatio) && currentRatio > 0 ? currentRatio : getSize("width") / getSize("height");
+        const ratioChoices = [
             [
                 "1:1",
                 1
+            ],
+            [
+                "3:4",
+                3 / 4
+            ],
+            [
+                "2:3",
+                2 / 3
+            ],
+            [
+                "9:16",
+                9 / 16
             ],
             [
                 "4:3",
@@ -4638,70 +5178,121 @@ function openCharacterExpressions(root, options) {
                 16 / 9
             ]
         ];
-        const setSize = (width, height)=>{
-            Object.assign(generation.recipe, {
-                width,
-                height
-            });
-            syncCanvas();
+        const ratioButtons = [];
+        const dimensionFields = element("div", "ss-expression-dimension-fields");
+        const sliders = [];
+        const nearest64 = (value)=>clamp(Math.round(value / 64) * 64, 64, 4096);
+        const sizeChange = (axis, value, snap)=>{
+            if (!Number.isFinite(value)) return;
+            const changed = clamp(snap ? nearest64(value) : Math.round(value), 64, 4096);
+            const other = axis === "width" ? "height" : "width";
+            generation.recipe[axis] = changed;
+            if (linkedSize) generation.recipe[other] = clamp(Math.round((axis === "width" ? changed / currentRatio : changed * currentRatio) / 8) * 8, 64, 4096);
+            else currentRatio = getSize("width") / getSize("height");
+            sync();
             saveSet();
         };
-        const applyRatio = (ratio, vertical)=>{
-            const long = Math.max(getSize("width"), getSize("height"));
-            const short = ratio === 1 ? long : Math.max(64, Math.round(long / ratio / 8) * 8);
-            setSize(vertical ? short : long, vertical ? long : short);
+        for (const axis of axes){
+            const field = element("div", "ss-expression-dimension-field");
+            const label = element("label", "", axis === "width" ? "Width" : "Height");
+            const exact = element("input", "ss-input");
+            exact.type = "number";
+            exact.min = "64";
+            exact.max = "4096";
+            exact.step = "1";
+            exact.setAttribute("aria-label", `${axis} in pixels`);
+            label.append(exact, element("span", "ss-expression-unit", "px"));
+            const slider = element("input");
+            slider.type = "range";
+            slider.min = "64";
+            slider.max = "4096";
+            slider.step = "64";
+            slider.setAttribute("aria-label", `${axis} slider`);
+            slider.addEventListener("input", ()=>sizeChange(axis, slider.valueAsNumber, true));
+            exact.addEventListener("change", ()=>{
+                if (!exact.value || !exact.checkValidity()) {
+                    exact.reportValidity();
+                    exact.value = String(getSize(axis));
+                    return;
+                }
+                sizeChange(axis, exact.valueAsNumber, false);
+            });
+            exact.addEventListener("keydown", (event)=>{
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    exact.blur();
+                }
+            });
+            const sliderWrap = element("div", "ss-expression-dimension-range");
+            sliderWrap.append(slider);
+            field.append(label, sliderWrap);
+            dimensionFields.append(field);
+            sliders.push({
+                axis,
+                slider,
+                exact
+            });
+        }
+        const linked = action("", ()=>{
+            linkedSize = !linkedSize;
+            currentRatio = getSize("width") / getSize("height");
+            sync();
+        });
+        linked.classList.add("ss-expression-size-link");
+        linked.setAttribute("title", "Toggle linked dimensions");
+        linked.setAttribute("aria-label", "Keep width and height at the current aspect ratio");
+        linked.setAttribute("aria-pressed", String(linkedSize));
+        linked.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13.5 14 9.5m-7.5 7h-1a4.5 4.5 0 0 1 0-9h3m7 0h3a4.5 4.5 0 0 1 0 9h-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+        dimensionFields.insertBefore(linked, dimensionFields.children[1]);
+        const sync = (updateExact = true)=>{
+            const width = getSize("width"), height = getSize("height");
+            size.textContent = `${width} × ${height}`;
+            for (const { axis, slider, exact } of sliders){
+                const value = getSize(axis);
+                slider.value = String(nearest64(value));
+                slider.setAttribute("aria-valuetext", `${value} pixels`);
+                if (updateExact || document.activeElement !== exact) exact.value = String(value);
+            }
+            linked.setAttribute("aria-pressed", String(linkedSize));
+            linked.setAttribute("aria-label", linkedSize ? "Unlink width and height" : "Link width and height");
+            for (const { ratio, button } of ratioButtons){
+                const active = Math.abs(width / height - ratio) < 0.018;
+                button.setAttribute("aria-pressed", String(active));
+            }
         };
-        const ratios = aspectChoices.map(([label, ratio])=>{
-            const button = action(label, ()=>applyRatio(ratio, preferVertical));
+        for (const [label, ratio] of ratioChoices){
+            const button = action("", ()=>{
+                const long = nearest64(Math.max(getSize("width"), getSize("height")));
+                linkedSize = true;
+                currentRatio = ratio;
+                generation.recipe.width = ratio >= 1 ? long : Math.max(64, Math.round(long * ratio / 8) * 8);
+                generation.recipe.height = ratio <= 1 ? long : Math.max(64, Math.round(long / ratio / 8) * 8);
+                sync();
+                saveSet();
+            });
+            button.classList.add("ss-expression-ratio-button");
+            button.setAttribute("aria-label", `${label} aspect ratio`);
+            const graphic = element("span", "ss-expression-ratio-shape");
+            graphic.style.width = `${Math.round(ratio >= 1 ? 19 : 19 * ratio)}px`;
+            graphic.style.height = `${Math.round(ratio <= 1 ? 19 : 19 / ratio)}px`;
+            button.append(graphic, element("span", "", label));
             presets.append(button);
-            return {
+            ratioButtons.push({
                 button,
                 ratio
-            };
-        });
-        const directions = [
-            false,
-            true
-        ].map((vertical)=>{
-            const button = action(vertical ? "Vertical" : "Horizontal", ()=>{
-                const width = getSize("width");
-                const height = getSize("height");
-                if (width === height) applyRatio(4 / 3, vertical);
-                else if (height > width !== vertical) setSize(height, width);
             });
-            orientations.append(button);
-            return button;
-        });
+        }
+        const tip = element("p", "ss-muted", "64 px slider increments · Link preserves the selected ratio. Unlink to resize freely.");
         const reset = action("Use inherited size", ()=>{
             delete generation.recipe.width;
             delete generation.recipe.height;
-            syncCanvas();
+            currentRatio = getSize("width") / getSize("height");
+            sync();
             saveSet();
         });
-        const syncCanvas = ()=>{
-            const width = getSize("width");
-            const height = getSize("height");
-            const long = Math.max(width, height);
-            const short = Math.min(width, height);
-            if (width !== height) preferVertical = height > width;
-            for (const { axis, slider, exact } of sliders){
-                slider.value = String(getSize(axis));
-                slider.setAttribute("aria-valuetext", getSize(axis) + " pixels");
-                exact.value = String(generation.recipe[axis] ?? "");
-            }
-            for (const { button, ratio } of ratios){
-                button.setAttribute("aria-pressed", String(ratio === 1 ? width === height : Math.abs(short - long / ratio) <= 4));
-            }
-            directions[0].setAttribute("aria-pressed", String(width > height));
-            directions[1].setAttribute("aria-pressed", String(height > width));
-            shape.style.width = width / long * 44 + "px";
-            shape.style.height = height / long * 44 + "px";
-            size.textContent = width + " × " + height;
-        };
-        syncCanvas();
-        toolbar.append(presets, orientations, reset);
-        controls.append(element("h3", "", "Canvas size"), toolbar, ...sliders.map((item)=>item.row));
-        canvas.append(preview, controls);
+        reset.classList.add("ss-expression-inherited-size");
+        canvas.append(head, presets, dimensionFields, tip, reset);
+        sync();
         return canvas;
     };
     const renderSettings = ()=>{
@@ -4990,6 +5581,7 @@ function openCharacterExpressions(root, options) {
         }
     });
     const changeStage = (index)=>{
+        inlineEdit = null;
         stage = index;
         if (stage === 1) void loadEnhanceOptions();
         if (stage === 2 && backgroundMode.value === "builtin" && !modelChecked) void checkModel();
@@ -5007,6 +5599,28 @@ function openCharacterExpressions(root, options) {
         return button;
     });
     steps.append(...stepButtons);
+    const stageHeadings = [
+        [
+            "01 / Build your set",
+            "Expression gallery",
+            "Choose expressions, refine their directions, and render or attach a saved portrait."
+        ],
+        [
+            "02 / Enhance",
+            "Refine your portraits",
+            "Enhance selected outputs with the active AI Upscale setup."
+        ],
+        [
+            "03 / Background removal",
+            "Prepare clean cutouts",
+            "Remove backgrounds from finished portraits, or skip this step."
+        ],
+        [
+            "04 / Publish expressions",
+            "Ready for your character",
+            "Review your expression names and send selected portraits to Lumiverse."
+        ]
+    ];
     const render = ()=>{
         const focused = dialog.ownerDocument.activeElement;
         const key = focused?.dataset.expressionFocus;
@@ -5018,24 +5632,89 @@ function openCharacterExpressions(root, options) {
             else button.removeAttribute("aria-current");
         });
         controls.replaceChildren();
+        galleryHead.replaceChildren();
         if (loading) {
             controls.append(element("p", "ss-muted", "Loading your expression set…"));
             return;
         }
         const selectable = stage === 0 ? rows : rows.filter((row)=>row.image);
-        const hasSelection = selectable.some((row)=>row.selected);
-        const toggleSelection = action(hasSelection ? "Deselect all" : "Select all", ()=>{
-            for (const row of selectable)row.selected = !hasSelection;
-            if (stage === 0 && hasSelection) showAll = true;
-            saveSet();
-            render();
-        });
-        toggleSelection.disabled = disabled || !selectable.length;
-        toggleSelection.dataset.expressionFocus = "toggle-selection";
+        const selected = selectable.filter((row)=>row.selected);
+        const ready = rows.filter((row)=>row.image).length;
+        const overview = element("div", "ss-expression-overview");
+        const headingText = element("div", "ss-expression-overview-copy");
+        headingText.append(element("small", "ss-expression-kicker", stageHeadings[stage][0]), element("h3", "", stageHeadings[stage][1]), element("p", "ss-muted", stageHeadings[stage][2]));
+        const count = element("span", "ss-expression-count", `${ready} / ${rows.length} portraits · ${selected.length} selected`);
+        overview.append(headingText, count);
+        controls.append(overview);
+        const config = element("div", "ss-expression-config");
+        if (stage === 0) {
+            const methodField = fields("Reference method", method);
+            methodField.classList.add("ss-expression-config-method");
+            const syncReference = ()=>{
+                chooseReference.disabled = disabled || !method.value;
+                clearReference.disabled = disabled || !method.value;
+            };
+            method.onchange = syncReference;
+            syncReference();
+            referenceField.classList.add("ss-expression-config-reference");
+            config.append(methodField, element("span", "ss-expression-config-divider"), referenceField, element("span", "ss-expression-config-divider"));
+            const modelInfo = element("div", "ss-expression-config-model");
+            modelInfo.append(element("small", "", "Checkpoint"), element("strong", "", options.model || "Current SwarmUI checkpoint"), element("span", "ss-muted", `${generation.recipe.width ?? options.inheritedRecipe.width ?? 768} × ${generation.recipe.height ?? options.inheritedRecipe.height ?? 768} · ${generation.recipe.steps ?? options.inheritedRecipe.steps ?? 24} steps`));
+            config.append(modelInfo);
+            const settings = action("Generation settings", ()=>{
+                renderSettings();
+                const { body, bottom } = openOverlay("Generation settings", "Shared rendering", true);
+                body.append(settingsFields);
+                bottom.append(action("Done", ()=>{
+                    closeOverlay();
+                    render();
+                }, true));
+            });
+            settings.classList.add("ss-expression-config-settings");
+            config.append(settings);
+        } else if (stage === 1) {
+            const copy = element("div", "ss-expression-config-copy");
+            copy.append(element("strong", "", "AI Upscale"), element("p", "ss-muted", loadingEnhance ? "Loading your enhancement setup…" : enhanceLoadFailed ? "Could not read upscale settings." : enhanceMode === "model" ? "Connected model enhancement" : enhanceMode ? "Resolution set by your saved workflow" : "Configure AI Upscale for this connection first."));
+            config.append(copy);
+            if (enhanceMode === "model") {
+                enhanceFactor.disabled = disabled;
+                config.append(enhanceFactorField);
+            }
+            if (enhanceLoadFailed) config.append(action("Retry", ()=>{
+                enhanceMode = null;
+                void loadEnhanceOptions();
+            }));
+        } else if (stage === 2) {
+            config.append(fields("Background-removal workflow", backgroundMode));
+            if (backgroundMode.value === "builtin") config.append(modelSetup);
+            else if (backgroundMode.value === "custom") config.append(backgroundGraphField);
+            else config.append(fields("Saved workflow", backgroundWorkflow), fields("Source image input", imageInput));
+        } else {
+            const destination = element("div", "ss-expression-config-copy");
+            destination.append(element("strong", "", "Lumiverse character expressions"), element("p", "ss-muted", options.folder.name));
+            const mapping = element("div", "ss-expression-naming");
+            const example = element("code", "", "joy");
+            const update = ()=>{
+                const prefix = sendPrefix.value.trim();
+                example.textContent = prefix ? `${prefix}-joy` : "joy";
+                for (const target of cards.querySelectorAll("[data-expression-map-name]")){
+                    target.textContent = prefix ? `${prefix}-${target.dataset.expressionMapName}` : String(target.dataset.expressionMapName || "");
+                }
+            };
+            sendPrefix.oninput = update;
+            update();
+            const exampleWrap = element("div", "ss-expression-naming-example");
+            exampleWrap.append(element("span", "", "Naming example"), example);
+            mapping.append(sendPrefixField, exampleWrap);
+            config.append(destination, mapping);
+        }
+        controls.append(config);
+        const toolbar = element("div", "ss-expression-gallery-toolbar");
+        const left = element("div", "ss-expression-gallery-left");
         if (stage === 0) {
             const presets = element("div", "ss-expression-presets");
-            const builtIns = rows.slice(0, EXPRESSION_SPREAD.length);
-            for (const [label, slots] of [
+            const builtins = rows.slice(0, EXPRESSION_SPREAD.length);
+            for (const [label, pairs] of [
                 [
                     "Basics",
                     EXPRESSION_BASICS
@@ -5045,56 +5724,78 @@ function openCharacterExpressions(root, options) {
                     EXPRESSION_SPREAD
                 ]
             ]){
-                const inclusion = new Set(slots.map(([slot])=>slot));
-                const preset = action(label, ()=>{
-                    for (const row of builtIns)row.selected = inclusion.has(row.label);
+                const inclusion = new Set(pairs.map(([name])=>name));
+                const button = action(label, ()=>{
+                    for (const row of builtins)row.selected = inclusion.has(row.label.toLowerCase());
                     saveSet();
                     render();
                 });
-                preset.disabled = disabled;
-                preset.dataset.expressionFocus = label;
-                preset.setAttribute("aria-pressed", String(builtIns.every((row)=>row.selected === inclusion.has(row.label))));
-                presets.append(preset);
+                button.disabled = disabled;
+                button.dataset.expressionFocus = label;
+                button.setAttribute("aria-pressed", String(builtins.every((row)=>row.selected === inclusion.has(row.label.toLowerCase()))));
+                presets.append(button);
             }
-            const toggle = action(showAll ? "Show selected slots" : "Show all slots", ()=>{
-                showAll = !showAll;
+            left.append(presets);
+        }
+        const filters = element("div", "ss-expression-filters");
+        for (const [value, caption] of [
+            [
+                "all",
+                "All"
+            ],
+            [
+                "selected",
+                "Selected"
+            ],
+            [
+                "ready",
+                "Ready"
+            ],
+            [
+                "empty",
+                "Empty"
+            ]
+        ]){
+            const filterButton = action(caption, ()=>{
+                inlineEdit = null;
+                galleryFilter = value;
                 render();
             });
-            toggle.disabled = disabled;
-            toggle.dataset.expressionFocus = "show-slots";
-            const count = element("span", "ss-muted", `${rows.filter((row)=>row.selected).length} selected · ${rows.length} slots`);
-            setToolbar.replaceChildren(presets, toggle, toggleSelection, count, saveStatus);
-            custom.disabled = disabled;
-            add.disabled = disabled || rows.length >= EXPRESSION_SPREAD.length + EXPRESSION_CUSTOM_LIMIT;
-            for (const input of settingsFields.querySelectorAll("input, select, textarea, button"))input.disabled = disabled;
-            const sources = element("div", "ss-expression-sources");
-            const syncReferenceAvailability = ()=>{
-                chooseReference.disabled = disabled || !method.value;
-                clearReference.disabled = disabled || !method.value;
-            };
-            method.onchange = syncReferenceAvailability;
-            syncReferenceAvailability();
-            sources.append(fields("Reference method", method), referenceField, element("p", "ss-muted", options.model || "Current SwarmUI checkpoint"));
-            controls.append(setToolbar, sources, settingsPanel, customForm);
-        } else if (stage === 1) {
-            if (enhanceMode === "model") {
-                enhanceFactor.disabled = disabled;
-                controls.append(enhanceFactorField);
-            } else {
-                controls.append(element("p", "ss-muted", loadingEnhance ? "Loading upscale settings…" : enhanceLoadFailed ? "Could not load upscale settings." : enhanceMode ? "The configured workflow sets the output resolution." : "Save an AI Upscale setup for this connection to enhance expressions."));
-                if (enhanceLoadFailed) controls.append(action("Retry loading settings", ()=>{
-                    void loadEnhanceOptions();
-                    render();
-                }));
-            }
-        } else if (stage === 2) {
-            controls.append(fields("Background-removal workflow", backgroundMode));
-            if (backgroundMode.value === "builtin") controls.append(modelSetup);
-            else if (backgroundMode.value === "custom") controls.append(backgroundGraphField);
-            else controls.append(fields("Saved workflow", backgroundWorkflow), fields("Source image input", imageInput));
-        } else {
-            controls.append(sendPrefixField);
+            filterButton.disabled = disabled;
+            filterButton.dataset.expressionFocus = `filter-${value}`;
+            filterButton.setAttribute("aria-pressed", String(galleryFilter === value));
+            filters.append(filterButton);
         }
+        left.append(filters);
+        const toggle = action(selected.length ? "Deselect all" : "Select all", ()=>{
+            const value = !selectable.some((row)=>row.selected);
+            for (const row of selectable)row.selected = value;
+            saveSet();
+            render();
+        });
+        toggle.disabled = disabled || !selectable.length;
+        toggle.dataset.expressionFocus = "toggle-selection";
+        const right = element("div", "ss-expression-gallery-right");
+        right.append(element("span", "ss-expression-toolbar-count", `${selected.length} selected · ${selectable.length} available`));
+        const view = action(previewMode === "portrait" ? "Full portrait" : "Face close-up", ()=>{
+            previewMode = previewMode === "portrait" ? "closeup" : "portrait";
+            render();
+        });
+        view.setAttribute("aria-pressed", String(previewMode === "closeup"));
+        view.dataset.expressionFocus = "preview-mode";
+        if (stage === 0) {
+            const addButton = action("+ Add custom", openCustomSlot);
+            addButton.disabled = disabled || !bankLoaded || rows.length >= EXPRESSION_SPREAD.length + EXPRESSION_CUSTOM_LIMIT;
+            right.append(toggle, addButton);
+            const bankButton = action(`Bank${bankLoaded ? ` · ${bank.length}` : ""}`, openBank);
+            bankButton.disabled = disabled || !bankLoaded;
+            bankButton.dataset.expressionFocus = "bank";
+            bankButton.setAttribute("aria-label", "Expression bank");
+            right.append(bankButton);
+        } else right.append(toggle);
+        right.append(view);
+        toolbar.append(left, right);
+        galleryHead.append(toolbar);
         for (const control of [
             method,
             backgroundMode,
@@ -5105,38 +5806,55 @@ function openCharacterExpressions(root, options) {
         ])control.disabled = disabled;
         installModel.disabled = disabled || Boolean(installTask);
         recheckModel.disabled = disabled || checkingModel || Boolean(installTask);
-        if (stage !== 0 && selectable.length) {
-            setToolbar.replaceChildren(toggleSelection);
-            controls.append(setToolbar);
-        }
-        const all = stage === 0 && !showAll ? selectable.filter((row)=>row.selected) : selectable;
-        const selected = all.filter((row)=>row.selected);
-        directionInputs.clear();
+        const filterRows = selectable.filter((row)=>galleryFilter === "all" ? true : galleryFilter === "selected" ? row.selected : galleryFilter === "ready" ? Boolean(row.image) : !row.image);
         progressTiles.clear();
-        const tiles = all.map((row)=>{
+        const tiles = filterRows.map((row)=>{
             const card = element("article", "ss-expression-card");
+            const isEditing = stage === 0 && inlineEdit?.row === row;
+            card.classList.toggle("ss-expression-card-editing", isEditing);
+            card.dataset.selected = String(row.selected);
+            card.dataset.state = row.state || (row.image ? "ready" : "empty");
+            const cardHead = element("div", "ss-expression-card-head");
             const checkbox = element("input");
             checkbox.type = "checkbox";
             checkbox.checked = row.selected;
             checkbox.disabled = disabled;
             checkbox.dataset.expressionFocus = `select-${row.label}`;
+            checkbox.setAttribute("aria-label", `Select ${row.label}`);
             checkbox.addEventListener("change", ()=>{
                 row.selected = checkbox.checked;
-                if (!showAll && stage === 0 && !row.selected) checkbox.dataset.expressionFocus = "show-slots";
                 saveSet();
                 render();
             });
             const label = element("label", "ss-expression-select");
-            label.append(checkbox, element("span", "", row.label));
+            label.title = `Select ${row.label}`;
+            label.append(checkbox, element("span", "", "Select"));
+            const chip = element("span", "ss-expression-state-label", row.state === "working" ? "Working" : row.state === "queued" ? "Queued" : row.state === "failed" ? "Failed" : row.image ? "Ready" : "Empty");
+            cardHead.append(label, chip);
+            const art = element("div", "ss-expression-art");
             const preview = element("div", "ss-expression-preview");
+            preview.dataset.view = previewMode;
             const image = element("img");
             if (row.image || row.state === "working") {
-                image.alt = row.label + " expression";
+                image.alt = `${row.label} expression`;
                 image.loading = row.state === "working" ? "eager" : "lazy";
                 if (row.image) image.src = row.image.url;
                 else image.hidden = true;
                 preview.append(image);
-            } else if (!row.state) preview.append(element("span", "", "Awaiting render"));
+            } else preview.append(element("span", "ss-expression-placeholder", "Awaiting portrait"));
+            if (row.image) {
+                preview.classList.add("ss-expression-inspectable");
+                preview.tabIndex = 0;
+                preview.setAttribute("role", "button");
+                preview.setAttribute("aria-label", `Inspect ${row.label} image`);
+                preview.addEventListener("click", ()=>openInspector(row));
+                preview.addEventListener("keydown", (event)=>{
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openInspector(row);
+                    }
+                });
+            }
             if (row.state) {
                 const feedback = element("div", "ss-expression-tile-feedback");
                 const caption = element("span", "", row.state === "queued" ? "Queued" : row.state === "failed" ? "Failed" : stage === 0 ? "Rendering…" : `${names[stage]}…`);
@@ -5153,75 +5871,134 @@ function openCharacterExpressions(root, options) {
                 }
                 preview.append(feedback);
             }
-            card.append(label, preview);
-            if (stage === 0) {
-                const input = element("textarea", "ss-textarea");
-                input.value = row.direction;
-                input.disabled = disabled;
-                input.maxLength = EXPRESSION_DIRECTION_LIMIT;
-                input.addEventListener("input", ()=>{
-                    row.direction = input.value;
-                });
-                input.addEventListener("change", saveSet);
-                directionInputs.set(row, input);
-                const generate = runButton(row.image ? "Regenerate" : "Render", row, ()=>process([
-                        row
-                    ], row), disabled);
-                input.setAttribute("aria-label", `Direction for ${row.label}`);
-                const slotActions = element("div", "ss-expression-slot-actions");
-                slotActions.append(generate);
-                if (rows.indexOf(row) >= EXPRESSION_SPREAD.length) {
-                    const remove = action("Remove slot", ()=>{
-                        rows.splice(rows.indexOf(row), 1);
-                        saveSet();
-                        render();
-                        custom.focus();
+            art.append(preview, cardHead);
+            const body = element("div", "ss-expression-card-info");
+            const bodyTitle = element("div", "ss-expression-card-title");
+            bodyTitle.append(element("strong", "", row.label));
+            if (stage === 0 && row.originalDirection && row.direction !== row.originalDirection) bodyTitle.append(element("span", "ss-expression-edited-tag", "Edited"));
+            if (row.bankId && !EXPRESSION_SPREAD.some(([label])=>label === row.label.toLowerCase())) bodyTitle.append(element("span", "ss-expression-edited-tag", "Custom"));
+            if (isEditing && inlineEdit) {
+                const editPanel = element("div", "ss-expression-card-edit-panel");
+                editPanel.append(bodyTitle);
+                const field = element("textarea", "ss-textarea ss-expression-card-editarea");
+                field.value = inlineEdit.draft;
+                field.rows = 4;
+                field.maxLength = EXPRESSION_DIRECTION_LIMIT;
+                field.dataset.expressionFocus = `direction-${row.label}`;
+                field.dataset.expressionInlineEditor = row.label;
+                field.setAttribute("aria-label", `Generation direction for ${row.label}`);
+                const tools = element("div", "ss-expression-card-edit-tools");
+                const bankButton = action(inlineEdit.bankLabel ? `Banked: ${inlineEdit.bankLabel}` : "Save to bank", saveInlineToBank);
+                bankButton.classList.add("ss-expression-card-bank");
+                bankButton.disabled = !bankAvailable;
+                bankButton.title = bankAvailable ? "Save the current draft as an account-wide reusable template" : "Expression bank is unavailable";
+                const restore = action("Restore default", ()=>{
+                    if (!inlineEdit || inlineEdit.row !== row) return;
+                    inlineEdit.draft = defaultDirection(row);
+                    field.value = inlineEdit.draft;
+                    restore.disabled = field.value === defaultDirection(row);
+                    field.focus({
+                        preventScroll: true
                     });
-                    remove.disabled = disabled;
-                    remove.setAttribute("aria-label", `Remove ${row.label} custom slot`);
-                    slotActions.append(remove);
-                }
-                card.append(fields("Direction", input), slotActions);
-                const useSaved = action("Choose saved image", ()=>options.pickImage("saved", row.image?.id || "", (image)=>{
-                        if (row.image?.id === image.id) return;
-                        if (row.image && created.has(row.image.id)) row.drafts.add(row.image.id);
-                        row.image = image;
-                        row.state = undefined;
-                        render();
-                    }));
-                useSaved.dataset.expressionFocus = "saved-image-" + row.label;
-                useSaved.setAttribute("aria-label", "Choose saved image for " + row.label);
-                useSaved.setAttribute("aria-haspopup", "dialog");
-                useSaved.disabled = disabled;
-                card.append(useSaved);
+                });
+                restore.classList.add("ss-expression-card-restore");
+                restore.title = "Restore default direction (draft only until saved)";
+                restore.setAttribute("aria-label", `Restore default direction for ${row.label}`);
+                restore.replaceChildren();
+                restore.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.9 6.65"/><path d="M3 4v7h7"/></svg>';
+                restore.disabled = field.value === defaultDirection(row);
+                field.addEventListener("input", ()=>{
+                    if (inlineEdit?.row === row) inlineEdit.draft = field.value;
+                    restore.disabled = field.value === defaultDirection(row);
+                });
+                field.addEventListener("keydown", (event)=>{
+                    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                        event.preventDefault();
+                        commitInlineEdit();
+                    }
+                });
+                tools.append(bankButton, restore);
+                editPanel.append(field, tools);
+                body.append(editPanel);
+            } else {
+                body.append(bodyTitle);
+                body.append(element("p", "ss-muted", stage === 0 ? row.direction : row.image ? `Output · ${row.image.id}` : "No output"));
             }
+            if (stage === 3) {
+                const mapping = element("div", "ss-expression-card-mapping");
+                const outputName = element("code", "", sendPrefix.value.trim() ? `${sendPrefix.value.trim()}-${row.label}` : row.label);
+                outputName.dataset.expressionMapName = row.label;
+                mapping.append(element("span", "", "Maps as"), outputName);
+                body.append(mapping);
+            }
+            const cardActions = element("div", "ss-expression-card-actions");
+            if (stage === 0) {
+                if (isEditing) {
+                    const save = action("Save", commitInlineEdit, true);
+                    save.classList.add("ss-expression-card-edit");
+                    save.dataset.expressionFocus = "save-" + row.label;
+                    const cancel = action("Cancel", cancelInlineEdit);
+                    cancel.classList.add("ss-expression-card-render");
+                    cardActions.append(save, cancel);
+                } else {
+                    const edit = action("Edit", ()=>beginInlineEdit(row));
+                    edit.classList.add("ss-expression-card-edit");
+                    edit.dataset.expressionFocus = "edit-" + row.label;
+                    edit.disabled = disabled;
+                    cardActions.append(edit);
+                    const generate = runButton(row.image ? "Redo" : "Render", row, ()=>process([
+                            row
+                        ], row), disabled);
+                    if (row.image) {
+                        generate.title = `Regenerate ${row.label} portrait`;
+                        generate.setAttribute("aria-label", `Regenerate ${row.label} portrait`);
+                    }
+                    generate.classList.add("ss-expression-card-render");
+                    cardActions.append(generate);
+                    const saved = action("Attach saved image", ()=>options.pickImage("saved", row.image?.id || "", (image)=>{
+                            if (row.image?.id === image.id) return;
+                            setImage(row, image);
+                            row.state = undefined;
+                            render();
+                        }));
+                    saved.classList.add("ss-expression-card-attach");
+                    saved.replaceChildren();
+                    saved.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>';
+                    saved.title = `Attach saved image to ${row.label}`;
+                    saved.setAttribute("aria-label", `Attach saved image to ${row.label}`);
+                    saved.dataset.expressionFocus = "saved-image-" + row.label;
+                    saved.setAttribute("aria-haspopup", "dialog");
+                    saved.disabled = disabled;
+                    cardActions.append(saved);
+                }
+            } else if (row.image) cardActions.append(action("Inspect image", ()=>openInspector(row)));
+            card.append(art, body, cardActions);
             return card;
         });
         cards.replaceChildren(...tiles.length ? tiles : [
-            element("p", "ss-muted", stage === 0 ? "Choose a preset or show all slots to make a selection." : "Render or choose a saved image in Generate to continue.")
+            element("p", "ss-expression-empty-gallery", "No expressions match this filter. Try All slots or select a different preset.")
         ]);
         actions.replaceChildren();
         if (stage < 3) {
             const customBackground = stage === 2 && backgroundMode.value === "custom";
             const canProcess = stage === 1 ? Boolean(enhanceMode) : stage !== 2 || (backgroundMode.value === "builtin" ? !installTask : customBackground ? Boolean(backgroundGraph.value.trim()) : Boolean(backgroundWorkflow.value && imageInput.value));
             const runSelected = runButton(`${names[stage]} selected`, "selected", ()=>process(selected, "selected"), disabled || !selected.length || !canProcess, true);
-            const runAll = runButton(`${names[stage]} all`, "all", ()=>process(all, "all"), disabled || !all.length || !canProcess);
+            const runAll = runButton(`${names[stage]} all`, "all", ()=>process(selectable, "all"), disabled || !selectable.length || !canProcess);
             if (customBackground) {
                 runSelected.dataset.backgroundAction = selected.length ? "ready" : "empty";
-                runAll.dataset.backgroundAction = all.length ? "ready" : "empty";
+                runAll.dataset.backgroundAction = selectable.length ? "ready" : "empty";
             }
             const failed = selectable.filter((row)=>row.state === "failed");
-            const retry = runButton("Retry failed", "failed", ()=>process(failed, "failed"), disabled || !canProcess);
-            if (customBackground) retry.dataset.backgroundAction = "ready";
+            const retry = runButton("Retry failed", "failed", ()=>process(failed, "failed"), disabled || !canProcess || !failed.length);
             const next = action("Next / Skip", ()=>changeStage(stage + 1));
             next.disabled = disabled;
-            actions.append(runSelected);
-            if (stage !== 0 || showAll) actions.append(runAll);
+            actions.append(runSelected, runAll);
             if (failed.length || activeRun?.source === "failed") actions.append(retry);
             actions.append(next);
         } else {
             actions.append(runButton("Send selected", "send", publish, disabled || !selected.length, true));
         }
+        status.textContent = `${selected.length} selected of ${rows.length} expressions · ${ready} ready`;
         if (key) [
             ...dialog.querySelectorAll("[data-expression-focus]")
         ].find((node)=>node.dataset.expressionFocus === key)?.focus({
@@ -5231,7 +6008,9 @@ function openCharacterExpressions(root, options) {
     const previousFocus = document.activeElement;
     dialog.addEventListener("cancel", (event)=>{
         event.preventDefault();
-        void closeDialog();
+        if (!overlay.hidden) closeOverlay();
+        else if (inlineEdit) cancelInlineEdit();
+        else void closeDialog();
     });
     dialog.addEventListener("close", ()=>{
         disposed = true;
@@ -5252,13 +6031,29 @@ function openCharacterExpressions(root, options) {
         if (disposed || !dialog.open) return;
         const settings = cleanStudioExpressionSet(value);
         const selected = new Set(settings.selected);
-        for (const { label, direction } of settings.slots)rows.push(makeRow(label, direction, selected.has(label.toLowerCase())));
+        for (const { label, direction, bankId } of settings.slots){
+            const row = makeRow(label, direction, selected.has(label.toLowerCase()));
+            row.bankId = bankId;
+            row.originalDirection = direction;
+            rows.push(row);
+        }
         generation = settings.generation;
         saved = JSON.stringify(getSettings());
         loading = false;
         renderSettings();
         render();
     };
+    void options.request("load_expression_bank", {}).then((value)=>{
+        bank = cleanStudioExpressionBank(value);
+        bankLoaded = true;
+        bankAvailable = true;
+        bankSnapshot = JSON.stringify(bank);
+        if (!disposed) render();
+    }, ()=>{
+        bankLoaded = true;
+        bankAvailable = false;
+        if (!disposed) status.textContent = "Expression bank is unavailable; templates cannot be saved this session.";
+    });
     void options.request("load_expression_set", {}).then((value)=>{
         settingsAvailable = true;
         useSet(value);
@@ -8633,8 +9428,12 @@ are removed when CSS is applied.</pre>
                 <label class="ss-field"><span>Name</span><input class="ss-input" data-role="save-preset-name" maxlength="120" placeholder="Preset name" /></label>
                 <label class="ss-field"><span>Description</span><input class="ss-input" data-role="save-preset-description" maxlength="500" placeholder="Optional description" /></label>
               </div>
-              <div class="ss-muted ss-tiny">Only checked values are written to SwarmUI. Seed starts unchecked so a reusable preset does not freeze one composition by accident.</div>
+              <div class="ss-save-preset-toolbar">
+                <div class="ss-save-preset-toolbar-copy"><strong>Parameters</strong><span data-role="save-preset-selected-count" aria-live="polite">0 selected</span></div>
+                <div class="ss-save-preset-bulk"><button type="button" class="ss-button" data-role="save-preset-select-all">Select all</button><button type="button" class="ss-button" data-role="save-preset-clear">Clear</button></div>
+              </div>
               <div class="ss-save-param-list" data-role="save-preset-fields"></div>
+              <p class="ss-save-preset-note">Only checked values are saved to SwarmUI. Seed starts unchecked so a preset won't lock every render to the same composition.</p>
             </div>
             <footer class="ss-workflow-modal-actions"><button class="ss-button" data-action="close-save-preset">Cancel</button><button class="ss-button ss-button-primary" data-action="confirm-save-preset">Save preset</button></footer>
           </section>
@@ -9484,7 +10283,7 @@ are removed when CSS is applied.</pre>
                         window.clearTimeout(timer);
                         timer = window.setTimeout(()=>failed(new Error(message)), delay);
                     };
-                    const waitForResult = ()=>setDeadline(type.endsWith("_expression_set") || type === "load_expression_enhance_options" || type === "check_expression_background_model" ? 12_000 : 240_000, "Lumiverse did not respond. Check the Output Library before retrying.");
+                    const waitForResult = ()=>setDeadline(type.endsWith("_expression_set") || type.endsWith("_expression_bank") || type === "load_expression_enhance_options" || type === "check_expression_background_model" ? 12_000 : 240_000, "Lumiverse did not respond. Check the Output Library before retrying.");
                     const stop = ()=>{
                         if (stopping) return;
                         stopping = true;
@@ -10773,20 +11572,55 @@ are removed when CSS is applied.</pre>
                 parameter.id,
                 parameter
             ]));
-        for (const [id, value] of Object.entries(this.pendingPresetParamMap)){
+        const refreshCount = ()=>{
+            const boxes = [
+                ...fields.querySelectorAll('input[data-role="save-preset-param"]')
+            ];
+            this.get('[data-role="save-preset-selected-count"]').textContent = `${boxes.filter((box)=>box.checked).length} of ${boxes.length} included`;
+        };
+        for (const [index, [id, value]] of Object.entries(this.pendingPresetParamMap).entries()){
             const parameter = schemaById.get(id);
             const normalized = id.toLowerCase().replace(/[^a-z0-9]/g, "");
-            const label = element("label", "ss-save-param");
+            const fullValue = String(value);
+            const row = element("div", "ss-save-param");
+            const label = element("label", "ss-save-param-line");
             const checkbox = element("input");
             checkbox.type = "checkbox";
             checkbox.checked = normalized !== "seed";
             checkbox.dataset.role = "save-preset-param";
             checkbox.dataset.paramId = id;
+            checkbox.addEventListener("change", refreshCount);
             const copy = element("span", "ss-save-param-copy");
-            copy.append(element("strong", "", parameter?.name || id), element("span", "", String(value).length > 120 ? `${String(value).slice(0, 117)}…` : String(value)));
+            const shownValue = fullValue.replace(/\s+/g, " ").trim();
+            copy.append(element("strong", "", parameter?.name || id), element("span", "", shownValue));
             label.append(checkbox, copy);
-            fields.appendChild(label);
+            row.append(label);
+            if (fullValue.length > 88 || fullValue.includes("\n")) {
+                const details = element("pre", "ss-save-param-full", fullValue);
+                details.id = `ss-save-param-detail-${index}`;
+                details.hidden = true;
+                const expand = element("button", "ss-save-param-expand", "More");
+                expand.type = "button";
+                expand.setAttribute("aria-expanded", "false");
+                expand.setAttribute("aria-controls", details.id);
+                expand.setAttribute("aria-label", `Show full value for ${parameter?.name || id}`);
+                expand.addEventListener("click", ()=>{
+                    const show = details.hidden;
+                    details.hidden = !show;
+                    expand.textContent = show ? "Less" : "More";
+                    expand.setAttribute("aria-expanded", String(show));
+                });
+                row.append(expand, details);
+            }
+            fields.appendChild(row);
         }
+        const bulk = (checked)=>{
+            for (const input of fields.querySelectorAll('input[data-role="save-preset-param"]'))input.checked = checked;
+            refreshCount();
+        };
+        this.get('[data-role="save-preset-select-all"]').onclick = ()=>bulk(true);
+        this.get('[data-role="save-preset-clear"]').onclick = ()=>bulk(false);
+        refreshCount();
         this.updatePresetViewport();
         this.get('[data-role="save-preset-modal"]').hidden = false;
         this.get('[data-role="save-preset-name"]').focus();
