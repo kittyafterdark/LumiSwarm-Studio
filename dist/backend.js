@@ -196,6 +196,27 @@ const EXPRESSION_DEFAULT_RECIPE = {
 const EXPRESSION_DEFAULT_PREFIX = "solo, head and shoulders portrait, facing viewer, plain background";
 const EXPRESSION_PROMPT_LIMIT = 4000;
 const EXPRESSION_DIRECTION_LIMIT = 1000;
+function cleanStudioExpressionBank(value) {
+    if (!Array.isArray(value)) return [];
+    const bank = new Map();
+    const builtIns = new Set(EXPRESSION_SPREAD.map(([label])=>label));
+    for (const raw of value.slice(0, 150)){
+        const data = recipeRecord(raw);
+        const label = cleanExpressionLabel(data.label);
+        if (!label || builtIns.has(label.toLowerCase()) || typeof data.direction !== "string") continue;
+        const key = label.toLowerCase();
+        if (bank.has(key)) continue;
+        const id = typeof data.id === "string" && /^[a-zA-Z0-9_-]{1,96}$/.test(data.id) ? data.id : `expression-${bank.size + 1}`;
+        bank.set(key, {
+            id,
+            label,
+            direction: data.direction.slice(0, EXPRESSION_DIRECTION_LIMIT)
+        });
+    }
+    return [
+        ...bank.values()
+    ];
+}
 function cleanExpressionLabel(value) {
     const label = typeof value === "string" ? value.trim() : "";
     return label.length <= 40 && /^[\p{L}\p{N}][\p{L}\p{N} _'-]*$/u.test(label) ? label : "";
@@ -225,7 +246,10 @@ function cleanStudioExpressionSet(value) {
         if (!label || typeof slot.direction !== "string") continue;
         slots.set(key, {
             label: existing?.label || label,
-            direction: slot.direction.slice(0, EXPRESSION_DIRECTION_LIMIT)
+            direction: slot.direction.slice(0, EXPRESSION_DIRECTION_LIMIT),
+            ...typeof slot.bankId === "string" && /^[a-zA-Z0-9_-]{1,96}$/.test(slot.bankId) ? {
+                bankId: slot.bankId
+            } : {}
         });
     }
     const selected = Array.isArray(input.selected) ? input.selected : EXPRESSION_BASICS.map(([label])=>label);
@@ -5984,6 +6008,31 @@ async function handleMessage(payload, userId) {
                     });
                     spindle.sendToFrontend({
                         type: "expression_set_result",
+                        requestId
+                    }, userId);
+                    return;
+                }
+            case "load_expression_bank":
+                {
+                    const saved = await spindle.userStorage.getJson("expression-bank.json", {
+                        fallback: [],
+                        userId
+                    });
+                    spindle.sendToFrontend({
+                        type: "expression_bank_result",
+                        requestId,
+                        data: cleanStudioExpressionBank(saved)
+                    }, userId);
+                    return;
+                }
+            case "save_expression_bank":
+                {
+                    const templates = cleanStudioExpressionBank(payload.templates);
+                    await spindle.userStorage.setJson("expression-bank.json", templates, {
+                        userId
+                    });
+                    spindle.sendToFrontend({
+                        type: "expression_bank_result",
                         requestId
                     }, userId);
                     return;

@@ -6110,6 +6110,17 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         spindle.sendToFrontend({ type: "expression_set_result", requestId }, userId)
         return
       }
+      case "load_expression_bank": {
+        const saved = await spindle.userStorage.getJson("expression-bank.json", { fallback: [], userId })
+        spindle.sendToFrontend({ type: "expression_bank_result", requestId, data: cleanStudioExpressionBank(saved) }, userId)
+        return
+      }
+      case "save_expression_bank": {
+        const templates = cleanStudioExpressionBank(payload.templates)
+        await spindle.userStorage.setJson("expression-bank.json", templates, { userId })
+        spindle.sendToFrontend({ type: "expression_bank_result", requestId }, userId)
+        return
+      }
       case "load_expression_enhance_options": {
         const connection = await getConnection(asString(payload.connectionId), userId)
         const settings = await readStudioUpscaleSettings(connection.id, userId)

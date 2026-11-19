@@ -1410,8 +1410,12 @@ are removed when CSS is applied.</pre>
                 <label class="ss-field"><span>Name</span><input class="ss-input" data-role="save-preset-name" maxlength="120" placeholder="Preset name" /></label>
                 <label class="ss-field"><span>Description</span><input class="ss-input" data-role="save-preset-description" maxlength="500" placeholder="Optional description" /></label>
               </div>
-              <div class="ss-muted ss-tiny">Only checked values are written to SwarmUI. Seed starts unchecked so a reusable preset does not freeze one composition by accident.</div>
+              <div class="ss-save-preset-toolbar">
+                <div class="ss-save-preset-toolbar-copy"><strong>Parameters</strong><span data-role="save-preset-selected-count" aria-live="polite">0 selected</span></div>
+                <div class="ss-save-preset-bulk"><button type="button" class="ss-button" data-role="save-preset-select-all">Select all</button><button type="button" class="ss-button" data-role="save-preset-clear">Clear</button></div>
+              </div>
               <div class="ss-save-param-list" data-role="save-preset-fields"></div>
+              <p class="ss-save-preset-note">Only checked values are saved to SwarmUI. Seed starts unchecked so a preset won't lock every render to the same composition.</p>
             </div>
             <footer class="ss-workflow-modal-actions"><button class="ss-button" data-action="close-save-preset">Cancel</button><button class="ss-button ss-button-primary" data-action="confirm-save-preset">Save preset</button></footer>
           </section>
@@ -2229,7 +2233,7 @@ are removed when CSS is applied.</pre>
           window.clearTimeout(timer)
           timer = window.setTimeout(() => failed(new Error(message)), delay)
         }
-        const waitForResult = () => setDeadline(type.endsWith("_expression_set") || type === "load_expression_enhance_options" || type === "check_expression_background_model" ? 12_000 : 240_000,
+        const waitForResult = () => setDeadline(type.endsWith("_expression_set") || type.endsWith("_expression_bank") || type === "load_expression_enhance_options" || type === "check_expression_background_model" ? 12_000 : 240_000,
           "Lumiverse did not respond. Check the Output Library before retrying.")
         const stop = () => {
           if (stopping) return
@@ -3553,23 +3557,53 @@ are removed when CSS is applied.</pre>
     const fields = this.get<HTMLElement>('[data-role="save-preset-fields"]')
     fields.replaceChildren()
     const schemaById = new Map(this.state.swarmParameters.map((parameter) => [parameter.id, parameter]))
-    for (const [id, value] of Object.entries(this.pendingPresetParamMap)) {
+    const refreshCount = () => {
+      const boxes = [...fields.querySelectorAll<HTMLInputElement>('input[data-role="save-preset-param"]')]
+      this.get<HTMLElement>('[data-role="save-preset-selected-count"]').textContent = `${boxes.filter(box => box.checked).length} of ${boxes.length} included`
+    }
+    for (const [index, [id, value]] of Object.entries(this.pendingPresetParamMap).entries()) {
       const parameter = schemaById.get(id)
       const normalized = id.toLowerCase().replace(/[^a-z0-9]/g, "")
-      const label = element("label", "ss-save-param")
+      const fullValue = String(value)
+      const row = element("div", "ss-save-param")
+      const label = element("label", "ss-save-param-line")
       const checkbox = element("input")
       checkbox.type = "checkbox"
       checkbox.checked = normalized !== "seed"
       checkbox.dataset.role = "save-preset-param"
       checkbox.dataset.paramId = id
+      checkbox.addEventListener("change", refreshCount)
       const copy = element("span", "ss-save-param-copy")
-      copy.append(
-        element("strong", "", parameter?.name || id),
-        element("span", "", String(value).length > 120 ? `${String(value).slice(0, 117)}…` : String(value)),
-      )
+      const shownValue = fullValue.replace(/\s+/g, " ").trim()
+      copy.append(element("strong", "", parameter?.name || id), element("span", "", shownValue))
       label.append(checkbox, copy)
-      fields.appendChild(label)
+      row.append(label)
+      if (fullValue.length > 88 || fullValue.includes("\n")) {
+        const details = element("pre", "ss-save-param-full", fullValue)
+        details.id = `ss-save-param-detail-${index}`
+        details.hidden = true
+        const expand = element("button", "ss-save-param-expand", "More")
+        expand.type = "button"
+        expand.setAttribute("aria-expanded", "false")
+        expand.setAttribute("aria-controls", details.id)
+        expand.setAttribute("aria-label", `Show full value for ${parameter?.name || id}`)
+        expand.addEventListener("click", () => {
+          const show = details.hidden
+          details.hidden = !show
+          expand.textContent = show ? "Less" : "More"
+          expand.setAttribute("aria-expanded", String(show))
+        })
+        row.append(expand, details)
+      }
+      fields.appendChild(row)
     }
+    const bulk = (checked: boolean) => {
+      for (const input of fields.querySelectorAll<HTMLInputElement>('input[data-role="save-preset-param"]')) input.checked = checked
+      refreshCount()
+    }
+    this.get<HTMLButtonElement>('[data-role="save-preset-select-all"]').onclick = () => bulk(true)
+    this.get<HTMLButtonElement>('[data-role="save-preset-clear"]').onclick = () => bulk(false)
+    refreshCount()
     this.updatePresetViewport()
     this.get<HTMLElement>('[data-role="save-preset-modal"]').hidden = false
     this.get<HTMLInputElement>('[data-role="save-preset-name"]').focus()
