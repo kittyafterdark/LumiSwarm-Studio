@@ -30,7 +30,7 @@ with sync_playwright() as pw:
     browser = pw.chromium.launch(executable_path='/usr/bin/chromium', headless=True,
                                  args=['--no-sandbox', '--disable-dev-shm-usage'])
     try:
-        for width in (390, 1440):
+        for width in (320, 390, 1440):
             page = browser.new_page(viewport={'width': width, 'height': 850}, has_touch=width < 721)
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
@@ -43,6 +43,19 @@ with sync_playwright() as pw:
             assert inspector.locator('[data-role="inspector-model"]').text_content() == 'anima-semi-v10.safetensors'
             assert page.locator('[data-action="edit-region"]').last.is_enabled()
             assert inspector.locator('[data-role="inspector-summary-facts"]').is_visible()
+            # One distinct workspace entry, four balanced SVG shortcuts, no overflow.
+            tools = inspector.locator('.ss-inspector-actions')
+            assert tools.locator('button').count() == 5
+            assert tools.locator('button svg').count() == 6, tools.inner_html()
+            assert tools.locator('[data-action="edit-artwork"]').is_enabled()
+            geometry = tools.evaluate("""el => ({w:el.clientWidth,scroll:el.scrollWidth,entry:el.firstElementChild.getBoundingClientRect().width,shortcuts:[...el.querySelectorAll('.ss-inspector-tool')].map(b=>({w:b.getBoundingClientRect().width,h:b.getBoundingClientRect().height,scroll:b.scrollWidth,client:b.clientWidth}))})""")
+            assert geometry['scroll'] <= geometry['w'] + 1, geometry
+            assert abs(geometry['entry'] - geometry['w']) <= 1, geometry
+            assert max(b['w'] for b in geometry['shortcuts']) - min(b['w'] for b in geometry['shortcuts']) <= 1, geometry
+            assert all(b['scroll'] <= b['client'] + 1 and b['h'] >= 32 for b in geometry['shortcuts']), geometry
+            if width != 320:
+                (ROOT/'test-results').mkdir(exist_ok=True)
+                inspector.screenshot(path=str(ROOT/f'test-results/inspector-tools-{width}.png'))
             pane = lambda name: inspector.locator(f'[data-inspector-pane="{name}"]')
             inspector.locator('[data-action="inspector-tab"][data-inspector-tab="prompt"]').click()
             assert pane('prompt').is_visible() and not pane('overview').is_visible()
@@ -78,6 +91,10 @@ with sync_playwright() as pw:
             assert editor.locator('.ss-inpaint-tool-rail').is_visible()
             generate = editor.get_by_role('button', name='Generate variant')
             assert generate.is_disabled(), 'cannot generate without a painted mask'
+            size = editor.locator('.ss-inpaint-range input[type="range"]').first
+            size.evaluate('(el)=>{el.value="12";el.dispatchEvent(new Event("input",{bubbles:true}))}')
+            assert editor.locator('.ss-inpaint-cursor').is_visible(), 'size slider shows a live ring'
+            assert editor.locator('.ss-inpaint-cursor').get_attribute('data-size-preview') == 'true'
             assert 'cinematic lighting' in editor.locator('.ss-inpaint-settings-section textarea').input_value(), 'uses rendered source prompt'
             buttons = editor.locator('.ss-inpaint-tool-rail')
             buttons.get_by_role('button', name='Hide mask overlay').click()

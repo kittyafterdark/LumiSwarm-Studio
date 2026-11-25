@@ -1,0 +1,142 @@
+/* Canonical Cast Material Edition components. One image and one native dialogue
+   slot per composition. No generic left-edge accent rails. Speaker color affects
+   MATERIAL, not the authored dialogue (which the host paints independently). */
+.ss-cast-design :is(.r-vn-hero,.r-popout,.r-angle,.r-messenger,.r-badge,.r-comms,.r-rpg,.r-standee,.r-folio,.r-mecha,.r-terminal,.r-cinema){
+ --m-ink:#17121b;--m-blend:color-mix(in srgb,var(--cast-voice) 18%,#1d1720);--m-edge:color-mix(in srgb,var(--cast-voice) 54%,#b4abb9);--m-soft:color-mix(in srgb,var(--cast-voice) 10%,#201b24);--m-panel-strong:color-mix(in srgb,var(--cast-voice) 18%,#1a151d);--m-panel-mid:color-mix(in srgb,var(--cast-voice) 12%,#14111a);--m-panel-soft:color-mix(in srgb,var(--cast-voice) 7%,#0d0b10);--m-copy:#f1eaf3;--m-ui:#d8cfde;
+ width:100%;max-width:100%;position:relative;isolation:isolate;color:var(--m-copy);overflow-wrap:anywhere;}
+.ss-cast-design :is(.r-vn-hero,.r-popout,.r-angle,.r-messenger,.r-badge,.r-comms,.r-rpg,.r-standee,.r-folio,.r-mecha,.r-terminal,.r-cinema) img{display:block;width:100%;height:100%;object-fit:contain;object-position:center bottom;}
+.ss-cast-design :is(.r-vn-hero,.r-popout,.r-angle,.r-messenger,.r-badge,.r-comms,.r-rpg,.r-standee,.r-folio,.r-mecha,.r-terminal,.r-cinema) [data-swarm-cast-dialogue]{line-height:1.48;font-size:13px;font-weight:500;}
+/* VN HERO · proscenium scene with a wide lacquer script strip. */
+.ss-cast-design .r-vn-hero{--m-surface-top:color-mix(in srgb,var(--cast-voice) 10%,#171019);--m-surface-mid:color-mix(in srgb,var(--cast-voice) 6%,#120e16);--m-surface-bottom:color-mix(in srgb,var(--cast-voice) 3%,#09070d);--m-edge:color-mix(in srgb,var(--cast-voice) 40%,#c3b5c4);min-height:306px;display:flex;align-items:flex-end;padding:0 14px 16px;background:radial-gradient(ellipse at 34% 34%,color-mix(in srgb,var(--cast-voice) 9%,transparent),transparent 54%);}
+.ss-cast-design .r-vn-stage{position:absolute;inset:16px 24px 54px;border-top:1px solid color-mix(in srgb,var(--m-edge) 42%,transparent);border-bottom:1px solid color-mix(in srgb,var(--m-edge) 28%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--cast-voice) 8%,transparent),transparent 40%),radial-gradient(circle at 32% 54%,color-mix(in srgb,var(--cast-voice) 12%,transparent),transparent 52%);}
+.ss-cast-design .r-vn-light{position:absolute;inset:18px 52px 70px 118px;clip-path:polygon(10% 0,100% 0,86% 100%,0 100%);background:linear-gradient(102deg,color-mix(in srgb,var(--cast-voice) 10%,transparent),transparent 72%);opacity:.55;}
+.ss-cast-design .r-vn-figure{position:absolute;z-index:2;left:24px;bottom:58px;width:208px;height:248px;pointer-events:none;filter:drop-shadow(0 10px 18px #000a);}
+.ss-cast-design .r-vn-script{position:relative;z-index:3;width:100%;margin-top:204px;min-height:84px;padding:21px 22px 16px 180px;background:transparent;box-shadow:0 12px 26px #0007;}
+.ss-cast-design .r-vn-script::before{content:"";position:absolute;inset:0;background:linear-gradient(108deg,var(--m-surface-top),var(--m-surface-mid) 45%,var(--m-surface-bottom));clip-path:polygon(0 14px,18px 0,100% 0,calc(100% - 18px) 100%,0 100%);}
+.ss-cast-design .r-vn-script::after{content:"";position:absolute;inset:4px 7px;border-top:1px solid color-mix(in srgb,var(--m-edge) 78%,transparent);border-bottom:1px solid color-mix(in srgb,var(--m-edge) 36%,transparent);pointer-events:none;}
+.ss-cast-design .r-vn-speaker{position:absolute;z-index:4;top:-14px;left:170px;max-width:calc(100% - 186px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:900 10px/1.25 system-ui,sans-serif;letter-spacing:.14em;padding:6px 14px;background:linear-gradient(180deg,color-mix(in srgb,var(--m-edge) 82%,white),var(--m-edge));color:#18131a;clip-path:polygon(0 0,100% 0,94% 100%,0 100%);box-shadow:4px 4px 0 #0006;}
+.ss-cast-design .r-vn-speaker small{font-size:9px;opacity:.78;letter-spacing:.08em;}
+.ss-cast-design .r-vn-speech{position:relative;z-index:1;}
+/* CORNER POP-OUT · pinned memo with a folded dog-ear and pasted-note energy. */
+.ss-cast-design .r-popout{--m-surface-top:color-mix(in srgb,var(--cast-voice) 12%,#19151b);--m-surface-mid:color-mix(in srgb,var(--cast-voice) 7%,#120f15);--m-surface-bottom:color-mix(in srgb,var(--cast-voice) 4%,#0a0910);--m-edge:color-mix(in srgb,var(--cast-voice) 40%,#cdc0c8);display:grid;grid-template-columns:34% minmax(0,1fr);align-items:end;min-height:260px;padding:20px 4px 12px;}
+.ss-cast-design .r-popout-figure{position:relative;z-index:3;height:232px;margin-right:-34px;filter:drop-shadow(6px 10px 14px #0009);}
+.ss-cast-design .r-popout-note{position:relative;z-index:2;min-height:142px;margin:0 2px 16px 0;padding:24px 20px 18px 34px;background:linear-gradient(145deg,var(--m-surface-top),var(--m-surface-mid) 58%,var(--m-surface-bottom));clip-path:polygon(0 18px,18px 0,calc(100% - 42px) 0,100% 26px,100% calc(100% - 14px),calc(100% - 18px) 100%,0 100%);box-shadow:0 14px 24px #0009;transform:rotate(-1.25deg);}
+.ss-cast-design .r-popout-note::before{content:"";position:absolute;inset:0;border:1px solid color-mix(in srgb,var(--m-edge) 38%,transparent);clip-path:inherit;pointer-events:none;}
+.ss-cast-design .r-popout-note::after{content:"";position:absolute;top:0;right:0;width:40px;height:26px;background:linear-gradient(135deg,color-mix(in srgb,var(--m-edge) 78%,white),color-mix(in srgb,var(--m-edge) 36%,#6b5b69));clip-path:polygon(0 0,100% 100%,100% 0);box-shadow:-3px 3px 0 #0004;}
+.ss-cast-design .r-popout-pin{position:absolute;top:12px;left:14px;width:13px;height:13px;border-radius:50%;background:radial-gradient(circle at 34% 34%,#fff,color-mix(in srgb,var(--m-edge) 84%,#e3d9e4) 36%,color-mix(in srgb,var(--m-edge) 48%,#66596b) 72%);box-shadow:0 1px 0 #0006;}
+.ss-cast-design .r-popout-label{font:900 10px system-ui,sans-serif;letter-spacing:.12em;color:#f7eef8;text-transform:uppercase;margin:0 0 10px 10px;}
+.ss-cast-design .r-popout-label small{color:color-mix(in srgb,var(--m-edge) 30%,#f4eef8);font-size:9px;}
+/* ANGLED CUTOUT · graphic slanted banner, more poster sash than dialogue card. */
+.ss-cast-design .r-angle{--m-surface-top:color-mix(in srgb,var(--cast-voice) 12%,#201822);--m-surface-mid:color-mix(in srgb,var(--cast-voice) 7%,#141018);--m-surface-bottom:#0b0910;--m-edge:color-mix(in srgb,var(--cast-voice) 36%,#c9bfcd);display:grid;grid-template-columns:35% minmax(0,1fr);align-items:center;gap:0;min-height:254px;padding:0 6px;background:linear-gradient(110deg,transparent 0 26%,color-mix(in srgb,var(--cast-voice) 11%,transparent) 44%,transparent 85%);}
+.ss-cast-design .r-angle-swash{position:absolute;left:132px;right:34px;top:26px;bottom:24px;background:linear-gradient(96deg,color-mix(in srgb,var(--cast-voice) 11%,transparent),transparent 74%);clip-path:polygon(10% 0,100% 0,88% 100%,0 100%);pointer-events:none;}
+.ss-cast-design .r-angle-art{height:244px;position:relative;z-index:2;filter:drop-shadow(5px 7px 10px #0008);}
+.ss-cast-design .r-angle-panel{position:relative;z-index:3;margin-left:-22px;min-height:146px;display:flex;flex-direction:column;justify-content:center;padding:26px 30px 22px 40px;background:linear-gradient(144deg,var(--m-surface-top),var(--m-surface-mid) 52%,var(--m-surface-bottom));clip-path:polygon(0 16px,85% 0,100% 0,92% 100%,12px 100%);box-shadow:0 12px 28px #0007;}
+.ss-cast-design .r-angle-panel::before{content:"";position:absolute;left:-18px;top:18px;bottom:18px;width:24px;background:linear-gradient(180deg,color-mix(in srgb,var(--m-edge) 20%,transparent),transparent 74%);clip-path:polygon(100% 0,0 50%,100% 100%);}
+.ss-cast-design .r-angle-label{font:900 10px system-ui,sans-serif;text-transform:uppercase;letter-spacing:.16em;margin-bottom:10px;color:color-mix(in srgb,var(--m-edge) 32%,#f4eef8);}
+/* TECH MESSENGER · tiny portrait, asymmetric chat tail and message chrome. */
+.ss-cast-design .r-messenger{--m-surface-top:color-mix(in srgb,var(--cast-voice) 12%,#1c161e);--m-surface-mid:color-mix(in srgb,var(--cast-voice) 11%,#18121c);--m-surface-bottom:color-mix(in srgb,var(--cast-voice) 5%,#0f0d14);--m-edge:color-mix(in srgb,var(--cast-voice) 56%,#c9b6c8);display:grid;grid-template-columns:64px minmax(0,1fr);gap:13px;align-items:end;padding:12px 4px 15px;}
+.ss-cast-design .r-messenger-avatar{height:64px;width:64px;border-radius:50%;padding:4px;background:radial-gradient(circle at 50% 20%,var(--m-soft),#100e14);border:2px solid var(--m-edge);overflow:hidden;box-shadow:0 4px 15px #0007;}
+.ss-cast-design .r-messenger-thread{position:relative;padding:12px 15px 9px;border-radius:17px 17px 17px 5px;background:linear-gradient(155deg,var(--m-surface-top),var(--m-surface-mid) 58%,var(--m-surface-bottom));border:1px solid color-mix(in srgb,var(--m-edge) 47%,transparent);box-shadow:0 8px 18px #0006;}
+.ss-cast-design .r-messenger-thread::before{content:"";position:absolute;bottom:0;left:-10px;width:14px;height:16px;clip-path:polygon(100% 0,100% 100%,0 100%);background:var(--m-surface-mid);}
+.ss-cast-design .r-messenger-top{display:flex;gap:6px;justify-content:space-between;align-items:baseline;margin-bottom:6px;font:700 11px system-ui,sans-serif;color:var(--m-copy);}
+.ss-cast-design .r-messenger-top small{color:color-mix(in srgb,var(--m-edge) 65%,#aaa);font:600 8px system-ui,sans-serif;text-transform:uppercase;}
+.ss-cast-design .r-messenger-footer{font:600 8px system-ui,sans-serif;letter-spacing:.12em;text-align:right;margin-top:7px;color:var(--m-ui);}
+.ss-cast-design .r-messenger-footer span{color:var(--m-edge);}
+/* AGENCY LANYARD · cream laminated pass, metal clip, photo and dark inset quote. */
+.ss-cast-design .r-badge{--m-surface-top:color-mix(in srgb,var(--cast-voice) 5%,#f0e9df);--m-surface-bottom:color-mix(in srgb,var(--cast-voice) 8%,#ded4c9);--m-quote-top:color-mix(in srgb,var(--cast-voice) 12%,#211920);--m-quote-bottom:#100d12;--m-edge:color-mix(in srgb,var(--cast-voice) 24%,#d0c5b8);width:min(100%,425px);padding:8px 0 12px;margin:auto;color:#30252b;}
+.ss-cast-design .r-badge-tether{height:24px;position:relative;z-index:2;display:flex;justify-content:center;}
+.ss-cast-design .r-badge-tether::before{content:"";width:26px;height:22px;border:5px solid #a5a2ab;border-radius:9px 9px 3px 3px;background:linear-gradient(#c8c4cc,#7e7b82);box-shadow:0 2px 0 #0005;}
+.ss-cast-design .r-badge-tether span{position:absolute;bottom:-6px;width:35px;height:10px;background:#66636b;border:2px solid #c1bac6;border-radius:3px;}
+.ss-cast-design .r-badge-plastic{position:relative;z-index:1;padding:15px 16px 9px;background:linear-gradient(125deg,var(--m-surface-top),var(--m-surface-bottom) 90%);border-radius:8px;border:1px solid #f9f4ed;box-shadow:0 12px 20px #0007,inset 0 1px #fff;}
+.ss-cast-design .r-badge-head{display:flex;justify-content:space-between;align-items:center;font:900 10px system-ui,sans-serif;letter-spacing:.17em;color:#4b3843;padding-bottom:8px;border-bottom:2px solid #84707a;}
+.ss-cast-design .r-badge-head b{color:var(--m-edge);font-size:16px;}
+.ss-cast-design .r-badge-main{display:grid;grid-template-columns:90px minmax(0,1fr);gap:12px;padding:10px 0;}
+.ss-cast-design .r-badge-photo{height:92px;background:#292129;border:3px solid white;box-shadow:0 1px 3px #0004;overflow:hidden;}
+.ss-cast-design .r-badge-photo img{object-fit:cover;object-position:center 17%;}
+.ss-cast-design .r-badge-info{display:grid;align-content:center;gap:4px;text-transform:uppercase;}
+.ss-cast-design .r-badge-info small{font:700 9px system-ui,sans-serif;color:#745e6b;letter-spacing:.1em;}
+.ss-cast-design .r-badge-info strong{font:900 18px system-ui,sans-serif;color:#2b212a;}
+.ss-cast-design .r-badge-info span{font:700 10px system-ui,sans-serif;color:#6d4e62;}
+.ss-cast-design .r-badge-caption{padding:10px 12px;background:linear-gradient(160deg,var(--m-quote-top),var(--m-quote-bottom) 78%);color:#fff;border:1px solid color-mix(in srgb,var(--m-edge) 34%,transparent);border-radius:2px;box-shadow:inset 0 0 0 1px #ffffff08;}
+.ss-cast-design .r-badge-serial{display:flex;justify-content:space-between;gap:8px;padding-top:7px;font:600 8px ui-monospace,monospace;letter-spacing:.08em;color:#63515d;}
+.ss-cast-design .r-badge-serial span{font-weight:900;letter-spacing:0;}
+/* CYBER COMMS · die-cut monitor frame and luminous voice screen. */
+.ss-cast-design .r-comms{--m-surface-top:color-mix(in srgb,var(--cast-voice) 10%,#152021);--m-surface-bottom:#070d0e;--m-edge:color-mix(in srgb,var(--cast-voice) 47%,#a6c4c1);padding:10px 15px 12px;background:radial-gradient(circle at 30% 35%,color-mix(in srgb,var(--cast-voice) 10%,transparent),transparent 55%),var(--m-surface-bottom);border:1px solid color-mix(in srgb,var(--m-edge) 64%,#35414b);clip-path:polygon(0 13px,13px 0,100% 0,100% calc(100% - 13px),calc(100% - 13px) 100%,0 100%);font-family:ui-monospace,monospace;}
+.ss-cast-design .r-comms::before{content:"";position:absolute;inset:4px;border:1px dashed color-mix(in srgb,var(--m-edge) 27%,transparent);clip-path:inherit;pointer-events:none;}
+.ss-cast-design .r-comms-header{display:flex;justify-content:space-between;gap:12px;padding:3px 0 8px;border-bottom:1px solid var(--m-edge);font:700 9px ui-monospace,monospace;letter-spacing:.035em;color:color-mix(in srgb,var(--m-edge) 42%,#f2edf6);}
+.ss-cast-design .r-comms-header b{color:var(--m-edge);}
+.ss-cast-design .r-comms-body{display:grid;grid-template-columns:92px minmax(0,1fr);gap:17px;padding:13px 0;align-items:center;}
+.ss-cast-design .r-comms-screen{height:110px;border:1px solid var(--m-edge);background:repeating-linear-gradient(0deg,transparent 0 4px,#fff1 5px 6px),radial-gradient(circle at 50% 40%,var(--m-soft),#080b0e);padding:3px;overflow:hidden;}
+.ss-cast-design .r-comms-screen img{object-fit:cover;object-position:center 14%;filter:contrast(1.08);}
+.ss-cast-design .r-comms-voice{padding:8px 2px;font:500 12px/1.6 ui-monospace,monospace;}
+.ss-cast-design .r-comms-footer{display:flex;justify-content:space-between;padding-top:5px;border-top:1px solid color-mix(in srgb,var(--m-edge) 36%,transparent);font:700 8px ui-monospace,monospace;color:var(--m-edge);}
+/* 16-BIT RPG · pixel border, double inset frame and inset sprite. */
+.ss-cast-design .r-rpg{--m-surface-top:color-mix(in srgb,var(--cast-voice) 9%,#131020);--m-surface-bottom:#09080f;--m-edge:color-mix(in srgb,var(--cast-voice) 48%,#e0d5e9);padding:6px 8px 11px;}
+.ss-cast-design .r-rpg-battle{display:grid;grid-template-columns:89px minmax(0,1fr);gap:12px;min-height:134px;padding:14px;background:linear-gradient(135deg,var(--m-surface-top),var(--m-surface-bottom));border:4px solid #e5dcf2;box-shadow:inset 0 0 0 4px #151221,inset 0 0 0 6px color-mix(in srgb,var(--m-edge) 78%,#eee),5px 6px 0 #06050c;image-rendering:pixelated;}
+.ss-cast-design .r-rpg-portrait{height:104px;border:2px solid #c9b9d7;background:color-mix(in srgb,var(--cast-voice) 10%,#16121d);overflow:hidden;}
+.ss-cast-design .r-rpg-portrait img{object-fit:cover;object-position:center 12%;}
+.ss-cast-design .r-rpg-dialogue{align-self:center;position:relative;padding-bottom:12px;font-family:ui-monospace,monospace;}
+.ss-cast-design .r-rpg-dialogue strong{display:block;font:700 10px ui-monospace,monospace;letter-spacing:.07em;color:var(--m-copy);margin-bottom:10px;}
+.ss-cast-design .r-rpg-dialogue strong small{font-size:8px;color:var(--m-edge);}
+.ss-cast-design .r-rpg-prompt{position:absolute;right:0;bottom:-5px;color:var(--m-edge);font:700 12px ui-monospace,monospace;}
+/* VN STANDEE · scenic cutout with a rigid display placard and inset caption window. */
+.ss-cast-design .r-standee{--m-surface-top:color-mix(in srgb,var(--cast-voice) 10%,#18121c);--m-surface-mid:color-mix(in srgb,var(--cast-voice) 6%,#110e16);--m-surface-bottom:#0b0910;--m-edge:color-mix(in srgb,var(--cast-voice) 40%,#c6b4c8);min-height:262px;display:grid;grid-template-columns:41% minmax(0,1fr);align-items:end;padding:16px 6px;}
+.ss-cast-design .r-standee-scene{position:absolute;inset:20px 10px 16px;background:linear-gradient(160deg,transparent 38%,color-mix(in srgb,var(--cast-voice) 12%,transparent) 96%),radial-gradient(circle at 26% 60%,var(--m-soft),transparent 56%);border-top:1px solid color-mix(in srgb,var(--m-edge) 28%,transparent);border-bottom:1px solid color-mix(in srgb,var(--m-edge) 28%,transparent);}
+.ss-cast-design .r-standee-art{position:relative;z-index:2;height:238px;filter:drop-shadow(5px 6px 11px #000a);margin-right:-12px;}
+.ss-cast-design .r-standee-dialogue{position:relative;z-index:1;min-height:138px;padding:18px 16px 18px 16px;margin:0 4px 14px 0;background:linear-gradient(180deg,color-mix(in srgb,var(--m-edge) 12%,#17131c),color-mix(in srgb,var(--m-edge) 4%,#0f0d14));border:1px solid color-mix(in srgb,var(--m-edge) 48%,transparent);box-shadow:0 10px 20px #0007,inset 0 0 0 1px #ffffff10;}
+.ss-cast-design .r-standee-dialogue::after{content:"";position:absolute;left:18px;right:18px;bottom:-8px;height:8px;background:linear-gradient(180deg,color-mix(in srgb,var(--m-edge) 10%,#1f1a24),#0e0b11);clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%);}
+.ss-cast-design .r-standee-plaque{position:absolute;top:-14px;left:14px;padding:6px 13px;background:linear-gradient(180deg,color-mix(in srgb,var(--m-edge) 78%,white),var(--m-edge));color:#17111b;font:900 11px system-ui,sans-serif;letter-spacing:.07em;box-shadow:3px 3px 0 #0007;}
+.ss-cast-design .r-standee-plaque small{font-size:8px;opacity:.7;}
+.ss-cast-design .r-standee-window{min-height:96px;padding:18px 14px 14px;margin-top:8px;background:linear-gradient(132deg,var(--m-surface-top),var(--m-surface-mid) 56%,var(--m-surface-bottom));border:1px solid color-mix(in srgb,var(--m-edge) 58%,transparent);box-shadow:inset 0 0 0 4px #ffffff07;}
+/* GOTHIC FOLIO · engraved cream vellum and an inset ink quotation. */
+.ss-cast-design .r-folio{--m-surface-top:color-mix(in srgb,var(--cast-voice) 4%,#e0d3bb);--m-surface-bottom:color-mix(in srgb,var(--cast-voice) 6%,#c4b49d);--m-quote-top:color-mix(in srgb,var(--cast-voice) 10%,#241b22);--m-quote-bottom:#191218;--m-edge:color-mix(in srgb,var(--cast-voice) 18%,#a48970);padding:13px;background:linear-gradient(133deg,var(--m-surface-top),var(--m-surface-bottom));color:#261b22;box-shadow:0 11px 25px #0008;}
+.ss-cast-design .r-folio-border{padding:16px;display:grid;grid-template-columns:31% minmax(0,1fr);gap:16px;align-items:center;border:3px double #5c4b40;outline:1px solid #f9e9d1;outline-offset:3px;min-height:188px;}
+.ss-cast-design .r-folio-art{height:160px;overflow:hidden;clip-path:ellipse(49% 48% at 50% 50%);background:radial-gradient(circle,#7c665e,#2c2429);border:2px solid #6d5648;}
+.ss-cast-design .r-folio-art img{object-fit:cover;object-position:center 14%;filter:sepia(.12);}
+.ss-cast-design .r-folio-script{min-width:0;text-align:center;}
+.ss-cast-design .r-folio-rule{font:20px Georgia,serif;color:#705642;}
+.ss-cast-design .r-folio-script h3{font:700 21px Georgia,serif;letter-spacing:.035em;color:#2b1d27;margin:0;}
+.ss-cast-design .r-folio-script small{display:block;font:700 9px Georgia,serif;letter-spacing:.16em;text-transform:uppercase;color:#6c4d4a;margin:3px 0 10px;}
+.ss-cast-design .r-folio-quote{padding:9px 10px;background:linear-gradient(145deg,var(--m-quote-top),var(--m-quote-bottom) 82%);border:1px solid #85716a;box-shadow:2px 3px 0 #0002;text-align:left;}
+/* MECHA HUD · an armored angular telemetry console, rather than chat card. */
+.ss-cast-design .r-mecha{--m-surface-top:color-mix(in srgb,var(--cast-voice) 8%,#171c20);--m-surface-bottom:color-mix(in srgb,var(--cast-voice) 6%,#101519);--m-edge:color-mix(in srgb,var(--cast-voice) 44%,#b6c5cb);padding:12px 16px 14px;background:linear-gradient(145deg,var(--m-surface-top),var(--m-surface-bottom) 74%);clip-path:polygon(0 15px,25px 0,100% 0,100% calc(100% - 16px),calc(100% - 26px) 100%,0 100%);border-top:3px solid color-mix(in srgb,var(--m-edge) 85%,#eee);box-shadow:inset 0 0 0 4px #ffffff08;}
+.ss-cast-design .r-mecha-status{display:flex;justify-content:space-between;gap:8px;align-items:center;padding-bottom:8px;border-bottom:2px solid color-mix(in srgb,var(--m-edge) 55%,#444);font:700 9px ui-monospace,monospace;letter-spacing:.08em;color:var(--m-copy);}
+.ss-cast-design .r-mecha-status b{color:var(--m-edge);}
+.ss-cast-design .r-mecha-body{display:grid;grid-template-columns:121px minmax(0,1fr);gap:13px;align-items:center;padding-top:12px;}
+.ss-cast-design .r-mecha-optic{height:146px;display:grid;place-items:center;background:radial-gradient(circle,var(--m-soft),#11161b 70%);clip-path:polygon(20% 0,80% 0,100% 22%,100% 78%,80% 100%,20% 100%,0 78%,0 22%);padding:5px;}
+.ss-cast-design .r-mecha-reticle{height:100%;width:100%;background:repeating-linear-gradient(0deg,transparent 0 9px,#fff1 10px 11px);border:1px solid var(--m-edge);}
+.ss-cast-design .r-mecha-reticle img{object-fit:cover;object-position:center 14%;}
+.ss-cast-design .r-mecha-speech{padding:11px 8px;border-block:1px solid color-mix(in srgb,var(--m-edge) 50%,transparent);font:500 12px ui-monospace,monospace;}
+.ss-cast-design .r-mecha-speech small{display:block;margin-top:12px;color:var(--m-edge);font:700 8px ui-monospace,monospace;}
+/* TERMINAL CONSOLE · shell window with phosphor text and true code pane. */
+.ss-cast-design .r-terminal{--m-surface-top:color-mix(in srgb,var(--cast-voice) 4%,#111811);--m-surface-bottom:#080b09;--m-edge:color-mix(in srgb,var(--cast-voice) 30%,#a1cbaa);background:linear-gradient(160deg,var(--m-surface-top),var(--m-surface-bottom));border:1px solid #5e645e;border-radius:5px;overflow:hidden;box-shadow:0 10px 24px #0009;font-family:ui-monospace,monospace;}
+.ss-cast-design .r-terminal-header{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#25292a;padding:8px 11px;color:#c6d6cb;font:500 10px ui-monospace,monospace;border-bottom:1px solid #525e56;}
+.ss-cast-design .r-terminal-lights{display:flex;gap:5px;}
+.ss-cast-design .r-terminal-lights i{width:8px;height:8px;border-radius:50%;background:#cf665d;}
+.ss-cast-design .r-terminal-lights i:nth-child(2){background:#dbc76f;}
+.ss-cast-design .r-terminal-lights i:nth-child(3){background:#75b88e;}
+.ss-cast-design .r-terminal-content{display:grid;grid-template-columns:91px minmax(0,1fr);gap:15px;align-items:center;padding:14px;}
+.ss-cast-design .r-terminal-pfp{height:110px;padding:3px;border:1px dashed #6c8575;background:#14211a;overflow:hidden;}
+.ss-cast-design .r-terminal-pfp img{object-fit:cover;object-position:center 17%;}
+.ss-cast-design .r-terminal-log{font:11px/1.6 ui-monospace,monospace;}
+.ss-cast-design .r-terminal-prompt{display:block;color:color-mix(in srgb,var(--cast-voice) 25%,#c5e9cd);font:600 10px ui-monospace,monospace;margin-bottom:7px;}
+.ss-cast-design .r-terminal-cursor{color:#93e5ab;font-size:12px;}
+/* CINEMATIC BLEED · widescreen matte and atmospheric rim, minimal chrome. */
+.ss-cast-design .r-cinema{--m-surface-top:color-mix(in srgb,var(--cast-voice) 15%,#1a1118);--m-surface-bottom:#050409;--m-edge:color-mix(in srgb,var(--cast-voice) 35%,#d3bfce);min-height:245px;background:radial-gradient(ellipse at 26% 45%,var(--m-surface-top),var(--m-surface-bottom) 74%);overflow:hidden;display:grid;grid-template-columns:45% minmax(0,1fr);align-items:center;border-top:12px solid #020104;border-bottom:12px solid #020104;}
+.ss-cast-design .r-cinema-sheen{position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,#040309bb 65%);pointer-events:none;}
+.ss-cast-design .r-cinema-figure{height:224px;position:relative;z-index:1;mask-image:linear-gradient(to right,#000 65%,transparent);}
+.ss-cast-design .r-cinema-caption{position:relative;z-index:2;padding:22px 24px 18px 2px;text-shadow:0 2px 8px #000;}
+.ss-cast-design .r-cinema-caption span{display:block;font:700 10px system-ui,sans-serif;letter-spacing:.17em;text-transform:uppercase;color:color-mix(in srgb,var(--m-edge) 40%,#f5eff8);margin-bottom:12px;}
+.ss-cast-design .r-cinema-caption [data-swarm-cast-dialogue]{font:500 14px/1.5 Georgia,serif;}
+/* Component-width safeguards: preserve silhouettes, keep readable captions. */
+@container (max-width:370px){
+.ss-cast-design .r-vn-hero{min-height:245px;padding-inline:4px;}.ss-cast-design .r-vn-stage{inset:14px 8px 48px;}.ss-cast-design .r-vn-light{inset:18px 22px 66px 84px;}.ss-cast-design .r-vn-figure{height:198px;width:140px;left:5px;bottom:54px;}.ss-cast-design .r-vn-script{padding:18px 10px 12px 123px;min-height:78px;}.ss-cast-design .r-vn-speaker{left:118px;max-width:calc(100% - 128px);}
+.ss-cast-design .r-popout{grid-template-columns:30% minmax(0,1fr);min-height:220px;}.ss-cast-design .r-popout-figure{height:199px;margin-right:-18px;}.ss-cast-design .r-popout-note{padding:18px 10px 12px 20px;transform:rotate(-.8deg);}
+.ss-cast-design .r-angle{grid-template-columns:28% minmax(0,1fr);min-height:205px;}.ss-cast-design .r-angle-swash{left:82px;right:14px;top:20px;bottom:18px;}.ss-cast-design .r-angle-art{height:205px;}.ss-cast-design .r-angle-panel{margin-left:-12px;padding:18px 14px 17px 24px;min-height:132px;}
+.ss-cast-design .r-badge-plastic{padding-inline:10px;}.ss-cast-design .r-badge-main{grid-template-columns:70px minmax(0,1fr);}.ss-cast-design .r-badge-info strong{font-size:15px;}
+.ss-cast-design .r-standee{grid-template-columns:33% minmax(0,1fr);}.ss-cast-design .r-standee-art{height:205px;}.ss-cast-design .r-standee-dialogue{padding:18px 10px 12px 10px;min-height:124px;}.ss-cast-design .r-standee-window{padding:15px 10px 12px;}
+.ss-cast-design .r-mecha-body{grid-template-columns:80px minmax(0,1fr);gap:7px;}.ss-cast-design .r-mecha-optic{height:115px;}
+.ss-cast-design .r-comms-body,.ss-cast-design .r-terminal-content{grid-template-columns:67px minmax(0,1fr);gap:10px;}.ss-cast-design .r-comms-screen,.ss-cast-design .r-terminal-pfp{height:96px;}
+.ss-cast-design .r-folio{padding:8px;}.ss-cast-design .r-folio-border{grid-template-columns:25% minmax(0,1fr);gap:8px;padding:10px;}.ss-cast-design .r-folio-art{height:132px;}.ss-cast-design .r-folio-script h3{font-size:17px;}
+.ss-cast-design .r-cinema{grid-template-columns:36% minmax(0,1fr);}.ss-cast-design .r-cinema-caption{padding-right:12px;}
+}

@@ -37,7 +37,9 @@ interface StudioExpressionGeneration {
   negative: string
 }
 
+interface StudioExpressionWorkshop { overrides: {checkpoint?:string;identity?:string;outfit?:string;identityNegative?:string;stack?:CastRecipeStackItem[]}; method?: string }
 interface StudioExpressionSet {
+  workshop?: StudioExpressionWorkshop
   slots: Array<{ label: string; direction: string; bankId?: string }>
   selected: string[]
   generation: StudioExpressionGeneration
@@ -77,6 +79,18 @@ function cleanExpressionGeneration(value: unknown): StudioExpressionGeneration {
   }
 }
 
+function cleanExpressionWorkshop(value:unknown):StudioExpressionWorkshop {
+  const raw=recipeRecord(value), source=recipeRecord(raw.overrides), overrides:StudioExpressionWorkshop["overrides"]={}
+  for(const key of ["identity","outfit","identityNegative","checkpoint"] as const)if(typeof source[key]==="string")overrides[key]=source[key].slice(0,key==="checkpoint"?500:EXPRESSION_PROMPT_LIMIT)
+  if(Array.isArray(source.stack))overrides.stack=cleanCastRenderRecipe({stack:source.stack})!.stack
+  return {overrides,...(typeof raw.method==="string"&&["","anima","illustrious"].includes(raw.method)?{method:raw.method}:{})}
+}
+function expressionAlternateLabel(label:string, existing:string[]):string {
+  const base=castExpressionKey(label).toLowerCase().replace(/-alt-\d+$/, "").slice(0,32)
+  const used=new Set(existing.map(s=>castExpressionKey(s).toLowerCase()))
+  for(let i=1;i<=64;i++){const candidate=`${base}-alt-${i}`;if(!used.has(candidate))return candidate}
+  throw new Error("No alternate slots available.")
+}
 function cleanStudioExpressionSet(value: unknown): StudioExpressionSet {
   const input = recipeRecord(value)
   const slots = new Map<string, StudioExpressionSet["slots"][number]>(
@@ -96,5 +110,6 @@ function cleanStudioExpressionSet(value: unknown): StudioExpressionSet {
     slots: [...slots.values()],
     selected: [...new Set(selected.slice(0, slots.size).filter((label): label is string => typeof label === "string" && slots.has(label)))],
     generation: cleanExpressionGeneration(input.generation),
+    ...(input.workshop && typeof input.workshop === "object" ? {workshop:cleanExpressionWorkshop(input.workshop)} : {}),
   }
 }

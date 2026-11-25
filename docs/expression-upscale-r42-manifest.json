@@ -1,0 +1,111 @@
+{
+  "release": "1.0.42",
+  "base": "1.0.41",
+  "purpose": "Expressions Maker upscale model readiness ribbon",
+  "changed": [
+    {
+      "path": "CHANGELOG.md",
+      "change": "modified",
+      "before_sha256": "969f3660765f6a2f8ec44f5afc68fd7b6ff135ccd93da24969f2eb5b5ed11bc4",
+      "after_sha256": "9e90e41c35e6fad60069e9a85ea8922156da1f9c6cbaeef12ec306d19dc9ed3e"
+    },
+    {
+      "path": "README.md",
+      "change": "modified",
+      "before_sha256": "c5a6a905d3d182996c55a52099c8a4baa37d2fc6cb6872c3150625a271d80459",
+      "after_sha256": "24480b102f33838912e29bb1baa2e692cb32fb09091f60401b09e3b60ded06fc"
+    },
+    {
+      "path": "dist/backend.js",
+      "change": "modified",
+      "before_sha256": "de6bc4264bdd2640d99f3bfacf73af53a18d054ef63ed33dd090021089f4852f",
+      "after_sha256": "f70223d6623186c268783983db47c6b63d57fd167ec422b4a062a317adb749b8"
+    },
+    {
+      "path": "dist/frontend.js",
+      "change": "modified",
+      "before_sha256": "e32904427f36768608619b9ee6a7514979463001eea9a1b891f35209ba2462b8",
+      "after_sha256": "b7a2bb1e25f472092c5c7580bd1b76c8f2d884d464cbd07de370432e5246ed0d"
+    },
+    {
+      "path": "docs/expression-upscale-ribbon-r42.md",
+      "change": "added",
+      "before_sha256": null,
+      "after_sha256": "122aaef40d818c03e4e95f36e6f4533ba03f9614cee06010efafa085eb448603"
+    },
+    {
+      "path": "docs/screenshots/expression-upscale-ribbon-mobile.png",
+      "change": "added",
+      "before_sha256": null,
+      "after_sha256": "fdf3d3f8bc67032a67f9459b22576113f0fbe5311b17a1f4545cf71ac912e7da"
+    },
+    {
+      "path": "package-lock.json",
+      "change": "modified",
+      "before_sha256": "487928a829c0f1bd951c46bb7a547922d29a837a8e21006890bd667e665c9ac6",
+      "after_sha256": "5f5229c9401d64547ddb0f8991bea14634ee1fe6204c85d7764cf85530c02e82"
+    },
+    {
+      "path": "package.json",
+      "change": "modified",
+      "before_sha256": "cdb94e985996c76b8a4c45d7d205666d8ed35bab99225926653033f26820d9b8",
+      "after_sha256": "48050bb3fd10fe94fad70abf5b3716c325648437d3cd17850231bd8e292a0668"
+    },
+    {
+      "path": "spindle.json",
+      "change": "modified",
+      "before_sha256": "301b9e3b872233955e428f154c7cc9e261de3a32383c8597b9a5db6f6d98c5f8",
+      "after_sha256": "dd2e60f17d881ba73c67128a467e348bf8352202f08a2bd4e1b2de5fdf32a24e"
+    },
+    {
+      "path": "src/backend.ts",
+      "change": "modified",
+      "before_sha256": "5125810e1781e677c95643eeb0ea67758b0ffa1304ace40492496805feb21222",
+      "after_sha256": "b628c3f387f2bc76791f47327666889eb7ad46e261555341d4787e247d83cdd5"
+    },
+    {
+      "path": "src/studio/controller.ts",
+      "change": "modified",
+      "before_sha256": "4dcec7bda607913537727169859aa8bd0633558696cdc3b34606f7276d2e720e",
+      "after_sha256": "ca84c1f2d813889f7158ade84840e5b3bf505b14126b98678af531d011c998d4"
+    },
+    {
+      "path": "src/studio/expressions.ts",
+      "change": "modified",
+      "before_sha256": "c8c2c2cd43b91b1ad1a3fb1279a254af9c6234be6c030c042fdcf5b48d9259f9",
+      "after_sha256": "cfa25d5b0c23cb93c9688fac02375e4e140c38bee7d0e5337f12fb47ada44165"
+    },
+    {
+      "path": "src/studio/styles.ts",
+      "change": "modified",
+      "before_sha256": "cfbdf0de816131a55420d70e5382cb81919b18a1b03f2d2f5ec110dd9deee6a1",
+      "after_sha256": "222aa82a9cfbdd900d5aeefe0a60819f387e72bbf076e72b2a546c84d533adcf"
+    },
+    {
+      "path": "tests/backend-contract.mjs",
+      "change": "modified",
+      "before_sha256": "e8bfda498c861d58c7533c24c64ceedf9fca0d6c4c78c60a02465b243b50d0c2",
+      "after_sha256": "f686ba5eb62603fee330ffe8b40f44f1e439f037989f7c4a7413b5cc8a43d1b7"
+    },
+    {
+      "path": "tests/expression-upscale-ribbon-browser.py",
+      "change": "added",
+      "before_sha256": null,
+      "after_sha256": "2676a96924139742a4bc1246f878de7021f2fd2c923deed11c486fa00ce3196a"
+    },
+    {
+      "path": "tests/expression-upscale-ribbon-contract.mjs",
+      "change": "added",
+      "before_sha256": null,
+      "after_sha256": "0015f1a9e8e65a16aedac684109cac494c55ef434fa3d9f1b088352584718c6d"
+    }
+  ],
+  "existing_files_preserved": 211,
+  "checks": {
+    "build": "pass",
+    "typecheck": "pass (global TypeScript 5.8.3)",
+    "backend_contract": "pass",
+    "compiled_ui_browser": "pass at 390px and 1200px",
+    "full_node_suite": "blocked after native-image-gen-contract by missing jsdom"
+  }
+}

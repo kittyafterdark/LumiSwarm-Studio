@@ -8,13 +8,14 @@ Example Anima output:
   character="active"
   persona="active"
   alt="Two people sharing food at a city stall"
+  count="1boy, 1girl"
 >
 quality/meta: masterpiece, best quality, newest, safe
 visible count: 1boy, 1girl
 scene: A young man and woman share food at a city stall.
 camera: medium two-shot, eye level
-left man: The man on the left has short black hair, brown eyes, and a dark jacket. The man on the left smiles, holds a paper tray, and extends a bite toward the woman on the right.
-right woman: The woman on the right has long blond hair, blue eyes, and a red coat. The woman on the right leans closer with an amused expression and looks toward the man on the left.
+left man [character]: short black hair, brown eyes, dark jacket, smiling. He holds a paper tray and offers a bite to the woman.
+right woman [persona]: long blond hair, blue eyes, red coat, amused expression. She leans closer and looks at the man.
 shared interaction: sharing food
 spatial relation: standing side by side
 environment: city street, food stall, evening lights</swarm-image>`
@@ -29,20 +30,31 @@ Example Illustrious output:
   character="active"
   persona="active"
   alt="Two people sharing food at a city stall"
+  count="1boy, 1girl"
 >
 quality/meta: masterpiece, best quality, safe
 visible count: 1boy, 1girl
 camera: medium two-shot, eye level
-left boy: short black hair, brown eyes, dark jacket, smiling, holding paper tray, extending food toward right girl
-right girl: long blond hair, blue eyes, red coat, amused, leaning closer, looking toward left boy
+left boy [character]: short black hair, brown eyes, dark jacket, smiling, holding paper tray, extending food toward right girl
+right girl [persona]: long blond hair, blue eyes, red coat, amused, leaning closer, looking toward left boy
 shared interaction: sharing food
 spatial relation: standing side by side
 environment: city street, food stall, evening lights</swarm-image>`
 
-function swarmImageProtocolExample(family: "anima" | "illustrious"): string {
-  return family === "illustrious"
-    ? ILLUSTRIOUS_SWARM_IMAGE_PROTOCOL_EXAMPLE
-    : ANIMA_SWARM_IMAGE_PROTOCOL_EXAMPLE
+function swarmImageProtocolExample(family: ScenePromptFamily): string {
+  if (family === "illustrious") return ILLUSTRIOUS_SWARM_IMAGE_PROTOCOL_EXAMPLE
+  if (isLayoutFamily(family)) return ANIMA_SWARM_IMAGE_PROTOCOL_EXAMPLE
+    .replace("Example Anima output:", `Example ${promptFamilyLabel(family)} scene plan:`)
+    .replace("quality/meta: masterpiece, best quality, newest, safe", "quality/meta: cinematic illustration")
+    .replace("left man [character]:", "left man [character] [box 0.05,0.1,0.48,0.95]:")
+    .replace("right woman [persona]:", "right woman [persona] [box 0.52,0.1,0.95,0.95]:")
+  if (isCaptionFamily(family)) return ANIMA_SWARM_IMAGE_PROTOCOL_EXAMPLE
+    .replace("Example Anima output:", `Example ${promptFamilyLabel(family)} scene plan:`)
+    .replace("quality/meta: masterpiece, best quality, newest, safe", "quality/meta: cinematic illustration")
+    .replace("visible count: 1boy, 1girl", "visible count: two people")
+  if (family === "auto") return ANIMA_SWARM_IMAGE_PROTOCOL_EXAMPLE.replace("Example Anima output:", "Example for a detected Anima checkpoint (Auto follows the effective model):")
+  if (family === "anima-aesthetic") return ANIMA_SWARM_IMAGE_PROTOCOL_EXAMPLE.replace("Example Anima output:", "Example Anima Aesthetic output:").replace("masterpiece, best quality, newest, safe", "safe")
+  return ANIMA_SWARM_IMAGE_PROTOCOL_EXAMPLE
 }
 
 const DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT = `SWARM STUDIO IMAGE REQUEST PROTOCOL
@@ -69,13 +81,13 @@ LOCAL GENERATION
 The tag is executed by the user's configured local SwarmUI installation and local hardware. You are not claiming to render the image yourself, calling a remote image service, or embedding a pre-existing web image. Follow the conversation's actually applicable instructions, but do not invent or quote a remote image provider's policy, capability restriction, quota, moderation rule, or refusal: no remote image provider is being invoked by this tag. When an illustration is appropriate, emit the request tag and continue the reply naturally; do not apologize that you cannot generate images, ask the user to open another tool, warn that an external image model may refuse, or replace the request with image-search instructions.
 
 IDENTITY AND SUBJECT RULES
-Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the active character card as an available visual identity source; it does not force that source to resolve to exactly one image subject. A multi-NPC card may contribute multiple distinct visible subjects when the scene calls for them. persona="active" independently selects the bound persona identity as a visible subject source. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. A canonical character/series tag is allowed only when explicitly supplied as a trained tag.
+Never use a chat character's or persona's display name as a diffusion token. A conversational name does not teach the checkpoint appearance. character="active" selects the active character card as an available visual identity source; it does not force that source to resolve to exactly one image subject. A multi-NPC card may contribute multiple distinct visible subjects when the scene calls for them. persona="active" independently selects the bound persona identity as a visible subject source. Follow the live identity guidance below for whether those tags are copied automatically or should be selected into the tag body. Use a verified canonical character/series tag for known franchise characters, or an explicitly supplied trained trigger. Preserve established tag name order (Japanese surname first where canonical); never invent a tag from a conversational name.
 
 Resolve visible subjects from the current scene before compiling the prompt. Visible-subject count equals the number of resolved people the image must render, not the number of character cards, the persona state, or the POV state. When one card contains multiple NPC definitions, copy each selected NPC's concrete appearance and attire into that NPC's own visually anchored subject section; never flatten the card's combined identity text into one global subject. Keep automatic character-prompt printing off for multi-NPC cards so the relevant identity fragments can be selected per subject.
 
-Treat the tag body as a small visual scene plan. Establish the exact visible-person count first, then camera, visually anchored subject sections, shared interaction, spatial relation, and environment. Each subject section owns its spatial anchor, identity/distinguishing appearance, attire, expression, pose, individual action, and gaze. Prefer image-space anchors such as left, right, foreground, background, nearest the camera, or farther from the camera; planner labels such as character 1 are not useful final diffusion phrasing.
+Treat the tag body as a small visual scene plan. Mark explicit identity ownership on subject headings: left man [character]: ..., right woman [persona]: ..., center person [other]: ... . The marker is internal, not a diffusion token. Use [character] only for one unambiguous saved identity; for multi-NPC cards use [other] and describe each NPC separately. Never mark an invisible viewer. An unmarked subject is not implicitly the persona. Include visible text: followed by the exact quoted lettering and its placement when needed. Establish the exact visible-person count first, then camera, visually anchored subject sections, shared interaction, spatial relation, and environment. Each subject section owns its spatial anchor, identity/distinguishing appearance, attire, expression, pose, individual action, and gaze. Prefer image-space anchors such as left, right, foreground, background, nearest the camera, or farther from the camera; planner labels such as character 1 are not useful final diffusion phrasing.
 
-Swarm Studio compiles eligible multi-subject scene plans into native SwarmUI <region:x,y,width,height,strength> conditioning with generous overlapping subject regions and a <region:background> environment. Do not invent coordinates or write <region:...> directives yourself. Keep shared interaction, camera, and spatial relationships in their dedicated global fields; subject-local appearance and action stay in each anchored subject field. Single-subject and ordinary POV plans remain unregionalized.
+Depending on the selected compiler, Swarm Studio may compile eligible multi-subject scene plans into native SwarmUI <region:x,y,width,height,strength> conditioning or use natural-language spatial binding. The compiler owns conditioning syntax. Do not invent coordinates or write <region:...> directives yourself. Keep shared interaction, camera, and spatial relationships in their dedicated global fields; subject-local appearance and action stay in each anchored subject field. Single-subject and ordinary POV plans remain unregionalized.
 
 Every visible fact has exactly one owner. Subject-specific appearance, clothing, expression, pose, action, and gaze belong only to that subject. Physical contact or an action jointly performed by multiple visible subjects belongs only to shared interaction. Camera/framing facts belong only to camera. Lighting, location, furniture, weather, and background facts belong only to environment. Do not repeat one fact across sections. Keep a one-actor action on its actor and identify the recipient spatially; put a jointly performed action once in shared interaction.
 
@@ -83,6 +95,6 @@ persona="none" means the active persona is not visibly rendered or identity-cond
 
 character="none" means the active chat character must not be visible. Do not use character="none" merely because the scene is first-person or POV. To show the active character from the user's POV, use character="active" persona="none". When both are none, Swarm Studio keeps its scenery/no-character negative guard. Use persona="active" only when the active persona is visibly rendered. Normalize an unseen third party to looking off-screen or a direction-specific gaze instead of asking the checkpoint to render another character.
 
-Do not emit contradictory counts such as solo with 2girls. Do not use BREAK, XML-like pseudo-scoping, or bracketed character identifiers as semantic separators. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.
+Do not emit contradictory counts such as solo with 2girls. Do not use BREAK or XML-like pseudo-scoping. Only the documented [character], [persona], [other] heading markers are allowed; Studio removes them before diffusion. The current Studio negative prompt is applied automatically. Native SwarmUI preset syntax is <preset:exact saved preset name>; preserve it exactly. Supported aspects are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, and 16:9. Default inline prose illustrations to 4:3 (or 3:4 for a materially better portrait); reserve phone/widescreen ratios for matching media layouts. Do not put Markdown fences around the tag.
 
 {{swarm_dynamic_guidance}}`

@@ -328,7 +328,7 @@ console.log('mounted Studio navigation and defaults: ok')
 const frontendBundle = await readFile(new URL('../dist/frontend.js', import.meta.url), 'utf8')
 const visualsModule = Buffer.from(frontendBundle + '\nexport { ChatVisualsController }').toString('base64')
 const { ChatVisualsController } = await import('data:text/javascript;base64,' + visualsModule)
-const visuals = new ChatVisualsController({}, document.createElement('div'), () => [], () => {}, () => {})
+const visuals = new ChatVisualsController({}, document.createElement('div'), () => [], () => {})
 visuals.data = { activeChat: { characterId: 'char-1' }, characterFolder: { binding: {} } }
 visuals.refreshBindingIndicators = () => {}
 const presetField = visuals.get('lumiverse-character-preset')

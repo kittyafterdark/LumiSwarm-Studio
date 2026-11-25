@@ -1,0 +1,79 @@
+{
+  "release": "1.0.39",
+  "base": "Lumiswarm Cast Stage Geometry v1.0.38 cumulative",
+  "packaging": "full cumulative source and compiled runtime",
+  "changed_files": [
+    {
+      "path": "src/state/cast-presentations.ts",
+      "before_sha256": "74d0da8ee4e3045624bebd640b7c5461e0fe79903f4da0e8cf649571bb75ef7f",
+      "after_sha256": "78921d7c4a4c828546a5a2c1bb50be63585e9c035e4838957f0ca6141f0336b7"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "before_sha256": "d303d89ac633bc9b0ef2f1f6ee3b96f9c1f6c75997c4eed2822a3bdce5359410",
+      "after_sha256": "45e84b9011e6462192f291d36733b84e7d28ae676325b01fc0045bbef2d024dd"
+    },
+    {
+      "path": "package.json",
+      "before_sha256": "d4b8d973b59a1d7fbbd95a185634bad40a133e26eddefd30e2af1d0aa18a0d00",
+      "after_sha256": "4df86611afa0924ca91eabbbd14c5bfe0b9864b20ab9bcd1b5db583909dc0fac"
+    },
+    {
+      "path": "package-lock.json",
+      "before_sha256": "ff513fac4b73213d567099d2b9231522543d8f7fa8cb9d9bd39177121434b91b",
+      "after_sha256": "dce9ee10f5bd6b2e743214bb02aa17626aec7f5c36e98fbbc01b954d9da786b3"
+    },
+    {
+      "path": "spindle.json",
+      "before_sha256": "317f490df6be7c9e071b93dd59c6a3e40030a1f2e704ed93bd8863b70def4337",
+      "after_sha256": "2c25e14f221ab48ad0ab8aa75981a115d86f64e96f707d0d4023f23b111d4236"
+    },
+    {
+      "path": "dist/backend.js",
+      "before_sha256": "f6bb68631eeaf09f6c9f3fcba5c8382699c3fbc5b6db7f0e04898c4cffea5202",
+      "after_sha256": "de6bc4264bdd2640d99f3bfacf73af53a18d054ef63ed33dd090021089f4852f"
+    },
+    {
+      "path": "dist/frontend.js",
+      "before_sha256": "b0518c672eed9f589e3f98e51b756362cac3bcef7410ccf897a2fe1293ff3bf7",
+      "after_sha256": "227d781d1e21230cc6c1f4502a19938a247ce48880a3ce40cca40f82f110c459"
+    },
+    {
+      "path": "scripts/cast-expression-sides.css",
+      "before_sha256": "c9f9cb892adb738948818e39559ae0d066d7d11483fc229d809324b3d2ee37c4",
+      "after_sha256": "2a34bae379fb672b74f2f55193d6de994dcf8aa55cf758e0550dc410b5f1df19"
+    },
+    {
+      "path": "tests/cast-stage-geometry-browser.py",
+      "before_sha256": "20d0013d60b29243be76fc99cf0905de394b1f1b3a534afef7c87ec83a7bfac7",
+      "after_sha256": "7dc2078ab7c838258aabcd119b7888bcb827a3b7e96700ef297a63dcd0881d0c"
+    },
+    {
+      "path": "docs/screenshots/cast-stage-geometry-manga-sfx.png",
+      "before_sha256": "1e818ee0001b715069a8ea1fe12fc2a21e88a6f1afd56dab6101d45487f6554b",
+      "after_sha256": "72df98120783d23b09170ac0c71d11712e5062292b00294340908c043e9c2d2a"
+    }
+  ],
+  "added_files": [
+    {
+      "path": "tests/cast-live-stage-parity-browser.py",
+      "sha256": "6697de1814c7ee0467b96c9d7b100a7daafd7dfdab82f410ae06ff73c85c5d5e"
+    },
+    {
+      "path": "docs/cast-stage-parity-r39.md",
+      "sha256": "eb462b6322a13dfd315ba0e72e728c5e3172f0454c3177d086fb3da78d33e2a8"
+    }
+  ],
+  "tests": {
+    "build": "pass",
+    "typecheck": "pass (global tsc via STUDIO_TSC)",
+    "306-stage-geometry": "pass",
+    "shadow-island-stage-parity": "pass",
+    "cast_side_browser": "pass",
+    "cast_island_remount_browser": "pass",
+    "cast_album_management_browser": "pass",
+    "cast_contracts": "pass",
+    "live_Lumiverse": "not tested"
+  },
+  "scope": "manga sfx internal side parity only; no stage lane redesign or Cast Island lifecycle modification"
+}

@@ -1,0 +1,1438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Swarm-Cast: The Basics Run (9 Focused Layouts)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Fira+Code:wght@400;600;700&family=Inter:wght@400;500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,700;1,6..72,500&family=Outfit:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700;800&family=Permanent+Marker&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --cast-color: #599CE3;
+      --cast-glow: rgba(89, 156, 227, 0.45);
+      --cast-subtle: rgba(89, 156, 227, 0.12);
+      --cast-border: rgba(89, 156, 227, 0.35);
+
+      --bg-page: #0a0d14;
+      --bg-card: #131822;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-paragraph: #cbd5e1;
+      --border-subtle: rgba(255, 255, 255, 0.1);
+      --font-ui: 'Plus Jakarta Sans', -apple-system, sans-serif;
+    }
+
+    body.light-mode {
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --text-paragraph: #334155;
+      --border-subtle: rgba(0, 0, 0, 0.1);
+      --cast-subtle: rgba(89, 156, 227, 0.14);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      font-family: var(--font-ui);
+      line-height: 1.6;
+      padding-bottom: 120px;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    /* Top Navigation Bar */
+    .top-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(10, 13, 20, 0.92);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 16px 24px;
+    }
+    body.light-mode .top-header {
+      background: rgba(248, 250, 252, 0.95);
+    }
+
+    .header-inner {
+      max-width: 1080px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .header-title-block h1 {
+      font-size: 1.25rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-title-block p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .controls-group {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .swatch-picker {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-card);
+      padding: 4px 8px;
+      border-radius: 20px;
+      border: 1px solid var(--border-subtle);
+    }
+    .swatch-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-right: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .swatch-btn {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .swatch-btn:hover {
+      transform: scale(1.2);
+    }
+    .swatch-btn.active {
+      border-color: #ffffff;
+      box-shadow: 0 0 6px var(--cast-color);
+    }
+
+    .btn {
+      cursor: pointer;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-card);
+      color: var(--text-main);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      border-color: var(--cast-color);
+      transform: translateY(-1px);
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 36px auto;
+      padding: 0 20px;
+    }
+
+    .category-divider {
+      margin: 50px 0 30px 0;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--cast-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .category-divider h2 {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .category-divider span.badge {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.75rem;
+      background: var(--cast-subtle);
+      color: var(--cast-color);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .style-showcase {
+      margin-bottom: 60px;
+      padding-bottom: 30px;
+      border-bottom: 1px dashed var(--border-subtle);
+    }
+
+    .style-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 22px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .style-number {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.78rem;
+      color: var(--cast-color);
+      font-weight: 700;
+    }
+    .style-title {
+      font-size: 1.2rem;
+      font-weight: 800;
+    }
+    .style-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .mock-context {
+      font-size: 0.95rem;
+      line-height: 1.7;
+      color: var(--text-paragraph);
+      margin: 18px 0;
+    }
+
+    /* =========================================================================
+       CATEGORY 1: EXPRESSION WITH CARD DIALOGUE OVERLAP
+       ========================================================================= */
+
+    /* 1A: Visual Novel Hero Stage Overlap (Center-Stage Depth) */
+    .overlap-vn-stage {
+      margin: 40px auto;
+      max-width: 660px;
+      position: relative;
+      min-height: 300px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+    }
+    .overlap-vn-figure {
+      position: absolute;
+      top: 0;
+      bottom: 20px;
+      z-index: 1;
+      height: 290px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .overlap-vn-figure img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 6px 20px rgba(0,0,0,0.85));
+    }
+    .overlap-vn-card {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      background: rgba(13, 18, 28, 0.94);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-left: 5px solid var(--cast-color);
+      border-top: 1px solid rgba(255,255,255,0.1);
+      border-right: 1px solid rgba(255,255,255,0.05);
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 22px 26px 18px 26px;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.7);
+    }
+    .overlap-vn-nameplate {
+      position: absolute;
+      top: -15px;
+      left: 24px;
+      background: var(--cast-color);
+      color: #000000;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 900;
+      font-size: 0.82rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 3px 16px;
+      border-radius: 4px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+    .overlap-vn-quote {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.45;
+    }
+    .overlap-vn-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: var(--cast-color);
+      margin-left: 8px;
+      transform: rotate(45deg);
+      animation: vnBlink 0.8s infinite alternate;
+    }
+    @keyframes vnBlink {
+      from { opacity: 0.2; transform: rotate(45deg) scale(0.8); }
+      to { opacity: 1; transform: rotate(45deg) scale(1.2); }
+    }
+
+    /* 1B: Corner Pop-Out Card (Figure Bursting Out of Top-Left) */
+    .overlap-popout-card {
+      margin: 44px 0 32px 0;
+      position: relative;
+      display: flex;
+      align-items: flex-end;
+      min-height: 170px;
+    }
+    .overlap-popout-figure {
+      position: relative;
+      z-index: 2;
+      width: 150px;
+      height: 230px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: flex-end;
+      margin-right: -30px;
+      margin-bottom: -4px;
+    }
+    .overlap-popout-figure img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(4px 4px 16px rgba(0,0,0,0.9));
+    }
+    .overlap-popout-body {
+      flex: 1;
+      position: relative;
+      z-index: 1;
+      background: linear-gradient(135deg, rgba(20, 26, 38, 0.95) 0%, rgba(12, 16, 24, 0.95) 100%);
+      border-radius: 14px;
+      padding: 24px 28px 24px 46px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+      border-top: 2px solid var(--cast-color);
+    }
+    .overlap-popout-tag {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 800;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 6px;
+    }
+    .overlap-popout-quote {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.45;
+    }
+
+    /* 1C: Angled Diagonal Split Overlap (Skewed Cutout Band) */
+    .overlap-angled-card {
+      margin: 44px 0;
+      position: relative;
+      display: flex;
+      align-items: center;
+      min-height: 180px;
+    }
+    .overlap-angled-figure {
+      position: relative;
+      z-index: 2;
+      width: 140px;
+      height: 220px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: flex-end;
+      margin-right: -25px;
+    }
+    .overlap-angled-figure img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(4px 4px 15px rgba(0,0,0,0.85));
+    }
+    .overlap-angled-banner {
+      flex: 1;
+      position: relative;
+      z-index: 1;
+      background: #0d121c;
+      transform: skew(-10deg);
+      border-bottom: 4px solid var(--cast-color);
+      padding: 24px 30px 24px 45px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+    }
+    .overlap-angled-inner {
+      transform: skew(10deg);
+    }
+    .overlap-angled-name {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 6px;
+    }
+    .overlap-angled-quote {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.4;
+    }
+
+    /* =========================================================================
+       CATEGORY 2: 1:1 CROPPED TO FACE WITH SIDE DIALOGUE
+       ========================================================================= */
+
+    /* 2A: Editorial Minimalist Square Face & Serif Pull-Quote */
+    .square-editorial-card {
+      margin: 36px 0;
+      display: grid;
+      grid-template-columns: 96px 1fr;
+      gap: 24px;
+      align-items: center;
+      padding: 10px 0;
+      border-top: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .square-editorial-avatar {
+      width: 96px;
+      height: 96px;
+      position: relative;
+      border-radius: 4px;
+      overflow: hidden;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+    }
+    .square-editorial-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 25% 12%;
+    }
+    .square-editorial-avatar::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 3px;
+      background: var(--cast-color);
+    }
+    .square-editorial-content {
+      position: relative;
+    }
+    .square-editorial-quote {
+      font-family: 'Newsreader', serif;
+      font-size: 1.35rem;
+      font-style: italic;
+      color: var(--text-main);
+      line-height: 1.4;
+      margin-bottom: 6px;
+    }
+    .square-editorial-cite {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+
+    /* 2B: Modern Tech Messenger Squircle & Dialogue Bubble */
+    .square-tech-card {
+      margin: 32px 0;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .square-tech-avatar-wrap {
+      position: relative;
+      width: 80px;
+      height: 80px;
+      flex-shrink: 0;
+    }
+    .square-tech-avatar-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 25% 12%;
+      border-radius: 16px;
+      border: 2px solid var(--cast-border);
+    }
+    .square-tech-status-dot {
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--cast-color);
+      border: 3px solid var(--bg-page);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-weight: 900;
+      color: #000;
+    }
+    .square-tech-bubble {
+      flex: 1;
+      background: var(--cast-subtle);
+      border-left: 4px solid var(--cast-color);
+      border-radius: 12px;
+      padding: 14px 20px;
+    }
+    .square-tech-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .square-tech-name {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.92rem;
+      font-weight: 800;
+      color: var(--cast-color);
+    }
+    .square-tech-pill {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.68rem;
+      color: var(--cast-color);
+      opacity: 0.8;
+      text-transform: uppercase;
+    }
+    .square-tech-quote {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-main);
+      line-height: 1.45;
+    }
+
+    /* 2C: Manga Comic Stamp with Pointer Tail */
+    .square-manga-card {
+      margin: 36px 0;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .square-manga-frame {
+      width: 88px;
+      height: 88px;
+      flex-shrink: 0;
+      border: 3px solid #000000;
+      box-shadow: 4px 4px 0px var(--cast-color);
+      background: #000000;
+      overflow: hidden;
+    }
+    .square-manga-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 25% 12%;
+    }
+    .square-manga-balloon {
+      flex: 1;
+      position: relative;
+      background: #ffffff;
+      color: #111111;
+      border: 3px solid #111111;
+      border-radius: 14px;
+      padding: 16px 20px;
+      box-shadow: 4px 4px 0px #111111;
+    }
+    /* Tail pointing to the square stamp */
+    .square-manga-balloon::before {
+      content: '';
+      position: absolute;
+      left: -14px;
+      top: 50%;
+      transform: translateY(-50%);
+      border-style: solid;
+      border-width: 9px 12px 9px 0;
+      border-color: transparent #111111 transparent transparent;
+    }
+    .square-manga-balloon::after {
+      content: '';
+      position: absolute;
+      left: -9px;
+      top: 50%;
+      transform: translateY(-50%);
+      border-style: solid;
+      border-width: 7px 10px 7px 0;
+      border-color: transparent #ffffff transparent transparent;
+    }
+    .square-manga-header {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 900;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 2px;
+    }
+    .square-manga-text {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #111111;
+      line-height: 1.4;
+    }
+
+    /* =========================================================================
+       CATEGORY 3: 4:3 CROPPED TAG-LIKE
+       ========================================================================= */
+
+    /* 3A: Official Agency Lanyard / Hanging ID Tag */
+    .tag-lanyard-card {
+      margin: 36px 0;
+      background: #0d121c;
+      border-top: 3px solid var(--cast-color);
+      border-radius: 6px;
+      padding: 16px 22px;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.5);
+      position: relative;
+    }
+    /* Clip slot punch hole */
+    .tag-lanyard-slot {
+      position: absolute;
+      top: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 32px;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 3px;
+    }
+    .tag-lanyard-body {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 20px;
+      align-items: center;
+      margin-top: 6px;
+    }
+    .tag-lanyard-photo-4-3 {
+      width: 120px;
+      height: 90px;
+      aspect-ratio: 4 / 3;
+      overflow: hidden;
+      border-radius: 4px;
+      border: 1px solid var(--cast-border);
+    }
+    .tag-lanyard-photo-4-3 img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 25% 12%;
+    }
+    .tag-lanyard-content {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .tag-lanyard-meta {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.72rem;
+      color: var(--cast-color);
+      margin-bottom: 6px;
+    }
+    .tag-lanyard-quote {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.45;
+    }
+    .tag-lanyard-footer {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      margin-top: 8px;
+    }
+
+    /* 3B: Chamfered Evidence Luggage Tag with Metal Eyelet */
+    .tag-chamfered-card {
+      margin: 36px 0;
+      background: #faf6ee;
+      color: #1a1a1a;
+      padding: 18px 24px;
+      box-shadow: 4px 6px 20px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      position: relative;
+      clip-path: polygon(18px 0%, 100% 0%, 100% 100%, 18px 100%, 0% 50%);
+    }
+    .tag-chamfered-grommet {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 3px solid #888888;
+      background: #0a0d14;
+      flex-shrink: 0;
+      margin-left: -4px;
+    }
+    .tag-chamfered-photo-4-3 {
+      width: 110px;
+      height: 82.5px;
+      aspect-ratio: 4 / 3;
+      border: 1px solid #c2bba8;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .tag-chamfered-photo-4-3 img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 25% 12%;
+    }
+    .tag-chamfered-info {
+      flex: 1;
+    }
+    .tag-chamfered-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: #666666;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .tag-chamfered-title span {
+      color: var(--cast-color);
+    }
+    .tag-chamfered-speech {
+      font-family: 'Newsreader', serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #111111;
+      line-height: 1.4;
+    }
+
+    /* 3C: Polaroid 35mm Landscape Slide Mount Tag */
+    .tag-slide-mount-card {
+      margin: 36px 0;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+    .tag-slide-mount-frame {
+      background: #f1ede4;
+      padding: 10px 10px 22px 10px;
+      border-radius: 4px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+      flex-shrink: 0;
+      width: 130px;
+      transform: rotate(-2deg);
+    }
+    .tag-slide-mount-img {
+      width: 110px;
+      height: 82.5px;
+      aspect-ratio: 4 / 3;
+      overflow: hidden;
+      background: #000000;
+    }
+    .tag-slide-mount-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 25% 12%;
+    }
+    .tag-slide-mount-caption {
+      font-family: 'Permanent Marker', cursive;
+      font-size: 0.68rem;
+      color: #333333;
+      text-align: center;
+      margin-top: 6px;
+    }
+    .tag-slide-mount-quote-pane {
+      flex: 1;
+    }
+    .tag-slide-mount-header {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.72rem;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 6px;
+    }
+    .tag-slide-mount-dialogue {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.4;
+    }
+
+    /* Modal for Code Snippets */
+    .code-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 999;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .code-modal.active {
+      display: flex;
+    }
+    .code-modal-window {
+      background: #161b22;
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 720px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .code-modal-header {
+      padding: 14px 20px;
+      background: #0d1117;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .code-modal-content {
+      padding: 20px;
+      overflow-y: auto;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.85rem;
+      color: #9ecbff;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .close-btn {
+      cursor: pointer;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.2rem;
+    }
+
+    @media (max-width: 768px) {
+      .overlap-popout-card,
+      .overlap-angled-card,
+      .square-editorial-card,
+      .square-tech-card,
+      .square-manga-card,
+      .tag-lanyard-body,
+      .tag-chamfered-card,
+      .tag-slide-mount-card {
+        flex-direction: column;
+        grid-template-columns: 1fr;
+        text-align: center;
+      }
+      .overlap-popout-figure,
+      .overlap-angled-figure {
+        margin-right: 0;
+      }
+      .square-editorial-avatar,
+      .square-tech-avatar-wrap,
+      .square-manga-frame,
+      .tag-lanyard-photo-4-3,
+      .tag-chamfered-photo-4-3,
+      .tag-slide-mount-frame {
+        margin: 0 auto;
+      }
+      .square-manga-balloon::before,
+      .square-manga-balloon::after {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Sticky Navigation Bar -->
+  <header class="top-header">
+    <div class="header-inner">
+      <div class="header-title-block">
+        <h1>
+          The Basics Run
+          <span style="font-size: 0.75rem; font-weight: 700; background: var(--cast-subtle); color: var(--cast-color); padding: 3px 8px; border-radius: 6px; border: 1px solid var(--cast-color);">3 Options &times; 3 Formats</span>
+        </h1>
+        <p>Targeted exploration of Overlaps, 1:1 Face Crops, and 4:3 Tag presentations.</p>
+      </div>
+
+      <div class="controls-group">
+        <!-- Live Palette Switcher -->
+        <div class="swatch-picker">
+          <span class="swatch-label">Theme:</span>
+          <button class="swatch-btn active" style="background: #599CE3;" title="Ice Blue (#599CE3)" onclick="setCastColor('#599CE3', this)"></button>
+          <button class="swatch-btn" style="background: #EF4444;" title="Crimson Red (#EF4444)" onclick="setCastColor('#EF4444', this)"></button>
+          <button class="swatch-btn" style="background: #10B981;" title="Emerald Green (#10B981)" onclick="setCastColor('#10B981', this)"></button>
+          <button class="swatch-btn" style="background: #F59E0B;" title="Amber Gold (#F59E0B)" onclick="setCastColor('#F59E0B', this)"></button>
+          <button class="swatch-btn" style="background: #8B5CF6;" title="Neon Violet (#8B5CF6)" onclick="setCastColor('#8B5CF6', this)"></button>
+          <button class="swatch-btn" style="background: #EC4899;" title="Hot Pink (#EC4899)" onclick="setCastColor('#EC4899', this)"></button>
+          <button class="swatch-btn" style="background: #94A3B8;" title="Slate Steel (#94A3B8)" onclick="setCastColor('#94A3B8', this)"></button>
+        </div>
+
+        <button class="btn" id="themeToggleBtn" onclick="toggleTheme()">☀️ Toggle Reader Mode</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- =========================================================================
+         SECTION 1: EXPRESSION WITH CARD DIALOGUE OVERLAP
+         ========================================================================= -->
+    <div class="category-divider">
+      <h2>Section A: Card Dialogue Overlap <span class="badge">3 Options</span></h2>
+      <span style="font-size: 0.85rem; color: var(--text-muted);">Physical layering of character &amp; dialogue card</span>
+    </div>
+
+    <!-- 1A: VN Hero Stage Overlap -->
+    <section class="style-showcase" id="layout-1a">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">OPTION 1A &bull; VN CENTER-STAGE OVERLAP</span>
+          <h3 class="style-title">Visual Novel Hero Stage Overlap</h3>
+          <p class="style-desc">The character stands tall in the center-stage while a frosted glass dialogue card sits in the foreground overlapping the lower body, with a floating nameplate on the top edge.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet('1a')">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The briefing room ambient lights dropped as the presentation paused. Nobody seemed ready to break the silence until a quiet voice spoke up:
+      </p>
+
+      <!-- Card -->
+      <div class="overlap-vn-stage" style="--cast-color: var(--cast-color);">
+        <div class="overlap-vn-figure">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="overlap-vn-card">
+          <div class="overlap-vn-nameplate">
+            Shoto &bull; Confusion
+          </div>
+          <div class="overlap-vn-quote">
+            "Why would I lie about trading the Shibuya shift?."
+            <span class="overlap-vn-cursor"></span>
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The supervisor lowered his glasses and checked the roster timestamp once more, unable to find any contradiction.
+      </p>
+    </section>
+
+    <!-- 1B: Corner Pop-Out Card -->
+    <section class="style-showcase" id="layout-1b">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">OPTION 1B &bull; CORNER POP-OUT OVERLAP</span>
+          <h3 class="style-title">Corner Pop-Out Dynamic Card</h3>
+          <p class="style-desc">The character's head and shoulders burst dramatically up and out over the top-left boundary of the dialogue card into negative space.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet('1b')">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        Midoriya leaned forward across the desk, looking over the dispatch logs with genuine curiosity:
+      </p>
+
+      <!-- Card -->
+      <div class="overlap-popout-card" style="--cast-color: var(--cast-color);">
+        <div class="overlap-popout-figure">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="overlap-popout-body">
+          <div class="overlap-popout-tag">SHOTO // CONFUSION</div>
+          <div class="overlap-popout-quote">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The logic seemed entirely bulletproof. There was simply no strategic benefit to fabricating patrol assignments.
+      </p>
+    </section>
+
+    <!-- 1C: Angled Diagonal Split Overlap -->
+    <section class="style-showcase" id="layout-1c">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">OPTION 1C &bull; SKEWED CUTOUT OVERLAP</span>
+          <h3 class="style-title">Angled Diagonal Cutout Overlap</h3>
+          <p class="style-desc">A skewed speed-cut dialogue card sweeping diagonally across the character's right side, creating dynamic comic depth.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet('1c')">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The conversation in the hallway halted as the counter-question echoed down the corridor:
+      </p>
+
+      <!-- Card -->
+      <div class="overlap-angled-card" style="--cast-color: var(--cast-color);">
+        <div class="overlap-angled-figure">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="overlap-angled-banner">
+          <div class="overlap-angled-inner">
+            <div class="overlap-angled-name">Shoto Todoroki &bull; Inquiry</div>
+            <div class="overlap-angled-quote">
+              "Why would I lie about trading the Shibuya shift?."
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        With that straightforward remark, the discrepancy was resolved without further debate.
+      </p>
+    </section>
+
+
+    <!-- =========================================================================
+         SECTION 2: 1:1 CROPPED TO FACE WITH SIDE DIALOGUE
+         ========================================================================= -->
+    <div class="category-divider">
+      <h2>Section B: 1:1 Face Crop + Side Dialogue <span class="badge">3 Options</span></h2>
+      <span style="font-size: 0.85rem; color: var(--text-muted);">Square framing focused tightly on the expression</span>
+    </div>
+
+    <!-- 2A: Editorial Minimalist Square Face -->
+    <section class="style-showcase" id="layout-2a">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">OPTION 2A &bull; EDITORIAL SQUARE</span>
+          <h3 class="style-title">Editorial Minimalist Square Face Crop</h3>
+          <p class="style-desc">Crisp 1:1 square crop with a colored accent underline, flanked by high-end literary serif pull-quote prose.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet('2a')">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        In an exclusive interview profile regarding the district assignment:
+      </p>
+
+      <!-- Card -->
+      <div class="square-editorial-card" style="--cast-color: var(--cast-color);">
+        <div class="square-editorial-avatar">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="square-editorial-content">
+          <div class="square-editorial-quote">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+          <div class="square-editorial-cite">
+            Shoto Todoroki &mdash; Field Testimony
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        His peers confirmed that throughout his rookie year, directness remained his defining quality.
+      </p>
+    </section>
+
+    <!-- 2B: Modern Tech Messenger Squircle -->
+    <section class="style-showcase" id="layout-2b">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">OPTION 2B &bull; TECH SQUIRCLE</span>
+          <h3 class="style-title">Modern Tech Messenger Squircle</h3>
+          <p class="style-desc">Rounded squircle avatar with an interactive status badge in the corner, paired with a modern dialogue strip.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet('2b')">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        Incoming radio log transcript authenticated at 04:15 AM:
+      </p>
+
+      <!-- Card -->
+      <div class="square-tech-card" style="--cast-color: var(--cast-color);">
+        <div class="square-tech-avatar-wrap">
+          <img src="shoto-confusion.png" alt="Shoto">
+          <div class="square-tech-status-dot">?</div>
+        </div>
+        <div class="square-tech-bubble">
+          <div class="square-tech-header">
+            <span class="square-tech-name">Shoto</span>
+            <span class="square-tech-pill">confusion</span>
+          </div>
+          <div class="square-tech-quote">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The dispatch operator paused, reviewing the roster history before clearing the channel.
+      </p>
+    </section>
+
+    <!-- 2C: Manga Comic Stamp with Pointer Tail -->
+    <section class="style-showcase" id="layout-2c">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">OPTION 2C &bull; COMIC STAMP</span>
+          <h3 class="style-title">Manga Comic Stamp with Pointer Tail</h3>
+          <p class="style-desc">Square comic portrait framed with a bold black outline and shadow, pointing directly into an authentic speech balloon.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet('2c')">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        He paused right outside the door, turning around with a deadpan stare:
+      </p>
+
+      <!-- Card -->
+      <div class="square-manga-card" style="--cast-color: var(--cast-color);">
+        <div class="square-manga-frame">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="square-manga-balloon">
+          <div class="square-manga-header">Shoto &bull; Confusion</div>
+          <div class="square-manga-text">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        Uraraka had to cover her mouth to stifle a laugh at his absolute sincerity.
+      </p>
+    </section>
+
+
+    <!-- =========================================================================
+         SECTION 3: 4:3 CROPPED TAG-LIKE
+         ========================================================================= -->
+    <div class="category-divider">
+      <h2>Section C: 4:3 Cropped Tag-Like <span class="badge">3 Options</span></h2>
+      <span style="font-size: 0.85rem; color: var(--text-muted);">Landscape ratio formatted as badges, tags &amp; mounts</span>
+    </div>
+
+    <!-- 3A: Official Agency Lanyard / Hanging ID Tag -->
+    <section class="style-showcase" id="layout-3a">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">OPTION 3A &bull; LANYARD PERSONNEL TAG</span>
+          <h3 class="style-title">Official Agency Lanyard ID Tag</h3>
+          <p class="style-desc">Hanging security credential with a punch-slot clip on top, 4:3 landscape photo window, and telemetry status footer.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet('3a')">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        Security verification log recorded at the south precinct gate:
+      </p>
+
+      <!-- Card -->
+      <div class="tag-lanyard-card" style="--cast-color: var(--cast-color);">
+        <div class="tag-lanyard-slot"></div>
+        <div class="tag-lanyard-body">
+          <div class="tag-lanyard-photo-4-3">
+            <img src="shoto-confusion.png" alt="Shoto">
+          </div>
+          <div class="tag-lanyard-content">
+            <div class="tag-lanyard-meta">
+              <span>PERSONNEL ID // SHOTO</span>
+              <span>STATE: CONFUSION</span>
+            </div>
+            <div class="tag-lanyard-quote">
+              "Why would I lie about trading the Shibuya shift?."
+            </div>
+            <div class="tag-lanyard-footer">
+              STATUS: RECORD CERTIFIED // ARCHIVE 04
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The biometric log recorded zero elevation in stress markers during the statement.
+      </p>
+    </section>
+
+    <!-- 3B: Chamfered Evidence Luggage Tag with Metal Eyelet -->
+    <section class="style-showcase" id="layout-3b">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">OPTION 3B &bull; CHAMFERED EYELET TAG</span>
+          <h3 class="style-title">Chamfered Evidence Tag with Metal Grommet</h3>
+          <p class="style-desc">Luggage/evidence style tag with chamfered pointed edge, circular metal eyelet, 4:3 photo frame, and serif statement text.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet('3b')">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        Attached to the precinct docket was an authenticated eyewitness tag:
+      </p>
+
+      <!-- Card -->
+      <div class="tag-chamfered-card" style="--cast-color: var(--cast-color);">
+        <div class="tag-chamfered-grommet"></div>
+        <div class="tag-chamfered-photo-4-3">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="tag-chamfered-info">
+          <div class="tag-chamfered-title">EXHIBIT // <span>SHOTO &bull; CONFUSION</span></div>
+          <div class="tag-chamfered-speech">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The inspector initialed the docket and returned it to the central filing cabinet.
+      </p>
+    </section>
+
+    <!-- 3C: Polaroid 35mm Landscape Slide Mount Tag -->
+    <section class="style-showcase" id="layout-3c">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">OPTION 3C &bull; 35MM SLIDE MOUNT</span>
+          <h3 class="style-title">Polaroid 35mm Slide Mount Tag</h3>
+          <p class="style-desc">Landscape 4:3 photo mounted inside a tilted paper slide with handwritten marker label, paired with clean subtitle prose.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet('3c')">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        Slide #04 projected onto the squad room screen during the retrospective debrief:
+      </p>
+
+      <!-- Card -->
+      <div class="tag-slide-mount-card" style="--cast-color: var(--cast-color);">
+        <div class="tag-slide-mount-frame">
+          <div class="tag-slide-mount-img">
+            <img src="shoto-confusion.png" alt="Shoto">
+          </div>
+          <div class="tag-slide-mount-caption">Shoto (confusion)</div>
+        </div>
+        <div class="tag-slide-mount-quote-pane">
+          <div class="tag-slide-mount-header">TRANSCRIPT RECORD // SLIDE 04</div>
+          <div class="tag-slide-mount-dialogue">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The slide carousel clicked forward to the next sector map.
+      </p>
+    </section>
+
+  </main>
+
+  <!-- Modal for copying HTML/CSS snippet -->
+  <div class="code-modal" id="codeModal" onclick="closeModal(event)">
+    <div class="code-modal-window" onclick="event.stopPropagation()">
+      <div class="code-modal-header">
+        <strong id="modalTitle">Universal HTML Template</strong>
+        <button class="close-btn" onclick="closeModal()">&times;</button>
+      </div>
+      <pre class="code-modal-content" id="modalCode"></pre>
+      <div style="padding: 12px 20px; background: #0d1117; border-top: 1px solid var(--border-subtle); text-align: right;">
+        <button class="btn" onclick="copySnippet()">📋 Copy Universal Template</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function setCastColor(color, btnElem) {
+      document.documentElement.style.setProperty('--cast-color', color);
+      document.documentElement.style.setProperty('--cast-glow', color + '77');
+      document.documentElement.style.setProperty('--cast-subtle', color + '22');
+      document.documentElement.style.setProperty('--cast-border', color + '66');
+
+      document.querySelectorAll('.swatch-btn').forEach(btn => btn.classList.remove('active'));
+      if (btnElem) btnElem.classList.add('active');
+    }
+
+    function toggleTheme() {
+      document.body.classList.toggle('light-mode');
+      const btn = document.getElementById('themeToggleBtn');
+      if (document.body.classList.contains('light-mode')) {
+        btn.textContent = '🌙 Dark Reader Mode';
+      } else {
+        btn.textContent = '☀️ Light Reader Mode';
+      }
+    }
+
+    const snippets = {
+      '1a': `<div class="overlap-vn-stage" style="--cast-color: {{COLOR}};">
+  <div class="overlap-vn-figure">
+    <img src="{{AVATAR}}" alt="{{NAME}}">
+  </div>
+  <div class="overlap-vn-card">
+    <div class="overlap-vn-nameplate">
+      {{NAME}} &bull; {{EXPRESSION}}
+    </div>
+    <div class="overlap-vn-quote">
+      "{{DIALOGUE}}"
+      <span class="overlap-vn-cursor"></span>
+    </div>
+  </div>
+</div>`,
+
+      '1b': `<div class="overlap-popout-card" style="--cast-color: {{COLOR}};">
+  <div class="overlap-popout-figure">
+    <img src="{{AVATAR}}" alt="{{NAME}}">
+  </div>
+  <div class="overlap-popout-body">
+    <div class="overlap-popout-tag">{{NAME}} // {{EXPRESSION}}</div>
+    <div class="overlap-popout-quote">
+      "{{DIALOGUE}}"
+    </div>
+  </div>
+</div>`,
+
+      '1c': `<div class="overlap-angled-card" style="--cast-color: {{COLOR}};">
+  <div class="overlap-angled-figure">
+    <img src="{{AVATAR}}" alt="{{NAME}}">
+  </div>
+  <div class="overlap-angled-banner">
+    <div class="overlap-angled-inner">
+      <div class="overlap-angled-name">{{NAME}} &bull; {{EXPRESSION}}</div>
+      <div class="overlap-angled-quote">
+        "{{DIALOGUE}}"
+      </div>
+    </div>
+  </div>
+</div>`,
+
+      '2a': `<div class="square-editorial-card" style="--cast-color: {{COLOR}};">
+  <div class="square-editorial-avatar">
+    <img src="{{AVATAR}}" alt="{{NAME}}">
+  </div>
+  <div class="square-editorial-content">
+    <div class="square-editorial-quote">
+      "{{DIALOGUE}}"
+    </div>
+    <div class="square-editorial-cite">
+      {{NAME}} &mdash; {{EXPRESSION}}
+    </div>
+  </div>
+</div>`,
+
+      '2b': `<div class="square-tech-card" style="--cast-color: {{COLOR}};">
+  <div class="square-tech-avatar-wrap">
+    <img src="{{AVATAR}}" alt="{{NAME}}">
+    <div class="square-tech-status-dot">?</div>
+  </div>
+  <div class="square-tech-bubble">
+    <div class="square-tech-header">
+      <span class="square-tech-name">{{NAME}}</span>
+      <span class="square-tech-pill">{{EXPRESSION}}</span>
+    </div>
+    <div class="square-tech-quote">
+      "{{DIALOGUE}}"
+    </div>
+  </div>
+</div>`,
+
+      '2c': `<div class="square-manga-card" style="--cast-color: {{COLOR}};">
+  <div class="square-manga-frame">
+    <img src="{{AVATAR}}" alt="{{NAME}}">
+  </div>
+  <div class="square-manga-balloon">
+    <div class="square-manga-header">{{NAME}} &bull; {{EXPRESSION}}</div>
+    <div class="square-manga-text">
+      "{{DIALOGUE}}"
+    </div>
+  </div>
+</div>`,
+
+      '3a': `<div class="tag-lanyard-card" style="--cast-color: {{COLOR}};">
+  <div class="tag-lanyard-slot"></div>
+  <div class="tag-lanyard-body">
+    <div class="tag-lanyard-photo-4-3">
+      <img src="{{AVATAR}}" alt="{{NAME}}">
+    </div>
+    <div class="tag-lanyard-content">
+      <div class="tag-lanyard-meta">
+        <span>PERSONNEL ID // {{NAME}}</span>
+        <span>STATE: {{EXPRESSION}}</span>
+      </div>
+      <div class="tag-lanyard-quote">
+        "{{DIALOGUE}}"
+      </div>
+      <div class="tag-lanyard-footer">
+        STATUS: CERTIFIED
+      </div>
+    </div>
+  </div>
+</div>`,
+
+      '3b': `<div class="tag-chamfered-card" style="--cast-color: {{COLOR}};">
+  <div class="tag-chamfered-grommet"></div>
+  <div class="tag-chamfered-photo-4-3">
+    <img src="{{AVATAR}}" alt="{{NAME}}">
+  </div>
+  <div class="tag-chamfered-info">
+    <div class="tag-chamfered-title">EXHIBIT // <span>{{NAME}} &bull; {{EXPRESSION}}</span></div>
+    <div class="tag-chamfered-speech">
+      "{{DIALOGUE}}"
+    </div>
+  </div>
+</div>`,
+
+      '3c': `<div class="tag-slide-mount-card" style="--cast-color: {{COLOR}};">
+  <div class="tag-slide-mount-frame">
+    <div class="tag-slide-mount-img">
+      <img src="{{AVATAR}}" alt="{{NAME}}">
+    </div>
+    <div class="tag-slide-mount-caption">{{NAME}} ({{EXPRESSION}})</div>
+  </div>
+  <div class="tag-slide-mount-quote-pane">
+    <div class="tag-slide-mount-header">TRANSCRIPT // {{NAME}}</div>
+    <div class="tag-slide-mount-dialogue">
+      "{{DIALOGUE}}"
+    </div>
+  </div>
+</div>`
+    };
+
+    function showHtmlSnippet(id) {
+      document.getElementById('modalTitle').textContent = `Layout ${id.toUpperCase()} Universal Template`;
+      document.getElementById('modalCode').textContent = snippets[id] || '';
+      document.getElementById('codeModal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('codeModal').classList.remove('active');
+    }
+
+    function copySnippet() {
+      const code = document.getElementById('modalCode').textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        alert('Copied universal template to clipboard!');
+      });
+    }
+  </script>
+</body>
+</html>

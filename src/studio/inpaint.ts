@@ -24,6 +24,8 @@ function openStudioInpaint(
   submit: (edit: StudioInpaintEdit) => boolean,
   stop: () => void,
   replace?: (imageId: string) => Promise<void>,
+  acceptLabel?: string,
+  initialSelection?: {width:number;height:number;mask:Uint8Array},
 ): StudioInpaintSession {
   const dialog = element("dialog", "ss-inpaint-dialog")
   const title = element("h2", "", "Edit region")
@@ -159,7 +161,7 @@ function openStudioInpaint(
   const stopRender = button("Stop render", "ss-button ss-button-danger")
   stopRender.hidden = true
   const renderActions = element("div", "ss-inpaint-render-actions")
-  const useInChat = button("Use variant in chat", "ss-button ss-button-primary")
+  const useInChat = button(acceptLabel || "Use variant in chat", "ss-button ss-button-primary")
   useInChat.hidden = true
   renderActions.append(compare, stopRender, generate, useInChat)
   const maskSettings = element("section", "ss-inpaint-settings-section")
@@ -393,8 +395,13 @@ function openStudioInpaint(
     refresh()
   })
   const displayBrushWidth = () => { size.readout.textContent = `${Math.round(radius() * 2)} px` }
+  let brushPreviewTimer:number|undefined
   size.input.addEventListener("input", () => {
-    cursor.style.width = `${radius() * 2 / paint.width * 100}%`
+    const a=paint.getBoundingClientRect(),b=viewport.getBoundingClientRect()
+    if((tool==="brush"||tool==="erase")&&a.width&&a.height){
+      positionCursor({x:(Math.max(a.left,b.left)+Math.min(a.right,b.right)-2*a.left)/2*paint.width/a.width,y:(Math.max(a.top,b.top)+Math.min(a.bottom,b.bottom)-2*a.top)/2*paint.height/a.height})
+      cursor.dataset.sizePreview="true";window.clearTimeout(brushPreviewTimer);brushPreviewTimer=window.setTimeout(()=>{delete cursor.dataset.sizePreview;positionCursor()},850)
+    }
     displayBrushWidth()
   })
   prompt.addEventListener("input", refresh)
@@ -457,7 +464,7 @@ function openStudioInpaint(
     replacing = true
     close.disabled = true
     refresh()
-    status.textContent = "Replacing the chat image…"
+    status.textContent = acceptLabel ? "Loading variant in Edit…" : "Replacing the chat image…"
     try {
       await replace(variantId)
       if (dialog.open) dialog.close()
@@ -496,6 +503,12 @@ function openStudioInpaint(
         photoContext.drawImage(bitmap, 0, 0, paint.width, paint.height)
       } finally {
         bitmap.close()
+      }
+      if(initialSelection && initialSelection.mask.length===initialSelection.width*initialSelection.height){
+        const selectionCanvas=document.createElement("canvas");selectionCanvas.width=initialSelection.width;selectionCanvas.height=initialSelection.height
+        const selectionContext=selectionCanvas.getContext("2d")!,data=selectionContext.createImageData(selectionCanvas.width,selectionCanvas.height)
+        for(let i=0;i<initialSelection.mask.length;i++){data.data[i*4]=data.data[i*4+1]=data.data[i*4+2]=255;data.data[i*4+3]=initialSelection.mask[i]}
+        selectionContext.putImageData(data,0,0);maskContext.drawImage(selectionCanvas,0,0,paint.width,paint.height);selectionCanvas.width=selectionCanvas.height=1;refreshMask()
       }
       surface.style.setProperty("--ss-inpaint-ratio", String(paint.width / paint.height))
       stageFoot.firstElementChild!.textContent = `${paint.width} × ${paint.height}`

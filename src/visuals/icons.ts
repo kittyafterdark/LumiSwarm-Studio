@@ -23,9 +23,10 @@ const BINDING_LINK_ICON = `
 `
 
 const LIBRARY_ICON = `
-  <svg class="ss-library-symbol" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/><path d="m7 17 3-3 2 2 2.5-3 2.5 4"/></svg>
+  <svg class="ss-library-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M3 10h18"/></svg>
 `
 
+const PROMPT_DIAGNOSTICS_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3H5v18h14v-7M13 3v6h6l-6-6M8 12h4M8 16h3"/><circle cx="16.5" cy="15.5" r="3.5"/><path d="m19 18 3 3"/></svg>`
 const INPAINT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m14 5 5 5M9 15 6 12l10-10 5 5-10 10m-2-2c-4-1-4 5-7 6 5 0 8-2 7-6Z"/></svg>`
 
 const INIT_IMAGE_ICON = `
@@ -121,3 +122,5 @@ const FRAME_WALL_ICON = `
 const SPARKLE_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.7 5.2 2.8 8.3 8 9-5.2.7-7.3 3.8-8 9-.7-5.2-2.8-8.3-8-9 5.2-.7 7.3-3.8 8-9Z"/><path d="M19 2.5c.2 1.7.8 2.7 2.5 3-1.7.3-2.3 1.3-2.5 3-.2-1.7-.8-2.7-2.5-3 1.7-.3 2.3-1.3 2.5-3Z"/></svg>
 `
+
+const STUDIO_LAUNCH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2" y="4" width="6" height="7"/><rect x="2" y="13" width="6" height="7"/><rect x="10" y="4" width="5" height="3"/><rect x="10" y="9" width="5" height="11"/><rect x="17" y="4" width="5" height="10"/><rect x="17" y="16" width="5" height="4"/></svg>`

@@ -16,16 +16,17 @@ function setup(ctx: FrontendContext): () => void {
 }
 
 function setupStudio(ctx: FrontendContext): () => void {
-  const removeStyle = ctx.dom.addStyle(STYLES)
+  const removeStyle = ctx.dom.addStyle(STYLES + "\n" + CAST_PRESENTATION_CSS)
   let currentTheme = storedStudioTheme()
   let appearance = storedStudioAppearance()
   let behavior = storedStudioBehavior()
   appearance.customCss = sanitizeCustomCss(appearance.customCss)
   if (studioAppearanceIsCustom(appearance)) currentTheme = "custom"
+  let drawerCards: HTMLElement | null = null
   let launcher: HTMLElement | null = null
+  let quickVisuals: QuickVisualsController | null = null
   let miniplayer: MiniPlayerController | null = null
   let taggedImages: TaggedImageController | null = null
-  let chatVisuals: ChatVisualsController | null = null
   let characterCanonHost: CharacterCanonHostController | null = null
   let removeCustomStyle: (() => void) | null = appearance.customCss
     ? ctx.dom.addStyle(appearance.customCss)
@@ -34,6 +35,7 @@ function setupStudio(ctx: FrontendContext): () => void {
   const setThemeState = (theme: StudioTheme) => {
     currentTheme = theme
     persistStudioTheme(theme)
+    if (drawerCards) drawerCards.dataset.theme = theme
     if (launcher) launcher.dataset.theme = theme
     activeStudio?.setTheme(theme)
   }
@@ -43,6 +45,7 @@ function setupStudio(ctx: FrontendContext): () => void {
     appearance.customCss = sanitizeCustomCss(appearance.customCss)
     setThemeState(studioAppearanceIsCustom(appearance) ? "custom" : "lumiverse")
     persistStudioAppearance(appearance)
+    if (drawerCards) applyAppearanceVariables(drawerCards, appearance)
     if (launcher) applyAppearanceVariables(launcher, appearance)
     miniplayer?.setAppearance(appearance)
     activeStudio?.setAppearance(appearance)
@@ -65,6 +68,7 @@ function setupStudio(ctx: FrontendContext): () => void {
     miniplayer?.setBehavior(behavior)
     activeStudio?.setBehavior(behavior)
     taggedImages?.setBehavior(behavior)
+    quickVisuals?.setBehavior(behavior)
   }
 
   const behaviorFromServer = (value: any): StudioBehavior => {
@@ -74,8 +78,9 @@ function setupStudio(ctx: FrontendContext): () => void {
       completionToast: value?.completionToast === true,
       tagAutoGenerate: value?.autoGenerate === true,
       tagPromptInjection: value?.injectProtocol === true,
+      historyImageMarkers: value?.historyImageMarkers === "strip" ? "strip" : "keep",
       protocolPrompt: typeof value?.protocolPrompt === "string" && value.protocolPrompt.trim()
-        ? value.protocolPrompt
+        ? upgradePromptProtocol(value.protocolPrompt)
         : DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
       requestMode: value?.requestMode === "parser" ? "parser" : "inline",
       parserConnectionId: typeof value?.parserConnectionId === "string" ? value.parserConnectionId : "",
@@ -87,7 +92,8 @@ function setupStudio(ctx: FrontendContext): () => void {
       requiredImageMin: range.min,
       requiredImageMax: range.max,
       tagPromptMode: value?.promptMode === "pov" ? "pov" : "multi",
-      tagPromptFamily: value?.promptFamily === "illustrious" ? "illustrious" : "anima",
+      tagPromptFamily: cleanPromptFamily(value?.promptFamily),
+      countStrength: cleanCountStrength(value?.countStrength),
     }
   }
 
@@ -99,6 +105,7 @@ function setupStudio(ctx: FrontendContext): () => void {
       config: {
         autoGenerate: behavior.tagAutoGenerate,
         injectProtocol: behavior.tagPromptInjection,
+        historyImageMarkers: behavior.historyImageMarkers,
         completionToast: behavior.completionToast,
         protocolPrompt: behavior.protocolPrompt,
         requestMode: behavior.requestMode,
@@ -112,13 +119,19 @@ function setupStudio(ctx: FrontendContext): () => void {
         requiredImageMax: behavior.requiredImageMax,
         promptMode: behavior.tagPromptMode,
         promptFamily: behavior.tagPromptFamily,
+        countStrength: behavior.countStrength,
       },
     })
   }
 
-  const openStudio = (initialView: "studio" | "library" = "studio") => {
+  const openStudio = (initialView: "studio" | "library" | "cast" | "current-cast" | "lore" | "visuals" | "styles" = "studio") => {
     if (activeModal) {
       if (initialView === "library") activeStudio?.openLibrary()
+      if (initialView === "cast") activeStudio?.openCastMember("")
+      if (initialView === "current-cast") activeStudio?.openCurrentCast()
+      if (initialView === "lore") activeStudio?.openVisualLore()
+      if (initialView === "visuals") activeStudio?.openVisuals()
+      if (initialView === "styles") activeStudio?.openStyles()
       return
     }
     miniplayer?.setStudioOpen(true)
@@ -148,13 +161,18 @@ function setupStudio(ctx: FrontendContext): () => void {
     activeStudio.setTheme(currentTheme)
     activeStudio.setBehavior(behavior)
     if (initialView === "library") activeStudio.openLibrary()
+    if (initialView === "cast") activeStudio.openCastMember("")
+    if (initialView === "current-cast") activeStudio.openCurrentCast()
+    if (initialView === "lore") activeStudio.openVisualLore()
+    if (initialView === "visuals") activeStudio.openVisuals()
+    if (initialView === "styles") activeStudio.openStyles()
     modal.onDismiss(() => {
       miniplayer?.captureDraft(activeStudio?.exportDraft() || null)
       activeStudio?.dispose()
       activeStudio = null
       activeModal = null
       miniplayer?.setStudioOpen(false)
-      chatVisuals?.refresh()
+      quickVisuals?.refresh()
     })
   }
 
@@ -192,10 +210,16 @@ function setupStudio(ctx: FrontendContext): () => void {
         ...target,
         onExit: () => { if (openedFromChat && activeStudio === studio) activeModal?.dismiss() },
       }
-      if (action === "inpaint") studio.requestInlineInpaint(selection)
+      if (action === "artwork") studio.requestInlineInpaint(selection, true)
+      else if (action === "inpaint") studio.requestInlineInpaint(selection)
       else studio.openInlineReplacement(selection)
     },
   )
+  const castNarrative = new StudioCastNarrative(ctx, memberId => {
+    openStudio("cast")
+    activeStudio?.openCastMember(memberId)
+  })
+  const theater = new StoryTheaterController(ctx,chatId=>castNarrative.theaterAtmosphere(chatId),(chatId,key)=>castNarrative.theaterScene(chatId,key))
   let unregisterTagInterceptor = () => {}
   let unregisterParserTagInterceptor = () => {}
   const registerTagInterceptor = ctx.messages?.registerTagInterceptor
@@ -244,6 +268,7 @@ function setupStudio(ctx: FrontendContext): () => void {
         () => activeStudio?.exportDraft() || null,
         behavior,
         updateBehavior,
+        () => theater.open(),
       )
       miniplayer.setAppearance(appearance)
     } catch {
@@ -251,6 +276,9 @@ function setupStudio(ctx: FrontendContext): () => void {
     }
   }
 
+  drawerCards = element("div", "ss-drawer-cards")
+  drawerCards.dataset.theme = currentTheme
+  applyAppearanceVariables(drawerCards, appearance)
   launcher = element("div", "ss-launcher")
   launcher.dataset.page = "home"
   launcher.dataset.theme = currentTheme
@@ -270,25 +298,32 @@ function setupStudio(ctx: FrontendContext): () => void {
   wordmark.appendChild(sparkle)
   const launcherActions = element("div", "ss-launcher-actions")
   const launchButton = element("button", "ss-button ss-button-primary", "Open Studio")
+  launchButton.innerHTML = `<span class="ss-launcher-action-content">${STUDIO_LAUNCH_ICON}<span>Open Studio</span></span>`
+  drawer.root.classList.add("ss-studio-drawer-root")
   launchButton.addEventListener("click", () => openStudio("studio"))
   const libraryButton = element("button", "ss-button")
   libraryButton.innerHTML = `<span class="ss-launcher-action-content">${LIBRARY_ICON}<span>Library</span></span>`
   libraryButton.addEventListener("click", () => openStudio("library"))
   const visualsButton = element("button", "ss-button ss-launcher-visuals-button")
   visualsButton.innerHTML = `${CHAT_VISUALS_ICON}<span>Visuals</span>`
-  visualsButton.addEventListener("click", () => chatVisuals?.show())
-  launcherActions.append(launchButton, libraryButton, visualsButton)
+  const showDrawerVisuals = (visible: boolean) => {
+    if (!launcher || !quickVisuals) return
+    launcher.hidden = visible
+    quickVisuals.setVisible(visible)
+    if (!visible) visualsButton.focus({ preventScroll: true })
+  }
+  visualsButton.addEventListener("click", () => showDrawerVisuals(true))
+  const theaterButton = element("button", "ss-button")
+  theaterButton.innerHTML = `<span class="ss-launcher-action-content">${THEATER_ICON}<span>Story Theater</span></span>`
+  theaterButton.addEventListener("click", () => theater.open())
+  launcherActions.append(launchButton, libraryButton, visualsButton, theaterButton)
   launcherCenter.append(emblem, wordmark, launcherActions)
   launcher.appendChild(launcherCenter)
-  chatVisuals = new ChatVisualsController(
-    ctx,
-    launcher,
-    () => activeStudio?.exportDraft()?.stack || miniplayer?.snapshot()?.draft?.stack || null,
-    () => openStudio("studio"),
-    () => openStudio("library"),
-  )
+  drawerCards.appendChild(launcher)
+  quickVisuals = new QuickVisualsController(ctx, drawerCards, () => activeStudio?.exportDraft()?.stack ?? miniplayer?.snapshot().draft?.stack ?? null, () => openStudio("visuals"), () => showDrawerVisuals(false), () => openStudio("current-cast"), () => openStudio("styles"), behavior, patch => applyBehaviorState({ ...behavior, ...patch }))
+  const removeDrawerActivate = typeof drawer.onActivate === "function" ? drawer.onActivate(() => quickVisuals?.refresh()) : null
   characterCanonHost = new CharacterCanonHostController(ctx)
-  drawer.root.appendChild(launcher)
+  drawer.root.appendChild(drawerCards)
 
   const inputAction =
     typeof ctx.ui.registerInputBarAction === "function"
@@ -304,7 +339,14 @@ function setupStudio(ctx: FrontendContext): () => void {
   const recovery = new StudioRecoveryController(ctx, () => {
     activeStudio?.refreshAfterResume()
   })
+  const copyAuditAbort = new AbortController()
   const unsubscribeMessages = ctx.onBackendMessage((payload: any) => {
+    if (payload?.type === "verify_snapshot_copies") {
+      void verifyStudioReferenceCopies(payload.data, copyAuditAbort.signal).then(snapshot => {
+        if (!copyAuditAbort.signal.aborted) ctx.sendToBackend({ type: "snapshot_copy_results", requestId: payload.requestId, claims: snapshot.claims })
+      }).catch(() => {})
+      return
+    }
     const backendError =
       payload?.error
       || payload?.data?.error
@@ -320,11 +362,12 @@ function setupStudio(ctx: FrontendContext): () => void {
     if (payload?.type === "tag_automation_result") {
       applyBehaviorState(behaviorFromServer(payload.data))
     }
+    if(payload?.type==='cast_library_changed'||payload?.type==='cast_result')theater.refreshStageDirection()
+    quickVisuals?.onMessage(payload)
     recovery.onMessage(payload)
     miniplayer?.onMessage(payload)
     activeStudio?.onMessage(payload)
     taggedImages?.onMessage(payload)
-    chatVisuals?.onMessage(payload)
     characterCanonHost?.onMessage(payload)
   })
   const subscribeToImageEvent = (eventName: string, handler: (payload: any) => void): (() => void) => {
@@ -354,7 +397,10 @@ function setupStudio(ctx: FrontendContext): () => void {
     miniplayer?.onImageGenerationEvent("error", payload)
     activeStudio?.onImageGenerationEvent("error", payload)
   })
+  const unsubscribeQuickChat = subscribeToImageEvent("CHAT_SWITCHED", () => quickVisuals?.contextChanged())
+  const unsubscribeQuickPersona = subscribeToImageEvent("PERSONA_CHANGED", () => quickVisuals?.contextChanged())
   miniplayer?.bootstrap()
+  quickVisuals.refresh()
 
   return () => {
     recovery.destroy()
@@ -362,19 +408,25 @@ function setupStudio(ctx: FrontendContext): () => void {
     activeModal?.dismiss()
     activeStudio = null
     activeModal = null
+    copyAuditAbort.abort()
     unsubscribeMessages()
     unsubscribeProgress()
     unsubscribeComplete()
     unsubscribeError()
     removeActionClick()
     inputAction?.destroy()
+    unsubscribeQuickChat()
+    unsubscribeQuickPersona()
+    if (typeof removeDrawerActivate === "function") removeDrawerActivate()
+    quickVisuals?.destroy()
+    quickVisuals = null
     drawer.destroy()
+    theater.destroy()
+    castNarrative.destroy()
     unregisterTagInterceptor()
     unregisterParserTagInterceptor()
     taggedImages?.destroy()
     taggedImages = null
-    chatVisuals?.destroy()
-    chatVisuals = null
     characterCanonHost?.destroy()
     characterCanonHost = null
     miniplayer?.destroy()

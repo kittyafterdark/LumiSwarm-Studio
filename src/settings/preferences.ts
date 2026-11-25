@@ -33,6 +33,7 @@ function defaultStudioBehavior(): StudioBehavior {
     mobileQuickCreate: false,
     tagAutoGenerate: false,
     tagPromptInjection: false,
+    historyImageMarkers: "keep",
     protocolPrompt: DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
     requestMode: "inline",
     parserConnectionId: "",
@@ -46,6 +47,7 @@ function defaultStudioBehavior(): StudioBehavior {
     requiredImageMax: 0,
     tagPromptMode: "multi",
     tagPromptFamily: "anima",
+    countStrength: 1.5,
   }
 }
 
@@ -71,8 +73,9 @@ function storedStudioBehavior(): StudioBehavior {
       mobileQuickCreate: parsed?.mobileQuickCreate === true,
       tagAutoGenerate: parsed?.tagAutoGenerate === true,
       tagPromptInjection: parsed?.tagPromptInjection === true,
+      historyImageMarkers: parsed?.historyImageMarkers === "strip" ? "strip" : "keep",
       protocolPrompt: typeof parsed?.protocolPrompt === "string" && parsed.protocolPrompt.trim()
-        ? parsed.protocolPrompt
+        ? upgradePromptProtocol(parsed.protocolPrompt)
         : DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT,
       requestMode: parsed?.requestMode === "parser" ? "parser" : "inline",
       parserConnectionId: typeof parsed?.parserConnectionId === "string" ? parsed.parserConnectionId : "",
@@ -87,7 +90,8 @@ function storedStudioBehavior(): StudioBehavior {
       requiredImageMin: imageRange.min,
       requiredImageMax: imageRange.max,
       tagPromptMode: parsed?.tagPromptMode === "pov" ? "pov" : "multi",
-      tagPromptFamily: parsed?.tagPromptFamily === "illustrious" ? "illustrious" : "anima",
+      tagPromptFamily: cleanPromptFamily(parsed?.tagPromptFamily),
+      countStrength: cleanCountStrength(parsed?.countStrength),
     }
   } catch {
     return defaultStudioBehavior()
@@ -204,7 +208,8 @@ function applyAppearanceVariables(target: HTMLElement, appearance: StudioAppeara
     }
   }
   // A custom Buttons swatch overrides the primary action fill as well as
-  // secondary controls. Without one, primary actions continue to follow Accent.
+  // secondary controls, except Studio's Generate/Stop CTA, which follows Accent.
+  // Without a Buttons swatch, primary actions continue to follow Accent.
   const primary = appearance.colors.button
   const accent = appearance.colors.accent
   for (const [property, value] of [

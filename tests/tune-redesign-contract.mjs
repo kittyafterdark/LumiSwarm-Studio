@@ -59,11 +59,11 @@ const styleSource = await readFile(new URL('../src/studio/styles.ts',import.meta
 const setup = await readFile(new URL('../src/host/setup.ts',import.meta.url),'utf8')
 assert.match(styleSource,/const STYLES = `/)
 assert.match(styleSource,/const STUDIO_V3_STYLES = ""/)
-assert.match(setup,/ctx\.dom\.addStyle\(STYLES\)/)
+assert.match(setup,/ctx\.dom\.addStyle\(STYLES\s*\+\s*"\\n"\s*\+\s*CAST_PRESENTATION_CSS\)/)
 assert.doesNotMatch(setup,/STYLES\s*\+\s*STUDIO_V3_STYLES/)
 assert.doesNotMatch(styleSource,/\.ss-tune-orientation-display span \{/)
 // Restoring the library's missing folder/selection/visual components adds real
 // source rules, not a second layered stylesheet. Guard against the old ~158k cascade.
-assert.equal((styleSource.match(/\.ss-commandbar \{ display:flex; position:absolute/g)||[]).length,1,'Mobile command bar has one layout definition')
+assert.equal((styleSource.match(/\.ss-commandbar \{ display:flex; flex:none; flex-direction:column/g)||[]).length,1,'Mobile command bar has one layout definition')
 assert.equal((styleSource.match(/\.ss-library-folder-preview img \{/g)||[]).length,1,'Library thumbnail styling must have one authored definition')
 console.log('Tune redesign contract: real aspect controls, menu actions, seed reuse, summaries, icon, six mobile panes and single stylesheet: ok')

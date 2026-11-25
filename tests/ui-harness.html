@@ -312,8 +312,8 @@
             total: historyOutputs.length,
             folders: outputFolders,
           }})
-        } else if (message.type === "get_chat_visuals") {
-          later({ type: "chat_visuals_result", requestId: message.requestId, data: {
+        } else if (message.type === "get_chat_visuals" || message.type === "get_quick_visuals") {
+          later({ type: message.type === "get_quick_visuals" ? "quick_visuals_result" : "chat_visuals_result", requestId: message.requestId, data: {
             activeChat: { id: "chat-1", name: "Lior chat", characterId: "char-1", characterName: "Lior" },
             activePersona: { id: "persona-1", name: "User", description: "" },
             personaPresets: [], personaBinding: { presetId: "", enabled: true }, activePersonaPreset: null,

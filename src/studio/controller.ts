@@ -4,7 +4,20 @@ const LIBRARY_PREVIEW_SHAPES = [
   { name: "portrait", label: "Portrait 3:4", ratio: 3 / 4, icon: PORTRAIT_ICON },
 ] as const
 
+const PROTOCOL_FAMILY_DESCRIPTIONS: Record<ScenePromptFamily, string> = {
+  auto: "Uses provider architecture, then checkpoint-name hints. MOSS defaults to Caption; layout is opt-in.",
+  anima: "Hybrid tags and prose, with native spatial language.",
+  "anima-aesthetic": "Hybrid tags and prose without standalone score metadata.",
+  "anima-regional": "Opt-in Swarm regional conditioning for subject placement.",
+  illustrious: "Booru tags with regional subject conditioning.",
+  moss: "Natural-language captions without imposed layout.",
+  "moss-bbox": "Swarm converts object boxes and supports native presets.",
+  "moss-layout": "Native JSON supports positioned text and objects. Clear Swarm presets and custom prompt/workflow overrides first.",
+  krea: "Natural-language scene descriptions and quoted visible text.",
+}
+
 class StudioController {
+  private readonly backgroundActivity = new CastBackgroundActivityTracker()
   private readonly ctx: FrontendContext
   private readonly modal: any
   private readonly root: HTMLElement
@@ -15,11 +28,30 @@ class StudioController {
   private appearance = defaultStudioAppearance()
   private behavior: StudioBehavior
   private appearanceControlsInitialized = false
+  private protocolPromptInitialized = false
   private readonly state: StudioState
   private readonly mobileMedia = window.matchMedia("(max-width: 720px)")
+  private pendingLayoutDialog: HTMLDialogElement | null = null
+  private readonly completeModalLayout = () => {
+    this.pendingLayoutDialog = null
+    if (!this.disposed) this.handleMobileLayout()
+  }
   private readonly handleMobileLayout = () => {
+    // Moving an ancestor of an open native dialog removes it from the top layer.
+    // Let its own close lifecycle finish before portaling the Studio shell.
+    const openDialog = this.root.querySelector<HTMLDialogElement>("dialog[open]")
+    if (openDialog) {
+      if (this.pendingLayoutDialog !== openDialog) {
+        this.pendingLayoutDialog?.removeEventListener("close", this.completeModalLayout)
+        this.pendingLayoutDialog = openDialog
+        openDialog.addEventListener("close", this.completeModalLayout, { once: true })
+      }
+      return
+    }
+    const view = this.studioView
     this.toggleFullscreen(this.desktopFullscreen)
     this.setMobileTab(this.get<HTMLElement>(".ss-shell").dataset.mobileTab || "create")
+    if (view === "cast" || view === "lore" || view === "visuals" || view === "edit" || view === "finalize") this.setStudioView(view)
   }
   private readonly updatePresetViewport = () => {
     const viewport = window.visualViewport
@@ -75,6 +107,7 @@ class StudioController {
   private librarySelectionMode = false
   private folderDeleteAbort: AbortController | null = null
   private avatarCropAbort: AbortController | null = null
+  private libraryUploadAbort: AbortController | null = null
   private characterImageActionPending = false
   private librarySelectOnlyNonStarred = false
   private libraryVisualMode: "profile" | "look" = "profile"
@@ -98,7 +131,23 @@ class StudioController {
   private fullscreenAnchor: Comment | null = null
   private stopActiveResize: (() => void) | null = null
   private profileSyncTimer: ReturnType<typeof setTimeout> | null = null
-  private studioView: "generate" | "styles" = "generate"
+  private studioView: "generate" | "styles" | "cast" | "lore" | "visuals" | "edit" | "finalize" = "generate"
+  private editWorkspace: StudioEditWorkspace | null = null
+  private finalizeWorkspace: StudioFinalizeWorkspace | null = null
+  private finalizeWorkspaceId=""
+  private manualAnimaRefs: (StudioExpressionImage|null)[]=[null,null]
+  private manualAnimaPair=""
+  private manualAnimaBusy=false
+  private manualAnimaEpoch=0
+  private editUpscaleAccept: ((image:CurrentImage)=>Promise<void>) | null = null
+  private visualLore: VisualLorebookHostController | null = null
+  private readonly manualLoreSelection = new Map<string, ManualLoreSelection>()
+  private chatVisualsWorkspace: ChatVisualsController | null = null
+  private castWorkspace: StudioCastWorkspace | null = null
+  private stageDirectionData: {chatId:string;groupId:string;groupName:string;global:StageDirectionConfig;cast:StageDirectionConfig|null;chat:StageDirectionConfig|null}|null=null
+  private stageDirectionScope:'global'|'cast'|'chat'='global'
+  private stageDirectionRequest=''
+  private stageDirectionTimer=0
   private renderStyles: StudioRenderStyle[] = []
   private studioDefaults: StudioGenerationDefaults | null = null
   private activeRenderStyleId = ""
@@ -107,7 +156,7 @@ class StudioController {
   private inspectorReturnFocus: HTMLElement | null = null
   private inpaintSession: StudioInpaintSession | null = null
   private inpaintJobId = ""
-  private inlineInpaint: { target: StudioInlineImageTarget; requestId: string; image?: CurrentImage } | null = null
+  private inlineInpaint: { target: StudioInlineImageTarget; requestId: string; image?: CurrentImage; workspace?:boolean } | null = null
   private libraryPicker: {
     kind: "reference" | "saved" | "replace"
     folderId?: string
@@ -123,12 +172,13 @@ class StudioController {
   private upscaleSession: StudioUpscaleSession | null = null
   private disposed = false
   private readonly handleKeyDown = (event: KeyboardEvent) => {
+    if (this.referenceLinkDialog?.open || (event.key === "Escape" && this.root.querySelector(".ss-settings-help-popover:popover-open"))) return
     if (event.key === "Escape") {
       const meta = this.root.querySelector<HTMLElement>('[data-role="lora-meta-layer"]')
       if (meta && !meta.hidden) { meta.hidden = true; event.stopPropagation(); return }
     }
     if (this.expressionDialog?.open) return
-    if (this.root.querySelector<HTMLDialogElement>(".ss-avatar-crop[open], .ss-confirm-folder[open], .ss-inpaint-dialog[open], .ss-upscale-dialog[open]")?.open) return
+    if (this.root.querySelector<HTMLDialogElement>(".ss-avatar-crop[open], .ss-confirm-folder[open], .ss-inpaint-dialog[open], .ss-upscale-dialog[open], .ss-cast-workspace dialog[open]")?.open) return
     if (event.key !== "Escape") return
     const loraSortMenu = this.root.querySelector<HTMLElement>('[data-role="lora-sort-menu"]')
     if (loraSortMenu && !loraSortMenu.hidden) {
@@ -282,6 +332,10 @@ class StudioController {
     }
     document.addEventListener("keydown", this.handleKeyDown, true)
     this.setRunStatus("Loading Lumiverse connections…")
+    if (this.activity) {
+      this.backgroundActivity.accept({type: "cast_background_jobs_result", data: this.activity.backgroundJobsSnapshot?.() || []})
+      this.renderBackgroundActivity()
+    }
     const activitySnapshot = this.activity?.snapshot()
     this.pendingDraftRestore = activitySnapshot?.draft || null
     if (activitySnapshot?.latestImage) this.setCurrentImage(activitySnapshot.latestImage)
@@ -299,15 +353,27 @@ class StudioController {
     this.send("bootstrap")
     void nativeImageGenAvailable().then(available => { if (!this.disposed) { this.nativeImageGenReady = available; this.renderStyleOptions() } })
     this.send("get_lora_download_status")
+    this.send("list_cast_background_jobs")
+    this.send("list_cast_genesis_activity")
   }
 
   dispose(): void {
+    this.referenceLinkDialog?.close()
+    this.referenceCopyAbort.abort()
     this.persistWorkspaceState()
     this.syncFullscreenRoot(false)
     this.syncStudioProfile()
     this.disposed = true
+    window.clearTimeout(this.stageDirectionTimer);this.stageDirectionRequest=''
+    this.pendingLayoutDialog?.removeEventListener("close", this.completeModalLayout)
+    this.pendingLayoutDialog = null
+    this.castWorkspace?.dispose()
+    this.editWorkspace?.dispose()
+    this.finalizeWorkspace?.dispose()
+    this.visualLore?.destroy()
+    this.chatVisualsWorkspace?.destroy()
     this.inpaintSession?.dialog.close()
-    if (this.libraryPicker?.folderId) this.closeOutputLibrary()
+    if (this.libraryPicker) this.closeOutputLibrary()
     this.expressionDialog?.close()
     for (const request of this.expressionRequests.values()) {
       request.stop?.()
@@ -316,6 +382,7 @@ class StudioController {
     this.expressionRequests.clear()
     this.upscaleSession?.close()
     this.avatarCropAbort?.abort()
+    this.libraryUploadAbort?.abort()
     this.folderDeleteAbort?.abort()
     window.visualViewport?.removeEventListener("resize", this.updatePresetViewport)
     window.visualViewport?.removeEventListener("scroll", this.updatePresetViewport)
@@ -356,6 +423,7 @@ class StudioController {
   }
 
   setBehavior(behavior: StudioBehavior): void {
+    const previousProtocol = this.behavior.protocolPrompt || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT
     this.behavior = { ...behavior }
     const toast = this.root.querySelector<HTMLInputElement>('[data-role="completion-toast"]')
     if (toast) toast.checked = this.behavior.completionToast
@@ -367,9 +435,13 @@ class StudioController {
     if (tagAutoGenerate) tagAutoGenerate.checked = this.behavior.tagAutoGenerate
     const tagPromptInjection = this.root.querySelector<HTMLInputElement>('[data-role="tag-prompt-injection"]')
     if (tagPromptInjection) tagPromptInjection.checked = this.behavior.tagPromptInjection
+    const historyImageMarkers = this.root.querySelector<HTMLSelectElement>('[data-role="history-image-markers"]')
+    if (historyImageMarkers) historyImageMarkers.value = this.behavior.historyImageMarkers
     const protocolPrompt = this.root.querySelector<HTMLTextAreaElement>('[data-role="tag-protocol-prompt"]')
-    if (protocolPrompt && document.activeElement !== protocolPrompt) {
-      protocolPrompt.value = this.behavior.protocolPrompt || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT
+    if (protocolPrompt) {
+      const nextProtocol = this.behavior.protocolPrompt || DEFAULT_SWARM_IMAGE_PROTOCOL_PROMPT
+      if (!this.protocolPromptInitialized || protocolPrompt.value === previousProtocol || (nextProtocol !== previousProtocol && document.activeElement !== protocolPrompt)) protocolPrompt.value = nextProtocol
+      this.protocolPromptInitialized = true
     }
     const parserConnection = this.root.querySelector<HTMLSelectElement>('[data-role="parser-connection"]')
     if (parserConnection) parserConnection.value = this.behavior.parserConnectionId
@@ -397,12 +469,14 @@ class StudioController {
     if (requiredImageMax) requiredImageMax.value = String(this.behavior.requiredImageMax)
     const tagPromptMode = this.root.querySelector<HTMLSelectElement>('[data-role="tag-prompt-mode"]')
     if (tagPromptMode) tagPromptMode.value = this.behavior.tagPromptMode
-    for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="set-prompt-family"]')) {
-      button.dataset.active = String(button.dataset.promptFamily === this.behavior.tagPromptFamily)
-      button.setAttribute("aria-checked", String(button.dataset.promptFamily === this.behavior.tagPromptFamily))
-    }
+    const countStrength = this.root.querySelector<HTMLSelectElement>('[data-role="count-strength"]')
+    if (countStrength) countStrength.value = String(this.behavior.countStrength)
+    const familySelect = this.root.querySelector<HTMLSelectElement>('[data-role="prompt-family"]')
+    if (familySelect) familySelect.value = this.behavior.tagPromptFamily
+    const familyHelp = this.root.querySelector<HTMLElement>('[data-role="prompt-family-help"]')
+    if (familyHelp) familyHelp.textContent = PROTOCOL_FAMILY_DESCRIPTIONS[this.behavior.tagPromptFamily]
     const copyProtocolExample = this.root.querySelector<HTMLButtonElement>('[data-action="copy-tag-protocol"]')
-    if (copyProtocolExample) copyProtocolExample.textContent = `Copy ${this.behavior.tagPromptFamily === "illustrious" ? "Illustrious" : "Anima"} example`
+    if (copyProtocolExample) copyProtocolExample.title = `Copy ${promptFamilyLabel(this.behavior.tagPromptFamily)} example`
   }
 
   private renderParserConnections(): void {
@@ -667,8 +741,22 @@ class StudioController {
     }
   }
 
+  openCurrentCast(): void {
+    this.setStudioView("cast")
+    this.castWorkspace?.openCurrent()
+  }
+
+  openStyles(): void {
+    this.setStudioView("styles")
+  }
+
   openLibrary(): void {
     this.openOutputLibrary()
+  }
+
+  openCastMember(memberId: string): void {
+    this.setStudioView("cast")
+    this.castWorkspace?.openMember(memberId)
   }
 
   private get<T extends HTMLElement>(selector: string): T {
@@ -705,6 +793,9 @@ class StudioController {
                     <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="generation" data-active="false">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z"/></svg><span>Generation</span>
                     </button>
+                    <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="stage-direction" data-active="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18v11H3zM3 9V4l17-2 1 5-18 2M8 3l3 5M15 2l3 5M8 14h8"/></svg><span>Stage Direction</span>
+                    </button>
                     <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="theme" data-active="false">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 0-3.6h-.8a1.7 1.7 0 0 1 0-3.4H15a6 6 0 0 0 0-12h-3Z"/><path d="M7.5 9h.01M9.5 6.5h.01M6.5 13h.01"/></svg><span>Theme</span>
                     </button>
@@ -731,6 +822,7 @@ class StudioController {
                       </section>
                     </div>
                     <div class="ss-settings-panel" data-settings-panel="generation" hidden>
+                      <section class="ss-config-section"><div class="ss-config-section-head"><strong>Swarm originals</strong><span>Native Swarm renders</span></div><label class="ss-settings-toggle"><span class="ss-settings-toggle-copy"><strong>Generate without saving a Swarm original</strong><span>Lumiverse still stores the generated image. Custom Comfy workflows require their own save controls.</span></span><input type="checkbox" data-role="skip-swarm-save" /><span class="ss-switch-track" aria-hidden="true"></span></label></section>
                       <section class="ss-config-section">
                         <div class="ss-config-section-head"><strong>Request completion</strong><span>One-pass or dedicated parser</span></div>
                         <div class="ss-request-mode-grid" role="group" aria-label="Image request completion mode">
@@ -769,6 +861,14 @@ class StudioController {
                           <span class="ss-settings-toggle-copy"><strong>Inject image protocol</strong><span>Teach the active model how to request local SwarmUI illustrations in its replies.</span></span>
                           <input type="checkbox" data-role="tag-prompt-injection" ${this.behavior.tagPromptInjection ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
                         </label>
+                        <label class="ss-config-field">
+                          <span>History image markers</span>
+                          <select class="ss-select" data-role="history-image-markers" aria-describedby="ss-history-markers-help">
+                            <option value="keep" ${this.behavior.historyImageMarkers === "keep" ? "selected" : ""}>Keep captions (default)</option>
+                            <option value="strip" ${this.behavior.historyImageMarkers === "strip" ? "selected" : ""}>Strip immediately (cache-first)</option>
+                          </select>
+                        </label>
+                        <p id="ss-history-markers-help" class="ss-muted ss-tiny">Applies to outgoing text context only. Both modes avoid a rolling history cutoff. Strip also avoids caption changes when a pending image becomes a finished illustration. Changing modes can invalidate an existing prompt cache once; chat images and Theater are unchanged.</p>
                         <label class="ss-settings-toggle">
                           <span class="ss-settings-toggle-copy"><strong>Strip LoRA stack from User-only composition</strong><span>When character="none" and only the active persona is requested, remove matching character-bound LoRAs. Off keeps the current Studio stack intact.</span></span>
                           <input type="checkbox" data-role="strip-user-only-lora-stack" ${this.behavior.stripUserOnlyLoraStack ? "checked" : ""} /><span class="ss-switch-track" aria-hidden="true"></span>
@@ -793,6 +893,13 @@ class StudioController {
                             <option value="pov" ${this.behavior.tagPromptMode === "pov" ? "selected" : ""}>Character-only / POV</option>
                           </select>
                         </label>
+                        <label class="ss-config-field">
+                          <span>Explicit character count</span>
+                          <select class="ss-select" data-role="count-strength">
+                            ${[[0,"Off"],[1,"Unweighted"],[1.15,"1.15×"],[1.25,"1.25×"],[1.5,"1.5× · default"],[1.75,"1.75×"],[2,"2×"]].map(([value,label])=>`<option value="${value}" ${this.behavior.countStrength===value?"selected":""}>${label}</option>`).join("")}
+                          </select>
+                        </label>
+                        <p class="ss-muted ss-tiny">Only applies to explicit count attributes, e.g. count="2boys, 1girl". Anima/Illustrious use grouped weights; caption models use plain language.</p>
                         <div class="ss-image-count-range">
                           <span>Required images per reply</span>
                           <input class="ss-input" type="number" min="0" max="6" step="1" inputmode="numeric" data-role="required-image-min" value="${this.behavior.requiredImageMin}" aria-label="Minimum required images" title="Minimum required images" />
@@ -804,22 +911,25 @@ class StudioController {
                       <section class="ss-config-section">
                         <div class="ss-config-section-head"><strong>Protocol prompt</strong><span>Inline-mode system instruction</span></div>
                         <div class="ss-prompt-family-row">
-                          <span><strong>Prompt family</strong><small>Controls subject serialization and model-specific ownership guidance.</small></span>
-                          <div class="ss-prompt-family-switch" role="radiogroup" aria-label="Protocol prompt family">
-                            <button type="button" data-action="set-prompt-family" data-prompt-family="anima" data-active="${this.behavior.tagPromptFamily === "anima"}" role="radio" aria-checked="${this.behavior.tagPromptFamily === "anima"}">Anima</button>
-                            <button type="button" data-action="set-prompt-family" data-prompt-family="illustrious" data-active="${this.behavior.tagPromptFamily === "illustrious"}" role="radio" aria-checked="${this.behavior.tagPromptFamily === "illustrious"}">Illustrious</button>
-                          </div>
+                          <label class="ss-field"><span>Prompt family</span>
+                            <select class="ss-select" data-role="prompt-family" aria-describedby="ss-prompt-family-help">
+                              ${PROMPT_FAMILIES.filter(f => f.id === "auto").map(f => `<option value="${f.id}">${f.label}</option>`).join("")}
+                              ${[["Anima", ["anima", "anima-aesthetic", "anima-regional"]], ["Illustrious", ["illustrious"]], ["MOSS", ["moss", "moss-bbox", "moss-layout"]], ["Krea", ["krea"]]].map(([label, ids]) => `<optgroup label="${label}">${PROMPT_FAMILIES.filter(f => ids.includes(f.id)).map(f => `<option value="${f.id}" ${this.behavior.tagPromptFamily === f.id ? "selected" : ""}>${f.label}</option>`).join("")}</optgroup>`).join("")}
+                            </select>
+                          </label>
+                          <p id="ss-prompt-family-help" class="ss-field-help" data-role="prompt-family-help">${PROTOCOL_FAMILY_DESCRIPTIONS[this.behavior.tagPromptFamily]}</p>
                         </div>
-                        <textarea class="ss-textarea ss-protocol-editor" data-role="tag-protocol-prompt" spellcheck="false"></textarea>
+                        <label class="ss-eyebrow" for="ss-protocol-prompt">System instruction</label>
+                        <textarea class="ss-textarea ss-protocol-editor" id="ss-protocol-prompt" data-role="tag-protocol-prompt" spellcheck="false"></textarea>
                         <p class="ss-muted ss-tiny"><code>{{swarm_dynamic_guidance}}</code> is replaced at runtime with the active image count, identities, composition mode, checkpoint guidance, and Swarm preset stack. Remove it only when your custom protocol deliberately replaces all dynamic guidance.</p>
                         <p class="ss-muted ss-tiny">Parser mode injects its own compact placement protocol and uses this fully resolved protocol privately when completing each request.</p>
                         <div class="ss-protocol-actions">
-                          <button class="ss-button" data-action="copy-tag-protocol">Copy ${this.behavior.tagPromptFamily === "illustrious" ? "Illustrious" : "Anima"} example</button>
+                          <button class="ss-button" data-action="copy-tag-protocol" title="Copy ${promptFamilyLabel(this.behavior.tagPromptFamily)} example">Copy example</button>
                           <button class="ss-button" data-action="reset-tag-protocol">Reset</button>
                           <button class="ss-button ss-button-primary" data-action="save-tag-protocol">Save current</button>
                         </div>
                         <details class="ss-css-guide ss-macro-guide">
-                          <summary>Macro reference</summary>
+                          <summary><span>Macro reference</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
                           <div class="ss-macro-guide-grid">
                             <code>{{swarm_dynamic_guidance}}</code><span>Insertion point inside the editable protocol for live identity, composition, checkpoint, image-count, and preset guidance.</span>
                             <code>{{swarm_image_protocol}}</code><span>The fully resolved local-generation protocol used by prompt injection.</span>
@@ -836,6 +946,10 @@ class StudioController {
                           </div>
                         </details>
                       </section>
+                    </div>
+                    <div class="ss-settings-panel ss-stage-direction" data-settings-panel="stage-direction" hidden>
+                      <div data-stage-direction-body></div>
+                      <div class="ss-stage-direction-footer"><span data-stage-direction-status role="status">Load Stage Direction settings.</span><button type="button" data-stage-direction-reload>Reload</button></div>
                     </div>
                     <div class="ss-settings-panel" data-settings-panel="theme" hidden>
                       <section class="ss-config-section">
@@ -916,7 +1030,11 @@ are removed when CSS is applied.</pre>
                     </div>
                     <div class="ss-settings-panel" data-settings-panel="metadata" hidden>
                       <section class="ss-config-section">
-                        <div class="ss-config-section-head"><strong>Swarm metadata</strong><span>Models, LoRAs, folders, and preview art</span></div>
+                        <div class="ss-config-section-head"><div class="ss-settings-heading"><strong>Studio references</strong><button type="button" class="ss-settings-help" data-action="settings-help" data-help="references" aria-label="About Studio references" aria-expanded="false" aria-controls="ss-help-references"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 0 1 4.6 1c0 1.7-2.3 1.9-2.3 3.5M12 16.5v.1"/></svg></button></div><span>Connect LumiSwarm with standalone Studio</span></div><div id="ss-help-references" class="ss-settings-help-popover" popover="auto" role="note"><strong>Studio references</strong><p>Share which Lumi images are retained or referenced with standalone Studio’s Vacuum preview. Live references pairs a read-only feed that updates every minute; Export references downloads a snapshot for manual import. Neither action deletes images. Incomplete coverage keeps uncertain originals under review.</p></div>
+                        <div class="ss-reference-actions"><button type="button" class="ss-button" data-action="live-reference-link">Live references</button><button type="button" class="ss-button" data-action="export-reference-snapshot">Export references</button></div>
+                      </section>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><div class="ss-settings-heading"><strong>Metadata debug</strong><button type="button" class="ss-settings-help" data-action="settings-help" data-help="metadata" aria-label="About Metadata debug" aria-expanded="false" aria-controls="ss-help-metadata"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 0 1 4.6 1c0 1.7-2.3 1.9-2.3 3.5M12 16.5v.1"/></svg></button></div><span>Models, LoRAs, folders, and preview art</span></div><div id="ss-help-metadata" class="ss-settings-help-popover" popover="auto" role="note"><strong>Metadata debug</strong><p>Refresh the selected Swarm connection’s model and LoRA catalog when previews, folders or installed models look out of date. The metadata token below is only for Swarm servers that require authentication. These controls do not change an image’s saved generation tags.</p></div>
                         <p class="ss-muted ss-tiny">Rescan the selected SwarmUI connection after adding or moving checkpoints and LoRAs.</p>
                         <button class="ss-button" data-action="refresh-metadata">Refresh metadata</button>
                       </section>
@@ -942,18 +1060,16 @@ are removed when CSS is applied.</pre>
         <nav class="ss-view-nav" aria-label="Studio workspaces">
           <button class="ss-button" data-action="studio-view" data-view="generate" aria-current="page">Generate</button>
           <button class="ss-button" data-action="studio-view" data-view="styles">Styles</button>
+          <button class="ss-button" data-action="studio-view" data-view="visuals">Visuals</button>
+          <button class="ss-button" data-action="studio-view" data-view="cast">Cast</button>
+          <button class="ss-button" data-action="studio-view" data-view="lore">Lore</button>
+          <button class="ss-button" data-action="studio-view" data-view="edit">Edit</button>
+          <button class="ss-button" data-action="studio-view" data-view="finalize">Finalize</button>
         </nav>
         <div class="ss-permission-banner" data-role="permission-banner"></div>
 
 
-        <nav class="ss-mobile-tabs" aria-label="Studio sections">
-          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="create" data-active="true">Create</button>
-          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="generation" data-active="false">Tune</button>
-          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="style" data-active="false">Style</button>
-          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="loras" data-active="false">LoRAs</button>
-          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="stack" data-active="false">Stack</button>
-          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="history" data-active="false">History</button>
-        </nav>
+
 
         <div class="ss-workspace" data-studio-page="generate" aria-label="Generate">
           <aside class="ss-generation-pane" data-mobile-pane="generation">
@@ -1067,6 +1183,7 @@ are removed when CSS is applied.</pre>
                 </div>
                     <div class="ss-seed-actions"><button class="ss-button" data-action="random-seed-mobile" title="Set seed to -1 for a random generation">${RANDOM_SEED_ICON}<span>Random</span></button><button class="ss-button" data-action="use-output-seed" title="Reuse the latest generated output's seed">${CURRENT_SEED_ICON}<span>Use output seed</span></button></div>
                     <div class="ss-field-help ss-seed-hint">-1 generates a random seed.</div>
+                    <details class="ss-finalize-ref-tune"><summary>Anima reference conditioning <span aria-hidden="true">⌄</span></summary><div class="ss-sampling-pair"><label class="ss-field"><span>Reference guidance</span><input class="ss-input" type="number" data-role="anima-ref-guidance" min="1" max="12" step="0.25" value="4.5"></label><label class="ss-field"><span>Guidance end</span><input class="ss-input" type="number" data-role="anima-ref-end" min="0" max="1" step="0.05" value="1"></label></div><div class="ss-anima-ref-slots"><button class="ss-button" data-action="anima-ref-pick" data-index="0"><img data-role="anima-ref-thumb-0" alt="" hidden>${LIBRARY_ICON}<span data-role="anima-ref-slot-0">Reference A</span></button><button class="ss-button" data-action="anima-ref-pick" data-index="1"><img data-role="anima-ref-thumb-1" alt="" hidden>${LIBRARY_ICON}<span data-role="anima-ref-slot-1">Reference B</span></button><button class="ss-icon-button" data-action="anima-ref-clear" title="Clear manual references" aria-label="Clear manual references">${editIcon("erase")}</button></div><p class="ss-muted ss-tiny" data-role="anima-ref-info">Use the active character binding, or choose one or two saved references. Two are stitched left/right; describe subjects in that order. Text CFG is independent.</p></details>
                     <div class="ss-sampling-pair">
                 <div class="ss-field ss-wide">
                   <label>Sampler</label>
@@ -1152,7 +1269,7 @@ are removed when CSS is applied.</pre>
                   <button type="button" class="ss-icon-button" data-action="download-output" aria-label="Download output" title="Download output" disabled>${DOWNLOAD_ICON}</button>
                   <button type="button" class="ss-icon-button" data-action="copy-output" aria-label="Copy output URL" title="Copy output URL" disabled>${BINDING_LINK_ICON}</button>
                   <button type="button" class="ss-icon-button" data-action="append-to-chat" aria-label="Append output to chat" disabled>${APPEND_CHAT_ICON}</button>
-                  <button type="button" class="ss-icon-button" data-action="edit-region" aria-label="Edit region" title="Edit region" disabled>${INPAINT_ICON}</button>
+                  <button type="button" class="ss-icon-button" data-action="edit-artwork" aria-label="Open in Edit" title="Open in Edit" disabled>${INPAINT_ICON}</button>
                   <button type="button" class="ss-icon-button" data-action="upscale-output" aria-label="AI upscale output" title="AI model / custom ComfyUI upscale" disabled>${EXPAND_ICON}</button>
                 </div>
               </div>
@@ -1166,6 +1283,11 @@ are removed when CSS is applied.</pre>
                     <div class="ss-progress-label" data-role="progress-label">Preparing…</div>
                   </div>
                 </div>
+              </div>
+              <div class="ss-background-activity" data-role="background-activity" hidden>
+                <img data-role="background-preview" alt="Cast background preview" hidden />
+                <span class="ss-background-activity-icon">${LANDSCAPE_ICON}</span>
+                <div class="ss-background-activity-copy"><strong data-role="background-label" role="status"></strong><small data-role="background-detail"></small><progress data-role="background-progress" max="100"></progress></div>
               </div>
               <div class="ss-output-meta">
                 <div class="ss-output-label" data-role="output-label">Nothing selected</div>
@@ -1190,7 +1312,7 @@ are removed when CSS is applied.</pre>
                   <button class="ss-button ss-button-primary ss-generate ss-desktop-generate" data-action="generate" disabled>Generate image</button>
                 </div>
               </div>
-              <div class="ss-prompt-context"><button class="ss-active-visual-pill" data-role="active-visual-pill" data-action="toggle-active-visual" type="button" hidden></button><button class="ss-active-visual-pill" data-role="active-persona-visual-pill" data-action="toggle-active-persona-visual" type="button" hidden></button><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span></div>
+              <div class="ss-prompt-context"><button class="ss-active-visual-pill" data-role="active-visual-pill" data-action="toggle-active-visual" type="button" hidden></button><button class="ss-active-visual-pill" data-role="active-persona-visual-pill" data-action="toggle-active-persona-visual" type="button" hidden></button><span class="ss-active-preset-pill" data-role="active-preset-pill" hidden></span><button class="ss-lore-provenance-button" data-action="lore-provenance" type="button" aria-label="Lore provenance, 0 selected" aria-expanded="false" title="Lore provenance"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6c-3-2-6-2-10-1v14c4-1 7-1 10 1 3-2 6-2 10-1V5c-4-1-7-1-10 1zm0 0v14"/></svg><span data-role="lore-provenance-count">0</span></button><div class="ss-lore-provenance" data-role="lore-provenance" popover="auto" aria-label="Lore provenance"></div></div>
               <div class="ss-prompt-grid">
                 <div class="ss-field">
                   <div class="ss-prompt-field-head">
@@ -1224,10 +1346,7 @@ are removed when CSS is applied.</pre>
             <details class="ss-rail-history" data-role="rail-history"><summary>History · <span data-role="output-count">0</span> outputs</summary>
             <div class="ss-pane-head">
               <div class="ss-pane-title"><strong>History</strong><div class="ss-muted ss-tiny">Saved outputs</div></div>
-              <div>
-                <button class="ss-icon-button ss-pane-toggle" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
-
-              </div>
+              <button class="ss-icon-button ss-pane-toggle" data-action="refresh-outputs" title="Refresh output history" aria-label="Refresh output history">↻</button>
             </div>
             <div class="ss-pane-body ss-history-grid" data-role="history-grid">
               <div class="ss-empty">Outputs created in this chat will appear here.</div>
@@ -1241,6 +1360,11 @@ are removed when CSS is applied.</pre>
           </aside>
         </div>
 
+        <section class="ss-cast-workspace" data-studio-page="cast" aria-label="Cast" hidden></section>
+        <section class="ss-visuals-workspace" data-studio-page="visuals" aria-label="Visuals" hidden></section>
+        <section class="ss-lore-page" data-studio-page="lore" aria-label="Lore" hidden><div data-role="visual-lore-root"></div></section>
+        <section data-studio-page="edit" aria-label="Edit artwork" hidden></section>
+        <section data-studio-page="finalize" aria-label="Finalize artwork" hidden></section>
         <section class="ss-styles-workspace" data-studio-page="styles" aria-label="Styles" hidden>
           <header class="ss-styles-header"><strong>Styles</strong><span class="ss-muted ss-tiny" data-role="dock-summary">0 models · 0 stacked</span></header>
           <div class="ss-styles-columns" data-role="styles-columns" data-collapsed="false">
@@ -1365,6 +1489,14 @@ are removed when CSS is applied.</pre>
         </div>
 
         <div class="ss-commandbar">
+          <nav class="ss-mobile-tabs" aria-label="Studio sections">
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="create" data-active="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4-1L20 7l-3-3L5 16Z"/></svg><span>Create</span></button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="generation" data-active="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg><span>Tune</span></button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="style" data-active="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 0-4 2 2 0 0 1 0-4h5a3 3 0 0 0 3-3c0-4-5-7-9-7Z"/><path d="M7 10h.01M11 6h.01M16 7h.01"/></svg><span>Style</span></button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="loras" data-active="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 9-5 9 5-9 5-9-5Zm0 5 9 5 9-5M3 18l9 5 9-5"/></svg><span>LoRAs</span></button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="stack" data-active="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/></svg><span>Stack</span></button>
+          <button class="ss-button ss-mobile-tab" data-action="mobile-tab" data-tab="history" data-active="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 1 3 7M3 5v7h7M12 7v5l3 2"/></svg><span>History</span></button>
+        </nav>
           <div class="ss-command-summary">
             <div class="ss-run-status" data-role="run-status">Waiting for a SwarmUI connection.</div>
             <div class="ss-stack-summary" data-role="command-stack-summary">No LoRAs enabled</div>
@@ -1493,10 +1625,12 @@ are removed when CSS is applied.</pre>
             <div class="ss-inspector-overview-head">
               <div class="ss-inspector-facts" data-role="inspector-summary-facts" aria-label="Output summary"></div>
               <div class="ss-inspector-actions" role="group" aria-label="Output actions">
-                <button type="button" class="ss-button ss-button-primary" data-action="edit-region">Edit region</button>
-                <button type="button" class="ss-button" data-action="reuse-parameters" title="Reuse recorded generation parameters">Reuse</button>
-                <button type="button" class="ss-button" data-action="use-as-init" title="Use this output as an image-to-image input">Use as init</button>
-                <button type="button" class="ss-button" data-action="upscale-output" title="AI model / custom ComfyUI upscale">AI Upscale</button>
+                <button type="button" class="ss-button ss-inspector-edit-entry" data-action="edit-artwork" title="Open the image in Studio Edit"><span class="ss-inspector-tool-mark">${editIcon("wand")}</span><span class="ss-inspector-tool-copy"><strong>Open in Edit</strong><small>Canvas &amp; image tools</small></span><svg class="ss-inspector-tool-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+                <button type="button" class="ss-button ss-inspector-tool" data-action="edit-region" title="Edit region · Inpaint">${INPAINT_ICON}<span>Inpaint</span></button>
+                <button type="button" class="ss-button ss-inspector-tool" data-action="finalize-artwork" title="Open in Finalize">${editIcon("wand")}<span>Finalize</span></button>
+                <button type="button" class="ss-button ss-inspector-tool" data-action="upscale-output" title="AI model / custom ComfyUI upscale">${editIcon("upscale")}<span>AI Upscale</span></button>
+                <button type="button" class="ss-button ss-inspector-tool" data-action="reuse-parameters" title="Reuse recorded generation parameters">${editIcon("rotate")}<span>Reuse</span></button>
+                <button type="button" class="ss-button ss-inspector-tool" data-action="use-as-init" title="Use this output as an image-to-image input">${INIT_IMAGE_ICON}<span>Use as init</span></button>
               </div>
             </div>
             <div class="ss-inspector-tabs" role="tablist" aria-label="Output information">
@@ -1611,6 +1745,7 @@ are removed when CSS is applied.</pre>
                 </div>
                 <div class="ss-library-folder-actions">
                   <button type="button" class="ss-button" data-action="cycle-library-preview"></button>
+                  <button type="button" class="ss-button" data-action="upload-library-image">Upload image</button>
                   <button class="ss-button" data-action="toggle-library-search">${SEARCH_ICON}<span>Search</span></button>
                   <button class="ss-button" data-action="toggle-library-selection">${CHECK_ICON}<span>Select</span></button>
                   <button class="ss-button ss-button-primary" data-action="open-visual-profile" data-role="library-visual-button" hidden>${SPARKLE_ICON}<span>Prompts &amp; visuals</span></button>
@@ -1735,6 +1870,18 @@ are removed when CSS is applied.</pre>
   }
 
   private bind(): void {
+    this.get<HTMLInputElement>('[data-role="skip-swarm-save"]').addEventListener('change', () => {
+      const field=this.get<HTMLTextAreaElement>('[data-role="raw-override"]')
+      try {
+        const raw=field.value.trim()?JSON.parse(field.value):{}
+        if(!raw || typeof raw!=="object" || Array.isArray(raw))throw new Error("Raw request override must be a JSON object.")
+        const target=raw.param_map && typeof raw.param_map==='object'?raw.param_map:raw
+        if(this.get<HTMLInputElement>('[data-role="skip-swarm-save"]').checked)target.donotsave=true
+        else delete target.donotsave
+        field.value=Object.keys(raw).length?JSON.stringify(raw):''
+        this.scheduleStudioProfileSync()
+      } catch(error) { this.get<HTMLInputElement>('[data-role="skip-swarm-save"]').checked=false;this.setRunStatus(String(error),true) }
+    })
     this.get<HTMLSelectElement>('[data-role="connection"]').addEventListener("change", (event) => {
       const connectionId = (event.currentTarget as HTMLSelectElement).value
       if (connectionId) this.loadConnection(connectionId)
@@ -1823,6 +1970,12 @@ are removed when CSS is applied.</pre>
         tagPromptInjection: (event.currentTarget as HTMLInputElement).checked,
       })
     })
+    this.get<HTMLSelectElement>('[data-role="history-image-markers"]').addEventListener("change", (event) => {
+      this.onBehaviorChange({
+        ...this.behavior,
+        historyImageMarkers: (event.currentTarget as HTMLSelectElement).value === "strip" ? "strip" : "keep",
+      })
+    })
     this.get<HTMLSelectElement>('[data-role="parser-connection"]').addEventListener("change", (event) => {
       this.onBehaviorChange({
         ...this.behavior,
@@ -1864,6 +2017,9 @@ are removed when CSS is applied.</pre>
         tagPromptMode: (event.currentTarget as HTMLSelectElement).value === "pov" ? "pov" : "multi",
       })
     })
+    this.get<HTMLSelectElement>('[data-role="count-strength"]').addEventListener("change", event => {
+      this.onBehaviorChange({ ...this.behavior, countStrength: cleanCountStrength((event.currentTarget as HTMLSelectElement).value) })
+    })
     const updateRequiredImageRange = () => {
       const range = normalizeRequiredImageRange(
         this.get<HTMLInputElement>('[data-role="required-image-min"]').value,
@@ -1877,6 +2033,10 @@ are removed when CSS is applied.</pre>
     }
     this.get<HTMLInputElement>('[data-role="required-image-min"]').addEventListener("change", updateRequiredImageRange)
     this.get<HTMLInputElement>('[data-role="required-image-max"]').addEventListener("change", updateRequiredImageRange)
+    this.get<HTMLSelectElement>('[data-role="prompt-family"]').addEventListener("change", (event) => {
+      const tagPromptFamily = cleanPromptFamily((event.currentTarget as HTMLSelectElement).value)
+      this.onBehaviorChange({ ...this.behavior, tagPromptFamily })
+    })
     this.get<HTMLSelectElement>('[data-role="lora-sort"]').addEventListener("change", () => this.renderLoras())
     this.get<HTMLSelectElement>('[data-role="lora-filter"]').addEventListener("change", () => this.renderLoras())
     this.get<HTMLSelectElement>('[data-role="model"]').addEventListener("change", () => {
@@ -1963,6 +2123,7 @@ are removed when CSS is applied.</pre>
 
     const scheduleProfileFromControl = (event: Event) => {
       const target = event.target as HTMLElement
+      if (target.closest('[data-studio-page="cast"], [data-studio-page="lore"], [data-studio-page="edit"], [data-studio-page="finalize"]')) return
       const role = target.dataset.role || ""
       if (
         /search|appearance|metadata-token|custom-css|library-output-check/.test(role)
@@ -2008,8 +2169,27 @@ are removed when CSS is applied.</pre>
         catch (error) { this.setRunStatus(error instanceof Error ? error.message : String(error), true) }
         return
       }
+      if(action==="anima-ref-pick"){const index=Number(button.dataset.index);this.openExpressionImagePicker("reference","",this.manualAnimaRefs[index]?.id||"",image=>{this.manualAnimaRefs[index]=image;void this.updateManualAnimaRefs()});return}
+      if(action==="anima-ref-clear"){this.manualAnimaRefs=[null,null];void this.updateManualAnimaRefs();return}
+      if (action === "open-visual-lore") { this.openVisualLore(); return }
+      if (action === "lore-provenance") { this.toggleLoreProvenance(button); return }
+      if (action === "lore-return-generate") { this.setStudioView("generate"); return }
       if (action === "studio-view") {
         this.setStudioView(button.dataset.view)
+        return
+      }
+      if (action === "settings-help") {
+        const panel = this.root.querySelector<HTMLElement>(`#ss-help-${button.dataset.help}`)
+        if (panel) {
+          panel.ontoggle = () => button.setAttribute("aria-expanded", String(panel.matches(":popover-open")))
+          if (panel.matches(":popover-open")) panel.hidePopover()
+          else {
+            panel.showPopover()
+            const rect = button.getBoundingClientRect()
+            panel.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - panel.offsetWidth - 12))}px`
+            panel.style.top = `${Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - panel.offsetHeight - 12))}px`
+          }
+        }
         return
       }
       if (action === "refresh-metadata") this.refreshMetadata()
@@ -2023,10 +2203,6 @@ are removed when CSS is applied.</pre>
       if (action === "copy-tag-protocol") void this.copyTagProtocol()
       if (action === "reset-tag-protocol") this.resetTagProtocol()
       if (action === "save-tag-protocol") this.saveTagProtocol()
-      if (action === "set-prompt-family") {
-        const tagPromptFamily = button.dataset.promptFamily === "illustrious" ? "illustrious" : "anima"
-        this.onBehaviorChange({ ...this.behavior, tagPromptFamily })
-      }
       if (action === "set-inline-image-scale") {
         const scale = Number(button.dataset.scale)
         if (scale === 100 || scale === 75 || scale === 50) {
@@ -2063,7 +2239,7 @@ are removed when CSS is applied.</pre>
       }
       if (action === "save-token") this.saveToken()
       if (action === "clear-token") this.clearToken()
-      if (action === "close-studio") this.modal.dismiss()
+      if (action === "close-studio" && (!this.editWorkspace || this.editWorkspace.canLeave())) this.modal.dismiss()
       if (action === "change-orientation") this.changeOrientation()
       if (action === "select-orientation") this.selectOrientation(button.dataset.orientation || "")
       if (action === "toggle-seed-mode") this.toggleSeedMode()
@@ -2125,6 +2301,8 @@ are removed when CSS is applied.</pre>
         } else this.generate()
       }
       if (action === "interrupt-generation") this.interruptGeneration()
+      if (action === "live-reference-link") this.openReferenceLink()
+      if (action === "export-reference-snapshot") this.send("export_reference_snapshot")
       if (action === "refresh-outputs") this.refreshOutputs()
       if (action === "history-prev") this.changeHistoryPage(-1)
       if (action === "history-next") this.changeHistoryPage(1)
@@ -2139,6 +2317,8 @@ are removed when CSS is applied.</pre>
       if (action === "inspector-send-toggle") this.toggleInspectorSendMenu()
       if (action === "inspector-copy-prompt") void this.copyInspectorPrompt()
       if (["append-to-chat", "send-character-gallery", "set-character-picture", "set-persona-picture"].includes(action || "")) this.closeInspectorSendMenu()
+      if (action === "edit-artwork" && this.state.currentImage?.id) this.openArtworkEditor(this.state.currentImage)
+      if (action === "finalize-artwork" && this.state.currentImage?.id) this.openFinalize(this.state.currentImage)
       if (action === "edit-region") this.editCurrentRegion()
       if (action === "upscale-output") this.upscaleCurrentOutput()
       if (action === "close-inspector") this.closeInspector()
@@ -2153,6 +2333,7 @@ are removed when CSS is applied.</pre>
       if (action === "delete-output-folder") void this.deleteSelectedOutputFolder()
       if (action === "cycle-library-preview") this.cycleLibraryPreview()
       if (action === "toggle-library-search") this.toggleLibrarySearch()
+      if (action === "upload-library-image") this.uploadLibraryImage()
       if (action === "toggle-library-selection") this.toggleLibrarySelectionMode()
       if (action === "save-visual-profile") this.saveVisualProfile()
       if (action === "open-visual-profile") this.openVisualProfile()
@@ -2200,26 +2381,44 @@ are removed when CSS is applied.</pre>
     })
   }
 
-  private openFolderExpressions(): void {
-    const folder = this.state.outputFolders.find(item => item.id === this.libraryFolderId)
-    const connection = this.state.connection
-    if (!folder?.binding || !connection || this.expressionDialog?.open) return
-    const look = folder.binding.looks.find(item => item.id === folder.binding?.activeLookId)
-    const recipe = resolveGenerationConfig({ provider: connection.default_parameters, characterBase: folder.binding, characterLook: look })
-    const model = recipe.checkpoint ||
-      this.get<HTMLSelectElement>('[data-role="model"]').value || connection.model
+  private castRecipeContext(): CastRecipeStudioContext {
+    const connection=this.state.connection,style=this.renderStyles.find(item=>item.id===this.activeRenderStyleId)
+    const stack=new Map<string,StackPresetItem>()
+    for(const item of this.state.stackPresets.find(item=>item.id===style?.loraStackId)?.items||[])stack.set(normalizeModelName(item.name),item)
+    for(const item of this.state.stack)stack.set(normalizeModelName(item.lora.name),{name:item.lora.name,title:item.lora.title,weight:item.weight,enabled:item.enabled,useTrigger:item.useTrigger,sourceUrl:item.lora.sourceUrl})
+    const capture=connection?cleanCastRenderRecipe({connectionId:connection.id,checkpoint:this.captureStableSettings().checkpoint||connection.model,family:"auto",generation:{recipe:resolveGenerationConfig({provider:connection.default_parameters,studioDefaults:this.studioDefaults,liveProfile:this.captureStableSettings(),style}),prefix:["solo, cowboy shot, facing viewer, plain background",style?.positiveAppend].filter(Boolean).join(", "),negative:style?.negativeAppend||""},stack:[...stack.values()].map(item=>({...item,trigger:this.installedLora(item.name)?.triggerPhrase||""}))}):undefined
+    return {capture,stacks:this.state.stackPresets,checkpoints:this.state.checkpoints,loras:this.state.loras,workflows:this.state.swarmWorkflows,connectionId:String(connection?.id||""),connections:this.state.connections.map(item=>({id:String(item.id),name:String(item.name||"Image connection")})),samplers:this.state.samplers,schedulers:this.state.schedulers,presets:this.state.swarmPresets,inheritedRecipe:resolveGenerationConfig({provider:connection?.default_parameters,studioDefaults:this.studioDefaults})}
+  }
+
+  private openFolderExpressions(cast?: StudioCastOpenOptions): void {
+    if (this.expressionDialog?.open) return
+    const activeConnection=this.state.connection
+    const connection=cast?.recipe?.connectionId&&cast.recipe.connectionId!==activeConnection?.id?this.state.connections.find(item=>item.id===cast.recipe!.connectionId)||null:activeConnection
+    const sameConnection=connection?.id===activeConnection?.id
+    const folder = cast ? { id: `cast:${cast.member.id}${cast.wardrobeKey&&cast.wardrobeKey!=="default"?`:${cast.wardrobeKey}`:""}`, name: cast.wardrobeName?`${cast.member.name} · ${cast.wardrobeName}`:cast.member.name, imageIds: Object.values(cast.member.images || {}).flatMap(image => image && typeof image.id === "string" ? [image.id] : []), binding: this.state.outputFolders.find(item => item.id === cast.member.folderId)?.binding || null, updatedAt: Date.now() } as OutputFolder
+      : this.state.outputFolders.find(item => item.id === this.libraryFolderId)
+    if (!folder || (!cast && (!folder.binding || !connection))) return
+    const look = folder.binding?.looks.find(item => item.id === folder.binding?.activeLookId)
+    const recipe = cast?.recipe?resolveGenerationConfig({provider:connection?.default_parameters,studioDefaults:this.studioDefaults,job:cast.recipe.generation.recipe}):resolveGenerationConfig({ provider: connection?.default_parameters, characterBase: folder.binding || undefined, characterLook: look })
+    const model = cast?.recipe?.checkpoint || recipe.checkpoint ||
+      this.get<HTMLSelectElement>('[data-role="model"]').value || connection?.model || ""
     const mount = this.get<HTMLElement>(".ss-shell")
     this.expressionDialog = openCharacterExpressions(mount, {
-      folder, model,
-      family: inferModelFamily(model, this.state.checkpoints.find(item => normalizeModelName(item.name) === normalizeModelName(model))?.architecture || ""),
-      workflows: this.state.swarmWorkflows,
+      folder, model, cast,
+      family: inferModelFamily(model, sameConnection?this.state.checkpoints.find(item => normalizeModelName(item.name) === normalizeModelName(model))?.architecture || "":""),
+      checkpoints: sameConnection?this.state.checkpoints:[],
+      loras: sameConnection?this.state.loras:[],
+      stacks: this.state.stackPresets,
+      workflows: sameConnection?this.state.swarmWorkflows:[],
       inheritedRecipe: { ...EXPRESSION_DEFAULT_RECIPE, ...recipe },
-      samplers: this.state.samplers,
-      schedulers: this.state.schedulers,
+      samplers: sameConnection?this.state.samplers:[],
+      schedulers: sameConnection?this.state.schedulers:[],
+      presets: sameConnection?this.state.swarmPresets:[],
       deleteDrafts: this.behavior.deleteExpressionDrafts,
-      pickImage: (kind, initialId, choose) => this.openExpressionImagePicker(kind, folder.id, initialId, choose),
+      pickImage: (kind, initialId, choose) => this.openExpressionImagePicker(kind, cast ? "" : folder.id, initialId, choose),
       request: (type, data, progress, signal) => new Promise((resolve, reject) => {
         if (signal?.aborted) { reject(signal.reason); return }
+        if (!connection && /^(render_|process_|check_expression_|load_expression_enhance|load_upscale)/.test(type)) { reject(new Error("Choose a SwarmUI connection in Generate to render or finish expressions. Saved images can still be selected.")); return }
         const requestId = createRequestId()
         let timer = 0
         let stopping = false
@@ -2233,7 +2432,7 @@ are removed when CSS is applied.</pre>
           window.clearTimeout(timer)
           timer = window.setTimeout(() => failed(new Error(message)), delay)
         }
-        const waitForResult = () => setDeadline(type.endsWith("_expression_set") || type.endsWith("_expression_bank") || type === "load_expression_enhance_options" || type === "check_expression_background_model" ? 12_000 : 240_000,
+        const waitForResult = () => setDeadline(type.endsWith("_expression_set") || type.endsWith("_expression_bank") || type === "load_expression_enhance_options" || type === "check_expression_background_model" || type === "check_expression_upscale_model" ? 12_000 : 240_000,
           "Lumiverse did not respond. Check the Output Library before retrying.")
         const stop = () => {
           if (stopping) return
@@ -2254,12 +2453,12 @@ are removed when CSS is applied.</pre>
         })
         signal?.addEventListener("abort", stop, { once: true })
         waitForResult()
-        try { this.ctx.sendToBackend({ ...data, type, requestId, folderId: folder.id, connectionId: connection.id }) }
+        try { this.ctx.sendToBackend({ ...data, type, requestId, folderId: folder.id, connectionId: connection?.id || "", ...(cast && { castMemberId: cast.member.id, ...(cast.wardrobeKey?{wardrobeKey:cast.wardrobeKey}:{}) }) }) }
         catch (error) { failed(error instanceof Error ? error : new Error(String(error))) }
       }),
       refresh: () => {
         this.expressionDialog = null
-        if (!this.disposed) this.send("list_library_outputs")
+        if (!this.disposed && !cast) this.send("list_library_outputs")
       },
     })
   }
@@ -2375,8 +2574,61 @@ are removed when CSS is applied.</pre>
     return true
   }
 
+  private renderBackgroundActivity(): void {
+    const surface = this.get<HTMLElement>('[data-role="background-activity"]')
+    const {job, label, detail, progress} = this.backgroundActivity.current()
+    surface.hidden = !job
+    if (!job) return
+    surface.dataset.state = job.status
+    this.get<HTMLElement>('[data-role="background-label"]').textContent = label
+    const caption = this.get<HTMLElement>('[data-role="background-detail"]')
+    caption.textContent = detail; caption.title = detail
+    const image = this.get<HTMLImageElement>('[data-role="background-preview"]')
+    const source = job.imageId ? `/api/v1/images/${encodeURIComponent(job.imageId)}` : job.preview
+    image.hidden = !source
+    if (source && image.getAttribute("src") !== source) image.src = source
+    else if (!source) image.removeAttribute("src")
+    image.onerror = () => { image.hidden = true; surface.dataset.hasPreview = "false" }
+    surface.dataset.hasPreview = String(!image.hidden)
+    const bar = this.get<HTMLProgressElement>('[data-role="background-progress"]')
+    bar.hidden = !["queued","generating"].includes(job.status)
+    if (progress === null) bar.removeAttribute("value"); else bar.value = progress
+  }
+
   onMessage(payload: any): void {
     if (this.disposed) return
+    if(this.stageDirectionRequest&&payload?.requestId===this.stageDirectionRequest&&(payload.type==='stage_direction_result'||payload.type==='studio_error')){
+      window.clearTimeout(this.stageDirectionTimer);this.stageDirectionRequest='';this.stageDirectionBusy(false)
+      if(payload.type==='studio_error'){this.stageDirectionStatus(String(payload.error||'Could not load Stage Direction.'));return}
+      const data=payload.data,active=this.ctx.getActiveChat?.()?.chatId;if(active&&data?.chatId!==active){this.stageDirectionData=null;this.renderStageDirection();this.stageDirectionStatus('The active chat changed. Reload to edit its settings.');return}
+      this.stageDirectionData={chatId:String(data.chatId||''),groupId:String(data.groupId||''),groupName:String(data.groupName||''),global:cleanStageDirection(data.global),cast:data.cast?cleanStageDirection(data.cast):null,chat:data.chat?cleanStageDirection(data.chat):null}
+      this.renderStageDirection();this.stageDirectionStatus('Settings loaded. Changes apply on the next generation.');return
+    }
+    if (this.backgroundActivity.accept(payload)) { this.renderBackgroundActivity(); return }
+    this.chatVisualsWorkspace?.onMessage(payload)
+    if (this.visualLore?.onMessage(payload)) return
+    if (payload?.type === "visual_lore_result" || (payload?.type === "studio_error" && ["get_visual_lore", "save_visual_lore"].includes(payload.operation))) return
+    if (this.referenceLinkRequests.has(String(payload?.requestId || ""))) {
+      this.referenceLinkRequests.delete(payload.requestId)
+      const linkDialog = this.referenceLinkDialog
+      if (linkDialog && linkDialog.dataset.pairingRequest === payload.requestId) {
+        const submit = linkDialog.querySelector<HTMLButtonElement>('button[type="submit"]')
+        if (submit) submit.disabled = false
+        if (payload.type === "reference_link_result" && payload.data?.paired && !payload.data?.error) {
+          const field = linkDialog.querySelector<HTMLTextAreaElement>("[data-reference-code]")
+          if (field) field.value = ""
+        }
+        delete linkDialog.dataset.pairingRequest
+      }
+      const status = this.referenceLinkDialog?.querySelector<HTMLElement>('[role="status"]')
+      if (status) {
+        const data = payload.data || {}
+        status.textContent = payload.type === "studio_error" ? String(payload.error || "Connection request failed.")
+          : data.error ? String(data.error) : data.busy ? "Publishing fresh references and checking retained copies…"
+          : data.paired ? `Paired with ${String(data.receiver || "")}. ${data.sentAt ? `Published ${data.claimCount ?? "unknown"} asset claims at ${new Date(data.sentAt).toLocaleTimeString()}` : "Waiting for first update."}` : "Not connected. Create a pairing code in standalone Studio."
+      }
+      return
+    }
     const expressionRequest = this.expressionRequests.get(String(payload?.requestId || ""))
     if (expressionRequest) {
       if (payload.type === "folder_expression_progress") {
@@ -2539,6 +2791,11 @@ are removed when CSS is applied.</pre>
         this.activity?.captureDraft(this.exportDraft())
         break
       }
+      case "reference_snapshot_result": {
+        void verifyStudioReferenceCopies(data, this.referenceCopyAbort.signal).then(snapshot => { if (!this.disposed) downloadJson(snapshot, "lumiswarm-reference-snapshot.json") }).catch(() => this.setRunStatus("Copy verification could not finish.", true))
+        this.setRunStatus("Exported read-only references. Host-wide coverage is incomplete; Vacuum stays in preview mode.")
+        break
+      }
       case "swarm_output_download": {
         const dataUrl = String(data.dataUrl || "")
         if (!dataUrl.startsWith("data:image/")) {
@@ -2630,15 +2887,15 @@ are removed when CSS is applied.</pre>
         const taggedJobId = String(data.id || "")
         if ((data.status === "queued" || data.status === "generating") && jobId) {
           this.adoptTaggedJob(data)
-        } else if (data.status === "ready") {
+        } else if (data.status === "ready" && !(data.inserted && data.error)) {
           this.settleTaggedJob(jobId, taggedJobId)
-        } else if (data.status === "failed" || data.status === "cancelled") {
+        } else if (data.status === "failed" || data.status === "cancelled" || (data.status === "ready" && data.inserted && data.error)) {
           const wasCurrent = this.currentJobSource === "tagged" && jobId === this.currentJobId
           const idle = this.settleTaggedJob(jobId, taggedJobId)
           if (wasCurrent && idle) {
             if (this.preGenerationImage) this.setCurrentImage(this.preGenerationImage)
             this.preGenerationImage = null
-            this.setRunStatus(String(data.error || "Message illustration stopped."), data.status === "failed")
+            this.setRunStatus(String(data.error || "Message illustration stopped."), data.status !== "cancelled")
           }
         }
         break
@@ -2683,7 +2940,9 @@ are removed when CSS is applied.</pre>
         this.upscaleRequestId = ""
         this.acceptOutputPage(data)
         if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
-        if (this.state.currentImage?.id === data.sourceId) {
+        const editAccept=this.editUpscaleAccept;this.editUpscaleAccept=null
+        if(editAccept){void editAccept({id:data.id,url:data.url,src:data.url,label:"Enhanced artwork",details:data.record}).catch(error=>this.setRunStatus(String(error),true))}
+        else if (this.state.currentImage?.id === data.sourceId) {
           this.setCurrentImage({ id: data.id, url: data.url, src: data.preview || data.url, label: data.record?.workflow || "Enhanced output", details: data.record })
           if (!this.get<HTMLElement>('[data-role="inspector"]').hidden) this.openInspector()
         }
@@ -2831,6 +3090,9 @@ are removed when CSS is applied.</pre>
         }
         this.updateActiveVisualPill()
         this.renderOutputLibrary()
+        break
+      case "cast_background_assets_changed":
+        this.send("list_library_outputs")
         break
       case "output_folders_result":
         this.state.outputFolders = Array.isArray(data) ? data : []
@@ -4052,7 +4314,7 @@ are removed when CSS is applied.</pre>
   }
 
   private setSettingsTab(tab: string): void {
-    const selected = ["general", "generation", "theme", "metadata"].includes(tab) ? tab : "general"
+    const selected = ["general", "generation", "stage-direction", "theme", "metadata"].includes(tab) ? tab : "general"
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="settings-tab"]')) {
       const active = button.dataset.settingsTab === selected
       button.dataset.active = String(active)
@@ -4061,6 +4323,41 @@ are removed when CSS is applied.</pre>
     for (const panel of this.root.querySelectorAll<HTMLElement>("[data-settings-panel]")) {
       panel.hidden = panel.dataset.settingsPanel !== selected
     }
+    if(selected==='stage-direction'){
+      const reload=this.root.querySelector<HTMLButtonElement>('[data-stage-direction-reload]');if(reload)reload.onclick=()=>this.loadStageDirectionSettings()
+      if(!this.stageDirectionRequest)this.loadStageDirectionSettings()
+    }
+  }
+
+  private stageDirectionStatus(text:string){const status=this.root.querySelector('[data-stage-direction-status]');if(status)status.textContent=text}
+  private stageDirectionBusy(busy:boolean){for(const control of this.root.querySelectorAll<HTMLButtonElement|HTMLInputElement>('[data-stage-direction-body] button,[data-stage-direction-body] input,[data-stage-direction-reload]')){if(busy){control.dataset.stageWasDisabled=String(control.disabled);control.disabled=true}else if(control.dataset.stageWasDisabled!==undefined){control.disabled=control.dataset.stageWasDisabled==='true';delete control.dataset.stageWasDisabled}}}
+  private sendStageDirection(type:string,data:Record<string,unknown>={}){
+    if(this.stageDirectionRequest)return
+    const id=createRequestId();this.stageDirectionRequest=id;this.stageDirectionBusy(true)
+    this.stageDirectionStatus(type==='load_stage_direction'?'Loading Stage Direction…':'Saving Stage Direction…')
+    this.stageDirectionTimer=window.setTimeout(()=>{if(this.stageDirectionRequest===id){this.stageDirectionRequest='';this.stageDirectionBusy(false);this.stageDirectionStatus('No response from Lumiverse. Reload before retrying.')}},12000)
+    try{this.ctx.sendToBackend({type,requestId:id,...data})}catch{window.clearTimeout(this.stageDirectionTimer);this.stageDirectionRequest='';this.stageDirectionBusy(false);this.stageDirectionStatus('Could not contact Lumiverse. Reload to retry.')}
+  }
+  private loadStageDirectionSettings(){this.sendStageDirection('load_stage_direction')}
+  private renderStageDirection(){
+    const body=this.root.querySelector<HTMLElement>('[data-stage-direction-body]');if(!body)return
+    const data=this.stageDirectionData;if(!data){body.textContent='No settings loaded.';return}
+    if(this.stageDirectionScope==='chat'&&!data.chatId||this.stageDirectionScope==='cast'&&!data.groupId)this.stageDirectionScope='global'
+    const scope=this.stageDirectionScope,owned=data[scope],config=cleanStageDirection(owned||(scope==='chat'?data.cast:null)||data.global)
+    const segment=(key:string,title:string,options:[string,string][],current:string)=>`<fieldset class="ss-stage-segment"><legend>${title}</legend><div>${options.map(([value,label])=>`<label><input type="radio" name="stage-${key}" data-stage-field="${key}" value="${value}" ${value===current?'checked':''}><span>${label}</span></label>`).join('')}</div></fieldset>`
+    const switches:[keyof StageDirectionConfig,string,string][]=[['scenery','Scenery','Saved locations, even without scene cards.'],['lighting','Lighting','Persistent time of day and mood.'],['weather','Atmosphere','Weather and environmental particles.'],['fx','Stage FX','One-shot expressive and physical effects.'],['generate','Generate missing backgrounds','May spend image generations. Requires a saved Cast.'],['continuity','Continuity reminder','Optional dynamic hint after history; may reduce cache reuse.']]
+    body.innerHTML=`<section class="ss-config-section ss-stage-scope"><div class="ss-config-section-head"><strong>Stage Direction</strong><span>Independent story staging for every dialogue layout.</span></div><div class="ss-stage-scope-tabs" role="group" aria-label="Settings scope">${(['global','cast','chat'] as const).map(s=>`<button type="button" data-stage-scope="${s}" aria-pressed="${s===scope}" ${s==='cast'&&!data.groupId||s==='chat'&&!data.chatId?'disabled':''}>${s==='global'?'Global':s==='cast'?'This Cast':'This chat'}</button>`).join('')}</div><p class="ss-muted ss-tiny" data-stage-scope-caption></p></section>
+    <section class="ss-config-section"><div class="ss-config-section-head"><strong>Direction capabilities</strong><span>Only the enabled instructions enter the protocol.</span></div>${switches.slice(0,5).map(([key,title,desc])=>`<label class="ss-stage-toggle"><span><strong>${title}</strong><small>${desc}</small></span><input type="checkbox" data-stage-field="${key}" ${config[key]?'checked':''}></label>`).join('')}${segment('frequency','Direction frequency',[['minimal','Minimal'],['natural','Natural'],['expressive','Expressive']],config.frequency)}</section>
+    <section class="ss-config-section"><div class="ss-config-section-head"><strong>Prompt integration</strong><span>Off by default. Before history keeps the protocol prefix stable as chat grows.</span></div>${segment('mode','Injection mode',[['off','Disabled'],['auto','Automatic'],['macro','Macro']],config.mode)}<div data-stage-auto>${segment('position','Position',[['before','Before history'],['depth','At depth'],['after','After history']],config.position)}<label class="ss-stage-depth" data-stage-depth>Depth (history messages from end)<input type="number" min="0" max="100" data-stage-field="depth" value="${config.depth}"></label>${segment('role','Send as',[['system','System'],['user','User'],['assistant','Assistant']],config.role)}<label class="ss-stage-toggle"><span><strong>${switches[5][1]}</strong><small>${switches[5][2]}</small></span><input type="checkbox" data-stage-field="continuity" ${config.continuity?'checked':''}></label></div><div class="ss-stage-macros" data-stage-macro><p class="ss-muted ss-tiny">Place these in your preset. Macro mode disables automatic injection; put state near the end of history.</p>${['protocol','locations','state'].map(k=>`<button type="button" data-stage-copy="${k}"><code>{{swarm_stage_${k}}}</code><span>Copy</span></button>`).join('')}</div></section>
+    <div class="ss-stage-save"><button type="button" data-stage-inherit ${scope==='global'||!owned?'hidden':''}>Use inherited settings</button><button type="button" data-stage-save>Save ${scope==='global'?'global':scope==='cast'?'Cast':'chat'} settings</button></div>`
+    body.querySelector('[data-stage-scope-caption]')!.textContent=(scope==='cast'?data.groupName:scope==='chat'?'Current conversation':'All conversations')+' · '+(owned?'Saved settings':'Inheriting '+(scope==='chat'&&data.cast?'Cast':'global')+' settings. Save to create an override.')+(scope==='global'?' · Cast and chat overrides take precedence.':'')
+    const read=()=>{const raw:Record<string,unknown>={...config};for(const field of body.querySelectorAll<HTMLInputElement>('[data-stage-field]')){const key=field.dataset.stageField!;if(field.type==='radio'&&!field.checked)continue;raw[key]=field.type==='checkbox'?field.checked:field.type==='number'?Number(field.value):field.value}return cleanStageDirection(raw)}
+    const paint=()=>{const next=read();body.querySelector<HTMLElement>('[data-stage-auto]')!.hidden=next.mode!=='auto';body.querySelector<HTMLElement>('[data-stage-macro]')!.hidden=next.mode!=='macro';body.querySelector<HTMLElement>('[data-stage-depth]')!.hidden=next.position!=='depth';const generate=body.querySelector<HTMLInputElement>('[data-stage-field=generate]')!;generate.disabled=!next.scenery}
+    for(const input of body.querySelectorAll<HTMLInputElement>('[data-stage-field]'))input.addEventListener('change',()=>{paint();this.stageDirectionStatus('Unsaved changes. Save before switching scope.')})
+    for(const button of body.querySelectorAll<HTMLButtonElement>('[data-stage-scope]'))button.onclick=(event)=>{event.stopPropagation();this.stageDirectionScope=button.dataset.stageScope as typeof scope;this.renderStageDirection();this.stageDirectionStatus('Editing selected scope. Unsaved changes from the previous scope were discarded.')}
+    for(const button of body.querySelectorAll<HTMLButtonElement>('[data-stage-copy]'))button.onclick=()=>{const value='{{swarm_stage_'+button.dataset.stageCopy+'}}';if(navigator.clipboard)void navigator.clipboard.writeText(value).then(()=>this.stageDirectionStatus('Macro copied.'),()=>this.stageDirectionStatus(value));else this.stageDirectionStatus(value)}
+    const save=(inherit=false)=>{const active=this.ctx.getActiveChat?.()?.chatId;if(scope!=='global'&&active&&active!==data.chatId){this.stageDirectionStatus('The chat changed. Reload before saving.');return}this.sendStageDirection('save_stage_direction',{scope,chatId:data.chatId,groupId:data.groupId,config:read(),expected:owned,inherit})}
+    body.querySelector<HTMLButtonElement>('[data-stage-save]')!.onclick=event=>{event.stopPropagation();save()};body.querySelector<HTMLButtonElement>('[data-stage-inherit]')!.onclick=event=>{event.stopPropagation();save(true)};paint()
   }
 
   private resetTagProtocol(): void {
@@ -4080,9 +4377,9 @@ are removed when CSS is applied.</pre>
 
   private async copyTagProtocol(): Promise<void> {
     try {
-      const family = this.behavior.tagPromptFamily === "illustrious" ? "illustrious" : "anima"
+      const family = this.behavior.tagPromptFamily
       await navigator.clipboard.writeText(swarmImageProtocolExample(family))
-      this.setRunStatus(`${family === "illustrious" ? "Illustrious" : "Anima"} image-tag protocol example copied.`)
+      this.setRunStatus(`${promptFamilyLabel(family)} image-tag protocol example copied.`)
     } catch {
       this.setRunStatus("The browser blocked clipboard access.", true)
     }
@@ -5408,20 +5705,152 @@ are removed when CSS is applied.</pre>
     this.root.querySelector<HTMLElement>(`[data-style-column="${section === "stacks" || section === "library" ? section : "saved"}"]`)?.scrollIntoView?.({ block: "nearest" })
   }
 
-  private setStudioView(view?: string): void {
-    this.studioView = view === "styles" ? "styles" : "generate"
+  private renderLoreProvenance(): void {
+    const trigger = this.get<HTMLButtonElement>('[data-action="lore-provenance"]')
+    const panel = this.get<HTMLElement>('[data-role="lore-provenance"]')
+    const count = this.manualLoreSelection.size
+    trigger.setAttribute("aria-label", `Lore provenance, ${count} selected`)
+    trigger.dataset.selected = String(count > 0)
+    this.get<HTMLElement>('[data-role="lore-provenance-count"]').textContent = String(count)
+    panel.replaceChildren(element("strong", "ss-lore-provenance-title", "Provenance"))
+    const sources = new Map<string, ManualLoreSelection[]>()
+    for (const item of this.manualLoreSelection.values()) {
+      if (!sources.has(item.bookId)) sources.set(item.bookId, [])
+      sources.get(item.bookId)!.push(item)
+    }
+    if (!count) panel.append(element("p", "ss-muted", "No lore selected. Choose saved visual identities in Lore."))
+    const labels: Record<string,string> = {location:"Locations",character:"Characters",creature:"Creatures",outfit:"Outfits",object:"Objects",style:"Styles"}
+    for (const items of sources.values()) {
+      const source = element("section", "ss-lore-provenance-source")
+      source.append(element("div", "ss-lore-provenance-book", `Source: ${items[0].bookName}`))
+      const groups = new Map<string, ManualLoreSelection[]>()
+      for (const item of items) { if (!groups.has(item.entityType)) groups.set(item.entityType, []); groups.get(item.entityType)!.push(item) }
+      for (const [type, group] of groups) {
+        const heading = element("div", "ss-lore-provenance-heading")
+        heading.append(element("span", "", labels[type] || "Other"), element("span", "ss-lore-provenance-rule"), element("span", "", `(${group.length})`))
+        const list = element("ul", "ss-lore-provenance-list")
+        for (const item of group) list.append(element("li", "", item.name))
+        source.append(heading, list)
+      }
+      panel.append(source)
+    }
+    const open = element("button", "ss-button", "Manage in Lore")
+    open.type = "button"; open.addEventListener("click", () => { panel.hidePopover(); this.openVisualLore() }); panel.append(open)
+  }
+
+  private toggleLoreProvenance(trigger: HTMLElement): void {
+    const panel = this.get<HTMLElement>('[data-role="lore-provenance"]')
+    if (panel.matches(":popover-open")) { panel.hidePopover(); return }
+    this.renderLoreProvenance()
+    panel.ontoggle = () => trigger.setAttribute("aria-expanded", String(panel.matches(":popover-open")))
+    panel.showPopover()
+    const rect = trigger.getBoundingClientRect(), width = panel.offsetWidth, height = panel.offsetHeight
+    panel.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`
+    panel.style.top = `${rect.bottom + height + 8 <= window.innerHeight ? rect.bottom + 5 : Math.max(8, rect.top - height - 5)}px`
+  }
+
+  openVisualLore(): void { this.setStudioView("lore") }
+  openVisuals(): void { this.setStudioView("visuals") }
+
+  private setStudioView(view?: string, autoSource=true): void {
+    const previousView = this.studioView
+    const provenance = this.root.querySelector<HTMLElement>('[data-role="lore-provenance"]')
+    if (provenance?.matches(":popover-open")) provenance.hidePopover()
+    this.studioView = view === "finalize" ? "finalize" : view === "edit" ? "edit" : view === "cast" ? "cast" : view === "styles" ? "styles" : view === "lore" ? "lore" : view === "visuals" ? "visuals" : "generate"
+    if (this.studioView === "edit") this.ensureEditWorkspace()
+    if (this.studioView === "finalize") this.ensureFinalizeWorkspace().activate(autoSource)
+    if (this.studioView === "visuals" && !this.chatVisualsWorkspace) {
+      this.chatVisualsWorkspace = new ChatVisualsController(this.ctx, this.get<HTMLElement>('[data-studio-page="visuals"]'), () => this.exportDraft()?.stack || null, () => this.openLibrary())
+      this.chatVisualsWorkspace.refresh()
+    }
+    if (this.studioView === "lore") {
+      if (!this.visualLore) this.visualLore = new VisualLorebookHostController(this.ctx, this.get<HTMLElement>('[data-role="visual-lore-root"]'), (initial, choose) => this.openExpressionImagePicker("reference", "", initial, choose), this.manualLoreSelection, () => this.renderLoreProvenance())
+      if (previousView !== "lore") this.visualLore.resume()
+      else this.visualLore.activate()
+    }
+    if (this.studioView === "cast") {
+      if (!this.castWorkspace) this.castWorkspace = new StudioCastWorkspace(this.ctx, this.get<HTMLElement>('[data-studio-page="cast"]'), () => this.state.outputFolders, options => this.openFolderExpressions(options), (initial, choose, folderId) => this.openExpressionImagePicker("reference", folderId||"", initial, choose),()=>this.castRecipeContext(), (image,target)=>this.openArtworkEditor(image,target))
+      else this.castWorkspace.render()
+    }
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.studioView = this.studioView
-    if (this.studioView === "generate" && ["style", "loras", "stack"].includes(shell.dataset.mobileTab || "")) {
-      shell.dataset.mobileTab = "create"
-      for (const button of this.root.querySelectorAll<HTMLElement>(".ss-mobile-tab")) {
-        button.dataset.active = String(button.dataset.tab === "create")
-        button.setAttribute("aria-current", button.dataset.tab === "create" ? "page" : "false")
-      }
+    if (this.studioView === "generate" || this.studioView === "styles") {
+      const current = shell.dataset.mobileTab || "create"
+      const inStyles = ["style", "loras", "stack"].includes(current)
+      const selected = this.studioView === "styles" ? (inStyles ? current : "style") : (inStyles ? "create" : current)
+      this.applyMobilePanes(selected)
     }
     for (const page of this.root.querySelectorAll<HTMLElement>("[data-studio-page]")) page.hidden = page.dataset.studioPage !== this.studioView
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="studio-view"]')) button.setAttribute("aria-current", button.dataset.view === this.studioView ? "page" : "false")
     if (this.studioView === "styles" && this.lorasDirty) this.renderLoras()
+  }
+
+  private editRequest<T>(type:string,data:Record<string,unknown>,progress?:(update:any)=>void,signal?:AbortSignal):Promise<T> {
+    return new Promise((resolve,reject)=>{
+      if(this.disposed||signal?.aborted){reject(new Error("Editor closed."));return}
+      const requestId=createRequestId();let timer=0;let stopping=false
+      const cleanup=()=>{window.clearTimeout(timer);this.expressionRequests.delete(requestId);signal?.removeEventListener("abort",stop)}
+      const fail=(error:Error)=>{cleanup();reject(error)}
+      const deadline=(ms=240_000)=>{window.clearTimeout(timer);timer=window.setTimeout(()=>fail(new Error("No response. Check Output Library before retrying.")),ms)}
+      const stop=()=>{if(stopping)return;stopping=true;deadline(12_000);try{this.ctx.sendToBackend({type:"stop_folder_expression",requestId})}catch(error){fail(error instanceof Error?error:new Error(String(error)))}}
+      this.expressionRequests.set(requestId,{resolve:value=>{cleanup();resolve(value as T)},reject:fail,progress:update=>{if(!stopping){deadline();progress?.(update)}},stop:signal?stop:undefined})
+      signal?.addEventListener("abort",stop,{once:true});deadline()
+      try{this.ctx.sendToBackend({type,requestId,...data})}catch(error){fail(error instanceof Error?error:new Error(String(error)))}
+    })
+  }
+
+  private ensureFinalizeWorkspace():StudioFinalizeWorkspace {
+    if(!this.finalizeWorkspace){this.finalizeWorkspaceId=createRequestId();this.finalizeWorkspace=new StudioFinalizeWorkspace(this.get<HTMLElement>('[data-studio-page="finalize"]'),{
+      connection:()=>this.state.connection?.id||"",current:()=>this.state.currentImage||null,draft:()=>this.exportDraft()?.details||null,
+      protect:(ids,release)=>this.ctx.sendToBackend({type:"finalize_protect",workspaceId:this.finalizeWorkspaceId,ids,release}),
+      pick:choose=>this.openExpressionImagePicker("reference","","",choose),
+      source:id=>this.editRequest<GenerationDetails|null>("postproduction_source",{imageId:id}),
+      capabilities:connectionId=>this.editRequest<FinalizeCapabilities>("postproduction_capabilities",{connectionId}),
+      recipes:()=>this.editRequest<FinalizeRecipe[]>("finalize_recipes",{}),
+      saveRecipe:recipe=>this.editRequest<FinalizeRecipe[]>("save_finalize_recipe",{recipe}),
+      removeRecipe:name=>this.editRequest<FinalizeRecipe[]>("delete_finalize_recipe",{name}),
+      run:async(image,stage,config,connectionId,signal,progress)=>{
+        if(!this.state.permissions.imageGen||!this.state.permissions.images)throw new Error("Grant Images and Image Generation permissions.")
+        const result=await this.editRequest<{id:string;url:string;record?:GenerationDetails}>("finalize_stage",{imageId:image.id,connectionId,stage,config,workspaceId:this.finalizeWorkspaceId},update=>progress(update.totalSteps?`${update.step||0}/${update.totalSteps}`:"Processing…"),signal)
+        this.send("list_library_outputs");return {id:result.id,url:result.url,src:result.url,label:FINALIZE_LABELS[stage.kind],details:result.record}
+      },
+      despill:async(image,stage,signal)=>{const png=await finalizeDespillPixels(image,stage,signal);signal.throwIfAborted();const result=await this.editRequest<{id:string;url:string;record?:GenerationDetails}>("save_local_edit",{png,sourceId:image.id,label:"Finalize despill",operation:"finalize-despill",workspaceId:this.finalizeWorkspaceId});this.send("list_library_outputs");return {id:result.id,url:result.url,src:result.url,label:"Despill",details:result.record}},
+      edit:image=>this.openArtworkEditor(image),
+    })}
+    return this.finalizeWorkspace
+  }
+
+  private openFinalize(image:CurrentImage):void {
+    if(this.disposed||!image.id)return
+    this.closeInspector();this.setStudioView("finalize",false);void this.ensureFinalizeWorkspace().open(image)
+  }
+
+  private ensureEditWorkspace():StudioEditWorkspace {
+    if(!this.editWorkspace)this.editWorkspace=new StudioEditWorkspace(this.get<HTMLElement>('[data-studio-page="edit"]'),{
+      pick:choose=>this.openExpressionImagePicker("reference","","",choose),
+      finalize:image=>this.openFinalize(image),
+      smartOptions:async()=>{const connectionId=this.state.connection?.id;if(!connectionId)throw new Error("Select a SwarmUI connection in Generate.");return this.editRequest<FinalizeCapabilities>("postproduction_capabilities",{connectionId})},
+      smart:async(image,point,model,device,signal,progress)=>{const connectionId=this.state.connection?.id;if(!connectionId||!this.state.permissions.imageGen)throw new Error("Select an available SwarmUI connection.");const result=await this.editRequest<{id:string;url:string}>("smart_selection",{imageId:image.id,connectionId,x:point.x,y:point.y,model,device},update=>progress(update.totalSteps?`Segmenting · ${update.step||0}/${update.totalSteps}`:"Segmenting object…"),signal);this.send("list_library_outputs");return {id:result.id,url:result.url,src:result.url,label:"Selection mask"}},
+      save:async(png,sourceId,label)=>{const result=await this.editRequest<{id:string;url:string;record?:GenerationDetails}>("save_local_edit",{png,sourceId,label});this.send("list_library_outputs");return result},
+      background:async(image,progress,signal)=>{
+        if(!this.state.connection?.id||!this.state.permissions.imageGen)throw new Error("Select a SwarmUI connection in Generate first.")
+        const result=await this.editRequest<{id:string;url:string;record?:GenerationDetails}>("process_edit_background",{imageId:image.id,connectionId:this.state.connection.id},update=>progress(update.totalSteps?`Removing background · ${update.step||0}/${update.totalSteps}`:"Removing background…"),signal)
+        this.send("list_library_outputs");return {id:result.id,src:result.url,url:result.url,label:image.label,details:result.record}
+      },
+      upscale:(image,accept)=>{if(!this.state.connection?.id||!this.state.permissions.imageGen||this.upscaleRequestId||this.upscaleSession?.dialog.open)throw new Error("Choose an available SwarmUI connection and wait for other enhancement jobs.");this.upscaleCurrentOutput("main_studio",image,accept)},
+      inpaint:(image,accept,selection)=>{if(!this.state.connection?.id||!this.state.permissions.imageGen||this.generating||this.inpaintSession?.dialog.open)throw new Error("Choose an available SwarmUI connection and wait for the active generation.");this.openRegionEditor(image,undefined,accept,selection)},
+    })
+    return this.editWorkspace
+  }
+
+  private openArtworkEditor(image:CurrentImage,target?:{memberId?:string;expression?:string;groupId?:string;backgroundKey?:string}):void {
+    if(this.disposed)return
+    this.closeInspector()
+    if(!this.get<HTMLElement>('[data-role="output-library"]').hidden&&!this.libraryPicker)this.closeOutputLibrary()
+    this.setStudioView("edit")
+    const sourceId=image.id||""
+    const replacement:EditImageTarget|null=target&&sourceId?{sourceId,label:target.expression?"Replace expression":"Replace background",...target,replace:async(id,expectedId)=>{await this.editRequest("replace_cast_edit",{...target,sourceId:expectedId,imageId:id});this.send("list_library_outputs")}}:null
+    void this.ensureEditWorkspace().open(image,replacement)
   }
 
   private restoreWorkspaceState(): void {
@@ -5647,6 +6076,11 @@ are removed when CSS is applied.</pre>
     const shell = this.get<HTMLElement>(".ss-shell")
     shell.dataset.mobileTab = selected
     this.setStudioView(["style", "loras", "stack"].includes(selected) ? "styles" : "generate")
+    this.persistWorkspaceState()
+  }
+
+  private applyMobilePanes(selected: string): void {
+    this.get<HTMLElement>(".ss-shell").dataset.mobileTab = selected
     const mobile = this.mobileMedia.matches
     // These panes are created once. Selection changes visibility, never their ownership or contents.
     for (const pane of this.root.querySelectorAll<HTMLElement>("[data-mobile-pane]")) {
@@ -5663,7 +6097,6 @@ are removed when CSS is applied.</pre>
       button.setAttribute("aria-current", active ? "page" : "false")
       if (active && mobile) button.scrollIntoView?.({ block: "nearest", inline: "nearest" })
     }
-    this.persistWorkspaceState()
   }
 
   private openInspector(): void {
@@ -5861,6 +6294,8 @@ are removed when CSS is applied.</pre>
     this.setDimensions(Number(parameters.width) || 1024, Number(parameters.height) || 1024)
     assign("steps", parameters.steps)
     assign("cfg", parameters.cfgScale)
+    assign("anima-ref-guidance", parameters.animaRefGuidance ?? 4.5)
+    assign("anima-ref-end", parameters.animaRefEnd ?? 1)
     assign("seed", parameters.seed)
     assign("sampler", parameters.sampler)
     assign("scheduler", parameters.scheduler)
@@ -5870,6 +6305,7 @@ are removed when CSS is applied.</pre>
     assign("clip-g", parameters.clipGModel)
     assign("t5", parameters.t5XXLModel)
     assign("raw-override", parameters.rawRequestOverride)
+    try { const raw=JSON.parse(String(parameters.rawRequestOverride||'{}'));this.get<HTMLInputElement>('[data-role="skip-swarm-save"]').checked=(raw.param_map||raw).donotsave===true } catch { this.get<HTMLInputElement>('[data-role="skip-swarm-save"]').checked=false }
     const workflowDraft = draft?.workflow || null
     const workflowName = workflowDraft?.name || details.workflow || ""
     if (workflowName && this.state.swarmWorkflows.some((workflow) => workflow.name === workflowName)) {
@@ -6010,20 +6446,21 @@ are removed when CSS is applied.</pre>
       return
     }
     this.setCurrentImage(image)
-    this.upscaleCurrentOutput()
+    this.upscaleCurrentOutput("inline")
   }
 
-  private upscaleCurrentOutput(): void {
-    const image = this.state.currentImage
+  private upscaleCurrentOutput(surface = "main_studio", sourceImage?:CurrentImage, accept?: (image:CurrentImage)=>Promise<void>): void {
+    const image = sourceImage || this.state.currentImage
     const connectionId = this.state.connection?.id
     if (this.upscaleRequestId || this.upscaleSession?.dialog.open || !image?.id || !connectionId ||
       !this.state.permissions.imageGen || !this.state.permissions.images) return
     const mount = this.root.querySelector<HTMLElement>(".ss-shell") || this.root
     const selectedImageId = image.id
+    this.editUpscaleAccept=accept||null
     this.upscaleSession = openStudioUpscale(mount, image, (settings, remember) => {
       if (this.disposed || !this.state.connection || this.state.connection.id !== connectionId) return
       this.upscaleRequestId = this.send("upscale_output", {
-        imageId: selectedImageId, connectionId, settings, remember,
+        imageId: selectedImageId, connectionId, settings, remember, studioSurface: surface,
       })
       this.updateAppendControls()
       this.setRunStatus("Running AI upscale workflow…")
@@ -6032,16 +6469,17 @@ are removed when CSS is applied.</pre>
       this.upscaleWorkflowRequestId = this.send("load_upscale_workflow", { connectionId, name })
     }, () => {
       this.upscaleSession = null
+      if(!this.upscaleRequestId)this.editUpscaleAccept=null
       this.upscaleOptionsRequestId = ""
       this.upscaleWorkflowRequestId = ""
     })
     this.upscaleOptionsRequestId = this.send("load_upscale_options", { connectionId })
   }
 
-  requestInlineInpaint(target: StudioInlineImageTarget): void {
+  requestInlineInpaint(target: StudioInlineImageTarget,workspace=false): void {
     if (this.inpaintSession?.dialog.open || this.disposed) return
     const requestId = createRequestId()
-    this.inlineInpaint = { target, requestId }
+    this.inlineInpaint = { target, requestId, workspace }
     this.setRunStatus("Loading the inline illustration…")
     try {
       this.ctx.sendToBackend({ type: "load_inline_edit_source", requestId, jobId: target.jobId, imageId: target.imageId })
@@ -6054,6 +6492,14 @@ are removed when CSS is applied.</pre>
   private tryOpenInlineInpaint(): void {
     const pending = this.inlineInpaint
     if (!pending?.image || this.disposed) return
+    if(pending.workspace){
+      if(this.state.permissions.images===undefined)return
+      this.inlineInpaint=null
+      if(!this.state.permissions.images){this.setRunStatus("Grant Images permission to edit artwork.",true);return}
+      this.setStudioView("edit")
+      void this.ensureEditWorkspace().open(pending.image,{label:"Replace chat image",sourceId:pending.target.imageId,replace:(id,expected)=>pending.target.replace(id,expected)})
+      return
+    }
     if (this.state.permissions.imageGen === undefined) return
     if (!this.state.permissions.imageGen || !this.state.permissions.images || !this.state.connections.length) {
       this.inlineInpaint = null
@@ -6070,15 +6516,15 @@ are removed when CSS is applied.</pre>
     if (image) this.openRegionEditor(image)
   }
 
-  private openRegionEditor(image: CurrentImage, target?: StudioInlineImageTarget): void {
+  private openRegionEditor(image: CurrentImage, target?: StudioInlineImageTarget, accept?: (image:CurrentImage)=>Promise<void>, selection?:{width:number;height:number;mask:Uint8Array}): void {
     if (this.inpaintSession?.dialog.open || !image?.id || !this.state.connection || !this.state.permissions.imageGen) return
     const session = openStudioInpaint(this.get<HTMLElement>(".ss-shell"), { ...image, id: image.id }, image.details?.resolvedPrompt || image.details?.prompt || "", edit => {
       if (this.disposed || this.generating || !this.state.connection || !this.state.permissions.imageGen) return false
-      this.generate(edit, image)
+      this.generate(edit, image, Boolean(target))
       return true
     }, () => {
       if (this.inpaintJobId && this.inpaintJobId === this.currentJobId) this.interruptGeneration()
-    }, target?.replace)
+    }, accept ? async id=>accept({id,src:`/api/v1/images/${encodeURIComponent(id)}`,url:`/api/v1/images/${encodeURIComponent(id)}`,label:image.label}) : target?.replace, accept ? "Use variant in Edit" : undefined, selection)
     this.inpaintSession = session
     session.dialog.addEventListener("close", () => {
       if (this.inpaintSession === session) this.inpaintSession = null
@@ -6194,7 +6640,7 @@ are removed when CSS is applied.</pre>
   }
 
   private openExpressionImagePicker(kind: "reference" | "saved", folderId: string, initialId: string, choose: (image: StudioExpressionImage) => void): void {
-    if (this.libraryPicker || !this.expressionDialog?.open) return
+    if (this.libraryPicker) return
     const library = this.get<HTMLElement>('[data-role="output-library"]')
     const search = this.get<HTMLInputElement>('[data-role="library-search"]')
     const searchWrap = this.get<HTMLElement>('[data-role="library-search-wrap"]')
@@ -6203,13 +6649,13 @@ are removed when CSS is applied.</pre>
     const next = library.nextSibling
     const focus = document.activeElement as HTMLElement | null
     const previous = {
-      folder: this.libraryFolderId, page: this.libraryPage, pageSize: this.libraryPageSize, query: search.value, searchHidden: searchWrap.hidden,
+      hidden: library.hidden, folder: this.libraryFolderId, page: this.libraryPage, pageSize: this.libraryPageSize, query: search.value, searchHidden: searchWrap.hidden,
       mode: this.librarySelectionMode, selected: [...this.librarySelection], anchor: this.librarySelectionAnchorId, scroll: grid.scrollTop,
     }
     const pickerDialog = element("dialog", "ss-expression-picker")
     pickerDialog.setAttribute("aria-label", kind === "reference" ? "Choose reference output" : "Choose saved image")
     pickerDialog.addEventListener("cancel", event => { event.preventDefault(); this.closeOutputLibrary() })
-    this.expressionDialog.append(pickerDialog)
+    ;(this.expressionDialog || this.get<HTMLElement>(".ss-shell")).append(pickerDialog)
     pickerDialog.append(library)
     this.openOutputLibrary({
       kind, folderId, initialId, choose,
@@ -6226,7 +6672,7 @@ are removed when CSS is applied.</pre>
         this.librarySelectionAnchorId = previous.anchor
         for (const id of previous.selected) this.librarySelection.add(id)
         if (this.disposed) return
-        library.hidden = false
+        library.hidden = previous.hidden
         this.renderOutputLibrary()
         grid.scrollTop = previous.scroll
         const key = focus?.dataset.expressionFocus
@@ -6237,6 +6683,35 @@ are removed when CSS is applied.</pre>
       },
     })
     pickerDialog.showModal()
+  }
+
+  private uploadLibraryImage(): void {
+    this.libraryUploadAbort?.abort()
+    const uploadAbort = this.libraryUploadAbort = new AbortController()
+    const input = document.createElement("input")
+    input.type = "file"; input.accept = "image/png,image/jpeg,image/webp"
+    input.hidden = true
+    // Native dialogs make elements outside their top layer inert, including a
+    // detached file input. Keep the upload input inside the active picker.
+    this.get<HTMLElement>('[data-role="output-library"]').append(input)
+    input.addEventListener("cancel", () => input.remove(), { once: true })
+    const picker = this.libraryPicker
+    input.addEventListener("change", () => void (async () => {
+      const file = input.files?.[0]
+      input.remove()
+      if (!file) return
+      if (!/^(image\/png|image\/jpeg|image\/webp)$/.test(file.type) || file.size > 50 * 1024 * 1024) throw new Error("Choose a PNG, JPEG, or WebP under 50 MB.")
+      const form = new FormData(); form.append("image", file)
+      const response = await fetch("/api/v1/images", { method: "POST", credentials: "same-origin", body: form, signal: uploadAbort.signal })
+      const data = await response.json()
+      if (!response.ok || !castKey(data.id)) throw new Error(data.error || "Image upload failed.")
+      if (this.disposed || this.libraryPicker !== picker) return
+      const image = { id: data.id, url: "/api/v1/images/" + encodeURIComponent(data.id) }
+      if (!this.state.libraryOutputs.some(output => String(output.id) === image.id)) this.state.libraryOutputs.unshift({ ...image, original_filename: file.name })
+      if (picker) { await picker.choose(image); this.closeOutputLibrary() }
+      else { this.libraryFolderId = ""; this.renderOutputLibrary(); this.send("list_library_outputs") }
+    })().catch(error => { if (!this.disposed && this.libraryPicker === picker) this.get<HTMLElement>('[data-role="library-replace-status"]').textContent = error instanceof Error ? error.message : String(error) }), { once: true })
+    input.click()
   }
 
   private selectedLibraryPick() {
@@ -6659,6 +7134,7 @@ are removed when CSS is applied.</pre>
     if (!folder?.binding) return
     pill.textContent = `Visuals: ${folder.name}`
     pill.dataset.enabled = String(folder.binding.enabled)
+    pill.setAttribute("aria-pressed", pill.dataset.enabled)
     pill.title = folder.binding.enabled
       ? `Using “${folder.name}” character visuals. Click to disable them for this character.`
       : `“${folder.name}” character visuals are disabled. Click to enable.`
@@ -6690,6 +7166,7 @@ are removed when CSS is applied.</pre>
     if (!visuals?.activePersona || !preset) return
     pill.textContent = `Persona: ${visuals.activePersona.name}`
     pill.dataset.enabled = String(visuals.personaBinding.enabled !== false)
+    pill.setAttribute("aria-pressed", pill.dataset.enabled)
     pill.title = visuals.personaBinding.enabled !== false
       ? `Using persona visual profile “${preset.name}”. Click to disable it.`
       : `Persona visual profile “${preset.name}” is disabled. Click to enable.`
@@ -6955,6 +7432,7 @@ are removed when CSS is applied.</pre>
     const reference = picker?.kind === "reference"
     library.dataset.selectionMode = String(this.librarySelectionMode)
     library.dataset.picker = picker?.kind ?? ""
+    library.dataset.pickerBound = String(Boolean(picker?.folderId))
     this.get<HTMLElement>('[data-role="library-heading"]').textContent = reference ? "Choose reference output"
       : picker?.kind === "saved" ? "Choose saved image" : "Output library"
     const replacebar = this.get<HTMLElement>('[data-role="library-replacebar"]')
@@ -7394,6 +7872,8 @@ are removed when CSS is applied.</pre>
       height: clamp(numberValue(this.get<HTMLInputElement>('[data-role="height"]'), 1024), 64, 4096),
       steps: clamp(numberValue(this.get<HTMLInputElement>('[data-role="steps"]'), 20), 1, 150),
       cfgScale: clamp(numberValue(this.get<HTMLInputElement>('[data-role="cfg"]'), 7), 1, 30),
+      animaRefGuidance: finalizeNumber(numberValue(this.get<HTMLInputElement>('[data-role="anima-ref-guidance"]'),4.5),4.5,1,12),
+      animaRefEnd: finalizeNumber(numberValue(this.get<HTMLInputElement>('[data-role="anima-ref-end"]'),1),1,0,1),
       seed: Math.trunc(numberValue(this.get<HTMLInputElement>('[data-role="seed"]'), -1)),
       sampler: optional("sampler") || undefined,
       scheduler: optional("scheduler") || undefined,
@@ -7432,15 +7912,30 @@ are removed when CSS is applied.</pre>
     return parameters
   }
 
-  private generate(edit?: StudioInpaintEdit, sourceImage?: CurrentImage): void {
+  private async updateManualAnimaRefs():Promise<void>{
+    const epoch=++this.manualAnimaEpoch;this.manualAnimaPair="";this.manualAnimaBusy=false
+    const refs=this.manualAnimaRefs.filter((v):v is StudioExpressionImage=>Boolean(v))
+    for(let i=0;i<2;i++){const node=this.root.querySelector<HTMLElement>(`[data-role="anima-ref-slot-${i}"]`);if(node)node.textContent=this.manualAnimaRefs[i]?`Reference ${i===0?"A":"B"} · selected`:`Reference ${i===0?"A":"B"}`;const thumb=this.root.querySelector<HTMLImageElement>(`[data-role="anima-ref-thumb-${i}"]`);if(thumb){const ref=this.manualAnimaRefs[i];thumb.hidden=!ref;if(ref)thumb.src=`/api/v1/images/${encodeURIComponent(ref.id)}`;else thumb.removeAttribute("src")}}
+    const status=this.root.querySelector<HTMLElement>('[data-role="anima-ref-info"]');if(!status)return
+    if(refs.length<2){status.textContent=refs.length?"Manual reference selected · overrides the character binding for Generate only.":"Use the active character binding, or choose one or two saved references. Text CFG is independent.";return}
+    this.manualAnimaBusy=true;status.textContent="Preparing left/right composite…"
+    try{const data=await combineAnimaReferences(refs);if(epoch===this.manualAnimaEpoch){this.manualAnimaPair=data;status.textContent="Two references stitched left/right. Describe A first, B second. Shared adapter guidance."}}
+    catch(error){if(epoch===this.manualAnimaEpoch)status.textContent=error instanceof Error?error.message:String(error)}finally{if(epoch===this.manualAnimaEpoch)this.manualAnimaBusy=false}
+  }
+
+  private generate(edit?: StudioInpaintEdit, sourceImage?: CurrentImage, inline = false): void {
     if (this.generating || !this.state.connection) return
+    const manualRefs=!edit&&!inline?this.manualAnimaRefs.filter((v):v is StudioExpressionImage=>Boolean(v)):[]
+    if(manualRefs.length&&(this.manualAnimaBusy||(manualRefs.length===2&&!this.manualAnimaPair))){this.setRunStatus("Wait for the reference composite or reselect the images.",true);return}
+    if(manualRefs.length&&this.state.initImage){this.setRunStatus("Manual Anima references are for text-to-image. Use Finalize for reference-assisted img2img.",true);return}
     const selectedWorkflowName = this.get<HTMLSelectElement>('[data-role="workflow-select"]').value
     if (!edit && selectedWorkflowName && this.state.selectedWorkflow?.name !== selectedWorkflowName) {
       this.setRunStatus("Wait for the selected workflow controls to finish loading.", true)
       return
     }
     const prompt = edit?.prompt ?? this.finalPrompt()
-    if (!prompt) {
+    const manualLore = !edit && !inline ? [...this.manualLoreSelection.values()].map(({bookId,entryId}) => ({bookId,entryId})) : []
+    if (!prompt && !manualLore.length) {
       this.setRunStatus("Enter a prompt or enable a LoRA trigger phrase.", true)
       return
     }
@@ -7515,6 +8010,8 @@ are removed when CSS is applied.</pre>
     else if (this.mobileMedia.matches) this.setMobileTab("create")
     this.send("generate", {
       profileInput,
+      manualLore,
+      manualAnimaReference:manualRefs.length===2?{url:this.manualAnimaPair,ids:manualRefs.map(v=>v.id)}:manualRefs.length?{id:manualRefs[0].id}:undefined,
       inpaint: edit && { sourceImageId: edit.sourceImageId, source: edit.source, mask: edit.mask, feather: edit.feather },
       input: {
         prompt,
@@ -7522,6 +8019,7 @@ are removed when CSS is applied.</pre>
         connection_id: this.state.connection.id,
         model,
         clientJobId,
+        studioSurface: inline ? "inline" : "main_studio",
         parameters,
       },
       recordHints: {
@@ -7817,11 +8315,15 @@ are removed when CSS is applied.</pre>
 
   private updateAppendControls(): void {
     const canEditOutput = Boolean(this.state.currentImage?.id && this.state.connection && this.state.permissions.imageGen && this.state.permissions.images)
+    for(const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="edit-artwork"], [data-action="finalize-artwork"]'))button.disabled=!this.state.currentImage?.id||!this.state.permissions.images
     for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="edit-region"], [data-action="upscale-output"]')) {
       button.disabled = !canEditOutput || (button.dataset.action === "upscale-output" && Boolean(this.upscaleRequestId))
       if (button.dataset.action === "upscale-output") {
         button.title = this.upscaleRequestId ? "AI enhancement running…" : "Open the model and custom ComfyUI upscale workspace"
-        if (button.classList.contains("ss-button")) button.textContent = this.upscaleRequestId ? "Enhancing…" : "AI Upscale"
+        if (button.classList.contains("ss-button")) {
+          const label = button.querySelector("span") || button
+          label.textContent = this.upscaleRequestId ? "Enhancing…" : "AI Upscale"
+        }
       }
     }
     const personaButton = this.root.querySelector<HTMLButtonElement>('[data-action="set-persona-picture"]')
@@ -7842,6 +8344,49 @@ are removed when CSS is applied.</pre>
         ? "Insert this Lumiverse-owned output into the active chat"
         : "Requires an active chat, a saved output, and Chat Mutation permission"
     }
+  }
+
+  private referenceCopyAbort = new AbortController()
+  private referenceLinkDialog: HTMLDialogElement | null = null
+  private referenceLinkRequests = new Set<string>()
+  private openReferenceLink(): void {
+    if (this.referenceLinkDialog?.open) { this.referenceLinkDialog.focus(); return }
+    const dialog = document.createElement("dialog")
+    dialog.className = "ss-reference-dialog"
+    dialog.setAttribute("aria-labelledby", "ss-reference-title")
+    dialog.innerHTML = `<header><div><span>STANDALONE CONNECTION</span><h2 id="ss-reference-title">Live Lumi references</h2></div><button type="button" class="ss-icon-button" data-reference-close aria-label="Close connection">×</button></header><form><p>Pair once with standalone Studio. It receives references and copy checks every minute. This connection cannot delete or modify Lumi images.</p><label>Pairing code<textarea data-reference-code rows="5" autocomplete="off" spellcheck="false" placeholder="Paste the code from standalone → Vacuum → Connect LumiSwarm"></textarea></label><p class="ss-reference-status" role="status">Checking connection…</p><footer><button type="button" class="ss-button" data-reference-disconnect>Disconnect</button><button type="button" class="ss-button" data-reference-refresh>Refresh now</button><button type="submit" class="ss-button ss-button-primary">Connect</button></footer></form>`
+    const prior = document.activeElement as HTMLElement | null
+    const request = (action: string, pairing?: string) => {
+      try {
+        if (!this.ctx.uuid || Number(this.ctx.host?.capabilities?.["frontend-uuid-v1"] || 0) < 1) throw new Error("Update Lumiverse: frontend-uuid-v1 is required for connection requests.")
+        const requestId = this.ctx.uuid.v4()
+        this.referenceLinkRequests.add(requestId)
+        if (action === "pair") { dialog.dataset.pairingRequest = requestId; dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = true }
+        this.ctx.sendToBackend({ type: "reference_link", requestId, action, pairing })
+      } catch (error) { dialog.querySelector<HTMLElement>('[role="status"]')!.textContent = error instanceof Error ? error.message : "Connection request failed." }
+    }
+    dialog.querySelector<HTMLTextAreaElement>("[data-reference-code]")!.addEventListener("input", event => {
+      const code = (event.target as HTMLTextAreaElement).value.trim()
+      try { const pairing = JSON.parse(code), url = new URL(String(pairing.url || "")); dialog.querySelector<HTMLElement>('[role="status"]')!.textContent = `This will publish read-only reference snapshots to ${url.origin}. Connect only to your own Studio receiver.` }
+      catch { dialog.querySelector<HTMLElement>('[role="status"]')!.textContent = code ? "Paste the complete pairing code from your Studio receiver." : "No pairing code entered." }
+    })
+    dialog.querySelector("form")!.addEventListener("submit", event => {
+      event.preventDefault()
+      const field = dialog.querySelector<HTMLTextAreaElement>("[data-reference-code]")!
+      const code = field.value.trim()
+      if (!code) return
+      request("pair", code)
+    })
+    dialog.querySelector("[data-reference-refresh]")!.addEventListener("click", () => request("refresh"))
+    dialog.querySelector("[data-reference-disconnect]")!.addEventListener("click", () => request("disconnect"))
+    dialog.querySelector("[data-reference-close]")!.addEventListener("click", () => dialog.close())
+    const timer = setInterval(() => { if (dialog.open && this.referenceLinkRequests.size < 2 && !dialog.querySelector<HTMLTextAreaElement>("[data-reference-code]")?.value.trim()) request("status") }, 2500)
+    dialog.addEventListener("close", () => {
+      clearInterval(timer); dialog.remove(); this.referenceLinkDialog = null; this.referenceLinkRequests.clear()
+      if (prior?.isConnected) prior.focus()
+    }, { once: true })
+    ;(this.root.querySelector(".ss-shell") || this.root).append(dialog)
+    this.referenceLinkDialog = dialog; dialog.showModal(); request("status")
   }
 
   private downloadCurrent(): void {

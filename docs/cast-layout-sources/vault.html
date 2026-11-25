@@ -1,0 +1,2725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Swarm-Cast Dialogue Cards — Saved Vault</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Fira+Code:wght@400;600&family=Inter:wght@400;500;600;700&family=Outfit:wght@400;600;700;800&family=Playfair+Display:ital,wght@0,600;1,600&family=Press+Start+2P&family=Space+Grotesk:wght@500;700&family=VT323&family=Plus+Jakarta+Sans:wght@700;800&family=Permanent+Marker&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --cast-color: #599CE3;
+      --cast-color-glow: rgba(89, 156, 227, 0.35);
+      --cast-color-bg: rgba(89, 156, 227, 0.08);
+      
+      --bg-page: #0e1117;
+      --bg-card-area: #161b22;
+      --text-main: #e6edf3;
+      --text-muted: #8b949e;
+      --text-paragraph: #c9d1d9;
+      --border-subtle: rgba(255, 255, 255, 0.1);
+      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    body.light-mode {
+      --bg-page: #f6f8fa;
+      --bg-card-area: #ffffff;
+      --text-main: #1f2328;
+      --text-muted: #656d76;
+      --text-paragraph: #24292f;
+      --border-subtle: rgba(0, 0, 0, 0.12);
+      --cast-color-bg: rgba(89, 156, 227, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      font-family: var(--font-body);
+      line-height: 1.6;
+      transition: background-color 0.25s ease, color 0.25s ease;
+      padding-bottom: 80px;
+    }
+
+    .top-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(14, 17, 23, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 16px 24px;
+    }
+    body.light-mode .top-header {
+      background: rgba(246, 248, 250, 0.9);
+    }
+
+    .header-content {
+      max-width: 1000px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .header-titles h1 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .badge-code {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.75rem;
+      background: var(--cast-color-bg);
+      color: var(--cast-color);
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--cast-color);
+    }
+
+    .header-titles p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .btn {
+      cursor: pointer;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-card-area);
+      color: var(--text-main);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      border-color: var(--cast-color);
+      transform: translateY(-1px);
+    }
+
+    .showcase-container {
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+
+    .saved-badge {
+      display: inline-block;
+      background: rgba(46, 160, 67, 0.15);
+      color: #3fb950;
+      border: 1px solid rgba(46, 160, 67, 0.4);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+
+    .style-showcase {
+      margin-bottom: 50px;
+      border-radius: 16px;
+      background: var(--bg-card-area);
+      border: 1px solid var(--border-subtle);
+      padding: 28px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+
+    .style-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .style-number {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.8rem;
+      color: var(--cast-color);
+      font-weight: 700;
+    }
+    .style-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+    .style-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .mock-context {
+      font-size: 0.95rem;
+      line-height: 1.7;
+      color: var(--text-paragraph);
+      margin: 18px 0;
+    }
+
+    /* 1: Persona 5 */
+    .persona-card {
+      margin: 30px 0;
+      position: relative;
+      display: flex;
+      align-items: stretch;
+      filter: drop-shadow(6px 6px 0px rgba(0, 0, 0, 0.7));
+    }
+    .persona-avatar-wrap {
+      flex: 0 0 110px;
+      position: relative;
+      background: #000000;
+      border: 3px solid #ffffff;
+      transform: skew(-8deg);
+      overflow: hidden;
+      z-index: 2;
+    }
+    .persona-avatar-wrap img {
+      width: 130%;
+      height: 130%;
+      margin-left: -15%;
+      margin-top: -10%;
+      object-fit: cover;
+      object-position: 30% 15%;
+      transform: skew(8deg);
+      filter: contrast(115%) saturate(110%);
+    }
+    .persona-emotion-stamp {
+      position: absolute;
+      bottom: 2px;
+      right: 0px;
+      background: #ffffff;
+      color: #000;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 900;
+      font-size: 0.65rem;
+      padding: 1px 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .persona-bubble {
+      flex: 1;
+      margin-left: -12px;
+      background: #111;
+      border: 3px solid #ffffff;
+      transform: skew(-8deg);
+      padding: 18px 24px 18px 32px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      position: relative;
+      box-shadow: inset 4px 0 0 var(--cast-color);
+    }
+    .persona-speaker-ribbon {
+      transform: skew(8deg);
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 800;
+      font-size: 0.85rem;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .persona-speaker-ribbon::after {
+      content: '';
+      flex: 1;
+      height: 2px;
+      background: linear-gradient(90deg, var(--cast-color), transparent);
+    }
+    .persona-dialogue {
+      transform: skew(8deg);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.4;
+    }
+
+    /* 2: Cyberpunk HUD */
+    .cyber-hud-card {
+      margin: 26px 0;
+      background: rgba(10, 18, 30, 0.85);
+      border: 1px solid rgba(89, 156, 227, 0.4);
+      border-radius: 4px;
+      position: relative;
+      padding: 18px 22px;
+      box-shadow: 0 0 20px rgba(89, 156, 227, 0.15), inset 0 0 15px rgba(89, 156, 227, 0.05);
+      font-family: 'Fira Code', monospace;
+    }
+    .cyber-hud-card::before {
+      content: '';
+      position: absolute;
+      top: -1px; left: -1px;
+      width: 12px; height: 12px;
+      border-top: 3px solid var(--cast-color);
+      border-left: 3px solid var(--cast-color);
+    }
+    .cyber-hud-card::after {
+      content: '';
+      position: absolute;
+      bottom: -1px; right: -1px;
+      width: 12px; height: 12px;
+      border-bottom: 3px solid var(--cast-color);
+      border-right: 3px solid var(--cast-color);
+    }
+    .cyber-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px dashed rgba(89, 156, 227, 0.3);
+      padding-bottom: 8px;
+      margin-bottom: 14px;
+      font-size: 0.75rem;
+      color: var(--cast-color);
+    }
+    .cyber-body {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+    }
+    .cyber-avatar-box {
+      width: 64px;
+      height: 64px;
+      position: relative;
+      flex-shrink: 0;
+      border: 1px solid var(--cast-color);
+      padding: 2px;
+    }
+    .cyber-avatar-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 25% 10%;
+      filter: grayscale(20%) brightness(1.05) contrast(1.1);
+    }
+    .cyber-scanline {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(rgba(89, 156, 227, 0) 50%, rgba(0, 0, 0, 0.5) 50%);
+      background-size: 100% 4px;
+      pointer-events: none;
+    }
+    .cyber-dialogue {
+      font-size: 0.95rem;
+      color: #e2f1ff;
+      line-height: 1.5;
+    }
+    .cyber-dialogue span.quote-mark {
+      color: var(--cast-color);
+      font-weight: 700;
+    }
+
+    /* 3: Manga Speech Bubble */
+    .manga-panel-card {
+      margin: 28px 0;
+      display: flex;
+      align-items: flex-end;
+      gap: 18px;
+    }
+    .manga-avatar-circ {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: 3px solid #1a1a1a;
+      box-shadow: 3px 3px 0 var(--cast-color);
+      overflow: hidden;
+      flex-shrink: 0;
+      background: #000;
+    }
+    .manga-avatar-circ img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center 12%;
+    }
+    .manga-bubble-wrap {
+      flex: 1;
+      position: relative;
+      background: #ffffff;
+      color: #121212;
+      border: 3px solid #121212;
+      border-radius: 20px;
+      padding: 16px 22px;
+      box-shadow: 4px 4px 0px var(--cast-color);
+    }
+    .manga-bubble-wrap::before {
+      content: '';
+      position: absolute;
+      bottom: 16px;
+      left: -14px;
+      border-style: solid;
+      border-width: 10px 14px 10px 0;
+      border-color: transparent #121212 transparent transparent;
+    }
+    .manga-bubble-wrap::after {
+      content: '';
+      position: absolute;
+      bottom: 18px;
+      left: -9px;
+      border-style: solid;
+      border-width: 8px 11px 8px 0;
+      border-color: transparent #ffffff transparent transparent;
+    }
+    .manga-name-tag {
+      display: inline-block;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 800;
+      font-size: 0.75rem;
+      background: var(--cast-color);
+      color: #0b1a2e;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .manga-state-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #555;
+      margin-left: 6px;
+    }
+    .manga-text {
+      font-family: 'Inter', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #111111;
+      line-height: 1.45;
+    }
+
+    /* 4: Cinematic 21:9 Cutscene */
+    .cinematic-cutscene {
+      margin: 32px 0;
+      position: relative;
+      background: #000000;
+      border-radius: 8px;
+      overflow: hidden;
+      border-top: 2px solid rgba(89, 156, 227, 0.4);
+      border-bottom: 2px solid rgba(89, 156, 227, 0.4);
+      height: 140px;
+      display: flex;
+      align-items: center;
+    }
+    .cinematic-bg-art {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 45%;
+      height: 100%;
+      mask-image: linear-gradient(to right, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%);
+      -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%);
+    }
+    .cinematic-bg-art img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center 15%;
+      filter: brightness(0.85) contrast(1.1);
+    }
+    .cinematic-content {
+      position: relative;
+      z-index: 2;
+      margin-left: auto;
+      width: 75%;
+      padding: 0 32px 0 0;
+      text-align: right;
+    }
+    .cinematic-speaker {
+      font-family: 'Cinzel', serif;
+      font-size: 0.85rem;
+      color: var(--cast-color);
+      letter-spacing: 2px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .cinematic-subtext {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.15rem;
+      font-weight: 400;
+      color: #ffffff;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      font-style: italic;
+    }
+
+    /* 5: Retro 16-Bit RPG */
+    .retro-rpg-box {
+      margin: 26px 0;
+      background: #0f172a;
+      border: 4px solid #ffffff;
+      box-shadow: inset 0 0 0 4px #000000, 0 6px 0 #000000;
+      border-radius: 4px;
+      padding: 16px;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      position: relative;
+    }
+    .retro-pixel-portrait {
+      width: 68px;
+      height: 68px;
+      border: 3px solid #ffffff;
+      box-shadow: inset 0 0 0 2px #000;
+      overflow: hidden;
+      flex-shrink: 0;
+      background: #1e293b;
+      image-rendering: pixelated;
+    }
+    .retro-pixel-portrait img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center 15%;
+      filter: contrast(120%) saturate(120%);
+    }
+    .retro-content {
+      flex: 1;
+    }
+    .retro-name {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 0.72rem;
+      color: var(--cast-color);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .retro-dialogue {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 0.7rem;
+      line-height: 1.7;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+    .retro-arrow {
+      position: absolute;
+      bottom: 12px;
+      right: 14px;
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-top: 8px solid var(--cast-color);
+      animation: bounceArrow 0.8s infinite alternate;
+    }
+    @keyframes bounceArrow {
+      from { transform: translateY(0); }
+      to { transform: translateY(5px); }
+    }
+
+    /* 6: Editorial Magazine */
+    .editorial-quote-card {
+      margin: 34px 0;
+      display: grid;
+      grid-template-columns: 100px 1fr;
+      gap: 24px;
+      padding: 16px 0;
+      border-top: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+      align-items: center;
+    }
+    .editorial-portrait {
+      position: relative;
+      height: 120px;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.3);
+    }
+    .editorial-portrait img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 20% 12%;
+    }
+    .editorial-portrait-badge {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px);
+      text-align: center;
+      font-size: 0.65rem;
+      font-family: 'Inter', sans-serif;
+      font-weight: 700;
+      color: var(--cast-color);
+      padding: 2px 0;
+      text-transform: uppercase;
+    }
+    .editorial-main {
+      position: relative;
+    }
+    .editorial-marks {
+      font-family: 'Playfair Display', serif;
+      font-size: 3.5rem;
+      color: var(--cast-color);
+      opacity: 0.35;
+      line-height: 0;
+      position: absolute;
+      top: 10px;
+      left: -14px;
+      pointer-events: none;
+    }
+    .editorial-quote-text {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--text-main);
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+    .editorial-cite {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      font-weight: 600;
+    }
+    .editorial-cite span {
+      color: var(--cast-color);
+    }
+
+    /* 7: Visual Novel Standee & Frosted Glass Narrative Bubble */
+    .vn-standee-card {
+      margin: 36px 0;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      align-items: center;
+      gap: 20px;
+      position: relative;
+      min-height: 360px;
+    }
+    .vn-standee-portrait {
+      position: relative;
+      height: 380px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .vn-standee-portrait::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      width: 180px;
+      height: 14px;
+      background: radial-gradient(ellipse, rgba(0,0,0,0.7) 0%, transparent 80%);
+      border-radius: 50%;
+    }
+    .vn-standee-portrait img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(4px 4px 18px rgba(0,0,0,0.6));
+      position: relative;
+      z-index: 2;
+    }
+    .vn-glass-bubble {
+      background: rgba(18, 25, 38, 0.75);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-left: 5px solid var(--cast-color);
+      border-radius: 16px;
+      padding: 24px 28px;
+      position: relative;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+    }
+    .vn-glass-bubble::before {
+      content: '';
+      position: absolute;
+      left: -12px;
+      top: 50%;
+      transform: translateY(-50%);
+      border-style: solid;
+      border-width: 10px 12px 10px 0;
+      border-color: transparent rgba(255, 255, 255, 0.2) transparent transparent;
+    }
+    .vn-glass-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 8px;
+    }
+    .vn-glass-name {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: var(--cast-color);
+      letter-spacing: 0.5px;
+    }
+    .vn-glass-mood {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.72rem;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--cast-color);
+      border: 1px solid var(--cast-color);
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .vn-glass-dialogue {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.15rem;
+      font-weight: 500;
+      color: #ffffff;
+      line-height: 1.5;
+    }
+    .vn-advance-pill {
+      margin-top: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* 8: Manga Halftone Cutout & Pop-Out SFX Card */
+    .manga-sfx-card {
+      margin: 40px 0;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 0;
+      min-height: 380px;
+      background: radial-gradient(circle at 45% 50%, rgba(255, 255, 255, 0.05) 0%, transparent 70%);
+    }
+    .manga-kanji-sfx {
+      position: absolute;
+      left: 60px;
+      top: 30px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 5rem;
+      font-weight: 900;
+      color: var(--cast-color);
+      opacity: 0.15;
+      line-height: 1;
+      pointer-events: none;
+      letter-spacing: -2px;
+      text-shadow: 0 0 20px var(--cast-color);
+    }
+    .manga-figure-center {
+      position: relative;
+      height: 360px;
+      z-index: 2;
+    }
+    .manga-figure-center img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 12px 24px rgba(0,0,0,0.8));
+    }
+    .manga-floating-card {
+      position: absolute;
+      right: 20px;
+      bottom: 40px;
+      max-width: 380px;
+      background: #ffffff;
+      color: #0c1017;
+      border: 3px solid #0c1017;
+      border-radius: 14px;
+      padding: 18px 22px;
+      box-shadow: 6px 6px 0px var(--cast-color);
+      z-index: 3;
+    }
+    .manga-floating-card::before {
+      content: '?!';
+      position: absolute;
+      top: -16px;
+      right: 18px;
+      background: var(--cast-color);
+      color: #ffffff;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 900;
+      font-size: 1rem;
+      padding: 2px 10px;
+      border-radius: 4px;
+      border: 2px solid #0c1017;
+      transform: rotate(6deg);
+    }
+    .manga-speaker-name {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 800;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .manga-dialogue-bold {
+      font-family: 'Inter', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #0c1017;
+      line-height: 1.4;
+    }
+
+    /* 9: Fighting Game Character Select & Diagonal Stripe */
+    .versus-select-card {
+      margin: 40px auto;
+      max-width: 580px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+    .versus-figure-stage {
+      position: relative;
+      height: 360px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      overflow: hidden;
+    }
+    .versus-figure-stage::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      width: 160px;
+      height: 130%;
+      background: linear-gradient(135deg, var(--cast-color) 0%, rgba(255, 255, 255, 0.1) 100%);
+      transform: rotate(20deg);
+      opacity: 0.3;
+      z-index: 1;
+    }
+    .versus-full-img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      position: relative;
+      z-index: 2;
+      filter: drop-shadow(0 10px 20px rgba(0,0,0,0.8));
+    }
+    .versus-banner-dock {
+      width: 100%;
+      position: relative;
+      z-index: 3;
+      margin-top: -15px;
+      background: #0d131f;
+      border-top: 4px solid var(--cast-color);
+      border-bottom: 4px solid #ffffff;
+      padding: 16px 22px;
+      clip-path: polygon(0 0, 100% 0, 97% 100%, 3% 100%);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+    }
+    .versus-name-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .versus-voice-quote {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #ffffff;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
+
+    /* Modal */
+    .code-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 999;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .code-modal.active {
+      display: flex;
+    }
+    .code-modal-window {
+      background: #161b22;
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 720px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .code-modal-header {
+      padding: 14px 20px;
+      background: #0d1117;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .code-modal-content {
+      padding: 20px;
+      overflow-y: auto;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.85rem;
+      color: #9ecbff;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .close-btn {
+      cursor: pointer;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.2rem;
+    }
+
+    /* Layout 10: Retro 90s VHS / Anime OVA Subtitle */
+    .vhs-sub-card {
+      margin: 36px auto;
+      max-width: 540px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+    .vhs-figure-pane {
+      position: relative;
+      height: 320px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+    }
+    .vhs-figure-pane img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 8px 20px rgba(0,0,0,0.7));
+    }
+    .vhs-tracking-header {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-family: 'VT323', monospace;
+      font-size: 1.1rem;
+      color: var(--cast-color);
+      letter-spacing: 1px;
+      text-shadow: 0 0 8px var(--cast-color);
+    }
+    .vhs-sub-floating {
+      margin-top: -12px;
+      position: relative;
+      z-index: 3;
+      text-align: center;
+      padding: 8px 16px;
+    }
+    .vhs-speaker-tag {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 2px;
+    }
+    .vhs-yellow-sub {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: #ffe600;
+      text-shadow: 2px 2px 0px #000000, -2px -2px 0px #000000, 2px -2px 0px #000000, -2px 2px 0px #000000, 0 4px 10px rgba(0,0,0,0.8);
+      line-height: 1.4;
+    }
+
+    /* Layout 11: Neon Grid Horizon Standee */
+    .synth-stage {
+      position: relative;
+      height: 250px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      line-height: 0;
+    }
+    .synth-stage::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--cast-color), transparent);
+      box-shadow: 0 0 12px var(--cast-color);
+    }
+    .synth-stage img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      vertical-align: bottom;
+      position: relative;
+      z-index: 2;
+      filter: drop-shadow(0 6px 14px rgba(0,0,0,0.8));
+    }
+    .synth-dialogue-under {
+      margin-top: 14px;
+      text-align: center;
+      width: 100%;
+      padding: 14px 20px;
+    }
+    .synth-speaker-chip {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .synth-quote {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.4;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.7);
+    }
+
+    /* Layout 12: Editorial Pull-Quote & Gradient Dissolve */
+    .editorial-dissolve-card {
+      margin: 36px 0;
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 22px;
+      align-items: center;
+      padding: 10px 0;
+    }
+    .editorial-dissolve-figure {
+      height: 220px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
+    }
+    .editorial-dissolve-figure img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+    }
+    .editorial-dissolve-content {
+      padding-left: 10px;
+      border-left: 3px solid var(--cast-color);
+    }
+    .editorial-dissolve-speaker {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 800;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 6px;
+    }
+    .editorial-dissolve-quote {
+      font-family: 'Newsreader', serif;
+      font-size: 1.3rem;
+      font-style: italic;
+      color: var(--text-main);
+      line-height: 1.45;
+    }
+
+    /* Layout 13: Dark Fantasy & Gothic Ornate Filigree */
+    .gothic-card {
+      margin: 36px 0;
+      background: linear-gradient(135deg, #101217 0%, #08090d 100%);
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.8), 0 12px 30px rgba(0,0,0,0.5);
+      border-radius: 6px;
+      padding: 18px 24px;
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 22px;
+      align-items: center;
+      position: relative;
+    }
+    .gothic-card::before {
+      content: '◆';
+      position: absolute;
+      top: -8px; left: -8px;
+      color: var(--cast-color);
+      font-size: 0.8rem;
+    }
+    .gothic-card::after {
+      content: '◆';
+      position: absolute;
+      bottom: -8px; right: -8px;
+      color: var(--cast-color);
+      font-size: 0.8rem;
+    }
+    .gothic-figure-pane {
+      height: 200px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    }
+    .gothic-figure-pane img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+    }
+    .gothic-content-pane {
+      border-left: 1px solid rgba(255, 255, 255, 0.15);
+      padding-left: 22px;
+    }
+    .gothic-header {
+      font-family: 'Cinzel', serif;
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .gothic-quote {
+      font-family: 'Cinzel', serif;
+      font-size: 1.18rem;
+      font-weight: 600;
+      color: #f1f5f9;
+      line-height: 1.45;
+    }
+
+    /* Layout 14: Mecha Pilot Synchronization HUD */
+    .cockpit-hud-card {
+      margin: 36px 0;
+      background: #080c14;
+      border: 1px solid var(--cast-border);
+      border-radius: 8px;
+      padding: 16px 22px;
+      position: relative;
+      box-shadow: 0 0 20px var(--cast-subtle);
+    }
+    .cockpit-hud-topline {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.72rem;
+      color: var(--cast-color);
+      border-bottom: 1px solid var(--cast-border);
+      padding-bottom: 6px;
+      margin-bottom: 14px;
+    }
+    .cockpit-hud-body {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 20px;
+      align-items: center;
+    }
+    .cockpit-avatar-pane {
+      height: 180px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      background: radial-gradient(circle at center, var(--cast-subtle) 0%, transparent 80%);
+      border: 1px solid var(--cast-border);
+      clip-path: polygon(0 0, 100% 0, 100% 88%, 88% 100%, 0 100%);
+    }
+    .cockpit-avatar-pane img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+    }
+    .cockpit-dialogue-pane {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .cockpit-quote {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.45;
+      margin-bottom: 10px;
+    }
+    .cockpit-status-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+
+    /* Layout 15: Japanese Manga Panel Frame */
+    .manga-panel-box {
+      margin: 36px 0;
+      background: #ffffff;
+      border: 3px solid #111111;
+      border-radius: 6px;
+      padding: 18px 24px;
+      display: grid;
+      grid-template-columns: 1fr 130px;
+      gap: 20px;
+      align-items: center;
+      box-shadow: 5px 5px 0px #111111;
+    }
+    .manga-panel-dialogue-col {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .manga-panel-name-chip {
+      display: inline-block;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 800;
+      color: #111111;
+      border-bottom: 2px solid var(--cast-color);
+      padding-bottom: 2px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .manga-panel-quote {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #111111;
+      line-height: 1.45;
+    }
+    .manga-panel-figure-col {
+      height: 190px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    }
+    .manga-panel-figure-col img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+    }
+
+    /* Layout 16: Developer & Terminal Console Prompt */
+    .terminal-console-card {
+      margin: 36px 0;
+      background: #090d14;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      overflow: hidden;
+      font-family: 'Fira Code', monospace;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+    .terminal-bar {
+      background: #111622;
+      padding: 8px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.2);
+    }
+    .terminal-dot:nth-child(1) { background: #ef4444; }
+    .terminal-dot:nth-child(2) { background: #f59e0b; }
+    .terminal-dot:nth-child(3) { background: #10b981; }
+    .terminal-title {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-left: 8px;
+    }
+    .terminal-body {
+      padding: 16px 20px;
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 18px;
+      align-items: center;
+    }
+    .terminal-avatar-pane {
+      height: 160px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      border: 1px dashed var(--cast-border);
+      background: var(--cast-subtle);
+    }
+    .terminal-avatar-pane img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+    }
+    .terminal-text-pane {
+      color: #e2e8f0;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    .terminal-prompt-lead {
+      color: var(--cast-color);
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    /* Layout 17: Luxury Lookbook & Oversized Quotation */
+    .lookbook-card {
+      margin: 40px 0;
+      position: relative;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 26px 30px;
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 24px;
+      align-items: center;
+      box-shadow: 0 14px 32px rgba(0,0,0,0.25);
+    }
+    .lookbook-figure-wrap {
+      height: 210px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    }
+    .lookbook-figure-wrap img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+    }
+    .lookbook-quote-wrap {
+      position: relative;
+    }
+    .lookbook-quote-wrap::before {
+      content: '“';
+      position: absolute;
+      top: -30px;
+      left: -12px;
+      font-family: 'Newsreader', serif;
+      font-size: 4.5rem;
+      color: var(--cast-color);
+      opacity: 0.25;
+      line-height: 1;
+      pointer-events: none;
+    }
+    .lookbook-quote-text {
+      font-family: 'Newsreader', serif;
+      font-size: 1.35rem;
+      font-style: italic;
+      font-weight: 500;
+      color: var(--text-main);
+      line-height: 1.45;
+      margin-bottom: 8px;
+    }
+    .lookbook-caption {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+
+    /* Layout 18: Open Horizon Grounded Monologue */
+    .open-horizon-card {
+      margin: 44px auto;
+      max-width: 600px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+    .open-horizon-figure {
+      height: 260px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      position: relative;
+      line-height: 0;
+    }
+    .open-horizon-figure img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      vertical-align: bottom;
+      filter: drop-shadow(0 10px 18px rgba(0,0,0,0.6));
+    }
+    .open-horizon-rule {
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--cast-color), transparent);
+      box-shadow: 0 0 10px var(--cast-color);
+    }
+    .open-horizon-quote-pane {
+      margin-top: 18px;
+      text-align: center;
+      width: 100%;
+      padding: 0 20px;
+    }
+    .open-horizon-speaker {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 800;
+      color: var(--cast-color);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .open-horizon-dialogue {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.45;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+    }
+
+    /* Layout 19: Cinematic Bleed Letterbox Horizon */
+    .bleed-letterbox-card {
+      margin: 40px -20px;
+      padding: 24px 30px;
+      background: linear-gradient(180deg, transparent 0%, rgba(8, 12, 18, 0.95) 15%, rgba(8, 12, 18, 0.95) 85%, transparent 100%);
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+    .bleed-letterbox-figure {
+      height: 210px;
+      width: 150px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .bleed-letterbox-figure img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(4px 4px 16px rgba(0,0,0,0.8));
+    }
+    .bleed-letterbox-content {
+      flex: 1;
+    }
+    .bleed-letterbox-tag {
+      font-family: 'Cinzel', serif;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--cast-color);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .bleed-letterbox-sub {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.3rem;
+      font-weight: 500;
+      color: #ffffff;
+      line-height: 1.4;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.9);
+    }
+
+    /* Layout 20: Shonen Manga Jagged Spike Action Burst */
+    .shonen-burst-card {
+      margin: 40px 0;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      position: relative;
+    }
+    .shonen-burst-figure {
+      height: 220px;
+      width: 140px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: flex-end;
+      mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    }
+    .shonen-burst-figure img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+    }
+    .shonen-burst-balloon {
+      flex: 1;
+      position: relative;
+      background: #000000;
+      color: #ffffff;
+      padding: 26px 32px;
+      border: 3px solid #ffffff;
+      box-shadow: 6px 6px 0px var(--cast-color);
+      clip-path: polygon(
+        0% 15%, 8% 0%, 92% 5%, 100% 20%, 96% 85%, 88% 100%, 15% 95%, 0% 80%, 4% 50%
+      );
+    }
+    .shonen-burst-tag {
+      font-family: 'Permanent Marker', cursive;
+      font-size: 0.9rem;
+      color: var(--cast-color);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+      transform: rotate(-2deg);
+      display: inline-block;
+    }
+    .shonen-burst-text {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #ffffff;
+      line-height: 1.3;
+      text-transform: uppercase;
+    }
+
+    /* Layout 21: Mystical Arched Tarot / Arcana Destiny Card */
+    .tarot-arch-card {
+      margin: 44px auto;
+      max-width: 600px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: radial-gradient(circle at 50% 30%, rgba(89, 156, 227, 0.15) 0%, transparent 70%);
+      padding: 10px 0 20px 0;
+    }
+    .tarot-arch-frame {
+      position: relative;
+      width: 240px;
+      height: 270px;
+      border-radius: 120px 120px 0 0;
+      border: 2px solid var(--cast-color);
+      border-bottom: none;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      box-shadow: 0 0 25px var(--cast-subtle);
+    }
+    .tarot-arch-frame::before {
+      content: '✦  THE BEWILDERED  ✦';
+      position: absolute;
+      top: 18px;
+      font-family: 'Cinzel', serif;
+      font-size: 0.65rem;
+      color: var(--cast-color);
+      letter-spacing: 2px;
+      font-weight: 700;
+    }
+    .tarot-arch-frame img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 8px 18px rgba(0,0,0,0.8));
+    }
+    .tarot-quote-dock {
+      margin-top: 14px;
+      text-align: center;
+      width: 100%;
+      padding: 0 20px;
+    }
+    .tarot-name-ribbon {
+      font-family: 'Cinzel', serif;
+      font-size: 0.85rem;
+      font-weight: 800;
+      color: var(--cast-color);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .tarot-speech {
+      font-family: 'Cinzel', serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.45;
+    }
+
+    /* Layout 22: Ripped Paper Clipping & Washi Tape Scrapbook */
+    .washi-scrap-card {
+      margin: 40px 0;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+    .washi-scrap-figure {
+      height: 200px;
+      width: 130px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: flex-end;
+      mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    }
+    .washi-scrap-figure img {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+    }
+    .washi-scrap-note {
+      flex: 1;
+      background: #faf6ee;
+      color: #1a1a1a;
+      padding: 24px 28px;
+      border-radius: 2px;
+      box-shadow: 4px 6px 20px rgba(0,0,0,0.5);
+      position: relative;
+      transform: rotate(1deg);
+    }
+    .washi-scrap-note::before {
+      content: '';
+      position: absolute;
+      top: -12px;
+      left: 30px;
+      width: 70px;
+      height: 22px;
+      background: var(--cast-color);
+      opacity: 0.75;
+      transform: rotate(-3deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    .washi-scrap-speaker {
+      font-family: 'Permanent Marker', cursive;
+      font-size: 0.85rem;
+      color: #333333;
+      margin-bottom: 4px;
+    }
+    .washi-scrap-quote {
+      font-family: 'Newsreader', serif;
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: #111111;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="top-header">
+    <div class="header-content">
+      <div class="header-titles">
+        <h1>Saved Layouts Vault <span class="badge-code">22 Preserved Styles</span></h1>
+        <p>Curated keepers extracted from your initial review.</p>
+      </div>
+      <div>
+        <button class="btn" onclick="toggleTheme()" id="themeToggleBtn">☀️ Toggle Reader Mode</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="showcase-container">
+    <div class="saved-badge">✓ 6 Preserved & Safely Extracted Styles</div>
+
+    <!-- 1: Persona 5 -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">SAVED #1</span>
+          <h3 class="style-title">Persona 5 / Neo-Angular Comic Pop</h3>
+          <p class="style-desc">Dynamic skewed frames, stark comic border, ice-blue accent stripe, and stamped emotion badge.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(1)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The precinct logs clearly showed two signatures for district patrol, but the timestamps were completely out of order.
+      </p>
+
+      <div class="persona-card">
+        <div class="persona-avatar-wrap">
+          <img src="shoto-confusion.png" alt="Shoto">
+          <div class="persona-emotion-stamp">CONFUSED</div>
+        </div>
+        <div class="persona-bubble">
+          <div class="persona-speaker-ribbon">
+            <span>SHOTO TODOROKI</span>
+          </div>
+          <div class="persona-dialogue">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        He tilted his head slightly, genuinely perplexed by the suspicion directed toward his schedule.
+      </p>
+    </section>
+
+    <!-- 2: Cyberpunk HUD -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">SAVED #2</span>
+          <h3 class="style-title">Cyberpunk / Sci-Fi Tactical Comms HUD</h3>
+          <p class="style-desc">Bracketed technical terminal readouts, scanline avatar filter, biometric status header, and monospace dialogue.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(2)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The comms earpiece crackled with incoming tactical telemetry over channel 04.
+      </p>
+
+      <div class="cyber-hud-card">
+        <div class="cyber-header">
+          <span>// COMMS LINK: ACTIVE [SHOTO]</span>
+          <span>AFFECTIVE_STATE: CONFUSED // 84% MATCH</span>
+        </div>
+        <div class="cyber-body">
+          <div class="cyber-avatar-box">
+            <img src="shoto-confusion.png" alt="Shoto">
+            <div class="cyber-scanline"></div>
+          </div>
+          <div class="cyber-dialogue">
+            <span class="quote-mark">&gt; </span>"Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        Static hissed briefly as the frequency recalibrated against the downtown interference.
+      </p>
+    </section>
+
+    <!-- 3: Manga Speech Bubble -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">SAVED #3</span>
+          <h3 class="style-title">Manga / Webtoon Speech Bubble with Avatar Tail</h3>
+          <p class="style-desc">Authentic comic book speech balloon with pointer tail originating directly toward the circular character avatar.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(3)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        He stopped mid-stride in the agency hallway, turning around with both hands buried in his dark uniform coat pockets.
+      </p>
+
+      <div class="manga-panel-card">
+        <div class="manga-avatar-circ">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="manga-bubble-wrap">
+          <div>
+            <span class="manga-name-tag">Shoto</span>
+            <span class="manga-state-badge">[State: Confusion]</span>
+          </div>
+          <div class="manga-text">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        His heterochromatic eyes blinked once in mild disbelief, genuinely failing to understand why anyone would concoct an excuse for overtime.
+      </p>
+    </section>
+
+    <!-- 4: Cinematic 21:9 Letterbox -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">SAVED #4</span>
+          <h3 class="style-title">Cinematic 21:9 Letterbox Subtitle Cutscene</h3>
+          <p class="style-desc">Widescreen atmospheric film frame with alpha-masked portrait blending into the darkness, gold/blue subtitle typography.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(4)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The neon billboards outside the alley cast long cerulean shadows across the damp brickwork. The camera tightened its focus.
+      </p>
+
+      <div class="cinematic-cutscene">
+        <div class="cinematic-bg-art">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="cinematic-content">
+          <div class="cinematic-speaker">Shoto Todoroki</div>
+          <div class="cinematic-subtext">"Why would I lie about trading the Shibuya shift?."</div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The camera held on the silence between them as an overhead train rattled past the overpass.
+      </p>
+    </section>
+
+    <!-- 5: Retro 16-Bit RPG -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">SAVED #5</span>
+          <h3 class="style-title">Retro 16-Bit Pixel RPG (EarthBound / Octopath Box)</h3>
+          <p class="style-desc">Nostalgic double-stroke border, retro pixel font, high-contrast bordered portrait, and bouncing advance caret.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(5)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        You examined the young hero stationed near the crosswalk. He had a bewildered expression on his face.
+      </p>
+
+      <div class="retro-rpg-box">
+        <div class="retro-pixel-portrait">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="retro-content">
+          <div class="retro-name">SHOTO [?]</div>
+          <div class="retro-dialogue">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+        <div class="retro-arrow"></div>
+      </div>
+
+      <p class="mock-context">
+        * SHOTO is waiting for your reply.
+      </p>
+    </section>
+
+    <!-- 6: Editorial Magazine -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">SAVED #6</span>
+          <h3 class="style-title">Editorial Magazine Pull-Quote Split</h3>
+          <p class="style-desc">High-fashion / journalism editorial pull-quote with dramatic typographic quotation glyphs and portrait sidebar.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(6)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        In an exclusive profile for the Hero Network Monthly, the UA prodigy addressed the rumors regarding district reassignment without hesitation.
+      </p>
+
+      <div class="editorial-quote-card">
+        <div class="editorial-portrait">
+          <img src="shoto-confusion.png" alt="Shoto">
+          <div class="editorial-portrait-badge">Confusion</div>
+        </div>
+        <div class="editorial-main">
+          <div class="editorial-marks">“</div>
+          <div class="editorial-quote-text">
+            Why would I lie about trading the Shibuya shift?.
+          </div>
+          <div class="editorial-cite">
+            <span>Shoto Todoroki</span> &mdash; District Patrol Log
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        His peers confirmed that throughout his rookie year, honesty remained his most uncompromising trait.
+      </p>
+    </section>
+
+    <!-- 7: Visual Novel Standee & Frosted Glass Narrative Bubble -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">SAVED #7</span>
+          <h3 class="style-title">Visual Novel Standee &amp; Frosted Glass Narrative Bubble</h3>
+          <p class="style-desc">Two-column VN composition: character standing at natural height on the left, dialogue in an elegant frosted acrylic bubble with pointer on the right.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(7)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The meeting room fell silent as the schedule was projected onto the white board.
+      </p>
+
+      <div class="vn-standee-card" style="--cast-color: #599CE3;">
+        <div class="vn-standee-portrait">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="vn-glass-bubble">
+          <div class="vn-glass-header">
+            <span class="vn-glass-name">Shoto</span>
+            <span class="vn-glass-mood">confusion</span>
+          </div>
+          <div class="vn-glass-dialogue">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+          <div class="vn-advance-pill">
+            <span>Next</span> &blacktriangleright;
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The question hung in the air with unshakeable sincerity, deflating any further debate.
+      </p>
+    </section>
+
+    <!-- 8: Manga Halftone Cutout & Kanji SFX Pop-Out -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">SAVED #8</span>
+          <h3 class="style-title">Manga Halftone Cutout &amp; Pop-Out SFX Card</h3>
+          <p class="style-desc">Stylized sound-effect typography behind full cutout, with an angled high-contrast comic dialogue pop-out layered beside the standee.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(8)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The tension spiked as all eyes focused on the doorway.
+      </p>
+
+      <div class="manga-sfx-card" style="--cast-color: #599CE3;">
+        <div class="manga-kanji-sfx">?!</div>
+        <div class="manga-figure-center">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="manga-floating-card">
+          <div class="manga-speaker-name">SHOTO // CONFUSION</div>
+          <div class="manga-dialogue-bold">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The calm rebuttal completely caught the team off guard.
+      </p>
+    </section>
+
+    <!-- 9: Fighting Game Character Select & Diagonal Stripe -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">SAVED #9</span>
+          <h3 class="style-title">Fighting Game Character Select &amp; Diagonal Stripe</h3>
+          <p class="style-desc">Dynamic diagonal gradient stripe backdrop with character standing tall, anchored by an arcade fighter quote banner below (dynamic name on left, expression on right).</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(9)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The referee signaled a pause in the sparring rotation as the inquiry was raised.
+      </p>
+
+      <div class="versus-select-card" style="--cast-color: #599CE3;">
+        <div class="versus-figure-stage">
+          <img class="versus-full-img" src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="versus-banner-dock">
+          <div class="versus-name-row">
+            <span>SHOTO</span>
+            <span>CONFUSION</span>
+          </div>
+          <div class="versus-voice-quote">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        With the inquiry settled, the sparring match resumed without delay.
+      </p>
+    </section>
+
+    <!-- LAYOUT 10: Retro 90s Anime OVA Subtitle & VCR Tracking -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 10</span>
+          <h3 class="style-title">Retro 90s Anime OVA Subtitle &amp; VCR Tracking</h3>
+          <p class="style-desc">Authentic classic anime fansub aesthetic: tracking timestamp on top-left, yellow-outlined heavy subtitle dialogue floating underneath.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(10)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The tape flickered as the analog tracking head aligned with the frame:
+      </p>
+
+      <div class="vhs-sub-card" style="--cast-color: #599CE3;">
+        <div class="vhs-figure-pane">
+          <div class="vhs-tracking-header">PLAY &#9654; SP [SHOTO]</div>
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="vhs-sub-floating">
+          <div class="vhs-speaker-tag">SHOTO // CONFUSION</div>
+          <div class="vhs-yellow-sub">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The frame jumped slightly with faint tape hiss before cutting smoothly to the exterior establishing shot.
+      </p>
+    </section>
+
+    <!-- LAYOUT 11: Neon Grid Horizon Standee -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 11</span>
+          <h3 class="style-title">Neon Grid Horizon Standee</h3>
+          <p class="style-desc">An explicit neon horizon line gives the character an unmistakable physical floor to stand on.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(11)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        He stood motionless at the edge of the neon-lit staging floor, waiting for an explanation:
+      </p>
+
+      <div class="synth-stage" style="--cast-color: #599CE3;">
+        <img src="shoto-confusion.png" alt="Shoto">
+      </div>
+      <div class="synth-dialogue-under" style="--cast-color: #599CE3;">
+        <div class="synth-speaker-chip">SHOTO &bull; CONFUSION</div>
+        <div class="synth-quote">
+          "Why would I lie about trading the Shibuya shift?."
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The team exchanged looks, realizing that no further explanation was needed.
+      </p>
+    </section>
+
+    <!-- LAYOUT 12: Editorial Pull-Quote & Gradient Dissolve -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 12</span>
+          <h3 class="style-title">Editorial Pull-Quote &amp; Gradient Dissolve</h3>
+          <p class="style-desc">The character dissolves gracefully into the page background on the left, flanked by a colored vertical quote lead and serif typography.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(12)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        An excerpt from the retrospective feature published in the precinct annual:
+      </p>
+
+      <div class="editorial-dissolve-card" style="--cast-color: #599CE3;">
+        <div class="editorial-dissolve-figure">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="editorial-dissolve-content">
+          <div class="editorial-dissolve-speaker">Shoto Todoroki &bull; Confusion</div>
+          <div class="editorial-dissolve-quote">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        Colleagues universally agreed that throughout his rookie service, directness remained his defining quality.
+      </p>
+    </section>
+
+    <!-- LAYOUT 13: Dark Fantasy & Gothic Ornate Filigree -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 13</span>
+          <h3 class="style-title">Dark Fantasy &amp; Gothic Ornate Filigree</h3>
+          <p class="style-desc">Castlevania / Bloodborne aesthetic: corner filigree diamonds, stone gradient card, and classical Roman serif dialogue.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(13)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The chamber was cold, lit only by the fading embers of the central hearth:
+      </p>
+
+      <div class="gothic-card" style="--cast-color: #599CE3;">
+        <div class="gothic-figure-pane">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="gothic-content-pane">
+          <div class="gothic-header">Shoto &bull; Confusion</div>
+          <div class="gothic-quote">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        His voice carried with an unhurried resonance that left no doubt regarding his intent.
+      </p>
+    </section>
+
+    <!-- LAYOUT 14: Mecha Pilot Synchronization HUD -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 14</span>
+          <h3 class="style-title">Mecha Pilot Synchronization HUD</h3>
+          <p class="style-desc">Evangelion cockpit interface: telemetry sync bar, chamfered avatar frame, and high-impact cockpit communication text.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(14)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        Tactical telemetry synchronized across the command deck console:
+      </p>
+
+      <div class="cockpit-hud-card" style="--cast-color: #599CE3;">
+        <div class="cockpit-hud-topline">
+          <span>// PILOT TELEMETRY: SHOTO</span>
+          <span>SYNC_RATE: 94.2% [CONFUSION]</span>
+        </div>
+        <div class="cockpit-hud-body">
+          <div class="cockpit-avatar-pane">
+            <img src="shoto-confusion.png" alt="Shoto">
+          </div>
+          <div class="cockpit-dialogue-pane">
+            <div class="cockpit-quote">
+              "Why would I lie about trading the Shibuya shift?."
+            </div>
+            <div class="cockpit-status-bar">
+              <span>AUDIO: CLEAR</span> &bull; <span>LINK: SECURE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The tactical coordinator validated the frequency and dismissed the inquiry.
+      </p>
+    </section>
+
+    <!-- LAYOUT 15: Japanese Manga Panel Frame -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 15</span>
+          <h3 class="style-title">Japanese Manga Panel Frame</h3>
+          <p class="style-desc">Clean black-bordered manga frame with dialogue on the left and the character dissolving smoothly into the panel on the right.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(15)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        He looked across the table with complete sincerity:
+      </p>
+
+      <div class="manga-panel-box" style="--cast-color: #599CE3;">
+        <div class="manga-panel-dialogue-col">
+          <span class="manga-panel-name-chip">Shoto &bull; Confusion</span>
+          <div class="manga-panel-quote">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+        <div class="manga-panel-figure-col">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The room fell silent as his question hung in the air.
+      </p>
+    </section>
+
+    <!-- LAYOUT 16: Developer & Terminal Console Prompt -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 16</span>
+          <h3 class="style-title">Developer &amp; Terminal Console Prompt</h3>
+          <p class="style-desc">Unix terminal console window with macOS-style window controls, monospace prompt leads, and crisp output dialogue.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(16)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        Executing session replay from automated logging service:
+      </p>
+
+      <div class="terminal-console-card" style="--cast-color: #599CE3;">
+        <div class="terminal-bar">
+          <span class="terminal-dot"></span>
+          <span class="terminal-dot"></span>
+          <span class="terminal-dot"></span>
+          <span class="terminal-title">cast_dialogue_stream.sh</span>
+        </div>
+        <div class="terminal-body">
+          <div class="terminal-avatar-pane">
+            <img src="shoto-confusion.png" alt="Shoto">
+          </div>
+          <div class="terminal-text-pane">
+            <div class="terminal-prompt-lead">&gt; shoto.speak(state="confusion"):</div>
+            <div>"Why would I lie about trading the Shibuya shift?."</div>
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        Session exited with status code 0 (Success).
+      </p>
+    </section>
+
+    <!-- LAYOUT 17: Luxury Lookbook & Oversized Quotation -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 17</span>
+          <h3 class="style-title">Luxury Lookbook &amp; Oversized Quotation</h3>
+          <p class="style-desc">High-fashion magazine layout: soft alpha-dissolved standee, giant decorative quote glyph, and elegant serif typography.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(17)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The special retrospective interview published in the precinct quarterly:
+      </p>
+
+      <div class="lookbook-card" style="--cast-color: #599CE3;">
+        <div class="lookbook-figure-wrap">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="lookbook-quote-wrap">
+          <div class="lookbook-quote-text">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+          <div class="lookbook-caption">
+            Shoto &bull; Confusion
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        Throughout the rotation, his directness remained his most disarming quality.
+      </p>
+    </section>
+
+    <!-- LAYOUT 18: Open Horizon Grounded Monologue -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 18</span>
+          <h3 class="style-title">Open Horizon Grounded Monologue</h3>
+          <p class="style-desc">Zero outer borders or enclosing cards. The character stands naturally on a single glowing baseline rule with dialogue floating freely underneath.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(18)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The briefing room ambient lights dropped as the presentation paused:
+      </p>
+
+      <div class="open-horizon-card" style="--cast-color: #599CE3;">
+        <div class="open-horizon-figure">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="open-horizon-rule"></div>
+        <div class="open-horizon-quote-pane">
+          <div class="open-horizon-speaker">Shoto &bull; Confusion</div>
+          <div class="open-horizon-dialogue">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The supervisor lowered his glasses and checked the roster timestamp once more.
+      </p>
+    </section>
+
+    <!-- LAYOUT 19: Cinematic Bleed Letterbox Horizon -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 19</span>
+          <h3 class="style-title">Cinematic Bleed Letterbox Horizon</h3>
+          <p class="style-desc">A soft, borderless matte black background band that fades naturally into the page, accompanied by cinematic subtitle typography.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(19)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        The overhead lights reflected off the damp tile as the patrol debrief continued:
+      </p>
+
+      <div class="bleed-letterbox-card" style="--cast-color: #599CE3;">
+        <div class="bleed-letterbox-figure">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="bleed-letterbox-content">
+          <div class="bleed-letterbox-tag">Shoto &bull; Field Inquiry</div>
+          <div class="bleed-letterbox-sub">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        A long pause lingered between them before the precinct commander gave a slow nod.
+      </p>
+    </section>
+
+    <!-- LAYOUT 20: Shonen Manga Jagged Spike Action Burst -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 20</span>
+          <h3 class="style-title">Shonen Manga Jagged Spike Action Burst</h3>
+          <p class="style-desc">Dynamic jagged spike polygon balloon with bold uppercase action lettering and an expressive marker tag.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(20)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        He turned abruptly, catching the entire room off guard with his unexpected counter-question:
+      </p>
+
+      <div class="shonen-burst-card" style="--cast-color: #599CE3;">
+        <div class="shonen-burst-figure">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="shonen-burst-balloon">
+          <div class="shonen-burst-tag">SHOTO // CONFUSION?!</div>
+          <div class="shonen-burst-text">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The sudden volume echoed down the empty corridor.
+      </p>
+    </section>
+
+    <!-- LAYOUT 21: Mystical Arched Tarot / Arcana Destiny Card -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 21</span>
+          <h3 class="style-title">Astrological Tarot &amp; Destiny Arch</h3>
+          <p class="style-desc">Persona / Elden Ring astrological arch frame with celestial gold/accent filigree and roman title heading.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(21)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        Consulting the tactical record through the celestial archives:
+      </p>
+
+      <div class="tarot-arch-card" style="--cast-color: #599CE3;">
+        <div class="tarot-arch-frame">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="tarot-quote-dock">
+          <div class="tarot-name-ribbon">SHOTO &bull; CONFUSION</div>
+          <div class="tarot-speech">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The astrological alignment confirmed that no deceit lay behind his words.
+      </p>
+    </section>
+
+    <!-- LAYOUT 22: Ripped Paper Clipping & Washi Tape Scrapbook -->
+    <section class="style-showcase">
+      <div class="style-meta">
+        <div>
+          <span class="style-number">VAULT 22</span>
+          <h3 class="style-title">Washi-Tape &amp; Ripped Paper Scrapbook</h3>
+          <p class="style-desc">Tilted parchment paper memo pinned with semi-transparent washi tape, marker attribution, and warm analog shadows.</p>
+        </div>
+        <button class="btn" onclick="showHtmlSnippet(22)">Get HTML</button>
+      </div>
+
+      <p class="mock-context">
+        Taped to the front of the investigation corkboard was a handwritten memo:
+      </p>
+
+      <div class="washi-scrap-card" style="--cast-color: #599CE3;">
+        <div class="washi-scrap-figure">
+          <img src="shoto-confusion.png" alt="Shoto">
+        </div>
+        <div class="washi-scrap-note">
+          <div class="washi-scrap-speaker">Shoto (confusion)</div>
+          <div class="washi-scrap-quote">
+            "Why would I lie about trading the Shibuya shift?."
+          </div>
+        </div>
+      </div>
+
+      <p class="mock-context">
+        The investigator pinned a red string to the note and stepped back.
+      </p>
+    </section>
+
+  </main>
+
+  <div class="code-modal" id="codeModal" onclick="closeModal(event)">
+    <div class="code-modal-window" onclick="event.stopPropagation()">
+      <div class="code-modal-header">
+        <strong id="modalTitle">HTML Snippet</strong>
+        <button class="close-btn" onclick="closeModal()">&times;</button>
+      </div>
+      <pre class="code-modal-content" id="modalCode"></pre>
+      <div style="padding: 12px 20px; background: #0d1117; border-top: 1px solid var(--border-subtle); text-align: right;">
+        <button class="btn" onclick="copySnippet()">📋 Copy Code</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function toggleTheme() {
+      document.body.classList.toggle('light-mode');
+      const btn = document.getElementById('themeToggleBtn');
+      btn.textContent = document.body.classList.contains('light-mode') ? '🌙 Dark Reader Mode' : '☀️ Light Reader Mode';
+    }
+
+    const snippets = {
+      1: `<div class="persona-card" style="--cast-color: #599CE3;">
+  <div class="persona-avatar-wrap">
+    <img src="shoto-confusion.png" alt="Shoto">
+    <div class="persona-emotion-stamp">CONFUSION</div>
+  </div>
+  <div class="persona-bubble">
+    <div class="persona-speaker-ribbon">
+      <span>SHOTO</span>
+    </div>
+    <div class="persona-dialogue">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      2: `<div class="cyber-hud-card" style="--cast-color: #599CE3;">
+  <div class="cyber-header">
+    <span>// COMMS LINK: ACTIVE [SHOTO]</span>
+    <span>AFFECT: CONFUSION</span>
+  </div>
+  <div class="cyber-body">
+    <div class="cyber-avatar-box">
+      <img src="shoto-confusion.png" alt="Shoto">
+      <div class="cyber-scanline"></div>
+    </div>
+    <div class="cyber-dialogue">
+      <span class="quote-mark">&gt; </span>"Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      3: `<div class="manga-panel-card" style="--cast-color: #599CE3;">
+  <div class="manga-avatar-circ">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="manga-bubble-wrap">
+    <div>
+      <span class="manga-name-tag">Shoto</span>
+      <span class="manga-state-badge">[confusion]</span>
+    </div>
+    <div class="manga-text">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      4: `<div class="cinematic-cutscene" style="--cast-color: #599CE3;">
+  <div class="cinematic-bg-art">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="cinematic-content">
+    <div class="cinematic-speaker">Shoto</div>
+    <div class="cinematic-subtext">"Why would I lie about trading the Shibuya shift?."</div>
+  </div>
+</div>`,
+
+      5: `<div class="retro-rpg-box" style="--cast-color: #599CE3;">
+  <div class="retro-pixel-portrait">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="retro-content">
+    <div class="retro-name">SHOTO [CONFUSION]</div>
+    <div class="retro-dialogue">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+  <div class="retro-arrow"></div>
+</div>`,
+
+      6: `<div class="editorial-quote-card" style="--cast-color: #599CE3;">
+  <div class="editorial-portrait">
+    <img src="shoto-confusion.png" alt="Shoto">
+    <div class="editorial-portrait-badge">confusion</div>
+  </div>
+  <div class="editorial-main">
+    <div class="editorial-marks">“</div>
+    <div class="editorial-quote-text">
+      Why would I lie about trading the Shibuya shift?.
+    </div>
+    <div class="editorial-cite">
+      <span>Shoto</span> &mdash; confusion
+    </div>
+  </div>
+</div>`,
+
+      7: `<div class="vn-standee-card" style="--cast-color: #599CE3;">
+  <div class="vn-standee-portrait">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="vn-glass-bubble">
+    <div class="vn-glass-header">
+      <span class="vn-glass-name">Shoto</span>
+      <span class="vn-glass-mood">confusion</span>
+    </div>
+    <div class="vn-glass-dialogue">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+    <div class="vn-advance-pill">
+      <span>Next</span> &blacktriangleright;
+    </div>
+  </div>
+</div>`,
+
+      8: `<div class="manga-sfx-card" style="--cast-color: #599CE3;">
+  <div class="manga-kanji-sfx">?!</div>
+  <div class="manga-figure-center">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="manga-floating-card">
+    <div class="manga-speaker-name">SHOTO // CONFUSION</div>
+    <div class="manga-dialogue-bold">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      9: `<div class="versus-select-card" style="--cast-color: #599CE3;">
+  <div class="versus-figure-stage">
+    <img class="versus-full-img" src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="versus-banner-dock">
+    <div class="versus-name-row">
+      <span>SHOTO</span>
+      <span>CONFUSION</span>
+    </div>
+    <div class="versus-voice-quote">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      10: `<div class="vhs-sub-card" style="--cast-color: #599CE3;">
+  <div class="vhs-figure-pane">
+    <div class="vhs-tracking-header">PLAY &#9654; SP [SHOTO]</div>
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="vhs-sub-floating">
+    <div class="vhs-speaker-tag">SHOTO // CONFUSION</div>
+    <div class="vhs-yellow-sub">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      11: `<div class="synth-stage" style="--cast-color: #599CE3;">
+  <img src="shoto-confusion.png" alt="Shoto">
+</div>
+<div class="synth-dialogue-under" style="--cast-color: #599CE3;">
+  <div class="synth-speaker-chip">SHOTO &bull; CONFUSION</div>
+  <div class="synth-quote">
+    "Why would I lie about trading the Shibuya shift?."
+  </div>
+</div>`,
+
+      12: `<div class="editorial-dissolve-card" style="--cast-color: #599CE3;">
+  <div class="editorial-dissolve-figure">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="editorial-dissolve-content">
+    <div class="editorial-dissolve-speaker">Shoto Todoroki &bull; Confusion</div>
+    <div class="editorial-dissolve-quote">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      13: `<div class="gothic-card" style="--cast-color: #599CE3;">
+  <div class="gothic-figure-pane">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="gothic-content-pane">
+    <div class="gothic-header">Shoto &bull; Confusion</div>
+    <div class="gothic-quote">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      14: `<div class="cockpit-hud-card" style="--cast-color: #599CE3;">
+  <div class="cockpit-hud-topline">
+    <span>// PILOT TELEMETRY: SHOTO</span>
+    <span>STATUS: ACTIVE [CONFUSION]</span>
+  </div>
+  <div class="cockpit-hud-body">
+    <div class="cockpit-avatar-pane">
+      <img src="shoto-confusion.png" alt="Shoto">
+    </div>
+    <div class="cockpit-dialogue-pane">
+      <div class="cockpit-quote">
+        "Why would I lie about trading the Shibuya shift?."
+      </div>
+      <div class="cockpit-status-bar">
+        <span>AUDIO: CLEAR</span> &bull; <span>LINK: SECURE</span>
+      </div>
+    </div>
+  </div>
+</div>`,
+
+      15: `<div class="manga-panel-box" style="--cast-color: #599CE3;">
+  <div class="manga-panel-dialogue-col">
+    <span class="manga-panel-name-chip">Shoto &bull; Confusion</span>
+    <div class="manga-panel-quote">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+  <div class="manga-panel-figure-col">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+</div>`,
+
+      16: `<div class="terminal-console-card" style="--cast-color: #599CE3;">
+  <div class="terminal-bar">
+    <span class="terminal-dot"></span>
+    <span class="terminal-dot"></span>
+    <span class="terminal-dot"></span>
+    <span class="terminal-title">cast_dialogue_stream.sh</span>
+  </div>
+  <div class="terminal-body">
+    <div class="terminal-avatar-pane">
+      <img src="shoto-confusion.png" alt="Shoto">
+    </div>
+    <div class="terminal-text-pane">
+      <div class="terminal-prompt-lead">&gt; shoto.speak(state="confusion"):</div>
+      <div>"Why would I lie about trading the Shibuya shift?."</div>
+    </div>
+  </div>
+</div>`,
+
+      17: `<div class="lookbook-card" style="--cast-color: #599CE3;">
+  <div class="lookbook-figure-wrap">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="lookbook-quote-wrap">
+    <div class="lookbook-quote-text">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+    <div class="lookbook-caption">
+      Shoto &bull; Confusion
+    </div>
+  </div>
+</div>`,
+
+      18: `<div class="open-horizon-card" style="--cast-color: #599CE3;">
+  <div class="open-horizon-figure">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="open-horizon-rule"></div>
+  <div class="open-horizon-quote-pane">
+    <div class="open-horizon-speaker">Shoto &bull; Confusion</div>
+    <div class="open-horizon-dialogue">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      19: `<div class="bleed-letterbox-card" style="--cast-color: #599CE3;">
+  <div class="bleed-letterbox-figure">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="bleed-letterbox-content">
+    <div class="bleed-letterbox-tag">Shoto &bull; Field Inquiry</div>
+    <div class="bleed-letterbox-sub">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      20: `<div class="shonen-burst-card" style="--cast-color: #599CE3;">
+  <div class="shonen-burst-figure">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="shonen-burst-balloon">
+    <div class="shonen-burst-tag">SHOTO // CONFUSION?!</div>
+    <div class="shonen-burst-text">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      21: `<div class="tarot-arch-card" style="--cast-color: #599CE3;">
+  <div class="tarot-arch-frame">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="tarot-quote-dock">
+    <div class="tarot-name-ribbon">SHOTO &bull; CONFUSION</div>
+    <div class="tarot-speech">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`,
+
+      22: `<div class="washi-scrap-card" style="--cast-color: #599CE3;">
+  <div class="washi-scrap-figure">
+    <img src="shoto-confusion.png" alt="Shoto">
+  </div>
+  <div class="washi-scrap-note">
+    <div class="washi-scrap-speaker">Shoto (confusion)</div>
+    <div class="washi-scrap-quote">
+      "Why would I lie about trading the Shibuya shift?."
+    </div>
+  </div>
+</div>`
+    };
+
+    function showHtmlSnippet(id) {
+      document.getElementById('modalTitle').textContent = `Saved Layout ${id} HTML Template`;
+      document.getElementById('modalCode').textContent = snippets[id] || '';
+      document.getElementById('codeModal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('codeModal').classList.remove('active');
+    }
+
+    function copySnippet() {
+      const code = document.getElementById('modalCode').textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        alert('Copied to clipboard!');
+      });
+    }
+  </script>
+</body>
+</html>

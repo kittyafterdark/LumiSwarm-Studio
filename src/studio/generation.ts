@@ -77,6 +77,29 @@ function applyPresetStackPrompts(
   return { prompt: resolvedPrompt, negativePrompt: resolvedNegative }
 }
 
+// Insert native Swarm directives as editable text, never as a second hidden stack.
+function mountExpressionPrefixPresets(input: HTMLTextAreaElement, presets: SwarmPreset[], onInsert: () => void): void {
+  const names = [...new Set(presets.map(preset => preset.title).filter(title => typeof title === "string" && title.trim() && !/[<>\r\n]/.test(title)))];
+  const field = document.createElement("label"); field.className = "field ss-field ss-expression-prefix-presets";
+  const caption = document.createElement("span"); caption.textContent = "Insert Swarm preset";
+  const select = document.createElement("select"); select.className = "ss-select"; select.setAttribute("aria-label", "Insert Swarm preset");
+  const placeholder = new Option(names.length ? "Choose a saved preset…" : "No presets loaded for this connection", "");
+  select.append(placeholder); for (const title of names) select.append(new Option(title, title));
+  select.disabled = !names.length;
+  const status = document.createElement("small"); status.className = "hint ss-muted"; status.setAttribute("role", "status");
+  status.textContent = "Insert a native preset directive or type your own style tags above. Presets may also change provider parameters.";
+  field.append(caption, select, status); input.closest("label")?.after(field);
+  select.addEventListener("change", () => {
+    const title = select.value; select.value = ""; if (!names.includes(title)) return;
+    const token = `<preset:${title}>`;
+    if (input.value.toLowerCase().includes(token.toLowerCase())) { status.textContent = "Preset already in the prefix."; return; }
+    const prefix = [input.value.trimEnd().replace(/,\s*$/, ""), token].filter(Boolean).join(", ");
+    if (prefix.length > (input.maxLength > 0 ? input.maxLength : EXPRESSION_PROMPT_LIMIT)) { status.textContent = "Prefix is too long to insert this preset."; return; }
+    input.value = prefix; input.dispatchEvent(new Event("input", { bubbles: true })); onInsert();
+    status.textContent = `Inserted ${title}. Edit or remove the directive in the prefix.`;
+  });
+}
+
 function applySwarmPresetTokens(prompt: string, titles: string[]): string {
   const tokens = titles
     .map((title) => String(title || "").replace(/[<>\r\n]+/g, "").trim())

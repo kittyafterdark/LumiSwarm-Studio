@@ -1,0 +1,9 @@
+masterpiece, score_9, safe
+3 people
+medium shot
+Three people at a rooftop stall.
+Visible text: The sign reads "HELLO,, WORLD".
+<region:0.54,0,0.46,1,1> right woman: silver hair, blue eyes, waving, looking at the left man
+<region:0.27,0,0.46,1,1> center man: round glasses, green coat
+<region:0,0,0.46,1,1> left man: black hair, red eyes, black jacket, carrying a cup
+<region:background> rooftop, sunset

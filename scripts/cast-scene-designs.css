@@ -1,0 +1,92 @@
+/* Each caption owns its typography, material and blocking. The root selector
+   is deliberately the stable preset ID, never a global .quote or .meta-name.
+   Only the underlying scene/actor mechanics remain shared. */
+/* VN: character tab and an understated mood tag on the script rail. */
+.ss-cast-design[data-cast-preset="vn-hero"] .vn-name{display:flex;align-items:center;flex-wrap:wrap;gap:5px 8px;margin-bottom:8px;font:750 15px/1.25 system-ui,sans-serif;letter-spacing:0;}
+.ss-cast-design[data-cast-preset="vn-hero"] .vn-name>span{border-radius:5px 5px 0 0;background:color-mix(in srgb,var(--atelier-voice) 16%,#10121a);border-bottom:2px solid var(--atelier-voice);padding:3px 10px;color:#f4f1f6;}
+.ss-cast-design[data-cast-preset="vn-hero"] .vn-name small{margin:0;font:500 10px/1.4 system-ui,sans-serif;letter-spacing:0;color:#c3c2ce;}
+.ss-cast-design[data-cast-preset="vn-hero"][data-cast-ink="dark"] .vn-name>span{background:#e7dfe4;color:#30252c;}
+.ss-cast-design[data-cast-preset="vn-hero"][data-cast-ink="dark"] .vn-name small{color:#594e55;}
+/* Afterglow: cinema subtitles, centered serif type on a soft optical matte. */
+.ss-cast-design[data-cast-preset="afterglow-cinema"] .afterglow-caption{position:relative;z-index:4;flex:none;margin:64px 32% 25px 5%;padding:12px 10px 14px;background:linear-gradient(90deg,transparent,#080a10b8 17%,#080a10b8 83%,transparent);text-align:center;}
+.ss-cast-design[data-cast-preset="afterglow-cinema"] .afterglow-caption .meta-name{display:flex;align-items:baseline;justify-content:center;flex-wrap:wrap;gap:5px;margin-bottom:6px;color:#fff5e9;font:700 11px/1.3 Georgia,serif;letter-spacing:.065em;text-transform:uppercase;}
+.ss-cast-design[data-cast-preset="afterglow-cinema"] .scene-expression{font:italic 400 10px/1.3 Georgia,serif;letter-spacing:0;text-transform:none;opacity:.9;}.ss-cast-design[data-cast-preset="afterglow-cinema"] .scene-expression::before{content:"·";padding-right:5px;font-style:normal;}
+.ss-cast-design[data-cast-preset="afterglow-cinema"] .afterglow-caption .quote{font:500 var(--cast-dialogue-size,17px)/1.42 Georgia,serif;color:#fff4e8;text-align:center;}
+.ss-cast-design[data-cast-preset="afterglow-cinema"] .scene-shade{background:linear-gradient(0deg,#02040abf,transparent 65%);}
+.ss-cast-design[data-cast-preset="afterglow-cinema"][data-cast-side="left"] .afterglow-caption{margin-left:32%;margin-right:5%;}
+.ss-cast-design[data-cast-preset="afterglow-cinema"][data-cast-ink="dark"] .afterglow-caption{background:linear-gradient(90deg,#f4ede2c9,#fff9ef,#f4ede2c9);}
+.ss-cast-design[data-cast-preset="afterglow-cinema"][data-cast-ink="dark"] .meta-name{color:#2d2424;}
+/* Rainbound: a suspended architectural sign, with fasteners and glazing. */
+.ss-cast-design[data-cast-preset="rainbound-platform"] .rain .scene-shade{background:linear-gradient(125deg,#0a222c65,#07131e24 55%,#07131e5c);}
+.ss-cast-design[data-cast-preset="rainbound-platform"] .rain-frame{inset:9px;border:6px solid #132c37bd;box-shadow:inset 0 0 0 1px #d0e3e655; background:repeating-linear-gradient(90deg,transparent 0 31%,#55737f95 31.4%,#b4c6cbaa 32%,#29444f99 33%,transparent 33.5% 34%),repeating-linear-gradient(104deg,transparent 0 38px,#e3f6ff0b 39px 41px,transparent 42px 56px);}
+.ss-cast-design[data-cast-preset="rainbound-platform"] .rain-sign{position:relative;z-index:4;flex:none;margin:64px 36% 40px 7%;padding:23px 15px 20px;min-height:136px;background:linear-gradient(160deg,#102933f2,#11202bee);border:1px solid #a2c4c98c;border-top:5px solid #d4e2db;box-shadow:0 8px 18px #0009;}
+.ss-cast-design[data-cast-preset="rainbound-platform"] .rain-sign::before,.ss-cast-design[data-cast-preset="rainbound-platform"] .rain-sign::after{content:"";position:absolute;top:7px;width:5px;height:5px;border-radius:50%;background:#b5d2d3;box-shadow:0 0 0 1px #0004;}
+.ss-cast-design[data-cast-preset="rainbound-platform"] .rain-sign::before{left:7px;}.ss-cast-design[data-cast-preset="rainbound-platform"] .rain-sign::after{right:7px;}
+.ss-cast-design[data-cast-preset="rainbound-platform"] .rain-sign .meta-name{display:flex;align-items:center;flex-wrap:wrap;gap:5px 10px;margin-bottom:9px;color:#d8eff0;font:750 12px/1.3 system-ui,sans-serif;}
+.ss-cast-design[data-cast-preset="rainbound-platform"] .scene-expression{font:600 9px/1.3 ui-monospace,monospace;letter-spacing:.035em;padding:2px 5px;border:1px solid #a2c4c95c;border-radius:2px;color:#b6d0d3;}
+.ss-cast-design[data-cast-preset="rainbound-platform"] .rain-sign .quote{font:550 var(--cast-dialogue-size,14px)/1.5 system-ui,sans-serif;color:#e3f3f5;text-align:left;}
+.ss-cast-design[data-cast-preset="rainbound-platform"][data-cast-side="left"] .rain-sign{margin-left:36%;margin-right:7%;}
+.ss-cast-design[data-cast-preset="rainbound-platform"][data-cast-ink="dark"] .rain-sign{background:linear-gradient(155deg,#e8f3f2,#c6dcdf);border-color:#8baeb2;border-top-color:#4b737d;}
+.ss-cast-design[data-cast-preset="rainbound-platform"][data-cast-ink="dark"] .meta-name,.ss-cast-design[data-cast-preset="rainbound-platform"][data-cast-ink="dark"] .scene-expression{color:#23424b;}
+/* Memory: three exposures with perforated celluloid rails and a film-leader caption. */
+.ss-cast-design[data-cast-preset="memory-filmstrip"] .film-strip{padding:35px 10px 31px;gap:6px;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"] .film-strip::before,.ss-cast-design[data-cast-preset="memory-filmstrip"] .film-strip::after{content:"";position:absolute;left:10px;right:10px;height:8px;background:repeating-linear-gradient(90deg,#d6c6ae 0 13px,transparent 13px 29px);z-index:2;pointer-events:none;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"] .film-strip::before{top:12px;}.ss-cast-design[data-cast-preset="memory-filmstrip"] .film-strip::after{bottom:10px;opacity:.68;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"] .film-index{top:24px;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"] .film-caption{position:relative;inset:auto;z-index:4;flex:none;align-self:flex-end;margin:64px 5% 24px 0;width:59%;padding:12px 14px 14px;background:linear-gradient(110deg,#16111beF,#100d12f5);border-top:1px solid #d2b798;border-bottom:1px solid #d2b798;box-shadow:0 8px 15px #0008;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"] .film-caption .meta-name{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:3px 8px;margin-bottom:7px;color:#f0d5b4;font:700 10px/1.35 ui-monospace,monospace;letter-spacing:.12em;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"] .scene-expression{font:500 9px/1.3 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#d5bda8;border:1px dashed currentColor;padding:2px 5px;}.ss-cast-design[data-cast-preset="memory-filmstrip"] .scene-speaker{font:700 13px/1.2 Georgia,serif;letter-spacing:.04em;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"] .film-caption .quote{font:550 var(--cast-dialogue-size,14px)/1.5 system-ui,sans-serif;color:#f1e9e0;text-align:left;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"][data-cast-side="right"] .film-caption{align-self:flex-start;margin-left:5%;margin-right:0;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"][data-cast-ink="dark"] .film-caption{background:linear-gradient(110deg,#f4e9d8,#e0d2bb);border-color:#876a4e;}
+.ss-cast-design[data-cast-preset="memory-filmstrip"][data-cast-ink="dark"] .meta-name,.ss-cast-design[data-cast-preset="memory-filmstrip"][data-cast-ink="dark"] .scene-expression{color:#64452d;}
+/* Postcard: actual writing paper, italic inscription, printed stamp. No slogan. */
+.ss-cast-design[data-cast-preset="postcard-original"] .postcard-note{position:relative;z-index:4;flex:none;margin:64px 3% 9px 32%;padding:15px 17px 16px;background:linear-gradient(110deg,#fff8e7f5,#e5d8bfe8);border-radius:1px 13px 3px 1px;box-shadow:3px 5px 0 #806f5b60,0 6px 14px #0004;transform:rotate(1deg);min-height:100px;}
+.ss-cast-design[data-cast-preset="postcard-original"] .postcard-note .meta-name{display:flex;align-items:baseline;gap:5px 9px;flex-wrap:wrap;margin-bottom:6px;color:#594035;font:italic 700 15px/1.25 Georgia,serif;}
+.ss-cast-design[data-cast-preset="postcard-original"] .scene-expression{font:italic 400 11px/1.3 Georgia,serif;opacity:.9;}.ss-cast-design[data-cast-preset="postcard-original"] .scene-expression::before{content:"(";}.ss-cast-design[data-cast-preset="postcard-original"] .scene-expression::after{content:")";}
+.ss-cast-design[data-cast-preset="postcard-original"] .postcard-note .quote{font:italic 600 var(--cast-dialogue-size,16px)/1.45 Georgia,serif;color:#30231f;text-align:left;}
+.ss-cast-design[data-cast-preset="postcard-original"][data-cast-side="right"] .postcard-note{margin-left:3%;margin-right:32%;border-radius:13px 1px 1px 3px;transform:rotate(-1deg);}
+/* Bright authored ink uses smoked stationery, not a generic black dialogue panel. */
+.ss-cast-design[data-cast-preset="postcard-original"][data-cast-ink="light"] .postcard-note{background:repeating-linear-gradient(0deg,#e7ca9a0c 0 1px,transparent 1px 23px),linear-gradient(115deg,#382b24f5,#211a17f5);box-shadow:3px 5px 0 #b69a7866,0 5px 13px #0006;border:1px solid #d5b8947a;}
+.ss-cast-design[data-cast-preset="postcard-original"][data-cast-ink="light"] .meta-name{color:#f0dcc3;}
+/* Letterbox variant: conventional centered subtitle + small speaker slug,
+   intentionally distinct from Afterglow's serif optical caption. */
+.ss-cast-design[data-cast-preset="afterglow-letterbox"] .afterglow-caption-letterbox{position:relative;inset:auto;z-index:5;flex:none;margin:64px 4% 44px 33%;padding:8px 12px 13px;background:linear-gradient(0deg,#08090de8,#090b1255);text-align:center;}
+.ss-cast-design[data-cast-preset="afterglow-letterbox"] .meta-name{display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:3px 7px;font:650 10px/1.35 system-ui,sans-serif;color:#ebe8e5;letter-spacing:.035em;margin:0 auto 7px;}
+.ss-cast-design[data-cast-preset="afterglow-letterbox"] .scene-speaker{background:#141720e8;padding:3px 7px;border-radius:2px;}
+.ss-cast-design[data-cast-preset="afterglow-letterbox"] .scene-expression{font:500 9px/1.3 system-ui,sans-serif;opacity:.85;}.ss-cast-design[data-cast-preset="afterglow-letterbox"] .scene-expression::before{content:"[";}.ss-cast-design[data-cast-preset="afterglow-letterbox"] .scene-expression::after{content:"]";}
+.ss-cast-design[data-cast-preset="afterglow-letterbox"] .quote{font:600 var(--cast-dialogue-size,15px)/1.48 system-ui,sans-serif;color:#fff;text-align:center;}
+.ss-cast-design[data-cast-preset="afterglow-letterbox"][data-cast-side="right"] .afterglow-caption-letterbox{margin-left:4%;margin-right:33%;}
+.ss-cast-design[data-cast-preset="afterglow-letterbox"][data-cast-ink="dark"] .afterglow-caption-letterbox{background:linear-gradient(0deg,#fcf7ee,#e9e1d5de);}
+.ss-cast-design[data-cast-preset="afterglow-letterbox"][data-cast-ink="dark"] .meta-name{color:#332b29;}
+.ss-cast-design[data-cast-preset="afterglow-letterbox"][data-cast-ink="dark"] .scene-speaker{background:#ddd4c6;}
+/* Postal Note: translucent folded letter, separate from the printed postcard. */
+.ss-cast-design[data-cast-preset="postcard-rebellion"] .postcard-note-rebellion{position:relative;inset:auto;z-index:5;flex:none;margin:64px 4% 12px 30%;padding:17px 17px 18px;background:linear-gradient(135deg,#fff9ebf0,#e6dbc9d9);border-top:2px solid #e5d9c8;border-radius:0 16px 3px 0;transform:rotate(-1deg);box-shadow:0 8px 12px #0005;}
+.ss-cast-design[data-cast-preset="postcard-rebellion"] .meta-name{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 9px;margin-bottom:7px;padding-bottom:5px;border-bottom:1px dashed #a58d775e;color:#594342;font:italic 700 15px/1.25 Georgia,serif;}
+.ss-cast-design[data-cast-preset="postcard-rebellion"] .scene-expression{font:650 9px/1.3 ui-monospace,monospace;letter-spacing:.07em;text-transform:uppercase;transform:rotate(-3deg);border:1px solid currentColor;border-radius:2px;padding:3px 6px;}
+.ss-cast-design[data-cast-preset="postcard-rebellion"] .quote{font:italic 500 var(--cast-dialogue-size,16px)/1.42 Georgia,serif;color:#342c2d;text-align:left;}
+.ss-cast-design[data-cast-preset="postcard-rebellion"][data-cast-side="right"] .postcard-note-rebellion{margin-left:4%;margin-right:30%;border-radius:16px 0 0 3px;transform:rotate(1deg);}
+.ss-cast-design[data-cast-preset="postcard-rebellion"][data-cast-ink="light"] .postcard-note-rebellion{background:linear-gradient(145deg,#48332beF,#211917ee);border-top-color:#b99c7e;}
+.ss-cast-design[data-cast-preset="postcard-rebellion"][data-cast-ink="light"] .meta-name{color:#e9d9c7;}
+/* Graphic establishing shot: retain ink burst, replace repeated metadata strip. */
+.ss-cast-design[data-cast-preset="comic-establishing-redux"] .comic-burst .meta-name{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font:900 14px/1.2 system-ui,sans-serif;letter-spacing:.015em;text-transform:uppercase;}
+.ss-cast-design[data-cast-preset="comic-establishing-redux"] .scene-expression{font:700 9px/1.3 ui-monospace,monospace;border:1px solid currentColor;padding:2px 4px;}
+/* Narrow cards: widen the individual caption instead of imposing a shared box. */
+@container(max-width:480px){
+ .ss-cast-design[data-cast-preset="rainbound-platform"] .rain-sign{min-height:110px;margin-right:29%;}
+ .ss-cast-design[data-cast-preset="rainbound-platform"][data-cast-side="left"] .rain-sign{margin-left:29%;margin-right:7%;}
+ .ss-cast-design[data-cast-preset="memory-filmstrip"] .film-caption{width:63%;}
+ .ss-cast-design[data-cast-preset="postcard-original"] .postcard-note{margin-left:24%;}
+ .ss-cast-design[data-cast-preset="postcard-original"][data-cast-side="right"] .postcard-note{margin-left:3%;margin-right:24%;}
+ .ss-cast-design[data-cast-preset="postcard-rebellion"] .postcard-note-rebellion{margin-left:24%;}
+ .ss-cast-design[data-cast-preset="postcard-rebellion"][data-cast-side="right"] .postcard-note-rebellion{margin-left:4%;margin-right:24%;}
+}
+@container(max-width:350px){
+ .ss-cast-design[data-cast-preset="afterglow-cinema"] .afterglow-caption{margin-right:22%;padding-inline:5px;}
+ .ss-cast-design[data-cast-preset="afterglow-cinema"][data-cast-side="left"] .afterglow-caption{margin-left:22%;margin-right:5%;}
+ .ss-cast-design[data-cast-preset="rainbound-platform"] .rain-sign{margin-right:17%;padding-inline:11px;}
+ .ss-cast-design[data-cast-preset="rainbound-platform"][data-cast-side="left"] .rain-sign{margin-left:17%;margin-right:7%;}
+ .ss-cast-design[data-cast-preset="memory-filmstrip"] .film-caption{width:74%;padding-inline:10px;}
+ .ss-cast-design[data-cast-preset="afterglow-letterbox"] .afterglow-caption-letterbox{margin-left:20%;}
+ .ss-cast-design[data-cast-preset="afterglow-letterbox"][data-cast-side="right"] .afterglow-caption-letterbox{margin-left:4%;margin-right:20%;}
+}

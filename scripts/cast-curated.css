@@ -1,0 +1,139 @@
+/* Runtime adaptation of the submitted designs: natural-height speech, scene assets,
+   and isolated selectors. The original doctype remains the visual reference. */
+.ss-cast-design :is(.atelier-curated,.atelier-overlap){--atelier-voice:color-mix(in srgb,var(--cast-voice) 70%,#b6afbb);--font-sans:system-ui,sans-serif;--font-mono:ui-monospace,monospace;--font-serif:Georgia,serif;--text-faint:#aaa4b3;--world:var(--cast-world,none),linear-gradient(145deg,color-mix(in srgb,var(--cast-color) 17%,#131217),#08080c);display:block;position:relative;isolation:isolate;color:#f5eff5;line-height:1.5;}
+.ss-cast-design .atelier-overlap .stage-canvas{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;height:auto;min-height:0;overflow:visible;background:none;padding:0 0 10px;}
+.ss-cast-design .atelier-overlap .stage-actor{position:relative;bottom:auto;width:min(74%,270px);height:clamp(200px,60cqw,300px);flex:none;}
+.ss-cast-design .atelier-overlap .stage-actor img{filter:drop-shadow(0 8px 12px #0006);}
+.ss-cast-design .atelier-overlap [class^="strip-"]{position:relative;inset:auto;width:calc(100% - 24px);max-width:100%;margin:-43px auto 0;flex:none;min-width:0;overflow-wrap:anywhere;}
+.ss-cast-design .atelier-overlap :is(.strip-console,.strip-swiss,.strip-cinema){width:100%;}
+.ss-cast-design .atelier-overlap .strip-manga{clip-path:none;border-radius:0 9px 0 0;}
+.ss-cast-design .atelier-overlap .strip-materia{background:color-mix(in srgb,var(--atelier-voice) 10%,#161420b8);}
+.ss-cast-design .atelier-overlap .strip-docket{padding-top:24px;}
+.ss-cast-design .atelier-overlap .docket-label{padding-right:72px;}
+.ss-cast-design .atelier-overlap .quote-render{font-size:var(--cast-dialogue-size,14px);line-height:1.5;overflow-wrap:anywhere;text-align:left;}
+.ss-cast-design .atelier-overlap .strip-cinema .quote-render{text-align:center;}
+.ss-cast-design .atelier-curated :where(.corner-mini) .quote{font-size:var(--cast-dialogue-size,14px);line-height:1.5;overflow-wrap:anywhere;text-align:left;}
+.ss-cast-design .atelier-curated :where(.angle-speech) .quote{font-size:var(--cast-dialogue-size,14px);line-height:1.5;overflow-wrap:anywhere;text-align:left;}
+.ss-cast-design .atelier-curated .vn-script .quote{font-size:var(--cast-dialogue-size,14px);line-height:1.5;text-align:left;}
+.ss-cast-design .atelier-curated .comic-burst .quote{font-size:var(--cast-dialogue-size,14px);line-height:1.5;text-align:left;}
+.ss-cast-design .atelier-curated .stage{display:flex;flex-direction:column;justify-content:flex-end;position:relative;isolation:isolate;}
+.ss-cast-design .atelier-curated .stage.world{background-color:#161419;}
+.ss-cast-design .atelier-curated :is(.vn-script,.comic-burst){position:relative;inset:auto;flex:none;}
+.ss-cast-design .atelier-curated .vn-script{margin:220px 0 0;width:100%;padding-left:28%;}
+.ss-cast-design .atelier-curated .comic-burst{align-self:flex-end;margin:205px 4% 24px 0;width:50%;clip-path:polygon(8% 0,100% 0,100% calc(100% - 16px),calc(100% - 16px) 100%,0 100%,0 16px);}
+.ss-cast-design .atelier-curated .angle-speech{clip-path:polygon(0 10px,89% 0,100% 30px,93% calc(100% - 10px),9% 100%,0 calc(100% - 16px));padding-top:30px;}
+.ss-cast-design .atelier-curated .angle-speech .quote:before{content:none;}
+.ss-cast-design .atelier-curated .corner-mini{background:linear-gradient(145deg,#ffe4cf,color-mix(in srgb,var(--atelier-voice) 24%,#f1d1c0));}
+.ss-cast-design .atelier-curated .comicbw{filter:none;}
+.ss-cast-design .atelier-curated .comic-actor img{filter:grayscale(1) contrast(1.12);}
+@container (max-width:480px){
+ .ss-cast-design .atelier-curated .comic-burst{width:62%;margin-right:2%;}
+ .ss-cast-design .atelier-curated .vn-script{padding-left:24%;}
+}
+@container (max-width:350px){
+ .ss-cast-design .atelier-curated .corner-cinematic{padding-inline:4px;}
+ .ss-cast-design .atelier-curated .angle-speech{padding-right:16%;}
+ .ss-cast-design .atelier-curated .vn-script{padding-left:16px;}
+ .ss-cast-design .atelier-curated .comic-burst{width:74%;}
+}
+@media(prefers-reduced-motion:reduce){.ss-cast-design .atelier-overlap .cyber-pulse{animation:none;}}
+/* Authored dialogue paint is immutable. Only switch the local material when
+   that paint would disappear on its default light/dark backing. Uncolored
+   dialogue keeps the exact original stationery and monochrome treatment. */
+.ss-cast-design[data-cast-ink="light"] .atelier-overlap :is(.washi-speaker,.washi-stamp,.docket-label){color:#dcc4b5;}
+.ss-cast-design[data-cast-ink="light"] .atelier-overlap .docket-stamp{color:#f3aaae;border-color:#f3aaae;}
+.ss-cast-design[data-cast-ink="light"] .atelier-overlap .strip-manga{background:#080808;color:#fff;border-color:#f7f7f7;box-shadow:6px 6px 0 #777;}
+.ss-cast-design[data-cast-ink="light"] .atelier-overlap .strip-manga :is(.manga-name,.manga-expr){color:#fff;}
+.ss-cast-design[data-cast-ink="light"] .atelier-overlap .manga-notch{border-bottom-color:#f7f7f7;}
+.ss-cast-design[data-cast-ink="light"] .atelier-curated .corner-mini{background:linear-gradient(145deg,color-mix(in srgb,var(--atelier-voice) 14%,#25151c),#1c1119);color:#f6e4d5;}
+.ss-cast-design[data-cast-ink="light"] .atelier-curated .corner-mini :is(.corner-mini-label,.corner-mini-stamp){color:#f1ccbb;}
+.ss-cast-design[data-cast-ink="light"] .atelier-curated .angle-speech{background:color-mix(in srgb,var(--atelier-voice) 12%,#110f13);box-shadow:7px 8px 0 #dfd4cf;}
+.ss-cast-design[data-cast-ink="light"] .atelier-curated .comic-burst{background:#090909;color:white;box-shadow:8px 8px 0 #fff;}
+.ss-cast-design[data-cast-ink="light"] .atelier-curated .comic-burst .meta-name{color:#fff;}
+/* Dark explicit ink gets a pale local caption field; scenery remains intact. */
+.ss-cast-design[data-cast-ink="dark"] .atelier-overlap :is(.strip-materia,.strip-console,.strip-swiss,.strip-cinema){background:linear-gradient(135deg,#fffcf9,#eae6e8);color:#18141b;}
+.ss-cast-design[data-cast-ink="dark"] .atelier-overlap :is(.materia-name,.materia-expr,.cyber-top-telemetry,.swiss-name,.swiss-issue,.capsule-name,.cinema-meta){color:#312d36;}
+.ss-cast-design[data-cast-ink="dark"] .atelier-overlap :is(.strip-materia,.strip-cinema) .quote-render{text-shadow:none;}
+.ss-cast-design[data-cast-ink="dark"] .atelier-curated .vn-script{background:linear-gradient(180deg,#f7f1e9d9,#f7f1e9);color:#211b21;text-shadow:none;}
+.ss-cast-design[data-cast-ink="dark"] .atelier-curated :is(.vn-name,.vn-name small){color:#403443;}
+.ss-cast-design[data-cast-ink="dark"] .atelier-curated .vn-script .quote{text-shadow:none;}
+
+/* Stage blocking: actor dimensions stay independent of dialogue length,
+   but their lower edge follows the growing scenic frame. */
+.ss-cast-design .atelier-curated .vn-actor{width:46%;height:320px;top:auto;bottom:0;left:2%;}
+.ss-cast-design .atelier-curated .vn-script{margin-top:232px;padding-left:36%;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .vn-actor{left:auto;right:2%;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .vn-script{padding-left:24px;padding-right:36%;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .vn-top{left:auto;right:18px;border-left:0;border-right:2px solid var(--atelier-voice);}
+.ss-cast-design .atelier-curated .stage>.actor{top:auto;}
+.ss-cast-design .atelier-curated .rain-actor{bottom:0;}
+.ss-cast-design .atelier-curated .film-actor{bottom:22px;}
+.ss-cast-design .atelier-curated .comic-actor{bottom:22px;}
+.ss-cast-design .atelier-curated .afterglow-actor-letterbox{bottom:38px;}
+.ss-cast-design .atelier-curated .afterglow-cinema .afterglow-actor{bottom:0;}
+.ss-cast-design .atelier-curated .postcard-original .postcard-photo{bottom:18px;}
+.ss-cast-design .atelier-curated .postcard-original .postcard-actor{bottom:25px;}
+.ss-cast-design .atelier-curated .postcard-rebellion .postcard-actor-tall{bottom:34px;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .postcard-original .postcard-actor{left:auto;right:5%;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .postcard-original .postcard-stamp{left:29px;right:auto;transform:rotate(-8deg);}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .film-actor{left:auto;right:12%;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .film-index{left:auto;right:20px;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .afterglow-actor-letterbox{left:auto;right:5%;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .comic-actor{left:auto;right:4%;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .comic-burst{align-self:flex-start;margin-left:4%;margin-right:0;clip-path:polygon(0 0,92% 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .comic-kicker{left:auto;right:28px;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .postcard-rebellion .postcard-actor-tall{left:auto;right:8%;}
+.ss-cast-design[data-cast-side="right"] .atelier-curated .postcard-stamp-rebellion{left:34px;right:auto;transform:rotate(-5deg);}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .afterglow-cinema .afterglow-actor{left:6%;right:auto;}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .afterglow-kicker{left:auto;right:19px;}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .afterglow-cinema .scene-shade{background:linear-gradient(270deg,#02040a7c,transparent 65%),linear-gradient(0deg,#020205ed,#06090a55 45%,transparent);}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .rain-actor{left:8%;right:auto;}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .rain-number{left:auto;right:16px;}
+/* The stage's minimum height is the scenic floor, not an extra spacer
+   above every line of dialogue. Captions consume available height first;
+   only truly long speech grows the stage. The actor follows its lower edge. */
+.ss-cast-design .atelier-curated .stage :is(.vn-script,.comic-burst){margin-top:64px;}
+/* On narrow VN cards the caption spans the actor bay. Keep space for the
+   illustration and let the script expand rather than covering the face. */
+@container (max-width:350px){
+ .ss-cast-design .atelier-curated .stage .vn-script{margin-top:232px;}
+}
+/* The two graphic panels have right-hand actors in Auto. Keep readable text
+   and artwork intact when moving to the opposite side. */
+.ss-cast-design[data-cast-side="left"] .atelier-curated :is(.corner-sprite,.angle-sprite){right:auto;left:2%;}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .corner-sprite{transform:rotate(-4deg);}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .corner-heading{left:auto;right:9%;}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .corner-mini{margin-left:auto;margin-right:5%;}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .corner-page-mark{left:auto;right:7%;}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .angle-speech{margin-left:auto;margin-right:2%;padding-left:17%;padding-right:24px;transform:rotate(4deg);clip-path:polygon(0 30px,11% 0,100% 10px,100% calc(100% - 16px),91% 100%,7% calc(100% - 10px));}
+.ss-cast-design[data-cast-side="left"] .atelier-curated :is(.angle-label,.angle-number,.angle-noise){left:auto;right:8%;}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .angle-corner-mark{right:auto;left:2%;}
+.ss-cast-design[data-cast-side="left"] .atelier-curated .angle-blade{transform:scaleX(-1) rotate(-3deg);}
+.ss-cast-design[data-cast-side="left"] .atelier-overlap .stage-actor{align-self:flex-start;}
+.ss-cast-design[data-cast-side="right"] .atelier-overlap .stage-actor{align-self:flex-end;}
+@container (max-width:480px){
+ .ss-cast-design .atelier-curated .vn-actor{width:51%;height:310px;left:0;}
+ .ss-cast-design[data-cast-side="right"] .atelier-curated .vn-actor{left:auto;right:0;}
+ .ss-cast-design[data-cast-side="right"] .atelier-curated .film-actor{right:4%;}
+ .ss-cast-design[data-cast-side="right"] .atelier-curated .comic-burst{margin-left:2%;}
+ .ss-cast-design[data-cast-side="left"] .atelier-curated .afterglow-cinema .afterglow-actor{left:0;}
+ .ss-cast-design[data-cast-side="right"] .atelier-curated .postcard-original .postcard-actor{right:0;}
+}
+@container (max-width:350px){
+ .ss-cast-design .atelier-curated .vn-script{padding-left:16px;padding-right:16px;}
+ .ss-cast-design[data-cast-side="right"] .atelier-curated .vn-script{padding-left:16px;padding-right:16px;}
+ .ss-cast-design .atelier-curated .vn-actor{width:62%;}
+ .ss-cast-design[data-cast-side="left"] .atelier-curated .angle-speech{padding-left:16%;padding-right:15px;}
+}
+
+/* SCENE_ART_DIRECTION */
+/* Open-caption readability (1.0.53): paint only, no new plates or geometry.
+   A tight contact shadow protects glyph edges over skin; a softer second
+   layer separates the text from busy scenery. Explicit dark ink already
+   receives a pale caption surface and must not inherit these shadows. */
+.ss-cast-design:not([data-cast-ink="dark"]) .atelier-curated :is(.vn-script,.afterglow-caption,.afterglow-caption-letterbox,.rain-sign,.film-caption) [data-swarm-cast-dialogue],
+.ss-cast-design:not([data-cast-ink="dark"]) .atelier-overlap :is(.strip-materia,.strip-cinema) [data-swarm-cast-dialogue]{text-shadow:0 1px 1px #000e,0 0 3px #000c,0 2px 5px #0008;}
+.ss-cast-design:not([data-cast-ink="dark"]) .atelier-curated :is(.vn-name,.vn-script .vn-name small,.afterglow-caption .meta-name,.afterglow-caption-letterbox .meta-name,.rain-sign .meta-name,.film-caption .meta-name),
+.ss-cast-design:not([data-cast-ink="dark"]) .atelier-overlap :is(.materia-name,.materia-expr,.cinema-meta){text-shadow:0 1px 1px #000e,0 0 3px #000a;}
+/* These scene labels sit on scenery regardless of the caption ink mode. */
+.ss-cast-design .atelier-curated :is(.vn-top,.afterglow-kicker,.film-index){text-shadow:0 1px 1px #000e,0 0 3px #000a;}

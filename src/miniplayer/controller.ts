@@ -11,6 +11,7 @@ interface StudioActivitySnapshot {
 }
 
 class MiniPlayerController {
+  private readonly backgroundActivity = new CastBackgroundActivityTracker()
   private readonly stopPositionPersistence: () => void
   private readonly ctx: FrontendContext
   private readonly widget: any
@@ -101,6 +102,7 @@ class MiniPlayerController {
     getStudioDraft: () => StudioDraft | null,
     behavior: StudioBehavior,
     onBehaviorChange: (behavior: StudioBehavior) => void,
+    private readonly openTheater?: () => void,
   ) {
     this.ctx = ctx
     this.widget = widget
@@ -131,12 +133,13 @@ class MiniPlayerController {
           <span data-role="mini-placeholder">${FRAME_WALL_ICON}</span>
           <img data-role="mini-image" alt="Latest Swarm Studio preview" draggable="false" hidden />
           <span class="ss-mini-live-dot" aria-hidden="true"></span>
+          <span class="ss-mini-background-badge" data-role="mini-background-badge" role="status" hidden></span>
         </div>
         <button type="button" class="ss-mini-rail-pin" data-action="mini-toggle-pin" title="Pin toolkit open" aria-label="Pin toolkit open" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-3 1.4-2 5-3 3-6-6 3-3 5-2Z"/><path d="m10 14-7 7"/></svg></button>
         <span class="ss-mini-satellite" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2Z"/><path d="m19 17 .7 2.3L22 20l-2.3.7L19 23l-.7-2.3L16 20l2.3-.7L19 17Z"/></svg></span>
         <div class="ss-mini-actions" aria-label="Studio toolkit">
           <button class="ss-mini-button ss-mini-compose-cta" data-action="mini-compose" title="Quick Create" aria-label="Quick Create"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></button>
-          <button class="ss-mini-button ss-mini-studio-cta" data-action="mini-studio" title="Open full Studio" aria-label="Open full Studio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="M2.5 9h19M8.5 9v11M8 6.5h.01M11 6.5h.01"/></svg></button>
+          <button class="ss-mini-button ss-mini-studio-cta" data-action="mini-studio" title="Open full Studio" aria-label="Open full Studio">${STUDIO_LAUNCH_ICON}</button>
           <button class="ss-mini-button ss-mini-preview-cta" data-action="mini-toggle-preview" title="Toggle artwork preview" aria-label="Toggle artwork preview" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.8"/></svg></button>
           <button class="ss-mini-button" data-action="mini-library" title="Recent images · open Gallery" aria-label="Recent images · open Gallery">${LIBRARY_ICON}</button>
           <span class="ss-mini-actions-divider" aria-hidden="true"></span>
@@ -155,7 +158,7 @@ class MiniPlayerController {
           <div class="ss-mini-quick-body">
             <div class="ss-mini-artwork" aria-label="Latest artwork preview">
               <span class="ss-mini-artwork-thumb"><span data-role="mini-compose-placeholder">${FRAME_WALL_ICON}</span><img data-role="mini-compose-image" alt="Latest illustration" hidden /></span>
-              <div><strong>Latest artwork</strong><span>Live outputs appear in Preview</span></div>
+              <div><strong>Latest artwork</strong><span data-role="mini-background-status">Live outputs appear in Preview</span></div>
             </div>
             <label class="ss-mini-field"><span>Positive prompt <button class="ss-mini-editor-button" data-action="mini-edit-prompt" data-prompt-role="positive" aria-label="Expand positive prompt">${EXPAND_ICON}</button></span><textarea class="ss-mini-prompt" data-role="mini-prompt" placeholder="Describe your illustration…" aria-label="Quick image prompt"></textarea></label>
             <button class="ss-mini-negative-toggle" data-action="mini-toggle-negative" aria-expanded="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><span data-role="mini-negative-label">Hide negative prompt</span></button>
@@ -194,6 +197,7 @@ class MiniPlayerController {
         <button class="ss-mini-context-action" data-action="mini-strip-quick" role="menuitem">${SPARKLE_ICON}<span>Quick Create</span></button>
         <button class="ss-mini-context-action" data-action="mini-strip-upscale" role="menuitem" disabled>${EXPAND_ICON}<span>AI Upscale latest</span></button>
         <button class="ss-mini-context-action" data-action="mini-strip-gallery" role="menuitem">${LIBRARY_ICON}<span>Recent images</span></button>
+        ${this.openTheater ? `<button class="ss-mini-context-action" data-action="mini-theater" role="menuitem">${THEATER_ICON}<span>Story Theater</span></button>` : ""}
         <span class="ss-mini-context-separator" aria-hidden="true"></span>
         <button class="ss-mini-context-action" data-action="mini-strip-pin" role="menuitem"><span data-role="mini-strip-pin-icon">${SETTINGS_ICON}</span><span data-role="mini-strip-pin-label">Pin toolkit open</span></button>
         <button class="ss-mini-context-action" data-action="mini-strip-reset" role="menuitem">${MINIMIZE_ICON}<span>Reset floating panels</span></button>
@@ -233,6 +237,7 @@ class MiniPlayerController {
       if (action === "mini-toggle-pin" || action === "mini-strip-pin") this.toggleStripPin()
       if (action === "mini-strip-quick") this.openQuickCreate()
       if (action === "mini-strip-gallery") this.openLibrary()
+      if (action === "mini-theater") { this.closeStripMenu(); this.openTheater?.() }
       if (action === "mini-strip-upscale" && this.snapshotValue.latestImage?.id) this.openUpscale(this.snapshotValue.latestImage)
       if (action === "mini-strip-reset") this.resetFloatingPanels()
       if (action === "mini-strip-collapse") { this.stripPinned = false; this.setCollapsed(true) }
@@ -404,8 +409,12 @@ class MiniPlayerController {
     return true
   }
 
+  backgroundJobsSnapshot(): CastBackgroundActivity[] { return this.backgroundActivity.snapshot() }
+
   bootstrap(): void {
     this.ctx.sendToBackend({ type: "bootstrap", requestId: this.bootstrapRequestId })
+    this.ctx.sendToBackend({ type: "list_cast_background_jobs", requestId: createRequestId() })
+    this.ctx.sendToBackend({ type: "list_cast_genesis_activity", requestId: createRequestId() })
   }
 
   begin(
@@ -588,6 +597,7 @@ class MiniPlayerController {
   }
 
   onMessage(payload: any): void {
+    if (this.backgroundActivity.accept(payload)) { this.render(); return }
     const data = payload?.data || {}
     if (payload?.type === "bootstrap_result") {
       const connections = Array.isArray(data.connections) ? data.connections : []
@@ -683,9 +693,9 @@ class MiniPlayerController {
             "tagged",
           )
         }
-      } else if (job.status === "ready") {
+      } else if (job.status === "ready" && !(job.inserted && job.error)) {
         this.settleTaggedJob(jobId, taggedJobId)
-      } else if (job.status === "failed" || job.status === "cancelled") {
+      } else if (job.status === "failed" || job.status === "cancelled" || (job.status === "ready" && job.inserted && job.error)) {
         this.settleTaggedJob(jobId, taggedJobId)
         if (jobId === this.snapshotValue.jobId || !this.snapshotValue.active) {
           this.fail(jobId, String(job.error || (job.status === "cancelled" ? "Message illustration stopped." : "Message illustration failed.")))
@@ -1105,6 +1115,7 @@ class MiniPlayerController {
         connection_id: connection.id,
         model,
         clientJobId,
+        studioSurface: "quick_create",
         parameters,
       },
       recordHints: {
@@ -1191,9 +1202,10 @@ class MiniPlayerController {
       <div class="ss-mini-easel-progress"><span data-role="mini-easel-progress-bar"></span></div>
       <footer class="ss-mini-easel-footer">
         <span class="ss-mini-easel-status" data-role="mini-easel-status">Ready when inspiration hits.</span>
-        <button type="button" data-action="easel-append" disabled>${APPEND_CHAT_ICON}<span>Append</span></button>
-        <button type="button" data-action="easel-gallery" title="Recent images">${LIBRARY_ICON}</button>
-        <button type="button" data-action="easel-generate" class="ss-mini-easel-generate" disabled>${SPARKLE_ICON}<span data-role="mini-easel-generate-label">Generate</span></button>
+        <span class="ss-mini-easel-compact-status" data-role="mini-easel-compact-status">Ready</span>
+        <button type="button" data-action="easel-append" title="Append latest artwork to chat" aria-label="Append latest artwork to chat" disabled>${APPEND_CHAT_ICON}<span>Append</span></button>
+        <button type="button" data-action="easel-gallery" title="Recent images" aria-label="Recent images">${LIBRARY_ICON}</button>
+        <button type="button" data-action="easel-generate" class="ss-mini-easel-generate" title="Generate image" aria-label="Generate image" disabled>${SPARKLE_ICON}<svg data-easel-stop viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span data-role="mini-easel-generate-label">Generate</span></button>
       </footer>
       <span class="ss-mini-easel-resize" data-role="mini-easel-resize" aria-hidden="true"></span>
     `
@@ -1346,7 +1358,17 @@ class MiniPlayerController {
     if (bar) bar.style.width = `${this.state === "running" && hasTotal ? percentage : this.state === "done" ? 100 : 0}%`
     surface.dataset.indeterminate = String(this.state === "running" && !hasTotal)
     const status = surface.querySelector<HTMLElement>('[data-role="mini-easel-status"]')
-    if (status) { status.textContent = this.snapshotValue.status; status.title = this.snapshotValue.status }
+    if (status) { const bg = this.backgroundActivity.current(); const text = bg.job ? `${this.snapshotValue.status} · ${bg.label}: ${bg.detail}` : this.snapshotValue.status; status.textContent = text; status.title = text }
+    const compactStatus = surface.querySelector<HTMLElement>('[data-role="mini-easel-compact-status"]')
+    if (compactStatus) {
+      const bg = this.backgroundActivity.current()
+      const statusText = this.snapshotValue.status
+      compactStatus.textContent = this.state === "running"
+        ? (/^Interrupt requested/.test(statusText) ? "Stopping…" : hasTotal ? `Rendering · ${percentage}%` : "Working…")
+        : this.state === "error" ? "Stopped" : bg.job ? bg.label : this.state === "done" ? "Complete" : "Ready"
+      compactStatus.title = status?.textContent || statusText
+      compactStatus.setAttribute("aria-label", compactStatus.title)
+    }
     const append = surface.querySelector<HTMLButtonElement>('[data-action="easel-append"]')
     if (append) append.disabled = !this.quickCanAppend || !this.snapshotValue.latestImage?.id
     const generate = surface.querySelector<HTMLButtonElement>('[data-action="easel-generate"]')
@@ -1354,6 +1376,9 @@ class MiniPlayerController {
       generate.disabled = !this.quickConfirm && !this.snapshotValue.active && !this.quickConnection
       generate.dataset.running = String(this.snapshotValue.active)
       const label = generate.querySelector<HTMLElement>('[data-role="mini-easel-generate-label"]')
+      const actionLabel = this.snapshotValue.active ? "Stop generation" : this.quickConfirm ? "Review prompt" : "Generate image"
+      generate.title = actionLabel
+      generate.setAttribute("aria-label", actionLabel)
       if (label) label.textContent = this.snapshotValue.active ? "Stop" : this.quickConfirm ? "Review" : "Generate"
     }
   }
@@ -1566,6 +1591,19 @@ class MiniPlayerController {
       ? clamp(Math.round((this.snapshotValue.step / this.snapshotValue.totalSteps) * 100), 0, 100)
       : this.state === "done" ? 100 : 0
     mini.dataset.state = this.state
+    const background = this.backgroundActivity.current()
+    const backgroundStatus = this.queryMini<HTMLElement>('[data-role="mini-background-status"]')
+    if (backgroundStatus) { backgroundStatus.textContent = background.job ? `${background.label}: ${background.detail}` : "Live outputs appear in Preview"; backgroundStatus.title = backgroundStatus.textContent }
+    const backgroundBadge = this.root.querySelector<HTMLElement>('[data-role="mini-background-badge"]')
+    if (backgroundBadge) {
+      backgroundBadge.hidden = !background.job
+      backgroundBadge.dataset.state = background.job?.status || ""
+      backgroundBadge.textContent = background.count ? String(background.count) : background.job?.status === "ready" ? "✓" : "!"
+      backgroundBadge.title = background.job ? `${background.label}: ${background.detail}` : ""
+      backgroundBadge.setAttribute("aria-label", backgroundBadge.title)
+      const orb = backgroundBadge.parentElement
+      if (orb) { orb.title = backgroundBadge.title || "Open toolkit"; orb.setAttribute("aria-label", orb.title) }
+    }
     const mobileOrb = this.isMobileOrb()
     mini.dataset.mobileOrb = String(mobileOrb)
     mini.dataset.collapsed = String(this.collapsed)

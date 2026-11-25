@@ -1,0 +1,60 @@
+.ss-cast-design[data-cast-side="left"],
+.ss-cast-design[data-cast-side="right"] {display:block;max-width:100%;width:min(100%,var(--cast-stage-width,560px))}
+.ss-cast-design[data-cast-side="left"] {margin-left:0!important;margin-right:auto!important}
+.ss-cast-design[data-cast-side="right"] {margin-left:auto!important;margin-right:0!important}
+.ss-cast-design[data-cast-side="left"] .ss-cast-preset-inner>*,
+.ss-cast-design[data-cast-side="left"] .ss-cast-preset-inner>.cast-look {margin-left:0!important;margin-right:auto!important}
+.ss-cast-design[data-cast-side="right"] .ss-cast-preset-inner>*,
+.ss-cast-design[data-cast-side="right"] .ss-cast-preset-inner>.cast-look {margin-left:auto!important;margin-right:0!important}
+/* Image-left horizontal layouts: switch the image to the right by reversing
+   the layout flow. Children retain normal left-to-right text direction. */
+.ss-cast-design[data-cast-side="right"] :is(.manga-core,.polaroid,.overlap-popout-card,.overlap-angled-card,.square-editorial-card,.square-tech-card,.square-manga-card,.persona-card,.cyber-body,.manga-panel-card,.retro-rpg-box,.editorial-quote-card,.vn-standee-card,.editorial-dissolve-card,.gothic-card,.cockpit-hud-body,.terminal-body,.lookbook-card,.bleed-letterbox-card,.shonen-burst-card,.washi-scrap-card,.tag-chamfered-card) {direction:rtl}
+.ss-cast-design[data-cast-side="right"] :is(.manga-core,.polaroid,.overlap-popout-card,.overlap-angled-card,.square-editorial-card,.square-tech-card,.square-manga-card,.persona-card,.cyber-body,.manga-panel-card,.retro-rpg-box,.editorial-quote-card,.vn-standee-card,.editorial-dissolve-card,.gothic-card,.cockpit-hud-body,.terminal-body,.lookbook-card,.bleed-letterbox-card,.shonen-burst-card,.washi-scrap-card,.tag-chamfered-card)>* {direction:ltr}
+/* These presets are drawn with artwork on the right by default. */
+.ss-cast-design[data-cast-side="left"] :is(.manga-panel-box,.terminal-console-card) {direction:rtl}
+.ss-cast-design[data-cast-side="left"] :is(.manga-panel-box,.terminal-console-card)>* {direction:ltr}
+/* A cutout must remain in front of the speech plate when the overlap flips. */
+.ss-cast-design[data-cast-side="right"] .overlap-popout-figure,
+.ss-cast-design[data-cast-side="right"] .overlap-angled-figure {margin-right:0;margin-left:-26px}
+.ss-cast-design[data-cast-side="right"] .overlap-popout-body,
+.ss-cast-design[data-cast-side="right"] .overlap-angled-banner {padding-left:24px;padding-right:46px}
+/* Nameplates remain legible and quotes are never mirrored. */
+.ss-cast-design[data-cast-side="left"] [data-swarm-cast-dialogue],
+.ss-cast-design[data-cast-side="right"] [data-swarm-cast-dialogue] {direction:ltr;unicode-bidi:normal}
+/* A few cinematic compositions position their art absolutely or stack it over
+   a plate. Move the ART BAY, never flip the image or its speech text. */
+.ss-cast-design[data-cast-side="left"] .overlap-vn-figure {left:0;right:auto}
+.ss-cast-design[data-cast-side="right"] .overlap-vn-figure {right:0;left:auto}
+.ss-cast-design[data-cast-side="right"] :is(.tag-lanyard-body,.tag-slide-mount-card){direction:rtl}
+.ss-cast-design[data-cast-side="right"] :is(.tag-lanyard-body,.tag-slide-mount-card)>*{direction:ltr}
+.ss-cast-design[data-cast-side="right"] .cinematic-bg-art{left:auto;right:0;mask-image:linear-gradient(to left,#000 40%,transparent 100%);-webkit-mask-image:linear-gradient(to left,#000 40%,transparent 100%)}
+.ss-cast-design[data-cast-side="right"] .cinematic-content{margin-left:0;margin-right:auto;padding-left:32px;padding-right:0;text-align:left}
+/* Manga SFX is an illustrated unit, not three independently positioned widgets.
+   Stage Left/Right moves the outer preset; never recompose its artwork, card
+   and SFX mark. This preserves gallery geometry at real message widths. */
+.ss-cast-design[data-cast-side="left"] :is(.versus-figure-stage,.vhs-figure-pane,.open-horizon-figure){justify-content:flex-start}
+.ss-cast-design[data-cast-side="right"] :is(.versus-figure-stage,.vhs-figure-pane,.open-horizon-figure){justify-content:flex-end}
+.ss-cast-design[data-cast-side="left"] .tarot-arch-frame{align-self:flex-start}
+.ss-cast-design[data-cast-side="right"] .tarot-arch-frame{align-self:flex-end}
+
+/* Material Edition: stage side flips the finished *scene arrangement*, without
+   mirroring portraits, lettering, or changing the authored caption color. */
+.ss-cast-design[data-cast-side="right"] :is(.r-popout,.r-angle,.r-messenger,.r-badge-main,.r-comms-body,.r-rpg-battle,.r-standee,.r-folio-border,.r-mecha-body,.r-terminal-content,.r-cinema){direction:rtl;}
+.ss-cast-design[data-cast-side="right"] :is(.r-popout,.r-angle,.r-messenger,.r-badge-main,.r-comms-body,.r-rpg-battle,.r-standee,.r-folio-border,.r-mecha-body,.r-terminal-content,.r-cinema)>*{direction:ltr;}
+.ss-cast-design[data-cast-side="right"] .r-popout-figure{margin-right:0;margin-left:-40px;}
+.ss-cast-design[data-cast-side="right"] .r-popout-note{padding-left:18px;padding-right:38px;}
+.ss-cast-design[data-cast-side="right"] .r-angle-panel{margin-left:0;margin-right:-17px;padding-left:24px;padding-right:40px;}
+.ss-cast-design[data-cast-side="right"] .r-messenger-thread{border-radius:17px 17px 5px 17px;}
+.ss-cast-design[data-cast-side="right"] .r-messenger-thread::before{left:auto;right:-10px;transform:scaleX(-1);}
+.ss-cast-design[data-cast-side="right"] .r-standee-art{margin-right:0;margin-left:-15px;}
+.ss-cast-design[data-cast-side="right"] .r-cinema-figure{mask-image:linear-gradient(to left,#000 65%,transparent);}
+.ss-cast-design[data-cast-side="right"] .r-vn-figure{left:auto;right:26px;}
+.ss-cast-design[data-cast-side="right"] .r-vn-script{padding-left:18px;padding-right:190px;}
+.ss-cast-design[data-cast-side="right"] .r-vn-speaker{left:auto;right:188px;max-width:calc(100% - 200px);}
+@container (max-width:370px){
+ .ss-cast-design[data-cast-side="right"] .r-vn-figure{right:5px;}
+ .ss-cast-design[data-cast-side="right"] .r-vn-script{padding-left:11px;padding-right:125px;}
+ .ss-cast-design[data-cast-side="right"] .r-vn-speaker{right:124px;max-width:calc(100% - 133px);}
+ .ss-cast-design[data-cast-side="right"] .r-popout-figure{margin-left:-20px;}
+ .ss-cast-design[data-cast-side="right"] .r-popout-note{padding-left:10px;padding-right:24px;}
+}

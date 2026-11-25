@@ -1,0 +1,220 @@
+{
+  "release": "1.0.50",
+  "baseline": "Lumiswarm new baseline.zip",
+  "baseline_sha256": "da7a4efc2d1b63139700a0d63a82ac3e79eeba02b885ce500381316e09143dba",
+  "changes": [
+    {
+      "path": "CHANGELOG.md",
+      "status": "modified",
+      "before_sha256": "20418a9016f947e3ff8ab1c0b92063f4df689b8ca52a3bd4ca5e2c5c188108a5",
+      "after_sha256": "c6c21cd2b5e51e2b5fb1aa7008b1b3a71f8918d1b71a7f08149e9b988e106e8e"
+    },
+    {
+      "path": "README.md",
+      "status": "modified",
+      "before_sha256": "fd36ea51eab8a6136ffb1e4d138ec3cb69e9c5235f7aed677e7ce7f16507d2a2",
+      "after_sha256": "f6077b3dbc2fabef8b9450fbe8da454bddfb1e21cd4fc8b9defb7deb77d21eaa"
+    },
+    {
+      "path": "dist/backend.js",
+      "status": "modified",
+      "before_sha256": "e9a04eab6d7631fd2f500b0de1c09e20fea80d604f83723a30888b9873a61646",
+      "after_sha256": "4856b0230f1fc9b388669097ae8c1e5220eb7bf8c68f0f9e56a4cffb515bf131"
+    },
+    {
+      "path": "dist/frontend.js",
+      "status": "modified",
+      "before_sha256": "f3c9332c918a4a5a3e47995f83a5f8482ff5c95e31a48c6aa41414166a04a965",
+      "after_sha256": "412a9d4435b0408615b3601ed44ca5fa0bbd68c2c7d9bb086b9ebd4fa1807dee"
+    },
+    {
+      "path": "docs/cast-layout-sources/curated-cards.html",
+      "status": "added",
+      "before_sha256": null,
+      "after_sha256": "d7cfe547232719ffafaa62b6a3c8c881826c97fc6693803186e9591605004ecd"
+    },
+    {
+      "path": "docs/cast-layout-sources/portrait-overlap.html",
+      "status": "added",
+      "before_sha256": null,
+      "after_sha256": "35bb87413f8ea92b28e4c0595eb64dd10e45fd6881ed884f9dba83edd7e4b54a"
+    },
+    {
+      "path": "docs/cast-worlds-v1.md",
+      "status": "added",
+      "before_sha256": null,
+      "after_sha256": "9487ccb312f1345664b3c29fd95e8115627f9ce80d04aeb542d1db3cc6f11703"
+    },
+    {
+      "path": "package-lock.json",
+      "status": "modified",
+      "before_sha256": "fc6d57435178305888cc3beb2524e2fac5feab0076305b35c5931800a320c29b",
+      "after_sha256": "4ee37f89689acc1fef5e7945b6521a0d5b7a2afbf52f15a365fd56077404f9a6"
+    },
+    {
+      "path": "package.json",
+      "status": "modified",
+      "before_sha256": "9e3432a050dabddddbbb5d1422844042315b4cfd484e0a137e76162aaf102d46",
+      "after_sha256": "69bd034088f5f44b35b5fadcb815255cce6353fff25bd9c7b6e5e8d4347f133a"
+    },
+    {
+      "path": "scripts/build-cast-presets.py",
+      "status": "modified",
+      "before_sha256": "0b6112b1142b5a1f1a6c285129164f17e05c4f247338f8337ba5df2387eabffd",
+      "after_sha256": "8ab942086341c2a215eaf9cb75806fb1626dd7b3bf35bed1760143f7eab5c29c"
+    },
+    {
+      "path": "scripts/cast-curated.css",
+      "status": "added",
+      "before_sha256": null,
+      "after_sha256": "e4b99db59c9afcf2a9e6fe78af9b01d0a6d7ab3776dc7baac8aee25c2f75bf98"
+    },
+    {
+      "path": "scripts/cast-curated.py",
+      "status": "added",
+      "before_sha256": null,
+      "after_sha256": "4c43c34c9f827671b9537aaa8845f6ed9122174d6ecd60ed9ba9ec9848da6575"
+    },
+    {
+      "path": "spindle.json",
+      "status": "modified",
+      "before_sha256": "673d5bbd8be2e8334b76b11d52b281d7445f0902181026d31a7b46662268adbc",
+      "after_sha256": "f5cd472aef95c41391a8df3429ebb2f56772546dfd15346834667ac2c5ccfc71"
+    },
+    {
+      "path": "src/backend.ts",
+      "status": "modified",
+      "before_sha256": "cb7b49c2ad25825be074b48e3449f4fad3ad17c7707ce7d3e30ef5f868f2e105",
+      "after_sha256": "96cf2bf5c99d6e90ba999402278ba6fe5b562ff17b0a29a2f683fca40d902983"
+    },
+    {
+      "path": "src/inline/cast-narrative.ts",
+      "status": "modified",
+      "before_sha256": "770e1bd3c5c1bb302fb6b6d6de079c1b23ab85448cff9888ae6691c9c6a88a6e",
+      "after_sha256": "e7c8b6f7edac75470f324618db5f5032978579ada688e483e8c1ca83eb9e173e"
+    },
+    {
+      "path": "src/state/cast-presentations.ts",
+      "status": "modified",
+      "before_sha256": "77f6f023034d2f35fa680397aa4e3bdfe809d0dcd868911bacc7d115d14f3224",
+      "after_sha256": "9a5704b2f97c1f9abbedc75fca37a2217ea989808733351dd1e13267025b800d"
+    },
+    {
+      "path": "src/state/cast.ts",
+      "status": "modified",
+      "before_sha256": "9c2fe1bf09885abd9a43b9a4d06a1e09da17c65d32d8dd2dd5a8f284a58687b6",
+      "after_sha256": "7ec415ccc82fd0ca2377fb9cc71262941100ec6c2519033b74680ea7062c12af"
+    },
+    {
+      "path": "src/studio/cast.ts",
+      "status": "modified",
+      "before_sha256": "82d0b858f76852d74ab1afef20a62db3119c5734bf902fcf841178e237817eea",
+      "after_sha256": "40bbae30c853e25afcb794ee830e1b14a1f9eaada6b8486b4a260760768d38de"
+    },
+    {
+      "path": "src/studio/styles.ts",
+      "status": "modified",
+      "before_sha256": "cd105fcab3bb9bfd645b2ef8521aa4fea4caf63eebb608514080cbfd781c8b83",
+      "after_sha256": "6e9d160df3b08ec27b3dd5b8c7154be1dc13e0e8e8e1ef186f8730d104f271c5"
+    },
+    {
+      "path": "tests/backend-contract.mjs",
+      "status": "modified",
+      "before_sha256": "2c1c4ad73bdfdaadf6c628372381d9f506f89fab7b7a00ae3968b529d0b684b4",
+      "after_sha256": "336aa71a3632f9437cef0c3de50da26f7dce12df71abe7ecf9c544250a722032"
+    },
+    {
+      "path": "tests/cast-album-management-browser.py",
+      "status": "modified",
+      "before_sha256": "6e00aaed896dee69d71168116a264fd299080899dcc9d655e2a5ea023bc2e502",
+      "after_sha256": "7f9e09d1062d84b18d2894461ae7eeea682d303f83da2c95b10365398f8cb1a2"
+    },
+    {
+      "path": "tests/cast-browser.mjs",
+      "status": "modified",
+      "before_sha256": "b017e61d7809e3cd700a6b5b70b206a7bc3bd6a84f74b1385c474cd461738c8b",
+      "after_sha256": "01c3bc66fc90a574767ab3b1c5cbf76dc76c5e4c8676e9b3c8d7319c2f7fed4c"
+    },
+    {
+      "path": "tests/cast-material-edition-browser.py",
+      "status": "modified",
+      "before_sha256": "b1efbbd2b7312524a26da61834e848a7abf6d5e501c1d0eb40f16ea0342b0c9c",
+      "after_sha256": "7991b09da6ea9baa6e30e537c238e44c43864a2951ac431b111cd68de3067869"
+    },
+    {
+      "path": "tests/cast-material-tint-v48-browser.py",
+      "status": "modified",
+      "before_sha256": "e5d3d905ac3a0d7db77e8f4de458c059cf09acdcf4d3ceb08daa4c2dd8ffdab7",
+      "after_sha256": "094acf7e6c90e8e75a1d88bf88f6db2a54e2e70b94c212e753370d67314cac5d"
+    },
+    {
+      "path": "tests/cast-mobile-presentation-modal-browser.py",
+      "status": "modified",
+      "before_sha256": "b47879667d8334c650204a4c427cdd845fb6b03b0bec61716551261b8cbb8b05",
+      "after_sha256": "5bc6f45ca8518f5519cdbecbd9fe63c521994febd7636cbc9f635915bbed93b0"
+    },
+    {
+      "path": "tests/cast-presentation-browser.py",
+      "status": "modified",
+      "before_sha256": "f03dab5bf32e2b53bfdf487e4964a5726af091da8e2f20eb67c3d0ad46a34231",
+      "after_sha256": "9a46a5e9d0ceef326e048acdbf697e2595f374726195665600a6d13affea33dd"
+    },
+    {
+      "path": "tests/cast-presentation-contract.mjs",
+      "status": "modified",
+      "before_sha256": "de2bb08ae36b9b35f70687aa3c2075fe1976c0e6229958b52f149417e9b2aca0",
+      "after_sha256": "57aab4113c6ce7455463729de6978b9788bd74295a77c490c4af04224f2a60fd"
+    },
+    {
+      "path": "tests/cast-shadow-r20-browser.py",
+      "status": "modified",
+      "before_sha256": "c5a5108f5a664414f92ad61b0cac40fdb51f6762f2e0e0d7d105154ee2b0bdc7",
+      "after_sha256": "518fd9a4c71b3e0ef2975007dd2e3f12cd16a659f71fc7f1851cb50be4c7a9a3"
+    },
+    {
+      "path": "tests/cast-stage-geometry-browser.py",
+      "status": "modified",
+      "before_sha256": "7dc2078ab7c838258aabcd119b7888bcb827a3b7e96700ef297a63dcd0881d0c",
+      "after_sha256": "019b11bed750f5dd11762b4b41475799e4c3a2c079ca198efe7387f3ab488c00"
+    },
+    {
+      "path": "tests/cast-wardrobe-r6-contract.mjs",
+      "status": "modified",
+      "before_sha256": "e0041a841173c3701bac5f87ebde9dc193500221c550751f5ca2471723ebcf6d",
+      "after_sha256": "5bdf0dfe0d325ac6dc6dfbae44c3a29905be566e5a9e920b9e30164481ebb146"
+    },
+    {
+      "path": "tests/cast-wardrobe-r7-contract.mjs",
+      "status": "modified",
+      "before_sha256": "9f54d463c1498bb63b53f6107002cd70f9bc23208a9ca9d458c077474c79ae08",
+      "after_sha256": "5092c5cf34f399836bfa73ce8ec86a005edbb48cb22342508932195490191dbe"
+    },
+    {
+      "path": "tests/cast-wardrobe-r8-browser.py",
+      "status": "modified",
+      "before_sha256": "3404f1b525f07c3bc0e21998aa6fe474af1cba4271aef2ec9235a9ae382b345b",
+      "after_sha256": "8e2778fb9b8c802f8953801cc75e9ba489c25529feaad02c05a0cc810d7c4e13"
+    },
+    {
+      "path": "tests/cast-worlds-browser.py",
+      "status": "added",
+      "before_sha256": null,
+      "after_sha256": "2d249cd18d01b05049a935a28e77cf47f5d672d748f77a612a7bbc8b4d9cd20f"
+    },
+    {
+      "path": "tests/cast-worlds-contract.mjs",
+      "status": "added",
+      "before_sha256": null,
+      "after_sha256": "eb062cd06b8d37a0d38e0ccfcabd99c34aae1b0a4141c9c4ea196fa21fad6dbb"
+    }
+  ],
+  "verification": {
+    "build": "pass",
+    "typecheck": "pass",
+    "npm_test": "pass",
+    "chromium_targeted": "8/8 pass",
+    "metadata_registry": "pass",
+    "metadata_provider": "external core source unavailable",
+    "live_host": "not tested"
+  }
+}

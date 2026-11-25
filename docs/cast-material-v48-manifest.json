@@ -1,0 +1,60 @@
+{
+  "release": "1.0.48",
+  "base": "1.0.47",
+  "topic": "Per-style material tint tuning, black/ink bases and trusted-caption contrast",
+  "scope": "12 redesigned material presets; no Cast Islands parser, schema, studio workflow or model API changes",
+  "source_of_truth": "scripts/cast-material-redesign.css",
+  "before_archive_sha256": "dd6d78f2ff500079dcbc887b923cbd7398f23d40874a3860e156f497ecc49cdd",
+  "changed_files": [
+    "CHANGELOG.md",
+    "README.md",
+    "dist/backend.js",
+    "dist/frontend.js",
+    "package-lock.json",
+    "package.json",
+    "scripts/cast-material-redesign.css",
+    "spindle.json",
+    "src/state/cast-presentations.ts",
+    "tests/cast-material-edition-browser.py"
+  ],
+  "added_files": [
+    "docs/cast-material-tint-v48-report.json",
+    "docs/cast-material-tint-v48.md",
+    "docs/screenshots/cast-material-edition-current.png",
+    "docs/screenshots/cast-material-three-voices-v48.png",
+    "tests/cast-material-tint-v48-browser.py"
+  ],
+  "removed_files": [],
+  "hashes_sha256": {
+    "CHANGELOG.md": "7814bb635697aa65fc7624dd73dfe8ad1eb637a5817e7dd0e75592b8cf1656a2",
+    "README.md": "11529d9e96c679927f6609a9ea9be715fdfd3d92c62b2913e403a0b7b9f0f322",
+    "dist/backend.js": "b4ec5dda51350687a27fa2701810430ff6b727076256cf6c7ecc767846c40301",
+    "dist/frontend.js": "5bca4b2e7cdb21e7ae8d5e7c256a533cd754fc16fd126ae604ad151cd3c6c3d4",
+    "package-lock.json": "fc6d57435178305888cc3beb2524e2fac5feab0076305b35c5931800a320c29b",
+    "package.json": "9e0f4f683f891736d938bcc889eb16c354dd6e71da54b2a9ac3ab97f4d5b03fd",
+    "scripts/cast-material-redesign.css": "4f9a2ac7f206c99edfdd4d68b595492735f86198fa7df3561683d18e8305f432",
+    "spindle.json": "673d5bbd8be2e8334b76b11d52b281d7445f0902181026d31a7b46662268adbc",
+    "src/state/cast-presentations.ts": "77f6f023034d2f35fa680397aa4e3bdfe809d0dcd868911bacc7d115d14f3224",
+    "tests/cast-material-edition-browser.py": "b1efbbd2b7312524a26da61834e848a7abf6d5e501c1d0eb40f16ea0342b0c9c",
+    "docs/cast-material-tint-v48-report.json": "8a79e2fc5bcf300a9e5af295f530bf5cfebd39dc16aa5b166dde2d12474d9a89",
+    "docs/cast-material-tint-v48.md": "77b8a12bf6533868557a69f898a0322cfa497f6b280a1c2670808b54bdef00e8",
+    "docs/screenshots/cast-material-edition-current.png": "ea8434f38a5517cdf2a2529ab314574ee84f54119a2786a263c5675d74370ead",
+    "docs/screenshots/cast-material-three-voices-v48.png": "cfebd6a6d96fc6e8ecee9078fdd41c86759da1bf4dfc15293480c8283d235c12",
+    "tests/cast-material-tint-v48-browser.py": "e5d3d905ac3a0d7db77e8f4de458c059cf09acdcf4d3ceb08daa4c2dd8ffdab7"
+  },
+  "verification": [
+    "npm run build — passed",
+    "STUDIO_TSC=$(which tsc) npm run typecheck — passed",
+    "python tests/cast-material-tint-v48-browser.py — 72 cases, >=4.84:1 tested contrast",
+    "python tests/cast-material-edition-browser.py — 216 scenarios",
+    "python tests/cast-stage-geometry-browser.py — 306 scenarios",
+    "python tests/cast-island-api-browser.py — passed",
+    "python tests/cast-mobile-presentation-modal-browser.py — 320/390/430 and desktop passed",
+    "node tests/cast-presentation-contract.mjs — passed",
+    "node tests/cast-island-pipeline-contract.mjs — passed",
+    "node tests/safety-scan.mjs — passed",
+    "npm test — passed initial Cast, backend, frontend, safety contracts; blocked at missing jsdom in studio-dom-contract"
+  ],
+  "limits": "Contrast verified for #ed7ca8, #599ce3, #ffae35 against defined surface endpoints, not arbitrary voices or actual installed Lumiverse themes.",
+  "preview": "docs/screenshots/cast-material-three-voices-v48.png"
+}

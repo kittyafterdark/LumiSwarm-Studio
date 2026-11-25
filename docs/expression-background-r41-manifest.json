@@ -1,0 +1,50 @@
+{
+  "version": "1.0.41",
+  "base_version": "1.0.40",
+  "source_archive": "Lumiswarm-Cast-Mobile-Presentation-1.0.40-CUMULATIVE.zip",
+  "changed": [
+    {
+      "path": "src/studio/expressions.ts",
+      "before_sha256": "b8dc75927d33252002e0adec25b51ba6c4264b79b88534761e494661bf1a34e3",
+      "after_sha256": "c8c2c2cd43b91b1ad1a3fb1279a254af9c6234be6c030c042fdcf5b48d9259f9"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "before_sha256": "c42a2159e3e1bcbbd97a0fffc95c36c6b47f7116485c93eb07a7a7dffd724e31",
+      "after_sha256": "969f3660765f6a2f8ec44f5afc68fd7b6ff135ccd93da24969f2eb5b5ed11bc4"
+    },
+    {
+      "path": "package.json",
+      "before_sha256": "0583cfd164585a3250311c08e657939f7ce215bcefcc0bcb43a0775e512dedaa",
+      "after_sha256": "cdb94e985996c76b8a4c45d7d205666d8ed35bab99225926653033f26820d9b8"
+    },
+    {
+      "path": "spindle.json",
+      "before_sha256": "846e31c7bcefc91c8c43dd4932eee3a95f700c4a917ae1e66906c86cfedeaf48",
+      "after_sha256": "301b9e3b872233955e428f154c7cc9e261de3a32383c8597b9a5db6f6d98c5f8"
+    },
+    {
+      "path": "dist/frontend.js",
+      "before_sha256": "1aa5d50dee4eba99d29503e85271aa8d9c4479753f3f4d9c35f35e68c3939cbe",
+      "after_sha256": "e32904427f36768608619b9ee6a7514979463001eea9a1b891f35209ba2462b8"
+    }
+  ],
+  "added": [
+    {
+      "path": "tests/expression-background-matrix-contract.mjs",
+      "sha256": "96ffba17f9ea2cbe7a34570b99d0f176fc76775000c7d78ee30bf4c24cfbd23a"
+    },
+    {
+      "path": "docs/expression-background-matrix-r41.md",
+      "sha256": "9701a594fdce94bdda7f84ba8ee708ef81ee6492ad6c8e47cfb261c9a2837195"
+    }
+  ],
+  "validation": [
+    "npm run build",
+    "npm run typecheck",
+    "node tests/expression-background-matrix-contract.mjs",
+    "node tests/backend-contract.mjs",
+    "npm run test:cast"
+  ],
+  "note": "Full cumulative source overlay; no dependency folders or local scratch files."
+}

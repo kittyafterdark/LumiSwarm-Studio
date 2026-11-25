@@ -1,0 +1,10 @@
+quality/meta: sfw, high detail, anime illustration
+visible count: 3 subjects
+scene: Late-night izakaya reunion at a wooden booth table.
+camera: medium shot, sharp focus on the two seated men
+left man [other]: Bakugo Katsuki, blond spiky hair, red eyes, dark overshirt, holding beer mug
+center-right man [other]: Todoroki Shoto_(My Hero Academia), split dye, heterochromia, burn scar, charcoal sweater, holding chopsticks
+foreground right woman [other]: pink skin, fluffy short pink hair, yellow horns, black sclera, yellow irises, casual cropped jacket, resting chin on palm
+shared interaction: the two men share food
+spatial relation: the men sit side by side and the woman sits opposite
+environment: izakaya, wooden booth, (amber lantern:1.2)

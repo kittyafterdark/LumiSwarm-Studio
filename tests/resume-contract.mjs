@@ -68,22 +68,38 @@ console.log('foreground retries, cleanup, saved inline image recovery and live p
 
 // Snapshot reconciliation must settle the mini-player even without live completion events.
 const {MiniPlayerController}=await import('../dist/frontend.js')
+const miniDom=new JSDOM('<main></main>',{url:'https://studio.test',pretendToBeVisual:true})
+for(const name of ['window','document','HTMLElement','MutationObserver','getComputedStyle'])globalThis[name]=miniDom.window[name]
+const players=[]
 function mini(active=true,source='tagged') {
- const player=Object.create(MiniPlayerController.prototype)
- Object.assign(player,{snapshotValue:{active,jobId:active?'attempt':''},currentActivitySource:source,activeTaggedAttempts:new Map(),settledGenerationJobIds:new Set(),settledTaggedJobIds:new Set()})
- player.render=()=>{}
- player.begin=(id)=>{player.snapshotValue.active=true;player.snapshotValue.jobId=id;player.currentActivitySource='tagged'}
+ const root=document.createElement('div');document.body.append(root)
+ const player=new MiniPlayerController({sendToBackend(){}},{root,destroy(){root.remove()}},()=>{},()=>{},()=>{},()=>null,defaultStudioBehavior(),()=>{})
+ players.push(player)
+ if(active)player.begin('attempt','','Fixture generation',source)
  return player
 }
-for(const status of ['ready','cancelled','failed']) {
- const p=mini();p.onMessage({type:'tagged_image_jobs_result',data:[{id:'tag',clientJobId:'attempt',status}]})
- assert.equal(p.snapshotValue.active,false,status+' snapshot clears loading')
- p.onMessage({type:'tagged_image_job',data:{id:'tag',clientJobId:'attempt',status:'generating'}})
- assert.equal(p.snapshotValue.active,false,'Delayed active event cannot revive terminal attempt')
+try {
+ for(const status of ['ready','cancelled','failed']) {
+  const p=mini();p.onMessage({type:'tagged_image_jobs_result',data:[{id:'tag',clientJobId:'attempt',status}]})
+  assert.equal(p.snapshot().active,false,status+' snapshot clears loading')
+  p.onMessage({type:'tagged_image_job',data:{id:'tag',clientJobId:'attempt',status:'generating'}})
+  assert.equal(p.snapshot().active,false,'Delayed active event cannot revive terminal attempt')
+ }
+ const missing=mini();missing.onMessage({type:'tagged_image_jobs_result',data:[]});assert.equal(missing.snapshot().active,false)
+ const manual=mini(true,'manual');manual.onMessage({type:'tagged_image_jobs_result',data:[]});assert.equal(manual.snapshot().active,true,'Tagged snapshots preserve manual generation')
+ const concurrent=mini();concurrent.onMessage({type:'tagged_image_jobs_result',data:[{id:'done',clientJobId:'attempt',status:'ready'},{id:'live',clientJobId:'next',status:'generating'}]});assert.equal(concurrent.snapshot().jobId,'next');assert.equal(concurrent.snapshot().active,true)
+ // Background activity must be initialized by the constructor and remain independent.
+ const background=mini(true,'manual')
+ background.onMessage({type:'cast_background_job',data:{groupId:'cast',key:'kitchen',status:'generating',step:2,totalSteps:8}})
+ assert.equal(background.backgroundJobsSnapshot()[0].key,'kitchen')
+ assert.equal(background.snapshot().jobId,'attempt','Background activity does not replace the foreground job')
+ background.onMessage({type:'cast_background_job',data:{groupId:'cast',key:'kitchen',status:'ready'}})
+ assert.equal(background.backgroundJobsSnapshot()[0].status,'ready')
+ assert.equal(background.snapshot().active,true,'Background completion does not stop the foreground job')
+} finally {
+ for(const player of players)player.destroy()
+ miniDom.window.close()
 }
-const missing=mini();missing.onMessage({type:'tagged_image_jobs_result',data:[]});assert.equal(missing.snapshotValue.active,false)
-const manual=mini(true,'manual');manual.onMessage({type:'tagged_image_jobs_result',data:[]});assert.equal(manual.snapshotValue.active,true,'Tagged snapshots preserve manual generation')
-const concurrent=mini();concurrent.onMessage({type:'tagged_image_jobs_result',data:[{id:'done',clientJobId:'attempt',status:'ready'},{id:'live',clientJobId:'next',status:'generating'}]});assert.equal(concurrent.snapshotValue.jobId,'next');assert.equal(concurrent.snapshotValue.active,true)
 // A ready/remount strip retires as soon as the native figure mounts, including late mounting.
 const stripDom=new JSDOM('<main></main>',{url:'https://studio.test'})
 for(const name of ['window','document','HTMLElement','MutationObserver'])globalThis[name]=stripDom.window[name]

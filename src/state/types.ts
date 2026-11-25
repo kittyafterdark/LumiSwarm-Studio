@@ -16,6 +16,7 @@ interface StudioBehavior {
   mobileQuickCreate: boolean
   tagAutoGenerate: boolean
   tagPromptInjection: boolean
+  historyImageMarkers: "keep" | "strip"
   protocolPrompt: string
   requestMode: "inline" | "parser"
   parserConnectionId: string
@@ -28,7 +29,8 @@ interface StudioBehavior {
   requiredImageMin: number
   requiredImageMax: number
   tagPromptMode: "multi" | "pov"
-  tagPromptFamily: "anima" | "illustrious"
+  tagPromptFamily: ScenePromptFamily
+  countStrength: number
 }
 
 interface LoraMetadata {
@@ -89,6 +91,8 @@ interface StackPreset {
 }
 
 interface GenerationDetails {
+  manualLore?: ManualLoreSelection[]
+  manualLoreDiagnostics?: string[]
   prompt: string
   negativePrompt: string
   resolvedPrompt?: string
@@ -229,6 +233,7 @@ interface VisualLoreIdentity {
   positivePrompt: string
   negativePrompt: string
   checkpointFamily: string
+  modelPrompts?: Partial<Record<ResolvedScenePromptFamily, {positivePrompt: string; negativePrompt: string}>>
   checkpoint: string
   stackPresetId: string
   stackSnapshot: StackPresetItem[]
@@ -274,6 +279,7 @@ interface ChatVisualsState {
   }
   activePersonaPreset: PersonaVisualPreset | null
   characterFolder: OutputFolder | null
+  characterStyleName?: string
   characterBasePrompt: string
   models: Array<{ id: string; label: string }>
   studioConnectionId: string

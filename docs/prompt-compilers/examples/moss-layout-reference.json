@@ -1,0 +1,44 @@
+{
+  "summary": {
+    "meta": [
+      "anime illustration"
+    ],
+    "canvas": "single",
+    "caption": "Two people at a rooftop stall at sunset."
+  },
+  "items": [
+    {
+      "label": "object",
+      "caption": "Black-haired man in a dark jacket holding a cup.",
+      "bbox": [
+        -360,
+        -560,
+        360,
+        -40
+      ]
+    },
+    {
+      "label": "object",
+      "caption": "Silver-haired woman in a blue jacket waving.",
+      "bbox": [
+        -360,
+        40,
+        360,
+        560
+      ]
+    },
+    {
+      "label": "text",
+      "caption": "White lettering on a sign at the top.",
+      "text": "HELLO, WORLD",
+      "bbox": [
+        -455,
+        -300,
+        -380,
+        300
+      ]
+    }
+  ],
+  "bbox_coord_space": "abs_centralized",
+  "bbox_format": "yxyx"
+}

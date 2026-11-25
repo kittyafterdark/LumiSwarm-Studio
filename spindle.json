@@ -1,11 +1,11 @@
 {
-  "version": "1.0.15",
+  "version": "1.1.0-alpha.17.12",
   "name": "Swarm Studio",
   "identifier": "swarm_studio",
   "author": "kittyafterdark",
   "github": "https://github.com/kittyafterdark/LumiSwarm-Studio",
   "homepage": "https://github.com/kittyafterdark/LumiSwarm-Studio",
-  "description": "A responsive SwarmUI workspace with live previews, mobile quick actions, shareable LoRA stacks, Lumiverse chat integration, img2img, workflows, output folders, and fullscreen inspection.",
+  "description": "A responsive SwarmUI workspace with live previews, mobile quick actions, shareable LoRA stacks, Lumiverse chat integration, img2img, workflows, output folders, fullscreen inspection, postproduction chains, and cinematic Story Theater.",
   "permissions": [
     "image_gen",
     "cors_proxy",
@@ -13,6 +13,7 @@
     "chats",
     "characters",
     "personas",
+    "world_books",
     "chat_mutation",
     "interceptor",
     "macro_interceptor",

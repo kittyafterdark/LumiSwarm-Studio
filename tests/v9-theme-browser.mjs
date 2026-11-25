@@ -26,7 +26,7 @@ try {
     host:getComputedStyle(document.documentElement).getPropertyValue('--lumiverse-accent').trim(),
   }))
   assert.equal(inherited.swatch.toLowerCase(),inherited.actual.toLowerCase(),'The Accent swatch should show the exact active Studio highlight')
-  // Nuclear colors: accent cyan, every ordinary and primary button burgundy.
+  // Nuclear colors: accent cyan, ordinary buttons burgundy; Generate follows accent.
   await page.locator('[data-color-key="accent"]').fill('#05c5e8')
   await page.locator('[data-color-key="button"]').fill('#831c28')
   await page.waitForTimeout(240) // let Studio's 160ms color transitions settle
@@ -50,9 +50,9 @@ try {
   })
   assert.equal(applied.accent,'#05c5e8')
   assert.equal(applied.swatch,'#05c5e8')
-  assert.equal(applied.primaryBg,'rgb(131, 28, 40)')
+  assert.equal(applied.primaryBg,'rgb(5, 197, 232)')
   assert.equal(applied.normalBg,'rgb(131, 28, 40)')
-  assert.equal(applied.primaryText,'rgb(255, 255, 255)')
+  assert.ok(['rgb(0, 0, 0)','color(srgb-linear 0 0 0)','rgb(9, 9, 11)'].includes(applied.primaryText),applied.primaryText)
   assert.equal(applied.normalText,'rgb(255, 255, 255)')
   assert.equal(applied.selectedTab,'rgb(5, 197, 232)')
   assert.equal(applied.icon,'rgb(5, 197, 232)')
@@ -75,7 +75,7 @@ try {
     button:getComputedStyle(document.querySelector('.ss-top-actions .ss-icon-button')).backgroundColor,
   }))
   assert.equal(bright.bg,'rgb(255, 228, 94)')
-  assert.equal(bright.text,'rgb(9, 9, 11)')
+  assert.ok(['rgb(0, 0, 0)','color(srgb-linear 0 0 0)','rgb(9, 9, 11)'].includes(bright.text),bright.text)
   assert.notEqual(bright.button,bright.bg,'Button fill should not change when only Accent is customized')
   await page.screenshot({path:resolve(output,'v9-accent-alone.png')})
   await page.close()

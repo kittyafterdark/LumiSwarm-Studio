@@ -1,0 +1,32 @@
+{
+  "release": "1.0.45",
+  "base": "1.0.44",
+  "change": "Cast neutral palette for donated presets",
+  "changed": [
+    "scripts/build-cast-presets.py",
+    "src/state/cast-presentations.ts",
+    "dist/frontend.js",
+    "package.json",
+    "spindle.json",
+    "CHANGELOG.md",
+    "README.md",
+    "tests/cast-neutral-palette-browser.py",
+    "dist/backend.js"
+  ],
+  "tested": [
+    "python tests/cast-neutral-palette-browser.py",
+    "python tests/cast-stage-geometry-browser.py",
+    "python tests/cast-live-stage-parity-browser.py",
+    "node tests/cast-wardrobe-r6-contract.mjs",
+    "node tests/cast-wardrobe-r7-contract.mjs",
+    "node tests/cast-presentation-contract.mjs",
+    "node tests/cast-wardrobe-r8-contract.mjs",
+    "STUDIO_TSC=$(which tsc) node scripts/check-types.mjs"
+  ],
+  "new": [
+    "tests/cast-neutral-palette-browser.py",
+    "docs/screenshots/cast-neutral-palette.png",
+    "docs/cast-palette-v45-manifest.json"
+  ],
+  "validation_note": "Mock Chromium palette and geometry tests passed; broader Node suite stops at missing jsdom."
+}

@@ -1,0 +1,89 @@
+{
+  "version": "1.0.44",
+  "base": "1.0.43",
+  "type": "full cumulative Lumiswarm extension overlay",
+  "scope": "Expression Studio Workflow Health UI and checks only",
+  "included_entrypoints": [
+    "dist/frontend.js",
+    "dist/backend.js"
+  ],
+  "changed_files": [
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "81f2c29ee2807a84438b9d11f9cca9662f5c339b5f0b2fb0a1a4025f7ccc1d89",
+      "change": "modified"
+    },
+    {
+      "path": "README.md",
+      "sha256": "216942db95b9c9d0e7f8864497ddb309fc4010679de371a9d122a025b9e58c33",
+      "change": "modified"
+    },
+    {
+      "path": "dist/frontend.js",
+      "sha256": "a18a0bd5a3443ad2af385dcdd1abb1ff2b447343853778d68304de78bd5be9cc",
+      "change": "modified"
+    },
+    {
+      "path": "docs/screenshots/workflow-health-mobile.png",
+      "sha256": "51c35e5f916a7ed55bcf8444f181cf9673e3464fac9760600857cf67a479fa70",
+      "change": "added"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "0aa06995207e3310d07b747ae3b9c45c2a8b4a37f923f82a6d3a8c3cabb2f1c4",
+      "change": "modified"
+    },
+    {
+      "path": "package.json",
+      "sha256": "5131bb192032e266b9bdb5516818eb3d473fd4a4ed816fb4ea915b45cdee5313",
+      "change": "modified"
+    },
+    {
+      "path": "scripts/frontend-sources.mjs",
+      "sha256": "747f8edf9c2c5eb68039b2767ba4f019c5ba0913abf5a65a976208d286fea241",
+      "change": "modified"
+    },
+    {
+      "path": "spindle.json",
+      "sha256": "a81badfbe637cea26fb45e452498caeabe6f4c3a36e9b49712f713ad3ae896cf",
+      "change": "modified"
+    },
+    {
+      "path": "src/studio/expressions.ts",
+      "sha256": "4b54cd7a19096ce3804254690a0b89c1ef36aa03c2438c44dfd9745b4028f1f9",
+      "change": "modified"
+    },
+    {
+      "path": "src/studio/styles.ts",
+      "sha256": "5a50b21673768f64075087f90f0cf06aa5efcec7b9413594fc4e4e2716a491cf",
+      "change": "modified"
+    },
+    {
+      "path": "src/studio/workflow-health.ts",
+      "sha256": "b8eeae9e716baf9b88779c5740ca6e1ed8d8fcc8a1142781c32512fff3e99225",
+      "change": "added"
+    },
+    {
+      "path": "tests/expression-upscale-ribbon-contract.mjs",
+      "sha256": "0a1795449de2b5f68473df2d5572feac3e7657e00725f0928cfbefb5bb3331ec",
+      "change": "modified"
+    },
+    {
+      "path": "tests/workflow-health-browser.py",
+      "sha256": "15d534b56f61c4daef9371b537bbf9a76202fce0086372af0048b917a2b3fd0d",
+      "change": "added"
+    },
+    {
+      "path": "tests/workflow-health-contract.mjs",
+      "sha256": "b06af219977572e798746c8045a2845f1f9dac5b0cfc718c809a45e9a5c5264d",
+      "change": "added"
+    }
+  ],
+  "removed_files": [],
+  "validation": {
+    "build": "passed",
+    "typescript": "passed using system TypeScript 5.8.3",
+    "chromium": "shared model ribbons passed at 390px and 1200px",
+    "node_contracts": "passed until pre-existing missing jsdom dependency"
+  }
+}

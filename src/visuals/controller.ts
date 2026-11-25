@@ -1,12 +1,9 @@
 class ChatVisualsController {
   private readonly ctx: FrontendContext
-  private readonly launcher: HTMLElement
   private readonly getCurrentStack: () => StackPresetItem[] | null
-  private readonly openStudio: () => void
   private readonly openLibrary: () => void
   private readonly page: HTMLElement
-  private readonly visualLore: VisualLorebookHostController
-  private activeTab: "character" | "persona" | "lore" = "character"
+  private activeTab: "character" | "persona" = "character"
   private data: ChatVisualsState | null = null
   private selectedPersonaPresetId = ""
   private selectedStackValue = ""
@@ -20,59 +17,63 @@ class ChatVisualsController {
 
   constructor(
     ctx: FrontendContext,
-    launcher: HTMLElement,
+    root: HTMLElement,
     getCurrentStack: () => StackPresetItem[] | null,
-    openStudio: () => void,
     openLibrary: () => void,
   ) {
     this.ctx = ctx
-    this.launcher = launcher
     this.getCurrentStack = getCurrentStack
-    this.openStudio = openStudio
     this.openLibrary = openLibrary
     this.page = element("section", "ss-chat-visuals-page")
-    this.page.hidden = true
     this.page.innerHTML = `
       <div class="ss-chat-visuals-head">
-        <button class="ss-icon-button" data-action="visuals-back" title="Back to Swarm Studio" aria-label="Back">${BACK_ICON}</button>
         <div class="ss-chat-visuals-head-copy">
-          <strong>Visuals</strong>
-          <span class="ss-muted ss-tiny">Character, persona, and activated visual lore.</span>
+          <span class="ss-eyebrow">CHAT ART DIRECTION</span>
+          <h1>Visuals</h1>
+          <p>Manage the active character’s visual identity, looks and persona profiles.</p>
         </div>
-        <button class="ss-icon-button" data-action="visuals-refresh" title="Refresh active chat context" aria-label="Refresh">↻</button>
+        <nav class="ss-chat-visuals-tabs" role="tablist" aria-label="Visual identity sections">
+          <button class="ss-chat-visuals-tab" data-action="visuals-tab" data-visual-tab="character" role="tab">Character</button>
+          <button class="ss-chat-visuals-tab" data-action="visuals-tab" data-visual-tab="persona" role="tab">Persona</button>
+        </nav>
+        <div class="ss-visuals-head-actions">
+          <button class="ss-button" data-action="visuals-open-library">${LIBRARY_ICON} Library</button>
+          <button class="ss-button" data-action="visuals-refresh" title="Refresh active chat context">Refresh</button>
+        </div>
       </div>
-      <nav class="ss-chat-visuals-tabs" role="tablist" aria-label="Visual identity sections">
-        <button class="ss-chat-visuals-tab" data-action="visuals-tab" data-visual-tab="character" role="tab">Character</button>
-        <button class="ss-chat-visuals-tab" data-action="visuals-tab" data-visual-tab="persona" role="tab">Persona</button>
-        <button class="ss-chat-visuals-tab" data-action="visuals-tab" data-visual-tab="lore" role="tab">Lore</button>
-      </nav>
       <div class="ss-chat-visuals-scroll">
         <div class="ss-chat-visuals-context" data-role="visuals-context"></div>
 
-        <div class="ss-chat-visuals-panel" data-visual-panel="persona" hidden>
-        <section class="ss-chat-visuals-section">
-          <div class="ss-chat-visuals-section-head">
-            <div><strong>Persona</strong><span data-role="persona-caption">The active Lumiverse persona can own a reusable image identity.</span></div>
-            <label class="ss-toggle-line"><input type="checkbox" data-role="persona-visual-enabled" checked> Active</label>
-          </div>
-          <div class="ss-chat-visuals-field">
-            <label for="ss-chat-persona-profile">Visual profile</label>
+        <div class="ss-chat-visuals-panel ss-persona-workspace" data-visual-panel="persona" hidden>
+        <aside class="ss-persona-directory" aria-label="Persona profile directory">
+          <div class="ss-persona-directory-head">
+            <div><span class="ss-visual-kicker">PERSONA LIBRARY</span><h2>Profiles</h2><span class="ss-visual-helper" data-role="persona-profile-count"></span></div>
             <div class="ss-chat-visuals-row">
-              <select id="ss-chat-persona-profile" class="ss-select" data-role="persona-visual-preset"></select>
-              <button class="ss-icon-button" data-action="new-persona-visual" title="Create a persona visual profile" aria-label="Create persona visual profile">${PLUS_ICON}</button>
+              <select id="ss-chat-persona-profile" class="ss-select ss-visual-fallback" data-role="persona-visual-preset" aria-label="Visual profile"></select>
               <button class="ss-icon-button ss-button-danger" data-action="delete-persona-visual" title="Delete selected persona visual profile" aria-label="Delete persona visual profile">${TRASH_ICON}</button>
             </div>
           </div>
+          <button class="ss-button ss-persona-create" data-action="new-persona-visual" title="Create a profile from the current identity and bind it" aria-label="Create persona visual profile">${PLUS_ICON} New profile</button>
+          <div class="ss-visual-card-rail ss-visual-profile-rail" data-role="persona-profile-cards" role="group" aria-label="Saved persona profiles"></div>
+        </aside>
+        <section class="ss-chat-visuals-section ss-persona-editor">
+          <div class="ss-chat-visuals-section-head">
+            <div><span class="ss-visual-kicker">PERSONA PROFILE</span><strong data-role="persona-title">Persona</strong><span data-role="persona-caption">The active Lumiverse persona can own a reusable image identity.</span></div>
+            <label class="ss-toggle-line"><input type="checkbox" data-role="persona-visual-enabled" checked> Active</label>
+          </div>
+          <div class="ss-visual-editor-body" data-role="persona-editor-body">
+          <div class="ss-chat-visuals-field ss-visual-writing">
+            <label for="ss-chat-persona-positive">Visual identity</label>
+            <textarea id="ss-chat-persona-positive" class="ss-textarea" data-role="persona-positive" placeholder="Visual traits for the active persona…"></textarea>
+          </div>
+          <details class="ss-visual-disclosure"><summary>Import a Lumiverse preset</summary>
           <div class="ss-chat-visuals-field">
             <label for="ss-chat-lumi-preset">Lumiverse Image Gen persona preset</label>
             <div class="ss-chat-visuals-row">
               <select id="ss-chat-lumi-preset" class="ss-select" data-role="lumiverse-persona-preset"><option value="">Loading persona presets…</option></select>
               <button class="ss-button" data-action="import-persona-prompt">Use preset</button>
             </div>
-          </div>
-          <div class="ss-chat-visuals-field">
-            <label for="ss-chat-persona-positive">Positive identity prompt</label>
-            <textarea id="ss-chat-persona-positive" class="ss-textarea" data-role="persona-positive" placeholder="Visual traits for the active persona…"></textarea>
+          </div></details>
           </div>
           <div class="ss-chat-visuals-actions">
             <span class="ss-chat-visuals-binding-state" data-role="persona-binding-state" data-state="unbound">${BINDING_LINK_ICON}<span>Not bound</span></span>
@@ -81,67 +82,37 @@ class ChatVisualsController {
         </section>
         </div>
 
-        <div class="ss-chat-visuals-panel" data-visual-panel="character">
-        <section class="ss-chat-visuals-section ss-look-editor-section">
-          <div class="ss-chat-visuals-section-head">
-            <div><strong>Character looks</strong><span>Identity stays inherited; each look adds outfit, LoRAs, negatives, references, and optional checkpoint direction.</span></div>
-            <span class="ss-chat-visuals-binding-state" data-role="look-active-state" data-state="bound">Active</span>
-          </div>
-          <div class="ss-chat-visuals-field">
-            <label for="ss-character-look">Canonical look</label>
-            <div class="ss-chat-visuals-row">
-              <select id="ss-character-look" class="ss-select" data-role="character-look"></select>
-              <button class="ss-icon-button" data-action="new-character-look" title="Create look" aria-label="Create character look">${PLUS_ICON}</button>
-              <button class="ss-icon-button ss-button-danger" data-action="delete-character-look" title="Delete look" aria-label="Delete character look">${TRASH_ICON}</button>
-            </div>
-          </div>
-          <div class="ss-chat-visuals-grid">
-            <label class="ss-chat-visuals-field"><span>Look name</span><input class="ss-input" data-role="look-name" placeholder="Formal" /></label>
-            <label class="ss-chat-visuals-field"><span>Aliases / prose cues</span><input class="ss-input" data-role="look-aliases" placeholder="formalwear, gala, suit" /></label>
-          </div>
-          <div class="ss-chat-visuals-grid">
-            <label class="ss-chat-visuals-field"><span>Outfit prompt</span><textarea class="ss-textarea" data-role="look-outfit" placeholder="black tailored suit, white dress shirt…"></textarea></label>
-            <label class="ss-chat-visuals-field"><span>Additional negative</span><textarea class="ss-textarea" data-role="look-negative" placeholder="casual clothes, sleepwear…"></textarea></label>
-          </div>
-          <div class="ss-chat-visuals-grid">
-            <label class="ss-chat-visuals-field"><span>Optional checkpoint override</span><select class="ss-select" data-role="look-checkpoint"><option value="">Inherit character checkpoint</option></select></label>
-            <label class="ss-chat-visuals-field"><span>Optional LoRA stack</span><select class="ss-select" data-role="look-stack"><option value="">No additional LoRAs</option></select></label>
-          </div>
-          <label class="ss-chat-visuals-field"><span>Trigger words</span><input class="ss-input" data-role="look-triggers" placeholder="formal outfit, tailored suit" /></label>
-          <div class="ss-chat-visuals-grid">
-            <label class="ss-chat-visuals-field"><span>Anima Reference Adapter</span><select class="ss-select" data-role="look-anima-reference"><option value="inherit">Inherit character setting</option><option value="on">Use Anima Reference Adapter</option><option value="off">Turn off for this look</option></select></label>
-            <label class="ss-chat-visuals-field"><span>Reference / init image URL</span><input class="ss-input" data-role="look-reference-url" placeholder="Lumiverse image URL" /></label>
-            <label class="ss-chat-visuals-field"><span>Thumbnail URL</span><input class="ss-input" data-role="look-thumbnail-url" placeholder="Defaults to reference" /></label>
-          </div>
-          <label class="ss-chat-visuals-field"><span>Continuity notes</span><textarea class="ss-textarea" data-role="look-notes" placeholder="When this look applies, immutable details, seasonal variations…"></textarea></label>
-          <div class="ss-chat-visuals-actions">
-            <button class="ss-button" data-action="activate-character-look">Set active</button>
-            <button class="ss-button ss-button-primary" data-action="save-character-look">Save &amp; activate look</button>
-          </div>
-        </section>
-
+        <div class="ss-chat-visuals-panel" data-visual-panel="character" data-character-detail="identity">
+        <div class="ss-visuals-character-nav" role="group" aria-label="Character editor section">
+          <button class="ss-button" data-action="visuals-character-section" data-section="identity" aria-pressed="true">Identity &amp; LoRAs</button>
+          <button class="ss-button" data-action="visuals-character-section" data-section="looks" aria-pressed="false">Looks</button>
+        </div>
+        <div class="ss-visuals-character-base">
         <section class="ss-chat-visuals-section">
           <div class="ss-chat-visuals-section-head">
-            <div><strong>Character folder</strong><span data-role="character-folder-caption">Creates the Library folder and keeps these prompts synchronized with it.</span></div>
+            <div><span class="ss-visual-kicker">BASE IDENTITY</span><strong data-role="character-title">Character</strong><span data-role="character-folder-caption">Creates the Library folder and keeps these prompts synchronized with it.</span></div>
             <label class="ss-toggle-line"><input type="checkbox" data-role="character-visual-enabled" checked> Active</label>
           </div>
+          <div class="ss-visual-editor-body" data-role="character-editor-body">
+          <div class="ss-visual-prompt-stack">
+            <div class="ss-chat-visuals-field ss-visual-writing">
+              <label for="ss-chat-character-positive">Appearance</label>
+              <textarea id="ss-chat-character-positive" class="ss-textarea" data-role="character-positive" placeholder="Stable visual identity for the active character…"></textarea>
+            </div>
+            <div class="ss-chat-visuals-field ss-visual-negative">
+              <label for="ss-chat-character-negative">Avoid</label>
+              <textarea id="ss-chat-character-negative" class="ss-textarea" data-role="character-negative" placeholder="Things to consistently avoid…"></textarea>
+            </div>
+          </div>
+          <details class="ss-visual-disclosure"><summary>Import a Lumiverse preset</summary>
           <div class="ss-chat-visuals-field">
             <label for="ss-chat-lumi-character-preset">Lumiverse Image Gen preset</label>
             <div class="ss-chat-visuals-row">
               <select id="ss-chat-lumi-character-preset" class="ss-select" data-role="lumiverse-character-preset"><option value="">Loading character presets…</option></select>
               <button class="ss-button" data-action="import-character-prompt">Use preset</button>
             </div>
-          </div>
-          <div class="ss-chat-visuals-grid">
-            <div class="ss-chat-visuals-field">
-              <label for="ss-chat-character-positive">Positive base</label>
-              <textarea id="ss-chat-character-positive" class="ss-textarea" data-role="character-positive" placeholder="Stable visual identity for the active character…"></textarea>
-            </div>
-            <div class="ss-chat-visuals-field">
-              <label for="ss-chat-character-negative">Negative base</label>
-              <textarea id="ss-chat-character-negative" class="ss-textarea" data-role="character-negative" placeholder="Things to consistently avoid…"></textarea>
-            </div>
-          </div>
+          </div></details>
+          <details class="ss-visual-disclosure"><summary>Model &amp; reference settings</summary>
           <div class="ss-chat-visuals-field">
             <label for="ss-chat-character-checkpoint">Checkpoint</label>
             <select id="ss-chat-character-checkpoint" class="ss-select" data-role="character-checkpoint"><option value="">Use current Studio checkpoint</option></select>
@@ -152,45 +123,96 @@ class ChatVisualsController {
             <div class="ss-anima-actions">
               <a class="ss-anima-setup" href="https://github.com/ArcAnima/ComfyUI-Anima-Ref-Adapter#quick-start" target="_blank" rel="noopener noreferrer">ComfyUI node setup</a>
             </div>
-          </div>
-        </section>
-
-        <section class="ss-chat-visuals-section">
-          <div class="ss-chat-visuals-section-head">
-            <div><strong>Character LoRA stack</strong><span>Saved presets remain named; edited Studio state is stored as a real Custom snapshot.</span></div>
-          </div>
+          </div></details>
+          <details class="ss-visual-disclosure"><summary>Character LoRA stack <span data-role="visual-stack-summary"></span></summary>
+          <p class="ss-visual-helper">Saved presets stay named; edited Studio state is captured as a Custom snapshot.</p>
           <div class="ss-chat-visuals-field">
             <label for="ss-chat-stack">Stack source</label>
             <select id="ss-chat-stack" class="ss-select" data-role="character-stack"></select>
           </div>
           <div class="ss-muted ss-tiny" data-role="character-stack-caption"></div>
+          </details>
+          </div>
           <div class="ss-chat-visuals-actions">
             <span class="ss-chat-visuals-binding-state" data-role="character-binding-state" data-state="unbound">${BINDING_LINK_ICON}<span>Not bound</span></span>
             <button class="ss-button ss-button-primary" data-role="save-character-visuals" data-action="save-character-visuals">Save character visuals</button>
           </div>
         </section>
         </div>
+        <section class="ss-chat-visuals-section ss-look-editor-section">
+          <div class="ss-chat-visuals-section-head">
+            <div><span class="ss-visual-kicker">WARDROBE</span><strong>Character looks</strong><span>Choose an outfit. Base identity stays inherited.</span></div>
+            <span class="ss-chat-visuals-binding-state" data-role="look-active-state" data-state="bound">Active</span>
+          </div>
+          <div class="ss-visual-editor-body" data-role="look-editor-body">
+          <div class="ss-visual-shelf">
+            <div class="ss-visual-shelf-head"><strong>Saved looks</strong><div class="ss-chat-visuals-row">
+              <select id="ss-character-look" class="ss-select ss-visual-fallback" data-role="character-look" aria-label="Canonical look"></select>
+              <button class="ss-icon-button" data-action="new-character-look" title="Create look" aria-label="Create character look">${PLUS_ICON}</button>
+              <button class="ss-icon-button ss-button-danger" data-action="delete-character-look" title="Delete look" aria-label="Delete character look">${TRASH_ICON}</button>
+            </div></div>
+            <div class="ss-visual-card-rail" data-role="character-look-cards" role="group" aria-label="Saved character looks"></div>
+          </div>
+          <div class="ss-visual-look-title"><span class="ss-visual-kicker">EDITING LOOK</span>
+            <label class="ss-chat-visuals-field"><span class="ss-visually-hidden">Look name</span><input class="ss-input" data-role="look-name" placeholder="Formal" /></label>
+          </div>
+          <div class="ss-visual-prompt-stack">
+            <label class="ss-chat-visuals-field ss-visual-writing"><span>Outfit prompt</span><textarea class="ss-textarea" data-role="look-outfit" placeholder="black tailored suit, white dress shirt…"></textarea></label>
+            <label class="ss-chat-visuals-field ss-visual-negative"><span>Additional negative</span><textarea class="ss-textarea" data-role="look-negative" placeholder="casual clothes, sleepwear…"></textarea></label>
+          </div>
+          <details class="ss-visual-disclosure"><summary>Generation overrides</summary>
+          <div class="ss-chat-visuals-grid">
+            <label class="ss-chat-visuals-field"><span>Optional checkpoint override</span><select class="ss-select" data-role="look-checkpoint"><option value="">Inherit character checkpoint</option></select></label>
+            <label class="ss-chat-visuals-field"><span>Optional LoRA stack</span><select class="ss-select" data-role="look-stack"><option value="">No additional LoRAs</option></select></label>
+          </div>
+          </details>
+          <details class="ss-visual-disclosure"><summary>Reference images</summary>
+          <div class="ss-chat-visuals-grid">
+            <label class="ss-chat-visuals-field"><span>Anima Reference Adapter</span><select class="ss-select" data-role="look-anima-reference"><option value="inherit">Inherit character setting</option><option value="on">Use Anima Reference Adapter</option><option value="off">Turn off for this look</option></select></label>
+            <label class="ss-chat-visuals-field"><span>Reference / init image URL</span><input class="ss-input" data-role="look-reference-url" placeholder="Lumiverse image URL" /></label>
+            <label class="ss-chat-visuals-field"><span>Thumbnail URL</span><input class="ss-input" data-role="look-thumbnail-url" placeholder="Defaults to reference" /></label>
+          </div>
+          </details>
+          <details class="ss-visual-disclosure"><summary>Recognition &amp; continuity</summary>
+          <label class="ss-chat-visuals-field"><span>Aliases / prose cues</span><input class="ss-input" data-role="look-aliases" placeholder="formalwear, gala, suit" /></label>
+          <label class="ss-chat-visuals-field"><span>Trigger words</span><input class="ss-input" data-role="look-triggers" placeholder="formal outfit, tailored suit" /></label>
+          <label class="ss-chat-visuals-field"><span>Continuity notes</span><textarea class="ss-textarea" data-role="look-notes" placeholder="When this look applies, immutable details, seasonal variations…"></textarea></label>
+          </details>
+          </div>
+          <div class="ss-chat-visuals-actions">
+            <button class="ss-button" data-action="activate-character-look">Set active</button>
+            <button class="ss-button ss-button-primary" data-action="save-character-look">Save &amp; activate look</button>
+          </div>
+        </section>
 
-        <div class="ss-chat-visuals-panel" data-visual-panel="lore" hidden>
-          <div class="ss-visual-lorebook-host" data-role="visual-lore-root"></div>
         </div>
 
-        <div class="ss-chat-visuals-status" data-role="chat-visuals-status">Open a chat to configure its active character.</div>
       </div>
-      <div class="ss-chat-visuals-footer">
-        <button class="ss-button ss-button-primary" data-action="visuals-open-studio">Open Studio</button>
-        <button class="ss-button" data-action="visuals-open-library">${LIBRARY_ICON} Library</button>
-      </div>
+      <div class="ss-chat-visuals-status" data-role="chat-visuals-status" role="status" aria-live="polite">Open a chat to configure its active character.</div>
     `
-    launcher.appendChild(this.page)
-    this.visualLore = new VisualLorebookHostController(ctx, this.get<HTMLElement>("visual-lore-root"))
+    root.appendChild(this.page)
     this.setVisualTab("character")
     this.page.addEventListener("click", (event) => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-action]")
       const action = button?.dataset.action || ""
-      if (action === "visuals-back") this.hide()
       if (action === "visuals-refresh") this.refresh()
-      if (action === "visuals-tab") this.setVisualTab((button?.dataset.visualTab || "character") as "character" | "persona" | "lore")
+      if (action === "visuals-character-section") {
+        const section = button?.dataset.section === "looks" ? "looks" : "identity"
+        this.page.querySelector<HTMLElement>('[data-visual-panel="character"]')!.dataset.characterDetail = section
+        for (const item of this.page.querySelectorAll<HTMLElement>('[data-action="visuals-character-section"]')) item.setAttribute("aria-pressed", String(item.dataset.section === section))
+        this.page.querySelector<HTMLElement>(".ss-chat-visuals-scroll")!.scrollTop = 0
+      }
+      if (action === "visuals-tab") this.setVisualTab((button?.dataset.visualTab || "character") as "character" | "persona")
+      if (action === "visual-select-look" || action === "visual-select-profile") {
+        const select = this.get<HTMLSelectElement>(action === "visual-select-look" ? "character-look" : "persona-visual-preset")
+        const id = button?.dataset.id || ""
+        if (id !== select.value && [...select.options].some(option => option.value === id)) {
+          select.value = id
+          select.dispatchEvent(new Event("change", { bubbles: true }))
+          const card = this.page.querySelector<HTMLButtonElement>(`[data-action="${action}"][aria-pressed="true"]`)
+          card?.focus({ preventScroll: true })
+        }
+      }
       if (action === "new-persona-visual") this.createPersonaVisual()
       if (action === "delete-persona-visual") this.deletePersonaVisual()
       if (action === "import-persona-prompt") this.importPersonaPrompt()
@@ -201,7 +223,6 @@ class ChatVisualsController {
       if (action === "delete-character-look") this.deleteCharacterLook()
       if (action === "activate-character-look") this.activateCharacterLook()
       if (action === "save-character-look") this.saveCharacterLook()
-      if (action === "visuals-open-studio") this.openStudio()
       if (action === "visuals-open-library") this.openLibrary()
     })
     this.page.addEventListener("change", (event) => {
@@ -230,27 +251,13 @@ class ChatVisualsController {
     this.page.addEventListener("input", () => this.refreshBindingIndicators())
   }
 
-  show(): void {
-    this.launcher.dataset.page = "visuals"
-    this.page.hidden = false
-    this.refresh()
-  }
-
-  hide(): void {
-    this.lumiversePresetLoadToken++
-    this.launcher.dataset.page = "home"
-    this.page.hidden = true
-  }
-
   refresh(): void {
     this.lumiversePresetLoadToken++
     this.setStatus("Reading the active chat, persona, Library folder, and Studio stack…")
     this.send("get_chat_visuals", { currentStack: this.getCurrentStack() })
-    if (this.activeTab === "lore") this.visualLore.activate(true)
   }
 
   onMessage(payload: any): void {
-    this.visualLore.onMessage(payload)
     if (payload?.type === "chat_visuals_result") {
       this.data = payload.data as ChatVisualsState
       this.selectedPersonaPresetId = this.data.personaBinding?.presetId
@@ -287,11 +294,11 @@ class ChatVisualsController {
   }
 
   destroy(): void {
-    this.visualLore.destroy()
+    this.lumiversePresetLoadToken++
     this.page.remove()
   }
 
-  private setVisualTab(tab: "character" | "persona" | "lore"): void {
+  private setVisualTab(tab: "character" | "persona"): void {
     this.activeTab = tab
     for (const button of this.page.querySelectorAll<HTMLButtonElement>("[data-visual-tab]")) {
       const active = button.dataset.visualTab === tab
@@ -301,8 +308,6 @@ class ChatVisualsController {
     for (const panel of this.page.querySelectorAll<HTMLElement>("[data-visual-panel]")) {
       panel.hidden = panel.dataset.visualPanel !== tab
     }
-    this.get<HTMLElement>("chat-visuals-status").hidden = tab === "lore"
-    if (tab === "lore") this.visualLore.activate()
   }
 
   private get<T extends HTMLElement>(role: string): T {
@@ -356,6 +361,7 @@ class ChatVisualsController {
       ? `Binding target: ${this.data.activePersona.name}`
       : "Select a Lumiverse persona to bind a visual identity."
 
+    this.get<HTMLElement>("character-title").textContent = this.data.activeChat?.characterName || "Character"
     this.renderPersonaEditor()
     this.renderLumiversePersonaPresets()
 
@@ -433,6 +439,61 @@ class ChatVisualsController {
     this.refreshBindingIndicators()
   }
 
+  private renderVisualCards(role: string, entries: { id: string; name: string; description: string; image?: string }[], selected: string, active: string, action: string): void {
+    const rail = this.get<HTMLElement>(role)
+    const scrollLeft = rail.scrollLeft
+    const scrollTop = rail.scrollTop
+    rail.replaceChildren()
+    for (const entry of entries) {
+      const button = element("button", "ss-visual-card")
+      button.type = "button"
+      button.dataset.action = action
+      button.dataset.id = entry.id
+      button.setAttribute("aria-pressed", String(entry.id === selected))
+      const art = element("span", "ss-visual-card-art")
+      art.appendChild(element("span", "ss-visual-card-initial", entry.name.slice(0, 1).toUpperCase() || "?"))
+      if (entry.image) {
+        // Only resolve owned local image routes or explicitly stored HTTP(S) previews.
+        try {
+          const url = new URL(entry.image, document.baseURI)
+          if (["http:", "https:"].includes(url.protocol)) {
+            const img = element("img")
+            img.alt = ""
+            img.loading = "lazy"
+            img.referrerPolicy = "no-referrer"
+            img.addEventListener("error", () => img.remove(), { once: true })
+            img.src = url.href
+            art.appendChild(img)
+          }
+        } catch { /* Keep the typographic placeholder. */ }
+      }
+      const body = element("span", "ss-visual-card-body")
+      body.append(element("strong", "", entry.name), element("span", "ss-visual-card-description", entry.description || "No prompt yet"))
+      button.append(art, body)
+      if (entry.id === active) button.appendChild(element("span", "ss-visual-card-active", "Active"))
+      rail.appendChild(button)
+    }
+    if (!entries.length) rail.appendChild(element("p", "ss-visual-helper", "Nothing saved yet. Use + to create one."))
+    rail.scrollLeft = scrollLeft
+    rail.scrollTop = scrollTop
+    const current = rail.querySelector<HTMLElement>('[aria-pressed="true"]')
+    if (current && rail.clientWidth) {
+      const bounds = rail.getBoundingClientRect(), card = current.getBoundingClientRect()
+      if (card.left < bounds.left) rail.scrollLeft -= bounds.left - card.left + 2
+      else if (card.right > bounds.right) rail.scrollLeft += card.right - bounds.right + 2
+      if (card.top < bounds.top) rail.scrollTop -= bounds.top - card.top + 2
+      else if (card.bottom > bounds.bottom) rail.scrollTop += card.bottom - bounds.bottom + 2
+    }
+  }
+
+  private renderLookCards(): void {
+    const binding = this.data?.characterFolder?.binding
+    const looks = binding?.looks || []
+    const entries = looks.map(look => ({ id: look.id, name: look.name, description: look.outfitPrompt || "Inherits base identity", image: look.thumbnailUrl || (look.thumbnailImageId ? `/api/v1/images/${encodeURIComponent(look.thumbnailImageId)}` : "") || look.referenceImageUrl || (look.referenceImageId ? `/api/v1/images/${encodeURIComponent(look.referenceImageId)}` : "") }))
+    if (!entries.length && this.selectedLookId === "default") entries.push({ id: "default", name: "Default", description: "Inherits base identity", image: "" })
+    this.renderVisualCards("character-look-cards", entries, this.selectedLookId, binding?.activeLookId || "", "visual-select-look")
+  }
+
   private currentLook(): CharacterVisualLook | null {
     return this.data?.characterFolder?.binding?.looks?.find((look) => look.id === this.selectedLookId) || null
   }
@@ -506,6 +567,7 @@ class ChatVisualsController {
     activeState.textContent = active ? "Active" : "Saved"
     this.page.querySelector<HTMLButtonElement>('[data-action="delete-character-look"]')!.disabled = this.selectedLookId === "default" || !look
     this.page.querySelector<HTMLButtonElement>('[data-action="activate-character-look"]')!.disabled = active || !look
+    this.renderLookCards()
   }
 
   private newCharacterLook(): void {
@@ -518,6 +580,11 @@ class ChatVisualsController {
     this.get<HTMLSelectElement>("look-checkpoint").value = ""
     this.get<HTMLSelectElement>("look-anima-reference").value = "inherit"
     this.get<HTMLSelectElement>("look-stack").value = ""
+    this.get<HTMLElement>("look-active-state").dataset.state = "unbound"
+    this.get<HTMLElement>("look-active-state").textContent = "New look"
+    this.page.querySelector<HTMLButtonElement>('[data-action="delete-character-look"]')!.disabled = true
+    this.page.querySelector<HTMLButtonElement>('[data-action="activate-character-look"]')!.disabled = true
+    this.renderLookCards()
     this.get<HTMLInputElement>("look-name").focus()
   }
 
@@ -574,9 +641,14 @@ class ChatVisualsController {
   private renderPersonaEditor(): void {
     if (!this.data) return
     const preset = this.data.personaPresets.find((candidate) => candidate.id === this.selectedPersonaPresetId)
+    this.get<HTMLElement>("persona-title").textContent = preset?.name || "New persona identity"
+    const count = this.data.personaPresets.length
+    this.get<HTMLElement>("persona-profile-count").textContent = `${count} saved ${count === 1 ? "profile" : "profiles"}`
+    this.get<HTMLElement>("persona-profile-cards").closest(".ss-persona-directory")!.querySelector<HTMLButtonElement>('[data-action="delete-persona-visual"]')!.disabled = !preset
     this.get<HTMLTextAreaElement>("persona-positive").value = preset?.positivePrompt || ""
     this.importedSourcePresetId = preset?.sourcePresetId || ""
     this.renderLumiversePersonaPresets()
+    this.renderVisualCards("persona-profile-cards", this.data.personaPresets.map(item => ({ id: item.id, name: item.name, description: item.positivePrompt })), this.selectedPersonaPresetId, this.data.personaBinding?.enabled !== false ? this.data.personaBinding?.presetId || "" : "", "visual-select-profile")
   }
 
   private renderLumiversePersonaPresets(): void {
@@ -952,6 +1024,8 @@ class ChatVisualsController {
     const folder = this.data.characterFolder
     const binding = folder?.binding
     const requestedStack = this.selectedCharacterStackBinding()
+    const stack = this.get<HTMLSelectElement>("character-stack")
+    this.get<HTMLElement>("visual-stack-summary").textContent = stack.selectedOptions[0]?.textContent || ""
     const stackMatches = Boolean(binding) && (
       requestedStack.stackPresetId
         ? requestedStack.stackPresetId === binding!.stackPresetId

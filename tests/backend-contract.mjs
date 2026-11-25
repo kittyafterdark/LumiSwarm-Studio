@@ -2,6 +2,8 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 
 const source = await readFile(new URL("../src/backend.ts", import.meta.url), "utf8")
+const manifest = JSON.parse(await readFile(new URL("../spindle.json", import.meta.url), "utf8"))
+assert.ok(manifest.permissions.includes("world_books"), "Lore requires the declared world_books permission")
 assert.match(source, /case "start_lora_download"/)
 assert.match(source, /case "get_lora_download_status"/)
 assert.match(source, /case "cancel_lora_download"/)
@@ -34,12 +36,14 @@ const macroDefinitions = new Map()
 const macroValues = new Map()
 const eventHandlers = new Map()
 let interceptorHandler = null
+let castRenderProcessor = null
 let visualMacroHandler = null
 let completionToast = ""
 let downloadedSwarmUrl = ""
 const relayedLoraRequests = []
 let holdLoraDownload = false
 let taggedGenerationCount = 0
+let latestStudioMetadata = {}
 const taggedGenerationInputs = []
 const legacyGenerationInputs = []
 const quietParserCalls = []
@@ -68,6 +72,8 @@ const visualLoreEntry = {
   id: "lore-entry-1",
   world_book_id: "world-book-1",
   comment: "Victoria Manor",
+  folder: "Architecture",
+  tags: ["location", "historic"],
   key: ["Victoria Manor", "the manor"],
   extensions: {},
 }
@@ -128,6 +134,10 @@ globalThis.spindle = {
   registerInterceptor(handler) {
     interceptorHandler = handler
   },
+  registerMessageContentProcessor(handler, priority) {
+    assert.equal(priority,80)
+    castRenderProcessor = handler
+  },
   on(eventName, handler) {
     eventHandlers.set(eventName, handler)
   },
@@ -181,6 +191,7 @@ globalThis.spindle = {
       return [{ id: "base.safetensors", label: "Base" }]
     },
     async generate(input) {
+      latestStudioMetadata = JSON.parse(input.parameters.rawRequestOverride).extra_metadata
       legacyGenerationInputs.push(input)
       assert.equal(Object.prototype.hasOwnProperty.call(input, "signal"), false)
       assert.equal(input.owner_chat_id, "chat-1")
@@ -194,6 +205,7 @@ globalThis.spindle = {
       }
     },
     async *generateStream(input) {
+      latestStudioMetadata = JSON.parse(input.parameters.rawRequestOverride).extra_metadata
       assert.equal(input.owner_chat_id, "chat-1")
       assert.equal(input.owner_character_id, "char-1")
       assert.equal(input.signal instanceof AbortSignal, true)
@@ -211,7 +223,7 @@ globalThis.spindle = {
         taggedGenerationInputs.push(input)
         taggedImageId = `image-tag-${taggedGenerationCount}`
         if (input.prompt.includes("train platform")) {
-          assert.match(input.prompt, /^1boy, black hair, red eyes, <preset:Cinematic>, train platform, waving/)
+          assert.match(input.prompt, /^(?:1boy, |\(1boy:1\.5\)\n)black hair, red eyes, <preset:Cinematic>, train platform, waving/)
         } else {
           assert.match(input.prompt, /^1boy, black hair, red eyes, <preset:Cinematic>, outside, city street/)
         }
@@ -256,7 +268,9 @@ globalThis.spindle = {
     },
   },
   generate: {
-    async quiet(input) {
+    async quiet(input, userId) {
+      assert.equal(userId, "user-1", "quiet positional scope must match the authenticated caller")
+      assert.equal(input.userId, "user-1", "operator-scoped quiet generation requires userId on the request")
       quietParserCalls.push(structuredClone(input))
       return {
         content: `<swarm-image
@@ -284,7 +298,7 @@ train⠀platform,⠀waving, <preset:composition></swarm-image>`,
     async list(options, legacyUserId) {
       assert.equal(options.userId, "user-1")
       assert.equal(legacyUserId, undefined, "world_books.list() requires userId inside its options object")
-      return { data: [{ id: "world-book-1", name: "Locations" }], total: 1 }
+      return { data: [{ id: "world-book-1", name: "Locations", folder: "Worlds" }], total: 1 }
     },
     entries: {
       async list(worldBookId, options, legacyUserId) {
@@ -678,6 +692,7 @@ train⠀platform,⠀waving, <preset:composition></swarm-image>`,
                 seed: 987654321,
               },
               sui_extra_data: {
+                ...latestStudioMetadata,
                 prep_time: "0.22 sec",
                 generation_time: "1.78 sec",
                 presets_used: ["Cinematic"],
@@ -722,6 +737,27 @@ train⠀platform,⠀waving, <preset:composition></swarm-image>`,
 }
 
 const backendModule = await import("../dist/backend.js")
+// Header geometry must be read from the actual byte slice, not the recipe or
+// an unrelated prefix of the underlying buffer. Verify real PNG/WebP fixtures.
+{
+  const read=async name=>new Uint8Array(await readFile(new URL('./fixtures/'+name,import.meta.url)))
+  const png=await read('cast-portrait.png'), webp=await read('studio-avatar.webp')
+  const {encodedImageDimensions}=backendModule
+  assert.deepEqual(encodedImageDimensions(png,'image/png'),{width:255,height:342})
+  assert.deepEqual(encodedImageDimensions(webp,'image/webp'),{width:1079,height:809})
+  const wrapped=new Uint8Array(png.length+7);wrapped.set(png,7)
+  assert.deepEqual(encodedImageDimensions(wrapped.subarray(7),'image/png'),{width:255,height:342})
+  // Minimal JPEG marker sequence: SOI, APP0, SOF0, EOI.
+  const jpg=Uint8Array.of(255,216,255,224,0,4,0,0,255,192,0,11,8,1,86,0,255,1,1,17,0,255,217)
+  assert.deepEqual(encodedImageDimensions(jpg,'image/jpeg'),{width:255,height:342})
+  assert.equal(encodedImageDimensions(png.subarray(0,20),'image/png'),null)
+  assert.equal(encodedImageDimensions(webp.subarray(0,25),'image/webp'),null)
+  assert.equal(encodedImageDimensions(jpg.subarray(0,16),'image/jpeg'),null)
+  assert.equal(encodedImageDimensions(png,'image/jpeg'),null)
+  const over=png.slice();new DataView(over.buffer).setUint32(16,4097)
+  assert.equal(encodedImageDimensions(over,'image/png').width,4097)
+}
+
 assert.equal(typeof frontendHandler, "function")
 assert.equal(macroDefinitions.get("last_genned").handler, "")
 assert.equal(macroDefinitions.has("swarm_image_protocol"), true)
@@ -752,14 +788,16 @@ const animaCollisionPrompt = backendModule.serializeScenePlan(
   "anima",
   ["1boy, short black hair, brown eyes", "1boy, blond hair, blue eyes"],
 )
-assert.match(animaCollisionPrompt, /^masterpiece, best quality, safe\n2 men/m)
-assert.match(animaCollisionPrompt, /The man on the left: short black hair, brown eyes; brown eyes, black shirt, eating rice/)
-assert.match(animaCollisionPrompt, /The man on the right: blond hair, blue eyes; blue eyes, gray cable-knit sweater, holding chopsticks/)
+assert.match(animaCollisionPrompt, /^masterpiece, best quality, safe\n2boys/m)
+assert.match(animaCollisionPrompt, /Left: man, short black hair, brown eyes; brown eyes, black shirt, eating rice/)
+assert.match(animaCollisionPrompt, /Right: man, blond hair, blue eyes; blue eyes, gray cable-knit sweater, holding chopsticks/)
 assert.equal((animaCollisionPrompt.match(/eating together at the same low table/g) || []).length, 1)
 assert.doesNotMatch(animaCollisionPrompt, /\bsolo\b|character 1|character 2/)
-assert.match(animaCollisionPrompt, /<region:0,0,0\.58,1,0\.85> The man on the left:/)
-assert.match(animaCollisionPrompt, /<region:0\.42,0,0\.58,1,0\.85> The man on the right:/)
-assert.match(animaCollisionPrompt, /<region:background> small Japanese restaurant, dishes and rice bowls/)
+assert.doesNotMatch(animaCollisionPrompt, /<region:/)
+const legacyRegional = backendModule.serializeScenePlan(collisionPlan,"anima-regional",["short black hair","blond hair"])
+assert.match(legacyRegional, /<region:0,0,0\.58,1,0\.85> left man:/)
+assert.match(legacyRegional, /<region:0\.42,0,0\.58,1,0\.85> right man:/)
+assert.match(legacyRegional, /<region:background> small Japanese restaurant/)
 const illustriousCollisionPrompt = backendModule.serializeScenePlan(
   collisionPlan,
   "illustrious",
@@ -797,7 +835,7 @@ const povPrompt = backendModule.serializeScenePlan(
   ["1girl, silver hair, green eyes"],
   true,
 )
-assert.match(povPrompt, /\n1 person\n/)
+assert.match(povPrompt, /\n1girl\n/)
 assert.match(povPrompt, /looking at viewer, reaching toward viewer/)
 assert.doesNotMatch(povPrompt, /2 people|looking at the user|toward the persona/)
 assert.doesNotMatch(povPrompt, /<region:/)
@@ -824,6 +862,7 @@ assert.deepEqual(bootstrap.data.stackPresets, [])
 assert.equal(bootstrap.data.outputFolders.length, 1)
 assert.equal(bootstrap.data.outputFolders[0].id, "__swarm_studio_favorites__")
 assert.equal(bootstrap.data.tagAutomation.stripUserOnlyLoraStack, false)
+assert.equal(bootstrap.data.tagAutomation.historyImageMarkers, "keep")
 assert.equal(bootstrap.data.tagAutomation.autoPrintCharacterPositive, false)
 assert.equal(bootstrap.data.tagAutomation.requestMode, "inline")
 assert.equal(bootstrap.data.tagAutomation.parserConnectionId, "")
@@ -993,7 +1032,7 @@ assert.equal(generated.data.record.timing.generation, "1.78 sec")
 assert.equal(generated.data.record.timing.source, "swarm")
 assert.equal(generated.data.record.swarmPath, "2026-07-19/image-1.png")
 assert.equal(generated.data.record.swarmPathVerified, true)
-assert.match(source, /const matched = parsed\.find[\s\S]*?if \(!matched\) return fallback/)
+assert.match(source, /const matches = parsed\.filter[\s\S]*?matches\.length !== 1/)
 assert.equal(generated.data.record.initImageId, "image-source")
 assert.equal(generated.data.record.initImageLabel, "source.png")
 assert.equal(generated.data.record.parameters.seed, 987654321)
@@ -1076,7 +1115,7 @@ try {
 }
 assert.equal(legacyGenerationInputs.length, 1)
 assert.equal(legacyGenerated.data.result.imageId, "image-legacy")
-assert.match(source, /typeof streamFactory !== "function"[\s\S]*?imageGen\.generate\(input\)[\s\S]*?const generationInput = \{/)
+assert.match(source, /typeof streamFactory !== "function"[\s\S]*?imageGen\.generate\(providerInput\)[\s\S]*?const generationInput = \{/)
 assert.doesNotMatch(source, /imageGen\.generate\(generationInput\)/)
 
 const tagConfig = await request("set_tag_automation", {
@@ -1196,19 +1235,40 @@ assert.match(cleanedCompleted.messages[1].content, /Scene text\.\n\[Generated il
 assert.doesNotMatch(cleanedCompleted.messages[1].content, /<figure|<img|data-swarm-studio/)
 assert.equal(cleanedCompleted.messages[2].content, "[Generated illustration: Swarm output]")
 
-const boundedVisualMemory = await interceptorHandler(
-  Array.from({ length: 8 }, (_, index) => ({
-    role: "assistant",
-    content: completedFigure.replace("serves tea", `serves tea ${index + 1}`),
-  })),
-  { chatId: "chat-1" },
-)
-const retainedVisualMarkers = boundedVisualMemory.messages
-  .slice(1)
-  .reduce((count, message) => count + (message.content.match(/\[Generated illustration:/g) || []).length, 0)
-assert.equal(retainedVisualMarkers, 6)
-assert.equal(boundedVisualMemory.messages.length, 7)
-assert.match(boundedVisualMemory.messages[1].content, /serves tea 3/)
+const visualHistory = Array.from({ length: 12 }, (_, index) => ({
+  role: "assistant", __isChatHistory: true,
+  content: `Scene ${index + 1}.\n${completedFigure.replace("serves tea", `serves tea ${index + 1}`)}\nAfter the image.`,
+}))
+const visualHistorySnapshot = structuredClone(visualHistory)
+const historyExample = { role: "system", content: "Do not emit [Generated illustration: example]." }
+const readHistory = async (history) => {
+  const result = await interceptorHandler([historyExample, ...history], { chatId: "chat-1" })
+  const projected = Array.isArray(result) ? result : result.messages
+  assert.equal(projected.find(message => message.content === historyExample.content)?.content, historyExample.content)
+  return projected.filter(message => message.role === "assistant")
+}
+const keepPrefix = await readHistory(visualHistory.slice(0, 8))
+const keepFull = await readHistory(visualHistory)
+assert.equal(keepFull.length, 12)
+assert.ok(keepFull.every(message => message.content.includes("[Generated illustration:")))
+assert.deepEqual(keepFull.slice(0, keepPrefix.length), keepPrefix, "Appended illustrations must not evict older captions")
+const stripConfig = await request("set_tag_automation", { config: { ...tagConfig.data, historyImageMarkers: "strip" } })
+assert.equal(stripConfig.data.historyImageMarkers, "strip")
+const stripPrefix = await readHistory(visualHistory.slice(0, 8))
+const stripFull = await readHistory(visualHistory)
+assert.equal(stripFull.length, 12)
+assert.deepEqual(stripFull.slice(0, stripPrefix.length), stripPrefix, "Strip policy must also be prefix stable")
+assert.equal(stripFull[0].content, "Scene 1.\n\nAfter the image.")
+assert.ok(stripFull.every(message => !/Generated illustration|data-swarm-studio|<img/.test(message.content)))
+const pending = { role: "assistant", content: 'Before.\n<swarm-image request="generate" slot="tea-gambit" alt="Tea">tea</swarm-image>\nAfter.' }
+const finished = { ...pending, content: `Before.\n${completedFigure}\nAfter.` }
+assert.deepEqual(await readHistory([pending]), await readHistory([finished]), "Strip mode must not change when a request becomes a generated figure")
+assert.deepEqual(await readHistory([{ role: "assistant", content: completedFigure }]), [], "Image-only assistant history is omitted consistently")
+assert.deepEqual(await readHistory([{ role: "assistant", content: "Before.\n[Illustration requested]\n[Embedded generated image omitted]\nAfter." }]), [{ role: "assistant", content: "Before.\n\nAfter." }])
+assert.deepEqual(visualHistory, visualHistorySnapshot, "Never mutate canonical inputs")
+const invalidHistoryPolicy = await request("set_tag_automation", { config: { ...tagConfig.data, historyImageMarkers: "rolling" } })
+assert.equal(invalidHistoryPolicy.data.historyImageMarkers, "keep")
+await request("set_tag_automation", { config: tagConfig.data })
 
 const originalTaggedContent = taggedMessage.content
 const tagMatch = originalTaggedContent.match(/<swarm-image\b([^>]*)>([\s\S]*?)<\/swarm-image>/i)
@@ -1333,6 +1393,36 @@ assert.equal(findNode("KSampler")[1].inputs.denoise, 1)
 
 await saveAdapterLook("inherit", lookReference)
 assert.deepEqual((await composePocket("Look reference")).parameters.referenceImages, [{ data: "bG9vaw==", mimeType: "image/png" }])
+// A native upload is visible to the user but not tagged to this extension.
+// Thumbnail and public-result URL locators must never go through the proxy.
+{
+  const get = spindle.images.get, read = spindle.images.readBinary, cors = spindle.cors
+  const original = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64"))
+  const reads = [], lookups = []
+  try {
+    spindle.images.get = async (id, options) => {
+      if (!['native-upload','hidden-reference','thumb-only'].includes(id)) return get(id,options)
+      assert.equal(options.userId, 'user-1'); assert.equal(options.onlyOwned,false)
+      lookups.push([id,options.specificity])
+      if (id === 'hidden-reference' || id === 'thumb-only' && options.specificity === 'full') return null
+      return {id, mime_type:'image/png', url:`/api/v1/images/${id}?size=sm`, owner_extension_identifier:null}
+    }
+    spindle.images.readBinary = async (id,userId) => {assert.equal(userId,'user-1');assert.notEqual(id,'hidden-reference');reads.push(id);return original}
+    spindle.cors = async (url,options) => {assert.doesNotMatch(url,/\/api\/v1\/(?:images|image-gen\/results)\//);return cors(url,options)}
+    for (const url of ['/api/v1/images/native-upload?size=sm','https://lumi.example/api/v1/images/native-upload?size=lg','/api/v1/image-gen/results/native-upload','/api/v1/images/thumb-only?size=sm']) {
+      await saveAdapterLook('on',url)
+      assert.deepEqual((await composePocket('Scoped reference')).parameters.referenceImages,[{mimeType:'image/png',data:Buffer.from(original).toString('base64')}])
+    }
+    assert.deepEqual(reads,['native-upload','native-upload','native-upload','thumb-only'])
+    assert.ok(lookups.some(([id,size])=>id==='thumb-only'&&size==='sm'))
+    await saveAdapterLook('on','/api/v1/images/hidden-reference?size=sm')
+    await assert.rejects(()=>composePocket('Inaccessible reference'),/accessible Anima reference/)
+    assert.equal(reads.length,4)
+    // External URL conditioning remains supported by the existing proxy.
+    await saveAdapterLook('on','https://image.civitai.com/example.jpg')
+    assert.deepEqual((await composePocket('External reference')).parameters.referenceImages,[{mimeType:'image/jpeg',data:'VEhVTUJOQUlM'}])
+  } finally { spindle.images.get=get;spindle.images.readBinary=read;spindle.cors=cors;await saveAdapterLook('inherit',lookReference) }
+}
 await saveAdapterLook("off", lookReference)
 const ordinaryLook = await composePocket("Standard look")
 assert.equal(ordinaryLook.parameters.rawRequestOverride?.includes("AnimaRefAdapter") ?? false, false)
@@ -1386,7 +1476,7 @@ assert.deepEqual(formalLook.aliases, ["evening wear", "black tie"])
 assert.equal(formalLook.stackSnapshot[0].weight, 0.72)
 assert.match(savedFormalLook.data.badge, /2 looks/)
 const previousPocketImageGet=spindle.images.get
-spindle.images.get=async(id,options)=>{if(id==="formal-reference"){assert.equal(options.userId,"user-1");assert.equal(options.onlyOwned,true);return {url:"data:image/png;base64,aGVsbG8="}}return previousPocketImageGet(id,options)}
+spindle.images.get=async(id,options)=>{if(id==="formal-reference"){assert.equal(options.userId,"user-1");assert.equal(options.onlyOwned,false);assert.equal(options.specificity,"full");return {url:"data:image/png;base64,aGVsbG8="}}return previousPocketImageGet(id,options)}
 let resolvedLookPocket
 try{resolvedLookPocket=await composePocket("A fresh evening portrait")}finally{spindle.images.get=previousPocketImageGet}
 assert.deepEqual(resolvedLookPocket.parameters.referenceImages,[{data:"aGVsbG8=",mimeType:"image/png"}])
@@ -1777,6 +1867,7 @@ taggedMessages.push({
     character="active"
     persona="none"
     alt="Train platform"
+    count="1boy"
   >a⠀character⠀waving at a train platform</swarm-image>After.`,
   metadata: {},
 })
@@ -1801,6 +1892,7 @@ assert.doesNotMatch(quietParserCalls[0].messages[1].content, /\u2800/, "Parser m
 assert.match(taggedMessages.at(-1).content, /^Before\.<figure/)
 assert.match(taggedMessages.at(-1).content, /<\/figure>After\.$/)
 assert.doesNotMatch(taggedGenerationInputs.at(-1).prompt, /\u2800/, "Parser output Braille blanks must not reach SwarmUI")
+assert.match(taggedGenerationInputs.at(-1).prompt, /\(1boy:1\.5\)/, "Parser must preserve the optional authored count through provider dispatch")
 // A late lifecycle replay with a *different* generationId must not pay Gem
 // to parse the old request again after the source message was replaced.
 const parserReplayCount = quietParserCalls.length
@@ -1815,17 +1907,58 @@ eventHandlers.get("GENERATION_ENDED")({
     character="active"
     persona="none"
     alt="Train platform"
+    count="1boy"
   >a⠀character⠀waving at a train platform</swarm-image>After.`,
 }, "user-1")
 await new Promise(resolve=>setTimeout(resolve,15))
 assert.equal(quietParserCalls.length, parserReplayCount, "Replayed GENERATION_ENDED must not invoke the parser again")
 
+assert.equal((await request("get_visual_lore")).data.available, false, "Permission denial must remain explicit")
 permissions.add("world_books")
 const visualLore = await request("get_visual_lore")
 assert.equal(visualLore.data.available, true)
 assert.equal(visualLore.data.bookId, "world-book-1")
 assert.equal(visualLore.data.entries[0].id, "lore-entry-1")
 assert.equal(visualLore.data.entries[0].activated, true)
+assert.equal(visualLore.data.entries[0].hasVisualIdentity, false)
+assert.equal(visualLore.data.books[0].folder, "Worlds")
+assert.equal(visualLore.data.entries[0].folder, "Architecture")
+assert.deepEqual(visualLore.data.entries[0].tags, ["location", "historic"])
+assert.equal(visualLore.data.selected.folder, "Architecture")
+assert.deepEqual(visualLore.data.selected.tags, ["location", "historic"])
+visualLoreEntry.extensions.unrelated_extension = { retained: true }
+const loreSaved = await request("save_visual_lore", { bookId: "world-book-1", entryId: "lore-entry-1", identity: {
+  enabled: false, entityType: "location", aliases: ["winter estate"], positivePrompt: "stone arches", negativePrompt: "neon", referenceImageId: "reference-1", stackPresetId: "old-stack", stackSnapshot: [{name:"legacy.safetensors",weight:0.7}], recipe: {steps:24}, notes:"keep the arches", modelPrompts: {moss:{positivePrompt:"A stone manor",negativePrompt:""}, auto:{positivePrompt:"ignored"}, krea:{positivePrompt:"",negativePrompt:""}}
+} })
+assert.equal(loreSaved.data.entries[0].activated, true)
+assert.equal(loreSaved.data.entries[0].visualEnabled, false)
+assert.equal(loreSaved.data.entries[0].entityType, "location")
+assert.deepEqual(loreSaved.data.entries[0].aliases, ["winter estate"])
+assert.equal(loreSaved.data.entries[0].referenceImageId, "reference-1")
+assert.equal(loreSaved.data.selected.identity.stackSnapshot[0].name, "legacy.safetensors")
+assert.deepEqual(loreSaved.data.selected.identity.recipe, {steps:24})
+assert.deepEqual(loreSaved.data.selected.identity.modelPrompts, {moss:{positivePrompt:"A stone manor",negativePrompt:""}})
+assert.deepEqual(visualLoreEntry.extensions.unrelated_extension, {retained:true})
+assert.equal((await request("get_visual_lore", {bookId:"missing",entryId:"missing"})).data.entryId, "lore-entry-1")
+// Exercise a real paginated provider shape, including a selected entry beyond 200.
+{
+  const listBooks = spindle.world_books.list
+  const listEntries = spindle.world_books.entries.list
+  const books = [{id:"world-book-1",name:"Locations",folder:"Worlds"},...Array.from({length:204},(_,i)=>({id:`book-extra-${i}`,name:`Book ${i}`,folder:"Archive"}))]
+  const records = [visualLoreEntry,...Array.from({length:205},(_,i)=>({id:`entry-extra-${i}`,world_book_id:"world-book-1",comment:`location | Place ${i}`,key:[`place ${i}`],folder:i<200?"Early":"Late",tags:["location"],extensions:{}}))]
+  const bookOffsets=[], entryOffsets=[]
+  spindle.world_books.list=async options=>{assert.equal(options.userId,"user-1");bookOffsets.push(options.offset);return {data:books.slice(options.offset,options.offset+options.limit),total:books.length}}
+  spindle.world_books.entries.list=async (id,options)=>{assert.equal(id,"world-book-1");assert.equal(options.userId,"user-1");entryOffsets.push(options.offset);return {data:records.slice(options.offset,options.offset+options.limit),total:records.length}}
+  try {
+    const big = (await request("get_visual_lore",{bookId:"world-book-1",entryId:"entry-extra-204"})).data
+    assert.equal(big.books.length,205); assert.equal(big.entries.length,206)
+    assert.deepEqual(bookOffsets,[0,200]);assert.deepEqual(entryOffsets,[0,200])
+    assert.equal(big.selected.id,"entry-extra-204");assert.equal(big.selected.folder,"Late")
+  } finally {spindle.world_books.list=listBooks;spindle.world_books.entries.list=listEntries}
+}
+// Restore fixture to avoid modifying later tagged-generation expectations.
+visualLoreEntry.extensions = {}
+
 
 console.log("backend contract: ok")
 
@@ -2028,6 +2161,44 @@ assert.equal(parsedUrlJob?.status,'ready')
 assert.equal(parsedUrlJob.output,'url')
 assert.equal(parserUrlMessage.content,authoredPrefix+parsedUrlJob.imageUrl+authoredSuffix)
 assert.match(quietParserCalls.at(-1).messages[0].content,/alt, and output attributes exactly/)
+// Actual provider dispatch of grouped ensemble count, not just helper output.
+await request('set_tag_automation',{config:{requestMode:'inline',promptFamily:'anima',countStrength:1.5}})
+const trioTag='<swarm-image request="generate" slot="weighted-trio" character="active" persona="none" count="2boys, 1girl">quality/meta: masterpiece, safe\nvisible count: 2boys, 1girl\nscene: three friends around a table\ncamera: wide shot\nleft man [other]: white hair\ncenter man [other]: blond hair\nright woman [other]: pink skin, yellow horns\nenvironment: izakaya</swarm-image>'
+const trioMessage={id:'weighted-trio-dispatch',role:'assistant',content:trioTag,metadata:{}}
+taggedMessages.push(trioMessage)
+const trioJob=await submitUrl(trioMessage,trioTag)
+assert.equal(trioJob.status,'ready',trioJob.error)
+assert.equal((urlInputs.at(-1).prompt.match(/\(2boys, 1girl:1\.5\)/g)||[]).length,1,urlInputs.at(-1).prompt)
+assert.ok(trioJob.compilerDiagnostics.some(d=>d.includes('Explicit count:')))
+// The inspector body can be correct while an unquoted attribute gets truncated.
+for(const [slot,attribute,expected] of [['recovered-trio','count=2boys, 1girl',true],['recovered-five','count="5"',true],['count-omitted','',false],['count-conflict','count="1boy, 2girls"',false]]){
+ let tag=trioTag.replace('weighted-trio',slot).replace('count="2boys, 1girl"',attribute)
+ if(slot==='recovered-five')tag=tag.replace('visible count: 2boys, 1girl','visible count: 4boys, 1girl').replace('left man [other]','left foreground man [other]').replace('center man [other]','left midground man [other]').replace('right woman [other]','right foreground woman [other]').replace('environment: izakaya','right midground man [other]: red hair\nright background man [other]: black hair\nenvironment: izakaya')
+ const message={id:slot+'-dispatch',role:'assistant',content:tag,metadata:{}}
+ taggedMessages.push(message)
+ const job=await submitUrl(message,tag);assert.equal(job.status,'ready',job.error)
+ const weight=slot==='recovered-five'?'(4boys, 1girl:1.5)':'(2boys, 1girl:1.5)'
+ assert.equal(urlInputs.at(-1).prompt.includes(weight),expected,slot)
+ if(expected)assert.ok(job.compilerDiagnostics.some(d=>d.includes('Recovered malformed count attribute')),slot)
+ if(slot==='recovered-five')assert.ok(!job.compilerDiagnostics.some(d=>d.includes('share a horizontal anchor')))
+}
+// Parser completion must retain a malformed original opt-in, not the parser's own attribute.
+await request('set_tag_automation',{config:{requestMode:'parser',promptFamily:'anima',countStrength:1.5,autoGenerate:true,injectProtocol:true}})
+{
+ const previous=spindle.generate.quiet
+ const tag=trioTag.replace('weighted-trio','parser-recovered-count').replace('request="generate"','request="parse"').replace('count="2boys, 1girl"','count="3"')
+ const completed=trioTag.replace('weighted-trio','parser-recovered-count').replace('count="2boys, 1girl"','count="1boy"')
+ const message={id:'parser-recovered-count',role:'assistant',content:tag,metadata:{}};taggedMessages.push(message)
+ try {
+  spindle.generate.quiet=async()=>({content:completed})
+  eventHandlers.get('GENERATION_ENDED')({generationId:message.id,chatId:'chat-1',messageId:message.id,content:tag},'user-1')
+  for(let i=0;i<200&&!message.metadata?.swarm_studio_tagged_images?.length;i++)await new Promise(resolve=>setTimeout(resolve,5))
+  const job=userFiles.get('tagged-image-jobs.json').find(j=>j.messageId===message.id)
+  assert.equal(job?.status,'ready',job?.error);assert.match(job.fullMatch,/count="3"/)
+  assert.match(urlInputs.at(-1).prompt,/\(2boys, 1girl:1\.5\)/);assert.ok(job.compilerDiagnostics.some(d=>d.includes('Recovered malformed count attribute')))
+ }finally{spindle.generate.quiet=previous}
+}
+await request('set_tag_automation',{config:{requestMode:'parser',promptFamily:'auto'}})
 // Automatic generation disabled: only the server requests manual approval.
 await request('set_tag_automation',{config:{autoGenerate:false}})
 const manualTag=urlTag.replace('slot="broadcast"','slot="manual-background"')
@@ -2124,6 +2295,54 @@ console.log('URL output: authored HTML, plain URL, Markdown, parser, retry, dupl
   } finally { spindle.images.get = previousGet }
 }
 console.log("inline replacement: owned image, authored URL preservation, stale attachment checks and refreshed job state: ok")
+
+// A failed Quick Create regeneration must not revoke tools for a surviving
+// committed image. Exercise real request dispatch and legacy snapshot recovery.
+{
+  const stream = spindle.imageGen.generateStream, get = spindle.images.get
+  let sequence = 0
+  try {
+    for (const output of ['inline','url']) {
+      const tag = `<swarm-image request="generate" slot="retry-retain-${output}" output="${output}">portrait</swarm-image>`
+      const message = {id:`retry-retain-${output}`,role:'assistant',content:tag,metadata:{}}
+      taggedMessages.push(message)
+      spindle.imageGen.generateStream = async function* () {const imageId=`retained-${++sequence}`; return {imageId,imageUrl:`/api/v1/images/${imageId}`}}
+      const initial = structuredClone(await submitUrl(message,tag))
+      assert.equal(initial.inserted,true)
+      const committed = message.content
+      spindle.imageGen.generateStream = async function* () {throw Error('Fixture retry failed')}
+      await frontendHandler({type:'retry_tagged_job',requestId:`failed-retry-${output}`,jobId:initial.id,retryMode:'current',promptOverride:'new portrait'},'user-1')
+      const persisted = userFiles.get('tagged-image-jobs.json').find(job=>job.id===initial.id)
+      assert.equal(persisted.status,'ready');assert.equal(persisted.inserted,true);assert.equal(persisted.imageId,initial.imageId)
+      assert.match(persisted.error,/Fixture retry failed/);assert.equal(message.content,committed)
+      const legacy = {...persisted,status:'failed',inserted:false,imageId:'uncommitted-result',imageUrl:'/api/v1/images/uncommitted-result',draftImage:undefined,finalImage:undefined}
+      userFiles.set('tagged-image-jobs.json',userFiles.get('tagged-image-jobs.json').map(job=>job.id===initial.id?structuredClone(legacy):job))
+      const snapshot=await request('list_tagged_jobs')
+      const recovered=snapshot.data.find(job=>job.id===initial.id)
+      assert.equal(recovered.status,'ready');assert.equal(recovered.inserted,true);assert.equal(recovered.imageId,initial.imageId)
+      assert.equal(userFiles.get('tagged-image-jobs.json').find(job=>job.id===initial.id).status,'failed','Legacy snapshot recovery is read only')
+      spindle.images.get=async(id,options)=>{
+        if(id===initial.imageId||id==='retained-replacement')return {id,url:`/api/v1/images/${id}`}
+        return get(id,options)
+      }
+      const edit=await request('load_inline_edit_source',{jobId:initial.id,imageId:initial.imageId})
+      assert.equal(edit.data.id,initial.imageId)
+      await assert.rejects(()=>request('load_inline_edit_source',{jobId:initial.id,imageId:legacy.imageId}),/currently attached/)
+      message.content=committed.replace(initial.imageUrl,'/api/v1/images/unrelated')
+      const mismatched=(await request('list_tagged_jobs')).data.find(job=>job.id===initial.id)
+      assert.equal(mismatched.status,'failed','Marker alone cannot establish an attachment')
+      await assert.rejects(()=>request('load_inline_edit_source',{jobId:initial.id,imageId:initial.imageId}),/currently attached/)
+      message.content=committed+committed
+      assert.equal((await request('list_tagged_jobs')).data.find(job=>job.id===initial.id).inserted,false,'Ambiguous attachment is not recovered')
+      message.content=committed
+      await request('select_inline_variant',{jobId:initial.id,imageId:initial.imageId,action:'replace',replacementId:'retained-replacement'})
+      assert.equal(message.content,committed.replace(initial.imageUrl,'/api/v1/images/retained-replacement'))
+      assert.equal(userFiles.get('tagged-image-jobs.json').find(job=>job.id===initial.id).inserted,true)
+    }
+  } finally {spindle.imageGen.generateStream=stream;spindle.images.get=get}
+}
+console.log('inline retry attachment recovery: live failed rerender, legacy job, exact source verification, ambiguity, edit and replacement: ok')
+
 
 // A message can be swiped while its image or quiet parser is still running.
 await request('set_tag_automation',{config:{autoGenerate:true,requestMode:'inline'}})
@@ -2240,7 +2459,9 @@ spindle.imageGen.generateStream = async function* (input) {
   assert.equal(input.parameters.denoise, 0.6)
   assert.equal(input.parameters.width, 512)
   assert.equal(input.parameters.height, 768)
-  assert.deepEqual(JSON.parse(input.parameters.rawRequestOverride), {
+  const { extra_metadata, ...inpaintOverride } = JSON.parse(input.parameters.rawRequestOverride)
+  assert.equal(extra_metadata.studio_stage, "inpaint_variant")
+  assert.deepEqual(inpaintOverride, {
     maskimage: "data:image/png;base64,bWFzaw==", maskblur: 12, initimagerecompositemask: true,
   })
   return { imageId: "inpaint-variant", imageUrl: "/api/v1/image-gen/results/inpaint-variant" }
@@ -2490,14 +2711,14 @@ console.log("v28: concurrent image-tag creation is serialized: ok")
     assert.match(calls[0].prompt, /head and shoulders portrait.*furrowed brows/)
     assert.equal(calls[0].owner_character_id, "char-1")
     assert.equal(calls[0].parameters.seed, -1)
-    assert.equal(calls[0].parameters.rawRequestOverride, undefined)
+    assert.equal(JSON.parse(calls[0].parameters.rawRequestOverride).extra_metadata.studio_stage, "expression_draft")
     const renderProgress = sent.filter(entry => entry.payload.requestId === plain.requestId && entry.payload.type === "folder_expression_progress")
     assert.equal(renderProgress.length, 1)
     assert.equal(renderProgress[0].userId, "user-1")
     assert.deepEqual(renderProgress[0].payload.data, { step: 8, totalSteps: 24, preview: "data:image/png;base64,AQID", nodeId: "" })
     spindle.images.get = async (id, options) => id === plain.data.id
-      ? (assert.equal(options.onlyOwned, true), { id, url: "data:image/png;base64,AQID" })
-      : originalExpressionsGet(id, options)
+      ? (assert.equal(options.onlyOwned, false), { id, url: "data:image/png;base64,AQID" })
+      : id === "unrelated-output" ? null : originalExpressionsGet(id, options)
     await request("render_folder_expression", { ...base, family: "anima", referenceId: plain.data.id, generation: saved.generation })
     assert.match(calls[1].prompt, /^standing, looking at viewer,.+furrowed brows$/)
     assert.doesNotMatch(calls[1].prompt, /head and shoulders portrait/)
@@ -2507,7 +2728,7 @@ console.log("v28: concurrent image-tag creation is serialized: ok")
     }
     assert.match(calls[1].parameters.rawRequestOverride, /AnimaRefAdapter/)
     assert.equal(calls[1].parameters.referenceImages[0].data, "AQID")
-    await assert.rejects(() => request("render_folder_expression", { ...base, referenceId: "unrelated-output" }), /reference from this character folder/)
+    await assert.rejects(() => request("render_folder_expression", { ...base, family: "anima", referenceId: "unrelated-output" }), /saved image visible to your account/)
     assert.equal(calls.length, 2)
 
     spindle.images.get = async (id, options) => id === plain.data.id
@@ -2554,6 +2775,27 @@ console.log("v28: concurrent image-tag creation is serialized: ok")
     assert.equal(graphs[2]["4"].inputs.width, 2048)
     assert.equal(graphs[2]["4"].inputs.height, 2048)
     assert.deepEqual((await request("load_expression_enhance_options", base)).data, enhanceOptions)
+    // Expressions Maker's ribbon checks the *selected* model, not merely
+    // whether any upscaler exists on the connected SwarmUI backend.
+    const checkUpscale = async () => (await request("check_expression_upscale_model", base)).data
+    assert.deepEqual(await checkUpscale(), { status: "installed", mode: "model", model: "4x-UltraSharp.pth", available: 2 })
+    userFiles.set("studio-upscale-settings.json", { ...storedUpscale, "swarm-1": { mode: "model", model: "missing-model.pth", factor: 2 } })
+    assert.deepEqual(await checkUpscale(), { status: "missing", mode: "model", model: "missing-model.pth", available: 2 })
+    const upscaleCors = spindle.cors
+    spindle.cors = async (url) => {
+      assert.match(url, /\/API\/ListT2IParams$/)
+      return { status: 200, body: JSON.stringify({ list: [{ id: "refinerupscalemethod", values: ["pixel-lanczos"] }] }) }
+    }
+    assert.deepEqual(await checkUpscale(), { status: "empty", mode: "model", model: "missing-model.pth", available: 0 })
+    spindle.cors = async () => { throw new Error("Backend offline") }
+    assert.deepEqual(await checkUpscale(), { status: "unavailable", mode: "model", model: "missing-model.pth" })
+    spindle.cors = upscaleCors
+    userFiles.set("studio-upscale-settings.json", { ...storedUpscale, "swarm-1": { mode: "model", model: "", factor: 2 } })
+    assert.equal((await checkUpscale()).status, "unconfigured")
+    userFiles.set("studio-upscale-settings.json", { ...storedUpscale, "swarm-1": { mode: "saved", workflow: "Portrait/Inpaint", imageParam: "image", factor: 2 } })
+    assert.deepEqual(await checkUpscale(), { status: "workflow", mode: "saved", model: "" })
+    userFiles.set("studio-upscale-settings.json", { ...storedUpscale, "swarm-1": { mode: "custom", graph: '{"1":{}}', factor: 2 } })
+    assert.deepEqual(await checkUpscale(), { status: "workflow", mode: "custom", model: "" })
     userFiles.set("studio-upscale-settings.json", storedUpscale)
     const stages = [
       ["generate", { ...base, type: "render_folder_expression" }],
@@ -2593,3 +2835,1238 @@ console.log("v28: concurrent image-tag creation is serialized: ok")
   }
 }
 console.log("character expression generation, owned references, Anima workflow and scoped cancellation: ok")
+
+// Cast uses account-scoped extension storage before any host deployment.
+{
+  const library = {version:1,activeGroupId:'cast-test',inject:true,groups:[{id:'cast-test',name:'Night shift'}],members:[{id:'mina',groupId:'cast-test',name:'Mina',prefix:'Mina',role:'persona',presentation:'portrait',folderId:'',images:{joy:{id:'cast-joy'}}}]}
+  await request('save_cast_library',{library})
+  const loaded = await request('load_cast_library')
+  assert.equal(loaded.data.members[0].images.joy.url,'/api/v1/images/cast-joy')
+  const result = await interceptorHandler([{role:'user',content:'Continue'}],{userId:'user-1',generationId:'cast-generation'})
+  assert.match(JSON.stringify(result),/SWARM STUDIO CAST/)
+  assert.match(JSON.stringify(result),/Color all spoken dialogue consistently by speaker, both inside and outside Cast packets/)
+  assert.match(JSON.stringify(result),/Mina-joy/)
+  activePersona.metadata.preserved_cast_test = "keep"
+  await request('assign_cast_persona',{memberId:'mina'})
+  assert.equal(activePersona.metadata.swarm_studio_cast.mappings.joy,'cast-joy')
+  assert.equal(activePersona.metadata.preserved_cast_test,'keep')
+  await request('save_cast_library',{library:{}}) // Group switch while the model is generating.
+  const originalGet=spindle.chat.getMessages, originalUpdate=spindle.chat.updateMessage
+  const message={id:'cast-message',content:'Mina laughs. <swarm-cast=Mina-joy>',swipe_id:0,swipes:['Mina laughs. <swarm-cast=Mina-joy>','other swipe']}
+  const writes=[]
+  spindle.chat.getMessages=async()=>[structuredClone(message)]
+  spindle.chat.updateMessage=async(...args)=>writes.push(args)
+  try {
+    eventHandlers.get('GENERATION_ENDED')({generationId:'cast-generation',chatId:'cast-chat',messageId:message.id,content:message.content},'user-1')
+    for(let i=0;i<20 && !writes.length;i++) await new Promise(resolve=>setTimeout(resolve,5))
+    assert.equal(writes.length,0,"Cast tags remain editable source; live display must not permanently rewrite swipes")
+    assert.equal(message.swipes[1],"other swipe")
+    message.content='An edited reply'
+    eventHandlers.get('GENERATION_ENDED')({chatId:'cast-chat',messageId:message.id,content:'Mina laughs. <swarm-cast=Mina-joy>'},'user-1')
+    await new Promise(resolve=>setTimeout(resolve,30))
+    assert.equal(writes.length,0,'An edited/switched reply must not be overwritten')
+  } finally {spindle.chat.getMessages=originalGet;spindle.chat.updateMessage=originalUpdate}
+  await request('save_cast_library',{library:{}})
+}
+console.log('Cast backend: storage, prompt injection, inline completion, user scope and stale reply protection PASS')
+
+// Targeted chat quick-picker side updates must not overwrite other Cast members.
+{
+  const group='side-isolation'
+  const library={version:2,activeGroupId:group,groups:[{id:group,name:'Side test',defaultPresentation:'chapter-tab'}],
+    members:[
+      {id:'shoto',groupId:group,name:'Shoto',prefix:'Shoto',presentationSide:'left',images:{neutral:{id:'shoto-neutral'}}},
+      {id:'katsuki',groupId:group,name:'Katsuki',prefix:'Katsuki',presentationSide:'right',images:{neutral:{id:'katsuki-neutral'}}},
+    ]}
+  await request('save_cast_library',{library})
+  await request('set_cast_side',{memberId:'shoto',side:'right'})
+  let updated=(await request('load_cast_library')).data
+  assert.equal(updated.members.find(m=>m.id==='shoto').presentationSide,'right')
+  assert.equal(updated.members.find(m=>m.id==='katsuki').presentationSide,'right')
+  assert.deepEqual(Object.keys(updated.members.find(m=>m.id==='katsuki').images),['neutral'])
+  await request('set_cast_side',{memberId:'shoto',side:'auto'})
+  updated=(await request('load_cast_library')).data
+  assert.equal(updated.members.find(m=>m.id==='shoto').presentationSide,'auto')
+  assert.equal(updated.members.find(m=>m.id==='katsuki').presentationSide,'right')
+  await request('save_cast_library',{library:{}})
+}
+console.log('Cast quick picker side save PASS: targeted member, independent members, images and Auto reset')
+
+// Card-specific edits are independent from shared Cast defaults and source text.
+{
+  const library={activeGroupId:'card-test',chatGroups:{'chat-1':'card-test'},groups:[{id:'card-test',name:'Card test',defaultPresentation:'afterglow-cinema'}],members:[{id:'actor',groupId:'card-test',name:'Actor',prefix:'actor',images:{neutral:{id:'neutral-img'},joy:{id:'joy-img'}}}]}
+  await request('save_cast_library',{library})
+  const before=structuredClone(userFiles.get('cast-library.json'))
+  const chatId='chat-1',key='message-one:0:0:abc:xyz',other='message-one:1:0:abc:xyz'
+  const override={memberId:'actor',expression:'joy',scale:99,x:-999,y:999,width:300,crop:{enabled:true,x:-50,y:500,zoom:9}}
+  const saved=await request('set_cast_card_override',{chatId,key,override})
+  assert.deepEqual(saved.override,{memberId:'actor',expression:'joy',scale:1.5,x:-20,y:15,width:100,crop:{enabled:true,x:0,y:100,zoom:3}})
+  await request('set_cast_card_override',{chatId,key:other,override:{...override,expression:'neutral'}})
+  const stored=(await request('load_cast_card_overrides',{chatId})).data
+  assert.equal(stored[key].expression,'joy');assert.equal(stored[other].expression,'neutral')
+  assert.deepEqual(userFiles.get('cast-library.json'),before)
+  const reject=async(type,data)=>{const requestId=`card-reject-${sent.length}`;await frontendHandler({type,requestId,...data},'user-1');assert.equal(sent.findLast(x=>x.payload.requestId===requestId).payload.type,'studio_error')}
+  await reject('set_cast_card_override',{chatId,key,override:{...override,expression:'missing'}})
+  await reject('set_cast_card_override',{chatId,key,override:{...override,memberId:'other-cast'}})
+  await reject('set_cast_card_override',{chatId,key:'../../not-a-key',override})
+  await reject('set_cast_card_override',{chatId:'another-chat',key,override})
+  await reject('load_cast_card_overrides',{chatId:'another-chat'})
+  assert.deepEqual((await request('load_cast_card_overrides',{chatId})).data,stored)
+  // A correction before member adoption keeps legacy geometry; adoption then
+  // supersedes all old geometry without changing the portable member record.
+  const legacy=await request('set_cast_card_override',{chatId,key,memberId:'actor',expressionOnly:true,override:{memberId:'actor',expression:'neutral',scale:1,x:0,y:0,width:null,crop:null}})
+  assert.equal(legacy.override.scale,1.5)
+  assert.equal(legacy.override.expression,'neutral')
+  const pref=await request('set_cast_member_preference',{chatId,memberId:'actor',preference:{presentation:'vn-hero',side:'left',scale:4,x:80,y:-60,width:20,expression:'joy'}})
+  assert.deepEqual(pref.preference,{presentation:'vn-hero',side:'left',scale:1.5,x:20,y:-15,width:40})
+  assert.deepEqual((await request('load_cast_card_overrides',{chatId})).preferences.actor,pref.preference)
+  const getActiveChat=spindle.chats.getActive
+  try{
+    spindle.chats.getActive=async()=>({...await getActiveChat(),'id':'chat-2'})
+    const across=await request('load_cast_card_overrides',{chatId:'chat-2'})
+    assert.deepEqual(across.preferences.actor,pref.preference)
+    assert.equal(across.data[key],undefined)
+  }finally{spindle.chats.getActive=getActiveChat}
+  assert.equal(Object.keys(userFiles.get('cast-member-preferences.json')).length,1)
+  await reject('set_cast_member_preference',{chatId,memberId:'other-cast',preference:{scale:1.2}})
+  await reject('set_cast_member_preference',{chatId:'another-chat',memberId:'actor',preference:{}})
+  await reject('set_cast_card_override',{chatId,key,memberId:'other-cast',expressionOnly:true,override:null})
+  const updatedPref=await request('set_cast_member_preference',{chatId,memberId:'actor',preference:{scale:1.2}})
+  assert.deepEqual(updatedPref.preference,{scale:1.2})
+  assert.equal(Object.keys(userFiles.get('cast-member-preferences.json')).length,1)
+  const local=await request('set_cast_card_override',{chatId,key,memberId:'actor',expressionOnly:true,override:{...override,expression:'joy'}})
+  assert.deepEqual(local.override,{memberId:'actor',expression:'joy',scale:1,x:0,y:0,width:null,crop:null})
+  const reverted=await request('set_cast_member_preference',{chatId,memberId:'actor',preference:{presentation:'inherit',side:'auto',scale:1,x:0,y:0}})
+  assert.deepEqual(reverted.preference,{})
+  assert.deepEqual((await request('load_cast_card_overrides',{chatId})).preferences.actor,{})
+  assert.equal((await request('load_cast_card_overrides',{chatId})).data[key].expression,'joy')
+  assert.deepEqual(userFiles.get('cast-library.json'),before)
+  await request('set_cast_card_override',{chatId,key,memberId:'actor',expressionOnly:true,override:null})
+  assert.equal((await request('load_cast_card_overrides',{chatId})).data[key],undefined)
+  assert.equal((await request('load_cast_card_overrides',{chatId})).data[other].expression,'neutral')
+  await request('set_cast_card_override',{chatId,key:other,override:null})
+  await request('save_cast_library',{library:{}})
+}
+console.log('Cast Atelier backend PASS: bounded geometry, member-wide preferences, legacy migration, cross-chat scope, expression corrections, validation and reset')
+
+// Independent Cast members generate into their own unlinked folder, even without a character/card.
+{
+ const originalStream=spindle.imageGen.generateStream, originalGet=spindle.images.get
+ const inputs=[]
+ const independent={version:2,activeGroupId:'independent-group',inject:true,chatGroups:{'chat-1':'independent-group','chat-other':''},groups:[{id:'independent-group',name:'Independent ensemble',defaultPresentation:'story',inject:true}],members:[{id:'independent-member',groupId:'independent-group',name:'Ada',prefix:'Ada',identityPrompt:'silver braids, green jacket',referenceImageId:'independent-reference',presentation:'inherit',images:{}}]}
+ try{
+  spindle.images.get=async(id)=>['independent-reference','independent-output'].includes(id)?{id,mime_type:'image/png',width:768,height:768}:originalGet(id)
+  spindle.imageGen.generateStream=async function*(input){inputs.push(input);return{imageId:'independent-output',imageUrl:'/api/v1/images/independent-output'}}
+  await request('save_cast_library',{library:independent})
+  await request('set_cast_recipe',{groupId:'independent-group',recipe:{connectionId:'swarm-1',checkpoint:'anima-base.safetensors',generation:{recipe:{width:640,height:960,steps:32},prefix:'album framing'},stack:[{name:'album-style.safetensors',weight:.85,enabled:true,useTrigger:true,trigger:'album trigger'}]}})
+  const atmosphereBefore=structuredClone(userFiles.get('cast-library.json'));const atmosphereResult=await request('set_cast_atmosphere',{groupId:'independent-group',settings:{enabled:true,intensity:82,actor:45,colorA:'#aabbcc',colorB:'bad; CSS',transitions:true}});const atmosphereAfter=atmosphereResult.data.library;assert.equal(atmosphereAfter.groups[0].atmosphere.intensity,82);assert.equal(atmosphereAfter.groups[0].atmosphere.colorB,'#354768');assert.equal(atmosphereAfter.groups[0].atmosphere.animations,false);assert.equal(JSON.stringify(atmosphereAfter.members),JSON.stringify(atmosphereBefore.members));assert.deepEqual(atmosphereAfter.groups[0].recipe,atmosphereBefore.groups[0].recipe);assert.deepEqual(atmosphereAfter.groups[0].backgrounds,atmosphereBefore.groups[0].backgrounds);
+  const result=await request('render_folder_expression',{castMemberId:'independent-member',connectionId:'swarm-1',direction:'bright eyes, joyful smile',family:'',generation:{prefix:'head and shoulders portrait, <preset:Alien Stage>, @qmeng_ci @VIVINOS',negative:'',recipe:{}}})
+  assert.equal(result.data.id,'independent-output')
+  assert.match(inputs[0].prompt,/silver braids, green jacket/)
+  assert.match(inputs[0].prompt,/album trigger/);assert.match(inputs[0].prompt,/head and shoulders portrait/);assert.ok(inputs[0].prompt.includes('<preset:Alien Stage>, @qmeng_ci @VIVINOS'));assert.deepEqual(inputs[0].parameters.loras,['album-style.safetensors']);assert.deepEqual(inputs[0].parameters.loraWeights,[.85]);assert.equal(inputs[0].parameters.width,640)
+  assert.equal(inputs[0].owner_character_id,undefined)
+  const workshopBase={castMemberId:'independent-member',connectionId:'swarm-1',direction:'smiling',family:'',generation:{prefix:'workshop framing',negative:'shared exclusion',recipe:{steps:40}}}
+  await request('render_folder_expression',{...workshopBase,renderOverrides:{checkpoint:'alternate.safetensors',identity:'custom pink hair',outfit:'blue hoodie',identityNegative:'extra exclusion',stack:[{name:'workshop.safetensors',weight:.72,enabled:true,useTrigger:true,trigger:'style cue'},{name:'disabled.safetensors',weight:1,enabled:false,useTrigger:true,trigger:'must not appear'}]}})
+  assert.equal(inputs[1].model,'alternate.safetensors');assert.match(inputs[1].prompt,/workshop framing, style cue, custom pink hair, blue hoodie, smiling/);assert.doesNotMatch(inputs[1].prompt,/album trigger|silver braids|must not appear/);assert.equal(inputs[1].negativePrompt,'shared exclusion, extra exclusion');assert.deepEqual(inputs[1].parameters.loras,['workshop.safetensors']);assert.deepEqual(inputs[1].parameters.loraWeights,[.72]);assert.equal(inputs[1].parameters.steps,40)
+  await request('render_folder_expression',{...workshopBase,renderOverrides:{identity:'',outfit:'',identityNegative:'',stack:[]}})
+  assert.equal(inputs[2].prompt,'workshop framing, smiling');assert.deepEqual(inputs[2].parameters.loras,[]);assert.equal(inputs[2].negativePrompt,'shared exclusion')
+  await request('render_folder_expression',workshopBase)
+  assert.match(inputs[3].prompt,/album trigger, silver braids, green jacket/);assert.deepEqual(inputs[3].parameters.loras,['album-style.safetensors'])
+  const folders=userFiles.get('output-folders.json')
+  const ownedFolder=folders.find(folder=>folder.id==='cast:independent-member')
+  assert.ok(ownedFolder);assert.equal(ownedFolder.binding,null);assert.ok(ownedFolder.imageIds.includes('independent-output'))
+  independent.members[0].images={joy:{id:'independent-output'}}
+  await request('save_cast_library',{library:independent})
+  const exported=await request('export_cast_folder',{groupId:'independent-group'})
+  assert.equal(exported.data.count,1)
+  const allFolders=userFiles.get('output-folders.json')
+  assert.equal(allFolders.find(folder=>folder.id==='cast-group:independent-group').binding,null)
+  assert.ok(allFolders.find(folder=>folder.id==='cast:independent-member').imageIds.includes('independent-output'),'Export must not remove the original member asset')
+  const otherChat=await interceptorHandler([{role:'user',content:'Continue'}],{userId:'user-1',chatId:'chat-other'})
+  assert.doesNotMatch(JSON.stringify(otherChat),/SWARM STUDIO CAST/)
+ }finally{spindle.imageGen.generateStream=originalStream;spindle.images.get=originalGet;await request('save_cast_library',{library:{}})}
+}
+console.log('Independent Cast backend PASS: member-owned identity, unlinked generation folder, copied export, retained originals and chat-specific prompt isolation')
+
+// End-to-end manual expression reference: native uploads are account-visible,
+// not extension-owned. Reject invisible assets before reading or dispatching.
+{
+ const get=spindle.images.get, read=spindle.images.readBinary, cors=spindle.cors, stream=spindle.imageGen.generateStream
+ const original=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64'))
+ const inputs=[], reads=[]
+ try {
+  await request('save_cast_library',{library:{groups:[{id:'ref-cast',name:'Reference Cast'}],members:[{id:'ref-member',groupId:'ref-cast',name:'Reference member',prefix:'ref',identityPrompt:'pink hair',referenceImageId:'native-reference',images:{}}]}})
+  spindle.images.get=async(id,options)=>{
+   if(!['native-reference','denied-reference','huge-reference','wrong-format'].includes(id))return get(id,options)
+   assert.equal(options.userId,'user-1');assert.equal(options.onlyOwned,false)
+   if(id==='denied-reference')return null
+   return {id,mime_type:id==='wrong-format'?'video/mp4':'image/png',url:`/api/v1/images/${id}?size=sm`,owner_extension_identifier:null}
+  }
+  spindle.images.readBinary=async(id,userId)=>{assert.equal(userId,'user-1');assert.notEqual(id,'denied-reference');reads.push(id);return id==='huge-reference'?new Uint8Array(5_625_001):id==='wrong-format'?Uint8Array.of(1,2,3):original}
+  spindle.cors=async(url,options)=>{
+   assert.doesNotMatch(url,/\/api\/v1\/images\//)
+   if(url.endsWith('/API/ListT2IParams'))return {status:200,body:JSON.stringify({list:[{id:'useipadapter',values:['PLUS (fixture)']}]})}
+   return cors(url,options)
+  }
+  spindle.imageGen.generateStream=async function*(input){inputs.push(input);return {imageId:'scoped-ref-output-'+inputs.length}}
+  const base={castMemberId:'ref-member',connectionId:'swarm-1',model:'anima-base.safetensors',direction:'neutral expression'}
+  await request('render_folder_expression',{...base,family:'anima'})
+  assert.deepEqual(inputs[0].parameters.referenceImages,[{mimeType:'image/png',data:Buffer.from(original).toString('base64')}])
+  assert.match(inputs[0].parameters.rawRequestOverride,/AnimaRefAdapter/)
+  // A folder-bound workshop may also reference an explicitly uploaded asset
+  // without moving the source into its output folder.
+  await request('render_folder_expression',{...base,castMemberId:undefined,folderId:'character:char-1',referenceId:'native-reference',family:'anima'})
+  assert.deepEqual(inputs[1].parameters.referenceImages,inputs[0].parameters.referenceImages)
+  await request('render_folder_expression',{...base,family:'illustrious'})
+  assert.equal(JSON.parse(inputs[2].parameters.rawRequestOverride).promptimages,'data:image/png;base64,'+Buffer.from(original).toString('base64'))
+  await assert.rejects(()=>request('render_folder_expression',{...base,family:'anima',referenceId:'denied-reference'}),/saved image visible to your account/)
+  await assert.rejects(()=>request('render_folder_expression',{...base,family:'anima',referenceId:'huge-reference'}),/reference image is too large/)
+  await assert.rejects(()=>request('render_folder_expression',{...base,family:'anima',referenceId:'wrong-format'}),/PNG, JPEG or WebP reference/)
+  assert.equal(inputs.length,3)
+  assert.ok(!reads.includes('denied-reference'))
+  const before=reads.length
+  await request('render_folder_expression',{...base,family:'',referenceId:'denied-reference'})
+  assert.equal(reads.length,before,'Prompt only must ignore stale reference IDs')
+  assert.equal(inputs[3].parameters.referenceImages,undefined)
+ } finally {spindle.images.get=get;spindle.images.readBinary=read;spindle.cors=cors;spindle.imageGen.generateStream=stream;await request('save_cast_library',{library:{}})}
+}
+console.log('Account-scoped reference upload, original binary, adapter transports, size and access rejection, prompt-only isolation: ok')
+// An outfit's reference and prompt must stay isolated from the other outfits,
+// including when the same logical expression exists in both collections.
+{
+ const stream=spindle.imageGen.generateStream, get=spindle.images.get, read=spindle.images.readBinary
+ const inputs=[],reads=[]; const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64'))
+ const group='wardrobe-test-group',member='wardrobe-test-member'
+ const raw={groups:[{id:group,name:'BNHA'}],members:[{id:member,groupId:group,name:'Actor',prefix:'actor',identityPrompt:'blond hair',referenceImageId:'casual-reference',images:{neutral:{id:'casual-art'},'patrol-neutral':{id:'patrol-art'}}}]}
+ try{
+  await request('save_cast_library',{library:raw});const old=userFiles.get('output-folders.json')||[];userFiles.set('output-folders.json',[...old,{id:`cast:${member}`,name:'Actor',imageIds:['casual-art','patrol-art','old-draft'],binding:null},{id:'wardrobe-user-folder',name:'Keep my references',imageIds:['patrol-art'],binding:null}]);
+  raw.members[0].wardrobes=[{key:'default',name:'Casual',outfitPrompt:'black t-shirt',referenceImageId:'casual-reference',slots:{neutral:'neutral'}},{key:'patrol',name:'Patrol',outfitPrompt:'orange hero suit',referenceImageId:'patrol-reference',slots:{neutral:'patrol-neutral'}}]
+  await request('save_cast_library',{library:raw});const folders=userFiles.get('output-folders.json');assert.ok(folders.find(x=>x.id===`cast:${member}:patrol`).imageIds.includes('patrol-art'));assert.ok(!folders.find(x=>x.id===`cast:${member}`).imageIds.includes('patrol-art'));assert.ok(folders.find(x=>x.id===`cast:${member}`).imageIds.includes('old-draft'));assert.ok(folders.find(x=>x.id==='wardrobe-user-folder').imageIds.includes('patrol-art'))
+  spindle.images.get=async(id,opts)=>['casual-reference','patrol-reference'].includes(id)?{id,mime_type:'image/png',url:`/api/v1/images/${id}`} :get(id,opts)
+  spindle.images.readBinary=async(id,userId)=>{assert.equal(userId,'user-1');reads.push(id);return png}
+  spindle.imageGen.generateStream=async function*(input){inputs.push(input);return {imageId:'wardrobe-test-render-'+inputs.length}}
+  const base={castMemberId:member,connectionId:'swarm-1',model:'anima-base.safetensors',direction:'angry expression',family:'anima'}
+  await request('render_folder_expression',{...base,wardrobeKey:'patrol'});assert.match(inputs[0].prompt,/blond hair, orange hero suit, angry expression/);assert.doesNotMatch(inputs[0].prompt,/black t-shirt/);assert.deepEqual(reads,['patrol-reference']);assert.match(inputs[0].parameters.rawRequestOverride,/AnimaRefAdapter/)
+  await request('render_folder_expression',{...base,wardrobeKey:'default'});assert.match(inputs[1].prompt,/black t-shirt/);assert.deepEqual(reads,['patrol-reference','casual-reference'])
+  await request('render_folder_expression',{...base,wardrobeKey:'patrol',referenceId:''});assert.equal(inputs[2].parameters.referenceImages,undefined);assert.equal(reads.length,2)
+  await assert.rejects(()=>request('render_folder_expression',{...base,wardrobeKey:'missing'}),/wardrobe no longer exists/)
+  assert.ok(userFiles.get('output-folders.json').find(x=>x.id===`cast:${member}:patrol`).imageIds.includes('wardrobe-test-render-1'))
+ }finally{spindle.imageGen.generateStream=stream;spindle.images.get=get;spindle.images.readBinary=read;await request('save_cast_library',{library:{}})}
+}
+console.log('Cast wardrobes: scoped render and reference dispatch, managed folder migration, no cross-outfit fallback: ok')
+
+
+
+// The v2 Island path must NEVER modify saved chat or swipes on load.
+// It replaces only the *render* projection, leaving the source immutable.
+{
+ const originalGet=spindle.chat.getMessages,originalUpdate=spindle.chat.updateMessage
+ const html='<span data-swarm-cast="Mina-joy" style="display:inline-flex;gap:12px;"><span><img src="/api/v1/images/cast-joy" alt="Mina"></span><span style="font-style:italic;line-height:1.7;">“Hello.”</span></span>'
+ const assistant={id:'legacy-cast',is_user:false,content:html,swipe_id:0,swipes:[html,'Other swipe']}
+ const user={id:'user-cast-example',is_user:true,content:html}
+ const code={id:'assistant-code-example',is_user:false,content:'```html\n'+html+'\n```'}
+ const writes=[]
+ spindle.chat.getMessages=async()=>structuredClone([assistant,user,code])
+ spindle.chat.updateMessage=async(chatId,id,patch,userId)=>{writes.push({chatId,id,patch,userId})}
+ try{
+  await request('load_cast_library')
+  assert.equal(writes.length,0,'Loading Cast may not rewrite any saved message')
+  assert.equal(assistant.content,html)
+  const roles=await request('load_cast_roles',{chatId:'chat-1',ids:[assistant.id,user.id,code.id]})
+  assert.deepEqual(roles.roles,{'legacy-cast':true,'user-cast-example':false,'assistant-code-example':true})
+  assert.equal(roles.sources['legacy-cast'],html,'Saved source remains original')
+  assert.equal(typeof castRenderProcessor,'function','Supported pre-render API hook is registered')
+  const packet='<swarm-cast=Mina-joy><font color="#599CE3">"Hello."</font></swarm-cast>'
+  const transformed=await castRenderProcessor({origin:'render',content:'Before '+packet+' after.',isUser:false,extra:{role:'assistant'}})
+  const stageRaw='<font⠀color="#599ce3">"Earlier dialogue."</font>\n\n⠀[[scene:⠀izakaya-booth]]\n[[lighting: golden-hour]]\n\n'+packet
+  const stageRender=await castRenderProcessor({origin:'render',content:stageRaw,isUser:false,extra:{role:'assistant'}})
+  assert.equal((stageRender.content.match(/data-ss-stage-cue=/g)||[]).length,2,'Real backend render hook must consume braille-spaced consecutive directions')
+  assert.match(stageRender.content,/data-ss-cast-slot="1"/)
+  assert.doesNotMatch(stageRender.content,/\[\[(?:scene|lighting):/)
+  assert.equal(await castRenderProcessor({origin:'render',content:stageRender.content,isUser:false,extra:{role:'assistant'}}),undefined)
+
+  assert.match(transformed.content,/data-ss-cast-slot="1"/)
+  assert.ok(transformed.content.startsWith('Before ')&&transformed.content.endsWith(' after.'))
+  assert.equal((await castRenderProcessor({origin:'render',content:transformed.content,isUser:false,extra:{role:'assistant'}})),undefined,'Render transform must be idempotent')
+  assert.equal(await castRenderProcessor({origin:'update',content:packet,isUser:false}),undefined,'No write-time mutation')
+  assert.equal(await castRenderProcessor({origin:'render',content:packet,isUser:true,extra:{role:'user'}}),undefined,'User content is excluded')
+  assert.equal(await castRenderProcessor({origin:'render',content:packet,isUser:false,extra:{role:'system'}}),undefined,'System content is excluded')
+  assert.equal(writes.length,0,'The render hook must never mutate the database')
+ }finally{spindle.chat.getMessages=originalGet;spindle.chat.updateMessage=originalUpdate}
+}
+console.log('Cast Islands backend PASS: pre-render API, original chat/swipe preservation, idempotence, user guard')
+
+// Scene assets are group references, never implicit generation or destructive moves.
+{
+ const originalGet=spindle.images.get, originalList=spindle.images.list, calls=[]
+ const library={activeGroupId:'world-group',groups:[{id:'world-group',name:'Worlds',defaultBackground:'plaza',backgrounds:[{key:'plaza',id:'world1',name:'Plaza'}]}],members:[]}
+ try{
+  spindle.images.get=async(id,opts)=>{calls.push({id,opts});return id==='world1'&&opts.specificity==='sm'?{id,mime_type:'image/png',width:1024,height:576}:id==='world2'||id==='unowned-world'?null:originalGet(id,opts)}
+  // Picker can list an owned image even when its individual lookup is absent.
+  spindle.images.list=async(opts)=>{assert.equal(opts.onlyOwned,true);assert.equal(opts.userId,'user-1');assert.equal(opts.specificity,'sm');return {data:[{id:'world2',url:'/api/v1/images/world2'}],total:1}}
+  const saved=await request('save_cast_library',{library})
+  assert.equal(saved.data.groups[0].backgrounds[0].id,'world1')
+  assert.ok(calls.some(c=>c.id==='world1'&&c.opts.onlyOwned&&c.opts.userId==='user-1'))
+  assert.equal((await request('export_cast_background_folder',{groupId:'world-group'})).data.count,1)
+  library.groups[0].backgrounds=[{key:'plaza',id:'world2',name:'Plaza',aliases:['sidewalk']}]
+  await request('save_cast_library',{library})
+  await request('export_cast_background_folder',{groupId:'world-group'})
+  const folder=()=>userFiles.get('output-folders.json').find(f=>f.id==='cast-backgrounds:world-group')
+  assert.deepEqual(folder().imageIds,['world1','world2'])
+  library.groups[0].backgrounds=[{key:'plaza',id:'unowned-world',name:'Plaza'}]
+  await frontendHandler({type:'save_cast_library',requestId:'world-ownership-reject',library},'user-1')
+  assert.equal(sent.findLast(e=>e.payload.requestId==='world-ownership-reject').payload.type,'studio_error')
+  assert.equal((await request('load_cast_library')).data.groups[0].backgrounds[0].id,'world2')
+  library.groups[0].backgrounds=[]
+  await request('save_cast_library',{library})
+  assert.deepEqual(folder().imageIds,['world1','world2'])
+ }finally{spindle.images.get=originalGet;spindle.images.list=originalList;await request('save_cast_library',{library:{}})}
+}
+console.log('Cast Worlds backend PASS: owned references, export merge, rejection, non-destructive removal')
+
+// Theater scenery is a read-only union of active-Cast locations and shared assets.
+{
+ const oldCast=structuredClone(userFiles.get('cast-library.json')),oldFolders=structuredClone(userFiles.get('output-folders.json'));
+ try{
+  userFiles.set('cast-library.json',{version:2,activeGroupId:'other',chatGroups:{'chat-1':'scenery'},groups:[{id:'scenery',name:'Scenery cast',backgrounds:[{key:'hallway',id:'hall',name:'Hallway'},{key:'library',id:'library',name:'Library'}]},{id:'other',name:'Other cast',backgrounds:[{key:'forest',id:'forest',name:'Forest'},{key:'private',id:'other-only',name:'Other only'}]}],members:[]});
+  userFiles.set('output-folders.json',[{id:'cast-background-assets',name:'Background Assets',imageIds:['hall','forest','generic','bad/id'],binding:null},{id:'unrelated',name:'Other images',imageIds:['unrelated'],binding:null}]);
+  const beforeCast=structuredClone(userFiles.get('cast-library.json')),beforeFolders=structuredClone(userFiles.get('output-folders.json'));
+  const response=await request('load_theater_scenery',{chatId:'chat-1'});assert.equal(response.type,'theater_scenery_result');assert.equal(response.data.castName,'Scenery cast');assert.deepEqual(response.data.assets,[{id:'hall',name:'Hallway',location:true,shared:true},{id:'library',name:'Library',location:true,shared:false},{id:'forest',name:'Forest',location:false,shared:true},{id:'generic',name:'Background 3',location:false,shared:true}]);
+  assert.deepEqual(userFiles.get('cast-library.json'),beforeCast);assert.deepEqual(userFiles.get('output-folders.json'),beforeFolders);
+  await frontendHandler({type:'load_theater_scenery',requestId:'wrong-scenery-chat',chatId:'chat-other'},'user-1');assert.equal(sent.findLast(e=>e.payload.requestId==='wrong-scenery-chat').payload.type,'studio_error');
+ }finally{userFiles.set('cast-library.json',oldCast);userFiles.set('output-folders.json',oldFolders)}
+}
+console.log('Theater scenery backend PASS: active cast, shared asset union, no writes, stale chat rejection')
+
+
+// 1.1 compiler: exercise actual tag request -> recipe -> provider, not only pure serializers.
+{
+ const {parseImageScenePlan,bindSceneIdentities,serializeScenePlan,escapeIdentityQualifiers,resolvePromptFamily,upgradePromptProtocol,parseLayoutBox,buildMossLayoutDraft,compileMossNativeLayout,compileSwarmMossBoxes}=backendModule
+ const exampleRoot=new URL('../docs/prompt-compilers/examples/',import.meta.url)
+ const scene=(await readFile(new URL('rooftop.scene.txt',exampleRoot),'utf8')).trim()
+ const plan=parseImageScenePlan(scene)
+ assert.deepEqual(plan.subjects.map(s=>s.owner),['persona','other','character'])
+ const ownership={character:'black hair, red eyes',persona:'silver hair, blue eyes'}
+ assert.deepEqual(bindSceneIdentities(plan,ownership,true,true),[ownership.persona,'',ownership.character])
+ assert.deepEqual(bindSceneIdentities(plan,ownership,true,false),['','',ownership.character])
+ const unmarked=parseImageScenePlan(scene.replace(/ \[(character|persona|other)\]/g,''))
+ assert.deepEqual(bindSceneIdentities(unmarked,ownership,true,true),['','',''])
+ const duplicates=parseImageScenePlan(scene.replace('[other]','[persona]'))
+ assert.deepEqual(bindSceneIdentities(duplicates,ownership,true,true),['','',ownership.character])
+ const escaped=String.raw`sakura \(naruto\), (red eyes:1.3), TRIGGER_X, rin \(fate\)`
+ assert.equal(escapeIdentityQualifiers('sakura (naruto), (red eyes:1.3), TRIGGER_X, '+String.raw`rin \(fate\)`),escaped)
+ assert.equal(escapeIdentityQualifiers(escaped),escaped)
+ assert.equal(resolvePromptFamily('auto','diffusion_models/MOSS-Image-Base.safetensors'),'moss')
+ assert.equal(resolvePromptFamily('auto','Krea_2_Turbo.safetensors'),'krea')
+ assert.equal(resolvePromptFamily('auto','anima_aesthetic_v1.safetensors'),'anima-aesthetic')
+ assert.equal(resolvePromptFamily('illustrious','anima_aesthetic_v1.safetensors'),'illustrious')
+ assert.equal(resolvePromptFamily('auto','anima_aesthetic_v1.safetensors',{architecture:'moss-image'}),'moss')
+ assert.equal(resolvePromptFamily('auto','renamed.safetensors',{compatClass:'krea-2'}),'krea')
+ assert.equal(resolvePromptFamily('auto','renamed_aesthetic.safetensors',{architecture:'anima'}),'anima-aesthetic')
+ assert.equal(resolvePromptFamily('anima','renamed.safetensors',{architecture:'moss-image'}),'anima')
+ assert.equal(resolvePromptFamily('auto','illustrious.safetensors',{architecture:'stable-diffusion-xl-v1/base'}),'illustrious')
+ for(const value of ['0,0,0,1','0,0,1.1,1','NaN,0,1,1','0,,1,1','0,1,1,0','0,0,1,1,1']) assert.equal(parseLayoutBox(value),null)
+ assert.deepEqual(parseLayoutBox('0.05, .1, 0.48, 1'),[.05,.1,.48,1])
+ const layoutScene=[
+  'quality/meta: score_9, editorial illustration', 'visible count: 2 people', 'scene: Two adults on a rooftop.', 'camera: medium shot',
+  'right woman [persona] [box .52,.1,.95,.95]: holding a book',
+  'left man [character] [box .05,.1,.48,.95]: smiling',
+  'object box [.44,.68,.56,.84]: a red cup',
+  'text box [.1,.01,.9,.08]: '+JSON.stringify({caption:'White heading',text:'OPEN, "TODAY"\n第二行'}),
+  'environment: rooftop at dusk',
+ ].join('\n')
+ const layoutPlan=parseImageScenePlan(layoutScene)
+ assert.deepEqual(layoutPlan.subjects.map(s=>s.owner),['persona','character'])
+ assert.deepEqual(layoutPlan.subjects[0].box,[.52,.1,.95,.95])
+ const draft=buildMossLayoutDraft(layoutPlan,'moss-layout',bindSceneIdentities(layoutPlan,ownership,true,true))
+ const json=JSON.parse(compileMossNativeLayout(draft,1280,960))
+ assert.equal(json.bbox_format,'yxyx');assert.equal(json.bbox_coord_space,'abs_centralized')
+ assert.deepEqual(json.items[0].bbox,[-384,25,432,576])
+ assert.deepEqual(json.items[1].bbox,[-384,-576,432,-25])
+ assert.match(json.items[0].caption,/silver hair/);assert.doesNotMatch(json.items[0].caption,/black hair/)
+ assert.equal(json.items[3].text,'OPEN, "TODAY"\n第二行');assert.equal(json.items[3].label,'text')
+ assert.doesNotMatch(json.summary.caption,/score_9/)
+ assert.throws(()=>compileMossNativeLayout(draft,1025,768),/aligned/)
+ assert.throws(()=>buildMossLayoutDraft(parseImageScenePlan(layoutScene.replace('.52,.1,.95,.95','1,0,0,1')),'moss-layout',[]),/Invalid layout/)
+ const swarm=compileSwarmMossBoxes(draft)
+ assert.match(swarm,/<bbox\[0.52,0.1,0.95,0.95\]:right woman:/)
+ assert.equal((swarm.match(/<bbox\[/g)||[]).length,3)
+ assert.match(swarm,/Exact lettering:/)
+ for (const [file,content] of [['rooftop.layout.scene.txt',layoutScene],['rooftop.moss-layout.json',JSON.stringify(json,null,2)],['rooftop.moss-bbox.txt',swarm]]) {
+   const path=new URL(file,exampleRoot)
+   if (process.env.UPDATE_PROMPT_EXAMPLES==='1') await (await import('node:fs/promises')).writeFile(path,content+'\n')
+   else assert.equal((await readFile(path,'utf8')).trim(),content)
+ }
+ const ambiguous=buildMossLayoutDraft(parseImageScenePlan('scene: Two people\nleft man [other]: tall\nleft woman [other]: smiling'),'moss-layout',[])
+ assert.equal(ambiguous.items.length,0);assert.match(ambiguous.caption,/left woman: smiling/)
+
+ const old='Treat the tag body as a small visual scene plan.'
+ assert.equal(upgradePromptProtocol(upgradePromptProtocol(old)),upgradePromptProtocol(old))
+ for (const family of ['anima','anima-aesthetic','anima-regional','illustrious','moss','krea']) {
+   const compiled=serializeScenePlan(plan,family,bindSceneIdentities(plan,ownership,true,true))
+   const exampleFile=new URL(`rooftop.${family}.txt`,exampleRoot)
+   if (process.env.UPDATE_PROMPT_EXAMPLES==='1') await (await import('node:fs/promises')).writeFile(exampleFile,compiled+'\n')
+   else assert.equal((await readFile(exampleFile,'utf8')).trimEnd(),compiled)
+   assert.doesNotMatch(compiled,/\[(character|persona|other)\]/)
+   assert.match(compiled,/HELLO,, WORLD/)
+   assert.match(compiled,/silver hair, blue eyes/)
+   assert.match(compiled,/black hair, red eyes/)
+   if (family==='anima-regional'||family==='illustrious') assert.match(compiled,/<region:/)
+   else assert.doesNotMatch(compiled,/<region:/)
+   if (['anima-aesthetic','moss','krea'].includes(family)) assert.doesNotMatch(compiled,/score_9/)
+ }
+ const nativeStream=spindle.imageGen.generateStream
+ const savedFiles=new Map([...userFiles].map(([k,v])=>[k,structuredClone(v)]))
+ const sentInputs=[]
+ try {
+  spindle.imageGen.generateStream=async function*(input){sentInputs.push(structuredClone({...input,signal:undefined}));return {imageId:`compiler-image-${sentInputs.length}`,imageUrl:`/api/v1/images/compiler-image-${sentInputs.length}`}}
+  const previousConfig=userFiles.get('tag-automation-config.json')||{}
+  // Independent fixture: earlier tests deliberately alter the workspace and folders.
+  userFiles.set('studio-generation-profile.json',{input:{connection_id:'swarm-1',model:'anima-base.safetensors',prompt:'',negativePrompt:'',parameters:{width:1024,height:768}},recordHints:{presets:['Cinematic']},updatedAt:Date.now()})
+  const fixtureFolder={id:'character:char-1',name:'Lior',imageIds:[],binding:{type:'character',characterId:'char-1',enabled:true,positivePrompt:'1boy, black hair, red eyes, sakura (naruto)',checkpoint:'',looks:[]}}
+  userFiles.set('output-folders.json',[fixtureFolder])
+  let index=0
+  const generate=async(family,body,persona='active',character='active',expectedError)=>{
+    await request('set_tag_automation',{config:{...previousConfig,autoGenerate:true,autoPrintCharacterPositive:true,promptFamily:family,promptMode:'multi',requestMode:'inline',injectProtocol:true}})
+    const slot=`compiler-${++index}`
+    const fullMatch=`<swarm-image request="generate" slot="${slot}" aspect="4:3" character="${character}" persona="${persona}">${body}</swarm-image>`
+    const msg={id:`compiler-message-${index}`,role:'assistant',content:fullMatch,metadata:{}}
+    taggedMessages.push(msg)
+    const before=sentInputs.length
+    await bounded(frontendHandler({type:'tag_generate',requestId:slot,chatId:'chat-1',messageId:msg.id,fullMatch,attrs:{request:'generate',slot,aspect:'4:3',character,persona},content:body,isStreaming:false},'user-1'))
+    if (expectedError) {
+      assert.equal(sentInputs.length,before,`${family} must reject before provider dispatch`)
+      const failed=userFiles.get('tagged-image-jobs.json').find(j=>j.messageId===msg.id)
+      assert.equal(failed.status,'failed');assert.match(failed.error,expectedError)
+      return ''
+    }
+    assert.equal(sentInputs.length,before+1,`${family} must dispatch exactly one request`)
+    const persisted=userFiles.get('tagged-image-jobs.json').find(j=>j.messageId===msg.id)
+    assert.ok(persisted)
+    assert.equal(persisted.sourcePrompt,body)
+    assert.equal(persisted.prompt,sentInputs.at(-1).prompt)
+    assert.ok(persisted.promptCompiler)
+    return sentInputs.at(-1).prompt
+  }
+  const compiled=await generate('anima',scene)
+  assert.match(compiled,/^Right: woman, [^\n]*silver hair/m)
+  assert.doesNotMatch(compiled,/^Left:[^\n]*silver hair/m)
+  assert.doesNotMatch(compiled,/^Center:[^\n]*silver hair/m)
+  assert.match(compiled,/HELLO,, WORLD/)
+  assert.match(compiled,/score_9/)
+  assert.ok(compiled.split('\n').find(line=>line.startsWith('Left:')).includes(String.raw`sakura \(naruto\)`))
+  assert.doesNotMatch(compiled,/quality\/meta:|\[persona\]|<region:/)
+  assert.equal((compiled.match(/<preset:Cinematic>/g)||[]).length,1)
+  for (const filename of ['izakaya-foreground.scene.txt','izakaya-background.scene.txt']) {
+    const body=(await readFile(new URL('../docs/prompt-compilers/examples/'+filename,import.meta.url),'utf8')).trim()
+    const prompt=await generate('anima',body,'none','active')
+    assert.match(prompt,/^2boys, 1girl$/m)
+    const diagnostics=userFiles.get('tagged-image-jobs.json').find(job=>job.messageId===`compiler-message-${index}`).compilerDiagnostics.join(' ')
+    assert.match(diagnostics,/camera prioritizes two actors/);assert.match(diagnostics,/share a horizontal anchor/)
+  }
+  const invisible=await generate('anima',scene.replace('right woman [persona]: waving, looking at the left man','right woman [other]: waving').replace('3 people','3 people'))
+  assert.doesNotMatch(invisible,/silver hair, blue eyes, black hoodie/)
+  const raw=await generate('anima','An empty rooftop at sunset','active','none')
+  assert.doesNotMatch(raw,/silver hair, blue eyes, black hoodie/)
+  const moss=await generate('moss',scene)
+  assert.match(moss,/Visible text: The sign reads "HELLO,, WORLD"/)
+  assert.doesNotMatch(moss,/score_9|<region:/)
+  const krea=await generate('krea',scene)
+  assert.doesNotMatch(krea,/score_9|<region:/)
+  // A character look's checkpoint outranks the workspace model for compiler selection.
+  const originalProfile=userFiles.get('studio-generation-profile.json')
+  userFiles.set('studio-generation-profile.json',{...originalProfile,input:{...originalProfile.input,model:'anima_aesthetic_v1.safetensors'}})
+  const auto=await generate('auto',scene,'none','none')
+  assert.doesNotMatch(auto,/score_9/)
+  assert.equal(sentInputs.at(-1).model,'anima_aesthetic_v1.safetensors')
+  userFiles.set('output-folders.json',[{...fixtureFolder,binding:{...fixtureFolder.binding,checkpoint:'MOSS-Image-Base.safetensors'}}])
+  const effective=await generate('auto',scene,'none','active')
+  assert.equal(sentInputs.at(-1).model,'MOSS-Image-Base.safetensors')
+  assert.match(effective,/Visible subjects:/)
+  assert.doesNotMatch(effective,/score_9|<region:/)
+  assert.equal(userFiles.get('tagged-image-jobs.json').find(job=>job.messageId===`compiler-message-${index}`).promptCompiler,'moss')
+  // Swarm BBox preserves native preset expansion; the native full document
+  // deliberately refuses presets and raw workflows that could mutate its size/prompt.
+  const bbox=await generate('moss-bbox',layoutScene)
+  assert.match(bbox,/<preset:Cinematic>/);assert.match(bbox,/<bbox\[0.52,0.1,0.95,0.95\]:right woman:/)
+  assert.doesNotMatch(bbox,/\[persona\]|\[box /)
+  await generate('moss-layout',layoutScene,'active','active',/preset directives/)
+  const layoutProfile={...originalProfile,recordHints:{presets:[]},input:{...originalProfile.input,model:'MOSS-Image-Base.safetensors',parameters:{width:1280,height:960,loras:['layout-art.safetensors'],loraWeights:[.7]}}}
+  userFiles.set('studio-generation-profile.json',layoutProfile)
+  const nativeJson=await generate('moss-layout',layoutScene)
+  const actual=JSON.parse(nativeJson), dimensions=sentInputs.at(-1).parameters
+  assert.equal(actual.items[3].text,'OPEN, "TODAY"\n第二行')
+  assert.deepEqual(actual.items[0].bbox,[-.4*dimensions.height,Math.floor(.52*dimensions.width)-dimensions.width/2,Math.ceil(.95*dimensions.height)-dimensions.height/2,Math.ceil(.95*dimensions.width)-dimensions.width/2])
+  assert.ok(dimensions.loras.includes('layout-art.safetensors'));assert.equal(dimensions.loraWeights[dimensions.loras.indexOf('layout-art.safetensors')],.7)
+  assert.doesNotMatch(nativeJson,/\[persona\]|\[character\]|<preset:|<bbox\[/)
+  const layoutJob=userFiles.get('tagged-image-jobs.json').find(job=>job.messageId===`compiler-message-${index}`)
+  assert.match(layoutJob.compilerDiagnostics.join(' '),/Native MOSS JSON/)
+  const beforeRetry=sentInputs.length
+  await bounded(frontendHandler({type:'retry_tagged_job',requestId:'layout-retry',jobId:layoutJob.id,retryMode:'original'},'user-1'))
+  assert.equal(sentInputs.length,beforeRetry+1);assert.deepEqual(JSON.parse(sentInputs.at(-1).prompt),actual)
+  await generate('moss-layout',layoutScene.replace('.52,.1,.95,.95','1,0,0,1'),'active','active',/Invalid layout/)
+  userFiles.set('studio-generation-profile.json',{...layoutProfile,input:{...layoutProfile.input,parameters:{...layoutProfile.input.parameters,rawRequestOverride:'{"width":768}'}}})
+  await generate('moss-layout',layoutScene,'active','active',/standard prompt path/)
+  userFiles.set('studio-generation-profile.json',layoutProfile)
+  userFiles.set('studio-generation-profile.json',{...layoutProfile,input:{...layoutProfile.input,parameters:{...layoutProfile.input.parameters,rawRequestOverride:'{"donotsave":true}'}}})
+  const safeOverride=await generate('moss-layout',layoutScene)
+  assert.equal(JSON.parse(safeOverride).items[3].text,actual.items[3].text)
+  assert.equal(JSON.parse(sentInputs.at(-1).parameters.rawRequestOverride).donotsave,true)
+  userFiles.set('studio-generation-profile.json',layoutProfile)
+  const fallback=await generate('moss-layout','Empty library at dusk','none','none')
+  assert.equal(fallback,'Empty library at dusk')
+  // Metadata must be requested for the recipe checkpoint, not the workspace model.
+  const originalCors=spindle.cors, described=[]
+  try {
+    spindle.cors=async function(url,options){
+      if(!url.endsWith('/API/DescribeModel'))return originalCors.call(this,url,options)
+      const request=JSON.parse(options.body);described.push(request.modelName)
+      assert.equal(request.subtype,'Stable-Diffusion');assert.ok(request.session_id)
+      return {status:200,body:JSON.stringify({model:{name:request.modelName,architecture:'moss-image',compat_class:'moss-image'}})}
+    }
+    userFiles.set('studio-generation-profile.json',originalProfile)
+    userFiles.set('output-folders.json',[{...fixtureFolder,binding:{...fixtureFolder.binding,checkpoint:'custom/renamed-finetune.safetensors'}}])
+    const metadataPrompt=await generate('auto',scene,'none','active')
+    assert.match(metadataPrompt,/Visible subjects:/);assert.equal(sentInputs.at(-1).model,'custom/renamed-finetune.safetensors')
+    assert.deepEqual(described,['custom/renamed-finetune.safetensors'])
+    assert.match(userFiles.get('tagged-image-jobs.json').find(job=>job.messageId===`compiler-message-${index}`).compilerDiagnostics.join(' '),/provider architecture moss-image/)
+    await generate('auto',scene,'none','active');assert.equal(described.length,1,'Metadata lookup is cached by exact connection and model')
+    const manual=await generate('anima',scene,'none','active');assert.match(manual,/^Left:/m);assert.equal(described.length,1)
+    spindle.cors=async function(url,options){
+      if(!url.endsWith('/API/DescribeModel'))return originalCors.call(this,url,options)
+      return {status:200,body:JSON.stringify({model:{name:'wrong-folder/renamed.safetensors',architecture:'moss-image'}})}
+    }
+    userFiles.set('output-folders.json',[{...fixtureFolder,binding:{...fixtureFolder.binding,checkpoint:'different-folder/anima-renamed.safetensors'}}])
+    const mismatched=await generate('auto',scene,'none','active');assert.match(mismatched,/^Left:/m)
+    assert.match(userFiles.get('tagged-image-jobs.json').find(job=>job.messageId===`compiler-message-${index}`).compilerDiagnostics.join(' '),/checkpoint-name fallback/)
+  } finally {spindle.cors=originalCors}
+  console.log('MOSS layout PASS: native JSON, exact text, canvas conversion, Swarm BBox presets, guarded overrides, retry, ambiguity, exact effective architecture, cache and fallback')
+  // Native activation is eligibility, never a blanket prompt/recipe contribution.
+  const getActivated=spindle.world_books.getActivated, getEntry=spindle.world_books.entries.get
+  const native=(id,type,fields={})=>({id,comment:`Lore ${id}`,extensions:{swarm_studio_visuals:{enabled:true,entityType:type,positivePrompt:`${id}-shared`,...fields}}})
+  const records=[
+    native('actor','character',{positivePrompt:'sakura (naruto), LORE_ACTOR',modelPrompts:{moss:{positivePrompt:'MOSS_ACTOR',negativePrompt:'MOSS_NEG'},anima:{positivePrompt:'sakura (naruto), ANIMA_ACTOR',negativePrompt:'ANIMA_NEG'}},stackSnapshot:[{name:'actor-lora.safetensors',weight:.6}]}),
+    native('coat','outfit',{positivePrompt:'NAVY_COAT'}),
+    native('place','location',{positivePrompt:'STONE_LIBRARY',checkpoint:'MOSS-Image-Base.safetensors',preferredAspect:'16:9',negativePrompt:'NEON_NEG'}),
+    native('other-place','location',{positivePrompt:'OTHER_PLACE',checkpoint:'Krea_2.safetensors'}),
+    native('past','location',{positivePrompt:'ABSENT_CASTLE',checkpoint:'wrong-checkpoint.safetensors',negativePrompt:'ABSENT_NEG',referenceImageId:'absent-ref',stackSnapshot:[{name:'absent-lora.safetensors',weight:.9}]}),
+    native('disabled','character',{enabled:false,positivePrompt:'DISABLED_ACTOR'}),
+    native('inactive','character',{positivePrompt:'INACTIVE_ACTOR'}),
+    native('art','style',{positivePrompt:'INK_STYLE'}),
+    native('prop','object',{positivePrompt:'BRASS_KEY',stackSnapshot:[{name:'actor-lora.safetensors',weight:.9}]}),
+  ]
+  let activeIds=records.filter(r=>r.id!=='inactive').map(r=>r.id)
+  const reads=[]
+  spindle.world_books.getActivated=async (chatId,userId)=>{assert.equal(chatId,'chat-1');assert.equal(userId,'user-1');return activeIds.map(id=>({entry_id:id}))}
+  spindle.world_books.entries.get=async(id,userId)=>{assert.equal(userId,'user-1');reads.push(id);assert.ok(activeIds.includes(id),'Must never fetch an inactive or arbitrary lore entry');return structuredClone(records.find(r=>r.id===id))}
+  try {
+    userFiles.set('output-folders.json',[fixtureFolder])
+    userFiles.set('studio-generation-profile.json',originalProfile)
+    const noLore=await generate('auto',scene,'none','none')
+    assert.doesNotMatch(noLore,/ABSENT_CASTLE|STONE_LIBRARY|ANIMA_ACTOR/)
+    assert.equal(sentInputs.at(-1).model,'anima-base.safetensors')
+    assert.doesNotMatch(sentInputs.at(-1).negativePrompt,/ABSENT_NEG|NEON_NEG/)
+    assert.ok(!(sentInputs.at(-1).parameters.loras||[]).includes('absent-lora.safetensors'))
+    assert.ok(!sentInputs.at(-1).parameters.referenceImages?.length)
+    const marked=scene.replace('Three people', 'Three people').replace('right woman [persona]:','right woman [other]: [[lore:actor]] [[lore:coat]]').replace('environment:', 'environment: [[lore:place]]').replace('scene:', 'scene: [[lore:art]]')
+    const selected=await generate('auto',marked,'none','none')
+    assert.equal(sentInputs.at(-1).model,'MOSS-Image-Base.safetensors')
+    assert.match(selected,/^right woman: [^\n]*MOSS_ACTOR[^\n]*NAVY_COAT/im)
+    assert.doesNotMatch(selected,/^left man:[^\n]*MOSS_ACTOR/im)
+    assert.match(selected,/STONE_LIBRARY/);assert.match(selected,/INK_STYLE/)
+    assert.doesNotMatch(selected,/ABSENT_CASTLE|ANIMA_ACTOR|\[\[lore:/)
+    assert.match(sentInputs.at(-1).negativePrompt,/MOSS_NEG/)
+    assert.match(sentInputs.at(-1).negativePrompt,/NEON_NEG/)
+    assert.ok(sentInputs.at(-1).parameters.loras.includes('actor-lora.safetensors'))
+    assert.equal(sentInputs.at(-1).parameters.width,sentInputs.at(-1).parameters.height*4/3)
+    const report=()=>userFiles.get('tagged-image-jobs.json').find(job=>job.messageId===`compiler-message-${index}`).loreDiagnostics.join('\n')
+    assert.match(report(),/Selected Lore actor.*right woman/)
+    assert.match(report(),/positive moss; negative moss/)
+    assert.match(report(),/whole image|image-wide/)
+    assert.match(report(),/explicit request aspect takes precedence/)
+    userFiles.set('studio-generation-profile.json',{...originalProfile,recordHints:{presets:[]}})
+    const loreLayout=JSON.parse(await generate('moss-layout',marked,'none','none'))
+    assert.match(loreLayout.items.find(item=>item.caption.startsWith('right woman:')).caption,/MOSS_ACTOR.*NAVY_COAT/)
+    assert.doesNotMatch(loreLayout.items.find(item=>item.caption.startsWith('left man:')).caption,/MOSS_ACTOR/)
+    assert.match(loreLayout.summary.caption,/STONE_LIBRARY/)
+    assert.doesNotMatch(JSON.stringify(loreLayout),/ABSENT_CASTLE|\[\[lore:/)
+    userFiles.set('studio-generation-profile.json',originalProfile)
+    const loreInjected=await interceptorHandler([{role:'user',content:'Show the library'}],{userId:'user-1',chatId:'chat-1'})
+    assert.match(loreInjected.messages[0].content,/\[\[lore:actor\]\]/)
+    assert.match(macroValues.get('swarm_image_protocol'),/\[\[lore:actor\]\]/)
+    assert.doesNotMatch(macroValues.get('swarm_image_protocol'),/\[\[lore:(?:disabled|inactive)\]\]/)
+    const conflict=await generate('anima',marked.replace('[[lore:place]]','[[lore:place]] [[lore:other-place]]').replace('[[lore:coat]]','[[lore:coat]] [[lore:prop]]'),'none','none')
+    assert.equal(sentInputs.at(-1).model,'anima-base.safetensors')
+    assert.match(conflict,/ANIMA_ACTOR/); assert.match(conflict,/BRASS_KEY/)
+    assert.ok(conflict.includes(String.raw`sakura \(naruto\)`))
+    assert.match(report(),/conflicting lore checkpoint/);assert.match(report(),/conflicting lore LoRA weights/)
+    assert.ok(!(sentInputs.at(-1).parameters.loras||[]).includes('actor-lora.safetensors'))
+    const invalid=await generate('anima',scene.replace('right woman [persona]:','right woman [persona]: [[lore:actor]] [[lore:disabled]] [[lore:inactive]] [[lore:unknown]]').replace('camera:', 'camera: [[lore:coat]]').replace('environment:', 'environment: [[lore:actor]] [[lore:art]]'),'none','none')
+    assert.doesNotMatch(invalid,/ANIMA_ACTOR|NAVY_COAT|INK_STYLE|DISABLED_ACTOR|INACTIVE_ACTOR|\[\[lore:/)
+    assert.match(report(),/ambiguous or unsupported marker placement/);assert.match(report(),/not an enabled, activated/)
+    const rawLore=await generate('anima','Rooftop at dusk [[lore:past]]','none','none')
+    assert.doesNotMatch(rawLore,/ABSENT_CASTLE|\[\[lore:/);assert.equal(sentInputs.at(-1).model,'anima-base.safetensors')
+    activeIds=activeIds.filter(id=>id!=='actor')
+    const refreshed=await interceptorHandler([{role:'system',content:loreInjected.messages[0].content}],{userId:'user-1',chatId:'chat-1'})
+    assert.ok(Array.isArray(refreshed))
+    assert.doesNotMatch(refreshed[0].content,/\[\[lore:actor\]\]/)
+    assert.match(refreshed[0].content,/\[\[lore:place\]\]/)
+    const deactivated=await generate('anima',marked.replace('[[lore:place]]',''),'none','none')
+    assert.doesNotMatch(deactivated,/ANIMA_ACTOR/);assert.match(report(),/Skipped actor: not an enabled, activated/)
+    assert.ok(!reads.includes('inactive')&&!reads.includes('unknown'))
+  } finally { spindle.world_books.getActivated=getActivated;spindle.world_books.entries.get=getEntry }
+  console.log('Scoped lore PASS: actual tagged provider dispatch, activation recheck, owner/field scope, model overrides, checkpoint and LoRA conflicts, no global leakage, persisted diagnostics')
+ } finally {
+  spindle.imageGen.generateStream=nativeStream
+  userFiles.clear();for (const [k,v] of savedFiles) userFiles.set(k,v)
+ }
+}
+console.log('1.1 compiler PASS: owner markers, duplicate and missing owners, literal escaping, six dialects, real mocked tag generation, saved raw/compiled prompts, effective checkpoint')
+
+// Quick access is a narrow persisted mutation, not a second identity editor.
+{
+  const stored = new Map([...userFiles].map(([key, value]) => [key, structuredClone(value)]))
+  const personaBefore = structuredClone(activePersona)
+  try {
+    const quick = await request('get_quick_visuals')
+    assert.equal(quick.type, 'quick_visuals_result')
+    assert.deepEqual(quick.data.models, [])
+    const context = {chatId: quick.data.activeChat.id, characterId: quick.data.activeChat.characterId, personaId: quick.data.activePersona.id}
+    const originalFolders = structuredClone(userFiles.get('output-folders.json'))
+    const styledFolders = structuredClone(originalFolders)
+    const styled = styledFolders.find(f=>f.binding?.characterId===context.characterId)
+    if(styled) {
+      styled.binding.styleId='quick-base-style'
+      const look=styled.binding.looks.find(l=>l.id===styled.binding.activeLookId)
+      if(look) look.styleId='quick-look-style'
+      userFiles.set('studio-render-styles.json',[{id:'quick-base-style',name:'Base ink'},{id:'quick-look-style',name:'Look watercolor'}])
+      userFiles.set('output-folders.json',styledFolders)
+      assert.equal((await request('get_quick_visuals')).data.characterStyleName,look?'Look watercolor':'Base ink')
+    }
+    const automation = structuredClone(userFiles.get('tag-automation-config.json'))
+    const originalMode = await request('set_tag_automation',{config:{...automation,promptMode:'multi',requestMode:'parser',parserModel:'saved-parser',promptFamily:'moss'}})
+    const narrowMode = await request('set_tag_prompt_mode',{promptMode:'pov'})
+    assert.deepEqual(narrowMode.data,{...originalMode.data,promptMode:'pov'},'Quick composition preserves other parser settings')
+    userFiles.set('output-folders.json',originalFolders)
+    userFiles.set('output-folders.json', originalFolders.filter(f=>f.binding?.characterId!==context.characterId))
+    const created = await request('set_quick_visuals',{...context,action:'bind-character'})
+    assert.equal(created.data.characterFolder.binding.characterId,context.characterId)
+    assert.equal(created.data.characterFolder.binding.activeLookId,'default')
+    userFiles.set('output-folders.json',originalFolders)
+    const bound = await request('set_quick_visuals', {...context, action:'bind-character'})
+    const before = structuredClone(bound.data.characterFolder.binding)
+    const paused = await request('set_quick_visuals', {...context, action:'character-enabled',enabled:false})
+    assert.deepEqual(paused.data.characterFolder.binding,{...before,enabled:false})
+    const currentStack = [{name:'quick/ink.safetensors', title:'Ink',weight:.72,enabled:true,useTrigger:true,sourceUrl:''}]
+    const saved = await request('set_quick_visuals', {action:'save-stack',name:'Quick access test',currentStack})
+    const preset = saved.data.stackPresets.find(x=>x.name==='Quick access test')
+    assert.ok(preset)
+    const attached = await request('set_quick_visuals',{...context,action:'stack',presetId:preset.id})
+    assert.deepEqual(attached.data.characterFolder.binding,{...before,enabled:false,stackPresetId:preset.id,stackSnapshot:preset.items})
+    const custom = await request('set_quick_visuals',{...context,action:'stack-current',currentStack:[{...currentStack[0],weight:.35}]})
+    assert.equal(custom.data.characterFolder.binding.stackPresetId,'')
+    assert.equal(custom.data.characterFolder.binding.stackSnapshot[0].weight,.35)
+    const look = custom.data.characterFolder.binding.looks.at(-1)
+    const selected = await request('set_quick_visuals',{...context,action:'look',lookId:look.id})
+    assert.deepEqual(selected.data.characterFolder.binding,{...custom.data.characterFolder.binding,activeLookId:look.id})
+    const profile = selected.data.personaPresets[0]
+    assert.ok(profile)
+    const personaResult = await request('set_quick_visuals',{...context,action:'persona',presetId:profile.id,enabled:false})
+    assert.deepEqual(personaResult.data.personaBinding,{presetId:profile.id,enabled:false})
+    const preserved = structuredClone(userFiles.get('output-folders.json'))
+    for (const [id, fields] of [['quick-stale-chat',{...context,chatId:'different',action:'character-enabled',enabled:true}],['quick-stale-persona',{...context,personaId:'different',action:'persona',presetId:profile.id,enabled:true}],['quick-missing-preset',{...context,action:'stack',presetId:'nonexistent'}],['quick-duplicate-name',{action:'save-stack',name:'quick access TEST',currentStack}]]) {
+      await frontendHandler({type:'set_quick_visuals',requestId:id,...fields},'user-1')
+      assert.equal(sent.findLast(x=>x.payload.requestId===id)?.payload.type,'studio_error')
+    }
+    assert.deepEqual(userFiles.get('output-folders.json'),preserved)
+    assert.equal(activePersona.metadata.swarm_studio_visuals.enabled,false)
+  } finally {
+    userFiles.clear(); for (const [key,value] of stored) userFiles.set(key,value)
+    Object.assign(activePersona,personaBefore)
+  }
+}
+console.log('Quick access PASS: targeted binding, saved/current stack, persona, stale context and duplicate rejection')
+
+// Cast background generation is an isolated, opt-in environment-only job.
+{
+  const savedFiles = new Map([...userFiles].map(([key,value])=>[key,structuredClone(value)]))
+  const oldStream=spindle.imageGen.generateStream,oldGet=spindle.images.get,oldActivated=spindle.world_books.getActivated,oldEntry=spindle.world_books.entries.get
+  const oldPermissions=new Set(permissions),inputs=[],owned=new Set()
+  let hold=null,fail=false
+  const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms))
+  const wait=async(predicate,label)=>{for(let i=0;i<300;i++){if(predicate())return;await delay(10)}assert.fail(label)}
+  const group='bg-test',other='bg-reuse'
+  const library={version:2,activeGroupId:group,inject:true,chatGroups:{'chat-1':group},groups:[{id:group,name:'Scene generation',inject:true,defaultPresentation:'vn-hero'},{id:other,name:'Other cast'}],members:[{id:'bg-character',groupId:group,name:'Actor',prefix:'Actor',identityPrompt:'NEVER_ACTOR',images:{neutral:{id:'bg-portrait'}}}]}
+  const read=()=>userFiles.get('cast-library.json'),scenes=()=>read().groups.find(g=>g.id===group)?.backgrounds||[]
+  const assets=()=>userFiles.get('output-folders.json').find(f=>f.id==='cast-background-assets')
+  const job=(key,status)=>sent.some(x=>x.payload.type==='cast_background_job'&&x.payload.data.key===key&&x.payload.data.status===status)
+  const generate=(key,prompt='Quiet rooftop at dusk')=>request('generate_cast_background',{groupId:group,key,name:key,prompt})
+  const reply=(key,body='Empty school library',role='assistant',contentOverride)=>{
+    const content=contentOverride||`Outside. <swarm-background=${group}:${key}>${body}</swarm-background> <swarm-cast=Actor-neutral background=${key}>“Hello.”</swarm-cast>`
+    const message={id:`bg-message-${key}`,role,content,metadata:{}};taggedMessages.push(message)
+    const payload={generationId:`bg-gen-${key}`,chatId:'chat-1',messageId:message.id,content}
+    return {message,payload,emit:()=>eventHandlers.get('GENERATION_ENDED')(payload,'user-1')}
+  }
+  try {
+    permissions.add('world_books');permissions.delete('cors_proxy')
+    userFiles.set('studio-generation-profile.json',{input:{connection_id:'swarm-1',model:'anima-base.safetensors',prompt:'NEVER_PROFILE',negativePrompt:'NEVER_PROFILE_NEG',parameters:{width:1024,height:1024,steps:28,cfgScale:5,loras:['actor-only.safetensors'],loraWeights:[.8],rawRequestOverride:'{"presets":["Character preset"],"comfyuicustomworkflow":"Character graph"}'}},recordHints:{presets:['Character preset']}})
+    userFiles.set('output-folders.json',[])
+    await request('save_cast_library',{library})
+    const dormant=await interceptorHandler([{role:'user',content:'Continue'}],{userId:'user-1',chatId:'chat-1'})
+    assert.doesNotMatch(JSON.stringify(dormant),/<swarm-background=/)
+    spindle.images.get=async(id,options)=>owned.has(id)?{id,url:`/api/v1/images/${id}`} : oldGet(id,options)
+    spindle.imageGen.generateStream=async function*(input){
+      inputs.push(input);yield {step:2,totalSteps:8,preview:'data:image/png;base64,AQID'};if(hold)await hold
+      if(fail)throw new Error('mock provider failed')
+      const id=`background-owned-${inputs.length}`;owned.add(id)
+      return {imageId:id,imageUrl:`/api/v1/images/${id}`,model:input.model}
+    }
+    const disabled=reply('disabled');disabled.emit();await delay(50);assert.equal(inputs.length,0)
+    await request('save_cast_library',{library:{...read(),groups:read().groups.map(g=>g.id===group?{...g,generateBackgrounds:true}:g)}})
+    const enabled=await interceptorHandler([{role:'user',content:'Continue'}],{userId:'user-1',chatId:'chat-1'})
+    assert.match(JSON.stringify(enabled),/<swarm-background=bg-test:new-scene-key>/)
+    const first=reply('rooftop','Empty rooftop at sunset');let release;hold=new Promise(resolve=>{release=resolve})
+    first.emit();first.emit();await wait(()=>inputs.length===1,'Inline render did not start')
+    assert.match(inputs[0].prompt,/no humans|No people/i);assert.match(inputs[0].prompt,/Empty rooftop at sunset/)
+    assert.doesNotMatch(inputs[0].prompt,/NEVER|<preset:|Actor/);assert.doesNotMatch(inputs[0].negativePrompt,/NEVER/)
+    assert.equal(inputs[0].owner_character_id,undefined);assert.equal(inputs[0].owner_chat_id,undefined)
+    assert.equal(inputs[0].parameters.loras,undefined);assert.equal(inputs[0].parameters.referenceImages,undefined)
+    assert.equal(inputs[0].parameters.steps,28);assert.equal(inputs[0].parameters.seed,-1)
+    assert.ok(inputs[0].parameters.width>inputs[0].parameters.height)
+    const metadata=JSON.parse(inputs[0].parameters.rawRequestOverride).extra_metadata
+    assert.equal(metadata.studio_stage,'cast_background');assert.equal(metadata.studio_cast_group,group);assert.equal(metadata.studio_background_key,'rooftop')
+    assert.deepEqual(Object.keys(JSON.parse(inputs[0].parameters.rawRequestOverride)),['extra_metadata'])
+    assert.equal((await generate('rooftop')).data.status,'pending')
+    await wait(()=>sent.some(x=>x.payload.type==='cast_background_job'&&x.payload.data.key==='rooftop'&&x.payload.data.preview==='data:image/png;base64,AQID'),'Background preview event missing')
+    const pendingBackgrounds=(await request('list_cast_background_jobs',{})).data
+    assert.ok(pendingBackgrounds.some(x=>x.groupId===group&&x.key==='rooftop'&&x.step===2&&x.totalSteps===8));assert.ok(pendingBackgrounds.every(x=>!x.preview),'Snapshot should not retain live preview payloads')
+    const stale=structuredClone(read())
+    await request('set_cast_side',{memberId:'bg-character',side:'right'})
+    release();hold=null
+    await wait(()=>scenes().length===1&&job('rooftop','ready'),'Background was not saved')
+    assert.equal(sent.findLast(x=>x.payload.type==='cast_background_job'&&x.payload.data.key==='rooftop'&&x.payload.data.status==='ready').payload.data.imageId,scenes()[0].id)
+    assert.ok(!(await request('list_cast_background_jobs',{})).data.some(x=>x.groupId===group&&x.key==='rooftop'))
+    assert.equal(read().members[0].presentationSide,'right');assert.equal(scenes()[0].id,assets().imageIds[0]);assert.equal(assets().binding,null)
+    assert.equal(read().groups[0].defaultBackground,'','Generating must not change existing default')
+    assert.equal(first.message.content,first.payload.content,'Saved dialogue source remains untouched')
+    const rendered=castRenderProcessor({origin:'render',isUser:false,content:first.message.content})
+    assert.ok(rendered.content.includes('data-ss-cast-background="rooftop"'));assert.doesNotMatch(rendered.content,/Empty rooftop at sunset|swarm-background=/)
+    await frontendHandler({type:'save_cast_library',requestId:'stale-bg-save',library:stale,baseSignature:JSON.stringify(stale)},'user-1')
+    assert.equal(sent.findLast(x=>x.payload.requestId==='stale-bg-save')?.payload.type,'studio_error');assert.equal(scenes().length,1)
+    first.emit();await delay(30);assert.equal(inputs.length,1);assert.equal((await generate('rooftop')).data.status,'exists')
+    // Reuse from the same unbound library without rendering another file.
+    const reused=structuredClone(read());reused.groups.find(g=>g.id===other).backgrounds=[{key:'roof',name:'Shared roof',id:assets().imageIds[0],aliases:[]}]
+    await request('save_cast_library',{library:reused});assert.equal(read().groups[1].backgrounds[0].id,scenes()[0].id)
+    // Exact source, role, matching expression, request count, and code fencing.
+    const staleReply=reply('stale');staleReply.message.content='Edited';staleReply.emit()
+    reply('user','Empty scene','user').emit()
+    reply('wrong','', 'assistant',`<swarm-background=${other}:wrong>Empty room</swarm-background> <swarm-cast=Actor-neutral background=wrong>Hi</swarm-cast>`).emit()
+    reply('bad-expression','','assistant',`<swarm-background=${group}:bad-expression>Empty room</swarm-background> <swarm-cast=Actor-invented background=bad-expression>Hi</swarm-cast>`).emit()
+    reply('fenced','','assistant',`\`\`\`<swarm-background=${group}:fenced>Empty room</swarm-background>\`\`\` <swarm-cast=Actor-neutral background=fenced>Hi</swarm-cast>`).emit()
+    reply('missing-use','','assistant',`<swarm-background=${group}:missing-use>Empty room</swarm-background>`).emit()
+    await delay(60);assert.equal(inputs.length,1)
+    // Location-specific overrides are permitted; character lore is never applied.
+    spindle.world_books.getActivated=async()=>[{id:'bg-place'},{id:'bg-actor'}]
+    spindle.world_books.entries.get=async id=>({id,extensions:{swarm_studio_visuals:{enabled:true,entityType:id==='bg-place'?'location':'character',positivePrompt:'NEVER_SHARED',modelPrompts:{moss:{positivePrompt:'MOSS_LIBRARY',negativePrompt:'NEON'}} ,checkpoint:'MOSS-Image-Base.safetensors',stackSnapshot:[{name:'location-art.safetensors',weight:.6}]}}})
+    await request('set_tag_automation',{config:{...userFiles.get('tag-automation-config.json'),promptFamily:'auto'}})
+    await generate('library','Quiet aisles [[lore:bg-place]]');await wait(()=>job('library','ready'),'Location generation did not finish')
+    assert.equal(inputs.at(-1).model,'MOSS-Image-Base.safetensors');assert.match(inputs.at(-1).prompt,/MOSS_LIBRARY/);assert.doesNotMatch(inputs.at(-1).prompt,/NEVER_SHARED|\[\[lore:/);assert.deepEqual(inputs.at(-1).parameters.loras,['location-art.safetensors'])
+    await generate('actor-lore','Empty room [[lore:bg-actor]]');await wait(()=>job('actor-lore','error'),'Non-location lore should be rejected');assert.equal(inputs.length,2)
+    // Failed automatic render gets a durable receipt; a manual retry is allowed.
+    fail=true;const failure=reply('failed','Empty hall');failure.emit();await wait(()=>job('failed','error'),'Expected failed job');assert.equal(scenes().length,2)
+    failure.emit();await delay(50);assert.equal(inputs.length,3);fail=false
+    await generate('failed','Empty hall');await wait(()=>job('failed','ready'),'Manual retry failed');assert.equal(scenes().length,3)
+    // Cast removed while provider runs: archive the asset instead of resurrecting the group.
+    hold=new Promise(resolve=>{release=resolve});await generate('orphan','Empty garden');await wait(()=>inputs.length===5,'Render not started')
+    await request('save_cast_library',{library:{...read(),activeGroupId:other,groups:read().groups.filter(g=>g.id!==group),members:[],chatGroups:{'chat-1':other}}})
+    release();hold=null;await wait(()=>job('orphan','error'),'Expected removed Cast error');assert.ok(assets().imageIds.includes('background-owned-5'));assert.ok(!read().groups.some(g=>g.id===group))
+    assert.ok(userFiles.get('studio-assets-v1.json').some(x=>x.imageId==='background-owned-5'&&x.metadata.studio_stage==='cast_background'))
+    // Stage Direction can request a location in narration with no Cast packet,
+    // even for a Cast whose legacy inline injection/generation is disabled.
+    const stageLoad=(await request('load_stage_direction')).data
+    const stageConfig={...stageLoad.global,mode:'auto',scenery:true,generate:true}
+    await request('save_stage_direction',{scope:'global',expected:stageLoad.global,config:stageConfig})
+    const standalone=(key,extra='')=>`<swarm-background=${other}:${key}>Empty hall at dawn</swarm-background>\n\n[[scene: ${key}]]\n\nThe hall was empty.${extra}`
+    reply('stage-protected','','assistant',`<div>${standalone('stage-protected')}</div>`).emit()
+    reply('stage-missing-cue','','assistant',`<swarm-background=${other}:stage-missing-cue>Empty hall</swarm-background>`).emit()
+    await delay(50);assert.equal(inputs.length,5)
+    const narrated=reply('stage-narration','','assistant',standalone('stage-narration'));narrated.emit();narrated.emit();await wait(()=>job('stage-narration','ready'),'Standalone Stage Direction background did not finish')
+    assert.equal(inputs.length,6);assert.ok(read().groups.find(g=>g.id===other).backgrounds.some(b=>b.key==='stage-narration'));assert.equal(narrated.message.content,narrated.payload.content)
+    assert.ok(castRenderProcessor({origin:'render',isUser:false,content:narrated.message.content}).content.includes('data-ss-stage-cue'))
+    const stageAfter=(await request('load_stage_direction')).data
+    await request('save_stage_direction',{scope:'global',expected:stageAfter.global,config:{...stageAfter.global,generate:false}})
+    reply('stage-disabled','','assistant',standalone('stage-disabled')).emit();await delay(50);assert.equal(inputs.length,6)
+    // Manual-only workshop: no premature registration, veto, retry, stale approval.
+    const inherited=(await request('load_cast_background_settings')).data
+    assert.equal(inherited.model,'anima-base.safetensors');assert.equal(inherited.recipe.steps,28)
+    assert.ok(inherited.recipe.width>inherited.recipe.height)
+    const draft=(settings={})=>request('generate_cast_background',{groupId:other,key:'manual-review',name:'Review me',prompt:'Empty restaurant',review:true,settings})
+    const review=async()=>{await wait(()=>sent.some(x=>x.payload.type==='cast_background_job'&&x.payload.data.key==='manual-review'&&x.payload.data.status==='review'),'No manual review');return (await request('list_cast_background_jobs')).data.find(x=>x.groupId===other&&x.key==='manual-review')}
+    const approve=(candidateId,action)=>request('review_cast_background',{groupId:other,key:'manual-review',candidateId,action})
+    const backgrounds=()=>read().groups.find(g=>g.id===other).backgrounds
+    await draft({recipe:{width:768,height:512,steps:43,cfg:3.2,sampler:'euler',scheduler:'normal'},checkpoint:'manual-anima.safetensors',seed:123,negative:'no clutter',aspect:'16:9'})
+    let candidate=await review();assert.equal(candidate.status,'review');assert.ok(candidate.candidateId)
+    assert.equal(inputs.at(-1).model,'manual-anima.safetensors');assert.equal(inputs.at(-1).parameters.width,768);assert.equal(inputs.at(-1).parameters.height,512);assert.equal(inputs.at(-1).parameters.steps,43);assert.equal(inputs.at(-1).parameters.cfgScale,3.2);assert.equal(inputs.at(-1).parameters.seed,123);assert.match(inputs.at(-1).negativePrompt,/no clutter/);assert.equal(inputs.at(-1).parameters.loras,undefined)
+    assert.ok(!backgrounds().some(bg=>bg.key==='manual-review'));assert.ok(!assets().imageIds.includes(candidate.imageId));assert.equal((await draft()).data.status,'review')
+    const oldCandidate=candidate.candidateId,rejectedImage=candidate.imageId
+    await approve(oldCandidate,'veto');assert.ok(!assets().imageIds.includes(rejectedImage));assert.ok(owned.has(rejectedImage));assert.ok(!backgrounds().some(bg=>bg.key==='manual-review'))
+    await draft();await wait(()=>sent.filter(x=>x.payload.type==='cast_background_job'&&x.payload.data.key==='manual-review'&&x.payload.data.status==='review').length===2,'Retry did not finish');candidate=await review();assert.notEqual(candidate.candidateId,oldCandidate)
+    assert.equal(inputs.at(-1).parameters.steps,28);assert.equal(inputs.at(-1).parameters.seed,-1)
+    await assert.rejects(()=>approve(oldCandidate,'accept'),/no longer awaiting review/)
+    await approve(candidate.candidateId,'accept');assert.ok(backgrounds().some(bg=>bg.key==='manual-review'&&bg.id===candidate.imageId));assert.ok(assets().imageIds.includes(candidate.imageId));assert.ok(!assets().imageIds.includes(rejectedImage));assert.ok(!(await request('list_cast_background_jobs')).data.some(x=>x.key==='manual-review'))
+    await assert.rejects(()=>approve(candidate.candidateId,'accept'),/no longer awaiting review/)
+    await assert.rejects(()=>draft({recipe:{width:1024}}),/both canvas dimensions/)
+    userFiles.set('lora-stack-presets.json',[{id:'scenic-stack',name:'Scenic stack',items:[{name:'environment.safetensors',weight:.7,enabled:true},{name:'disabled.safetensors',weight:.5,enabled:false}]}])
+    const queued=key=>request('generate_cast_background',{groupId:other,key,name:key,prompt:'Empty room',review:true,settings:{stackId:'scenic-stack'}})
+    hold=new Promise(resolve=>{release=resolve});const beforeQueue=inputs.length
+    await queued('manual-hold');await wait(()=>inputs.length===beforeQueue+1,'Manual queue did not start')
+    await queued('manual-snapshot');const profile=userFiles.get('studio-generation-profile.json');profile.input.parameters.steps=99;userFiles.set('studio-generation-profile.json',profile);userFiles.set('lora-stack-presets.json',[])
+    release();hold=null;await wait(()=>job('manual-snapshot','review'),'Queued manual snapshot did not finish')
+    assert.equal(inputs.at(-1).parameters.steps,28);assert.deepEqual(inputs.at(-1).parameters.loras,['environment.safetensors']);assert.deepEqual(inputs.at(-1).parameters.loraWeights,[.7])
+    const held=(await request('list_cast_background_jobs')).data.filter(x=>['manual-hold','manual-snapshot'].includes(x.key));assert.equal(held.length,2)
+    for(const job of held)await request('review_cast_background',{groupId:other,key:job.key,candidateId:job.candidateId,action:'veto'})
+
+    console.log('Manual background review PASS: inherited settings, isolated overrides, preview gate, veto, retry, stale approval and accepted library references')
+
+
+  }finally{
+    spindle.imageGen.generateStream=oldStream;spindle.images.get=oldGet;spindle.world_books.getActivated=oldActivated;spindle.world_books.entries.get=oldEntry
+    permissions.clear();for(const p of oldPermissions)permissions.add(p)
+    userFiles.clear();for(const [k,v] of savedFiles)userFiles.set(k,v)
+  }
+}
+console.log('Cast background generation PASS: opt-in, source validation, pending/replay dedup, isolated provider payload, location lore, same-ID shared assets, concurrent edits, failure retry and deleted Cast retention')
+
+// Manual Lore is an explicit Studio-only selection, independent of native activation.
+{
+  const savedFiles = structuredClone(userFiles), savedPermissions = new Set(permissions)
+  const oldStream = spindle.imageGen.generateStream, oldGet = spindle.world_books.entries.get, oldList = spindle.world_books.list, oldActive = spindle.world_books.getActivated
+  const inputs = []
+  const books = [{id:'manual-book',name:'Sekaiichi Hatsukoi'},{id:'manual-book-2',name:'Other world'}]
+  const entries = {
+    library:{id:'library',world_book_id:'manual-book',comment:'The library',extensions:{swarm_studio_visuals:{enabled:true,entityType:'location',positivePrompt:'SHARED_LIBRARY',modelPrompts:{moss:{positivePrompt:'MOSS_LIBRARY',negativePrompt:'NO_NEON'}},checkpoint:'never-override.safetensors',preferredAspect:'16:9',referenceImageId:'do-not-inherit',stackSnapshot:[{name:'scene.safetensors',weight:.6},{name:'conflict.safetensors',weight:.7},{name:'existing.safetensors',weight:.9}]}}},
+    ritsu:{id:'ritsu',world_book_id:'manual-book-2',comment:'Ritsu',extensions:{swarm_studio_visuals:{enabled:true,entityType:'character',positivePrompt:'RITSU_VISIBLE',negativePrompt:'NO_HAT',stackSnapshot:[{name:'conflict.safetensors',weight:.4}]}}},
+  }
+  const selection=[{bookId:'manual-book',entryId:'library',name:'UNTRUSTED'},{bookId:'manual-book-2',entryId:'ritsu'},{bookId:'manual-book',entryId:'library'}]
+  try {
+    permissions.add('world_books');permissions.delete('cors_proxy')
+    userFiles.set('output-folders.json',[])
+    spindle.world_books.list=async options=>{assert.equal(options.userId,'user-1');return {data:books,total:books.length}}
+    spindle.world_books.entries.get=async (id,userId)=>{assert.equal(userId,'user-1');return structuredClone(entries[id])}
+    spindle.world_books.getActivated=async()=>{throw new Error('Manual selection must not use activation')}
+    spindle.imageGen.generateStream=async function*(input){inputs.push(input);yield {step:1,totalSteps:2};return {imageId:`manual-output-${inputs.length}`,imageUrl:`/api/v1/images/manual-output-${inputs.length}`,model:input.model}}
+    await request('set_tag_automation',{config:{...userFiles.get('tag-automation-config.json'),promptFamily:'auto'}})
+    const base={prompt:'A quiet study session',negativePrompt:'blurry',connection_id:'swarm-1',model:'MOSS-Image-Base.safetensors',parameters:{width:832,height:1024,loras:['existing.safetensors'],loraWeights:[.3]}}
+    const response=await request('generate',{input:{...structuredClone(base),clientJobId:'manual-lore-ok'},profileInput:structuredClone(base),manualLore:selection})
+    assert.equal(inputs.length,1)
+    assert.match(inputs[0].prompt,/A quiet study session\nMOSS_LIBRARY\nRITSU_VISIBLE/)
+    assert.doesNotMatch(inputs[0].prompt,/SHARED_LIBRARY|UNTRUSTED/)
+    assert.match(inputs[0].negativePrompt,/blurry, NO_NEON, NO_HAT/)
+    assert.deepEqual(inputs[0].parameters.loras,['existing.safetensors','scene.safetensors']);assert.deepEqual(inputs[0].parameters.loraWeights,[.3,.6])
+    assert.equal(inputs[0].model,base.model);assert.equal(inputs[0].parameters.width,832);assert.equal(inputs[0].parameters.referenceImages,undefined)
+    assert.equal(response.data.record.manualLore.length,2);assert.equal(response.data.record.manualLore[0].bookName,'Sekaiichi Hatsukoi');assert.equal(response.data.record.manualLore[0].name,'The library')
+    assert.match(response.data.record.manualLoreDiagnostics.join('\n'),/Skipped conflicting Lore LoRA weights/)
+    assert.equal(userFiles.get('studio-generation-profile.json').input.prompt,base.prompt)
+    assert.deepEqual(userFiles.get('studio-generation-profile.json').input.parameters.loras,['existing.safetensors'])
+    assert.equal(userFiles.get('generation-records.json')[0].manualLore[1].name,'Ritsu')
+    const reject=async (job,selected,patch={})=>{await frontendHandler({type:'generate',requestId:job,input:{...structuredClone(base),...patch,clientJobId:job},manualLore:selected},'user-1');assert.equal(sent.findLast(x=>x.payload.requestId===job).payload.type,'studio_error');assert.equal(inputs.length,1)}
+    await reject('manual-lore-cross-book',[{bookId:'manual-book-2',entryId:'library'}])
+    await reject('manual-lore-raw',selection,{parameters:{rawRequestOverride:'{"prompt":"override"}'}})
+    await reject('manual-lore-layout',selection,{prompt:'{"summary":{}}'})
+    entries.library.extensions.swarm_studio_visuals.enabled=false
+    await reject('manual-lore-disabled',selection)
+    permissions.delete('world_books');await reject('manual-lore-permission',selection)
+    // No selection: the same normal generation route still works and does not inherit Lore.
+    const noLore=await request('generate',{input:{...structuredClone(base),clientJobId:'manual-lore-none'},manualLore:[]})
+    assert.equal(inputs.length,2);assert.equal(inputs[1].prompt,base.prompt);assert.equal(noLore.data.record.manualLore,undefined)
+  } finally {
+    spindle.imageGen.generateStream=oldStream;spindle.world_books.entries.get=oldGet;spindle.world_books.list=oldList;spindle.world_books.getActivated=oldActive
+    permissions.clear();for(const p of savedPermissions)permissions.add(p)
+    userFiles.clear();for(const [k,v] of savedFiles)userFiles.set(k,v)
+  }
+}
+console.log('Manual Lore PASS: explicit cross-book selection, authoritative model prompts and provenance, conflict precedence, profile isolation, stale/disabled/permission rejection and JSON protection')
+
+// Genesis exercises the actual provider/sidecar/processing/storage path, not a
+// mocked orchestrator. Every derivative is an owned Lumi image with provenance.
+{
+  const savedFiles=structuredClone(userFiles),savedPermissions=new Set(permissions)
+  const old={stream:spindle.imageGen.generateStream,get:spindle.images.get,read:spindle.images.readBinary,delete:spindle.images.delete,quiet:spindle.generate.quiet}
+  const inputs=[],designs=[],owned=new Map(),deleted=[];let fail=false,denyDesignOnce=true,invalidDraftOnce=true
+  const png=new Uint8Array(await readFile(new URL("./fixtures/cast-portrait.png",import.meta.url)))
+  const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms))
+  const rows=()=>userFiles.get('cast-genesis-jobs.json')||[]
+  const job=key=>rows().find(item=>item.key===key)
+  const wait=async(predicate,label)=>{for(let i=0;i<800;i++){if(predicate())return;await delay(10)}assert.fail(label+': '+JSON.stringify(rows()))}
+  const member=key=>userFiles.get('cast-library.json').members.find(m=>m.prefix===key)
+  const group='genesis-crew',settings={enabled:true,pipeline:'basics',retention:'final',approval:'auto',reference:'neutral',limit:1} // legacy preference must normalize to prompt-only
+  const emit=(id,content,role='assistant')=>{const message={id:'genesis-'+id,role,content,metadata:{}};taggedMessages.push(message);const payload={chatId:'chat-1',messageId:message.id,content,generationId:message.id};const fire=()=>eventHandlers.get('GENERATION_ENDED')(payload,'user-1');fire();return {message,fire}}
+  const packet=key=>`<swarm-cast=${key} flag=create type=full-pipeline expression=joy><font color="pink">"Hello!"</font></swarm-cast>`
+  try{
+    permissions.delete('world_books');permissions.delete('cors_proxy')
+    userFiles.set('output-folders.json',[]);userFiles.set('studio-upscale-settings.json',{});userFiles.delete('expression-set.json');userFiles.delete('cast-genesis-jobs.json')
+    userFiles.set('studio-generation-profile.json',{input:{connection_id:'swarm-1',model:'anima-base.safetensors',parameters:{width:768,height:768,steps:24}}})
+    await request('set_tag_automation',{config:{...userFiles.get('tag-automation-config.json'),mode:'direct',injectProtocol:false,parserConnectionId:'text-1',promptFamily:'anima'}})
+    await request('save_cast_library',{library:{version:2,activeGroupId:group,chatGroups:{'chat-1':group},groups:[{id:group,name:'Genesis crew',inject:true}],members:[]}})
+    spindle.generate.quiet=async (input,userId)=>{assert.equal(userId,"user-1");assert.equal(input.userId,"user-1","Genesis must send explicit scope to the quiet worker");if(denyDesignOnce){denyDesignOnce=false;throw new Error('userId is required for operator-scoped extensions')}designs.push(structuredClone(input));const key=JSON.parse(input.messages.at(-1).content).characterKey;return {content:JSON.stringify({name:key==='mina'?'Mina Ashido':key,identityPrompt:'adult character, pink hair, cream sweater'})}}
+    spindle.images.get=async (id,options)=>owned.get(id)||old.get(id,options)
+    spindle.images.readBinary=async id=>{assert.ok(owned.has(id));if(invalidDraftOnce){invalidDraftOnce=false;return Uint8Array.of(1,2,3)}return png}
+    spindle.images.delete=async id=>{assert.ok(owned.has(id));deleted.push(id);owned.delete(id);return true}
+    spindle.imageGen.generateStream=async function*(input){assert.equal(input.userId,'user-1','Genesis provider requests require explicit scope');inputs.push(structuredClone(input));yield {step:2,totalSteps:8};const metadata=JSON.parse(input.parameters.rawRequestOverride).extra_metadata;if(fail&&metadata.studio_stage==='background_removed'){fail=false;throw new Error('fixture removal failure')};const id=`genesis-owned-${String(inputs.length).padStart(4,'0')}-asset`;owned.set(id,{id,url:`/api/v1/images/${id}`,mime_type:'image/png',width:null,height:null});return {imageId:id,imageUrl:`/api/v1/images/${id}`,model:input.model}}
+    emit('disabled',packet('disabled'));await delay(50);assert.equal(inputs.length,0)
+    await request('set_cast_genesis_settings',{groupId:group,settings})
+    assert.equal(userFiles.get('cast-library.json').groups.find(g=>g.id===group).genesis.reference,'prompt')
+    const prompt=await interceptorHandler([{role:'user',content:'Continue'}],{userId:'user-1',chatId:'chat-1'})
+    assert.match(JSON.stringify(prompt),/flag=create type=basics-pipeline/)
+    const albumRecipe={version:1,connectionId:'swarm-1',checkpoint:'anima-base.safetensors',family:'anima',generation:{recipe:{width:640,height:960,steps:36,cfg:4},prefix:'solo, cowboy shot, ALBUM STYLE, <preset:Alien Stage>, @qmeng_ci @VIVINOS',negative:'ALBUM NEGATIVE'},appearance:'ADULT CASUAL WARDROBE',sidecarInstructions:'USE ONE FIXED OUTFIT',stack:[{name:'house-style.safetensors',weight:.75,enabled:true,useTrigger:true,trigger:'HOUSE TRIGGER'},{name:'disabled.safetensors',weight:1,enabled:false}],enhance:false,background:{mode:'builtin'}}
+    await request('set_cast_recipe',{groupId:group,recipe:albumRecipe})
+    const first=emit('first',packet('mina')+' '+packet('over-budget'));first.fire()
+    await wait(()=>job('mina')?.status==='error','Expected simulated sidecar failure')
+    assert.match(job('mina').error,/Genesis design sidecar: userId is required/)
+    const originalGenesisId=job('mina').id;assert.equal(inputs.length,0);assert.equal(member('mina'),undefined)
+    assert.equal(job('mina').castRecipe.stack[0].weight,.75)
+    await request('set_cast_recipe',{groupId:group,recipe:{...albumRecipe,sidecarInstructions:'CHANGED AFTER QUEUE',stack:[{name:'other-style.safetensors',weight:1}]}})
+    await delay(30);await request('control_cast_genesis_job',{id:originalGenesisId,action:'retry'})
+    await wait(()=>job('mina')?.status==='error','Expected missing-dimensions failure on unreadable draft')
+    assert.match(job('mina').error,/Removing background · neutral: Source image dimensions/)
+    const initialMember=member('mina').id, initialDraft=job('mina').intermediates.neutral.draft
+    assert.ok(owned.has(initialDraft));assert.equal(inputs.length,1);assert.equal(designs.length,1)
+    assert.match(designs[0].messages[0].content,/Choose one coherent outfit/)
+    assert.match(designs[0].messages[0].content,/restrained expressions, composed body language/)
+    assert.match(designs[0].messages[0].content,/bubbly expressions, expressive posing/)
+    assert.match(designs[0].messages[0].content,/Do not specify a fixed facial expression, emotion, gesture or pose/)
+    assert.doesNotMatch(inputs[0].prompt,/bubbly expressions, expressive posing/,'Sidecar guidance must not be appended directly to the diffusion prompt')
+    assert.match(designs[0].messages[0].content,/ADULT CASUAL WARDROBE/);assert.match(designs[0].messages[0].content,/USE ONE FIXED OUTFIT/);assert.doesNotMatch(designs[0].messages[0].content,/CHANGED AFTER QUEUE/)
+    assert.match(inputs[0].prompt,/ALBUM STYLE/);assert.match(inputs[0].prompt,/HOUSE TRIGGER/);assert.doesNotMatch(inputs[0].prompt,/USE ONE FIXED OUTFIT/);assert.equal(inputs[0].negativePrompt,'ALBUM NEGATIVE');assert.deepEqual(inputs[0].parameters.loras,['house-style.safetensors']);assert.deepEqual(inputs[0].parameters.loraWeights,[.75]);assert.equal(inputs[0].parameters.width,640);assert.equal(inputs[0].parameters.height,960);assert.equal(inputs[0].parameters.steps,36)
+    // A queued alpha.8.2 job may still carry the old reference preference.
+    const legacy=structuredClone(rows());legacy[0].settings.reference='neutral';userFiles.set('cast-genesis-jobs.json',legacy)
+    await delay(30);await request('control_cast_genesis_job',{id:originalGenesisId,action:'retry'})
+    await wait(()=>job('mina')?.status==='ready'||job('mina')?.status==='error','Genesis failed to finish')
+    assert.equal(member('mina').id,initialMember);assert.equal(job('mina').settings.reference,'prompt')
+    assert.ok(deleted.includes(initialDraft),'The original draft was reused then cleaned')
+    assert.equal(job('mina').id,originalGenesisId)
+    assert.equal(job('mina').status,'ready',job('mina').error);assert.equal(job('mina').completed,6);
+    const published=await request('list_cast_genesis_jobs');assert.deepEqual(published.data.find(item=>item.id===originalGenesisId).slots,['neutral','joy','sadness','anger','surprise','fear']);assert.equal(designs.length,1);assert.equal(inputs.length,12);assert.equal(rows().length,1)
+    assert.equal(designs[0].connection_id,'text-1');assert.match(designs[0].messages.at(-1).content,/Mina|mina/)
+    assert.equal(member('mina').name,'Mina Ashido');assert.equal(Object.keys(member('mina').images).length,6)
+    assert.equal(deleted.length,6);assert.equal(owned.size,6);assert.equal(userFiles.get('output-folders.json').find(x=>x.id===`cast:${member('mina').id}`).imageIds.length,6)
+    for(const input of inputs){const override=JSON.parse(input.parameters.rawRequestOverride);assert.ok(override.extra_metadata.studio_genesis_job);if(override.extra_metadata.studio_stage==='expression_draft'){assert.equal(override.donotsave,true);assert.match(input.prompt,/pink hair/);assert.ok(input.prompt.includes('<preset:Alien Stage>, @qmeng_ci @VIVINOS'));assert.ok(!input.parameters.referenceImages?.length);assert.ok(!override.promptimages&&!override.useipadapter&&!override.comfyworkflowraw)}else{assert.equal(override.donotsave,undefined);assert.match(override.comfyworkflowraw,/birefnet/);assert.equal(input.parameters.width,255);assert.equal(input.parameters.height,342)}}
+    assert.ok(Object.values(member('mina').images).every(image=>owned.has(image.id)));assert.equal(first.message.content,packet('mina')+' '+packet('over-budget'))
+    const transformed=castRenderProcessor({origin:'render',isUser:false,content:first.message.content});assert.match(transformed.content,/data-ss-cast-requested-expression="joy"/);assert.match(transformed.content,/&quot;Hello!&quot;/)
+    first.fire();emit('again',packet('mina'));emit('fenced','```\n'+packet('fenced'));emit('user',packet('user'),'user');await delay(80);assert.equal(inputs.length,12);assert.equal(rows().length,1)
+    await request('set_cast_recipe',{groupId:group,recipe:null})
+    await request('set_cast_genesis_settings',{groupId:group,settings:{...settings,approval:'review',retention:'normal'}})
+    emit('review',packet('kirishima'));await wait(()=>job('kirishima')?.status==='review','Missing review state');assert.equal(inputs.length,12);assert.equal(member('kirishima'),undefined)
+    fail=true;await request('control_cast_genesis_job',{id:job('kirishima').id,action:'approve'});await wait(()=>job('kirishima')?.status==='error','Missing processing failure');assert.equal(inputs.length,14)
+    const partialId=member('kirishima').id,draft=job('kirishima').intermediates.neutral.draft;assert.ok(owned.has(draft));assert.equal(Object.keys(member('kirishima').images).length,0)
+    await request('control_cast_genesis_job',{id:job('kirishima').id,action:'retry'});await wait(()=>job('kirishima')?.status==='ready'||job('kirishima')?.status==='error','Resume did not finish');assert.equal(job('kirishima').status,'ready',job('kirishima').error);assert.equal(member('kirishima').id,partialId);assert.equal(designs.length,2);assert.equal(inputs.length,25);assert.ok(!owned.has(draft));assert.equal(owned.size,12)
+    assert.equal(JSON.parse(inputs[12].parameters.rawRequestOverride).donotsave,undefined)
+    assert.ok((await request('list_cast_genesis_activity')).data.every(x=>x.status==='ready'))
+    // An existing empty member keeps its identity. Full selection and configured
+    // enhancement are honored without asking the sidecar to redesign them.
+    const library=structuredClone(userFiles.get('cast-library.json'))
+    library.members.push({id:'existing-member',groupId:group,prefix:'momo',name:'Momo',identityPrompt:'saved identity, dark hair',images:{}})
+    await request('save_cast_library',{library})
+    await request('set_cast_genesis_settings',{groupId:group,settings:{...settings,pipeline:'full'}})
+    userFiles.set('studio-upscale-settings.json',{'swarm-1':{mode:'custom',graph:JSON.stringify({'1':{class_type:'SwarmLoadImageB64',inputs:{image_base64:'${init_image}'}},'2':{class_type:'SaveImage',inputs:{images:['1',0],filename_prefix:'old'}}})}})
+    userFiles.set('studio-render-styles.json',[{id:'genesis-style',name:'Ink',positiveAppend:'approved ink style',negativeAppend:'no blur',loraStackId:''}])
+    userFiles.set('studio-generation-profile.json',{input:{connection_id:'swarm-1',model:'anima-base.safetensors',prompt:'UNRELATED_ILLUSTRATION',parameters:{width:768,height:768,steps:24,loras:['unrelated.safetensors'],loraWeights:[.8]}},recordHints:{styleId:'genesis-style'}})
+    emit('full','<swarm-cast=momo flag=create type=basics-pipeline>"Hello."</swarm-cast>')
+    await wait(()=>job('momo')?.status==='ready'||job('momo')?.status==='error','Full production did not finish')
+    assert.equal(job('momo').status,'ready',job('momo').error);assert.equal(job('momo').completed,20);assert.equal(member('momo').id,'existing-member');assert.equal(designs.length,2);assert.equal(inputs.length,85);assert.equal(owned.size,32)
+    const full=inputs.slice(25),drafts=full.filter(x=>JSON.parse(x.parameters.rawRequestOverride).extra_metadata.studio_stage==='expression_draft')
+    assert.equal(drafts.length,20);assert.ok(drafts.every(x=>x.prompt.includes('saved identity')&&x.prompt.includes('approved ink style')&&!x.prompt.includes('UNRELATED_ILLUSTRATION')&&x.negativePrompt.includes('no blur')&&!x.parameters.loras.includes('unrelated.safetensors')))
+    assert.ok(full.filter(x=>JSON.parse(x.parameters.rawRequestOverride).extra_metadata.studio_stage==='upscale_result').length===20)
+    assert.equal(Object.keys(member('momo').images).length,20)
+    // New opt-in: neutral is prompt-only, all following drafts use the same registered
+    // neutral binary. Do not reuse a deleted intermediate or silently switch on Resume.
+    userFiles.set('studio-upscale-settings.json',{})
+    await request('set_cast_recipe',{groupId:group,recipe:albumRecipe})
+    await request('set_cast_genesis_settings',{groupId:group,settings:{...settings,reference:'anima-neutral'}})
+    assert.equal(userFiles.get('cast-library.json').groups.find(g=>g.id===group).genesis.reference,'anima-neutral')
+    const start=inputs.length
+    emit('anchor',packet('anchor'))
+    await wait(()=>job('anchor')?.status==='ready'||job('anchor')?.status==='error','Reference production did not finish')
+    assert.equal(job('anchor').status,'ready',job('anchor').error);assert.equal(job('anchor').completed,6)
+    const anchorId=member('anchor').images.neutral.id
+    assert.equal(job('anchor').neutralReferenceId,anchorId);assert.ok(owned.has(anchorId));assert.equal(inputs.length-start,12)
+    const anchored=inputs.slice(start).filter(x=>JSON.parse(x.parameters.rawRequestOverride).extra_metadata.studio_stage==='expression_draft')
+    assert.equal(anchored.length,6);assert.ok(!anchored[0].parameters.referenceImages?.length)
+    assert.equal(JSON.parse(anchored[0].parameters.rawRequestOverride).donotsave,true)
+    for(const input of anchored.slice(1)){
+      assert.ok(input.parameters.referenceImages?.length===1)
+      const raw=JSON.parse(input.parameters.rawRequestOverride)
+      assert.match(raw.comfyworkflowraw,/AnimaRefAdapter/);assert.equal(raw.donotsave,undefined)
+      assert.ok(input.prompt.includes('pink hair'));assert.ok(input.prompt.includes('ALBUM STYLE'))
+    }
+    assert.equal(Object.keys(member('anchor').images).length,6);assert.ok(Object.values(member('anchor').images).every(im=>owned.has(im.id)))
+    const oldId=member('mina').id,oldImages=Object.values(member('mina').images).map(x=>x.id)
+    await request('remove_cast_member',{groupId:group,memberId:oldId})
+    assert.equal(member('mina'),undefined);assert.ok(oldImages.every(id=>owned.has(id)));assert.ok(member('momo').images.neutral)
+    await request('set_cast_genesis_settings',{groupId:group,settings:{...settings,approval:'review'}})
+    first.fire();await delay(60);assert.equal(rows().filter(x=>x.key==='mina').length,1,'Original reply cannot recreate removed member')
+    emit('recreate',packet('mina'));await wait(()=>rows().filter(x=>x.key==='mina').some(x=>x.status==='review'),'Fresh reply can recreate removed character')
+    assert.equal(rows().filter(x=>x.key==='mina').length,2);assert.equal(member('mina'),undefined);assert.ok(oldImages.every(id=>owned.has(id)))
+  }finally{spindle.imageGen.generateStream=old.stream;spindle.images.get=old.get;spindle.images.readBinary=old.read;spindle.images.delete=old.delete;spindle.generate.quiet=old.quiet;permissions.clear();for(const p of savedPermissions)permissions.add(p);userFiles.clear();for(const [k,v]of savedFiles)userFiles.set(k,v)}
+}
+console.log('Cast Genesis PASS: empty-album protocol, opt-in, sidecar, user budget, final-only cleanup, immutable reply, replay exclusion, review, failure and durable retry')
+
+// Auto authoring must resolve the same dialect as dispatch; an already expanded
+// macro must not leave yesterday's checkpoint guidance in today's RP prompt.
+{
+  const saved=structuredClone(userFiles), previousCors=spindle.cors, previousQuiet=spindle.generate.quiet
+  const lookups=[], calls=[]
+  const profile=model=>({input:{connection_id:'swarm-1',model,parameters:{width:832,height:640}},recordHints:{},updatedAt:Date.now()})
+  const fixtureFolder={id:'character:char-1',name:'Lior',imageIds:[],binding:{type:'character',characterId:'char-1',enabled:true,positivePrompt:'1boy, black hair',looks:[]}}
+  const config={promptFamily:'auto',requestMode:'inline',promptMode:'multi',autoGenerate:false,injectProtocol:true,parserConnectionId:'text-1'}
+  const ctx={userId:'user-1',chatId:'chat-1'}
+  const prompt=async messages=>{const result=await interceptorHandler(messages||[{role:'user',content:'Continue'}],ctx);return Array.isArray(result)?result.map(m=>m.content).join('\n'):result.messages.map(m=>m.content).join('\n')}
+  try{
+    spindle.cors=async function(url,options){
+      if(!url.endsWith('/API/DescribeModel'))return previousCors.call(this,url,options)
+      const {modelName}=JSON.parse(options.body);lookups.push(modelName)
+      const architecture=modelName.includes('renamed-moss')?'moss-image':modelName.includes('renamed-anime')?'anima':modelName.includes('renamed-krea')?'krea-2':'stable-diffusion-xl-v1/base'
+      return {status:200,body:JSON.stringify({model:{name:modelName,architecture}})}
+    }
+    userFiles.set('output-folders.json',[fixtureFolder]);userFiles.set('studio-generation-profile.json',profile('AutoFixtures/renamed-anime.safetensors'))
+    await request('set_tag_automation',{config})
+    const anima=await prompt();assert.match(anima,/ANIMA SUBJECT SERIALIZER/);assert.match(anima,/2boys, 1girl/);assert.match(anima,/Gelbooru/);assert.doesNotMatch(anima,/AUTO SUBJECT SERIALIZER/)
+    assert.equal(lookups.filter(x=>x==='AutoFixtures/renamed-anime.safetensors').length,1)
+    const expanded=macroValues.get('swarm_image_protocol')
+    userFiles.set('studio-generation-profile.json',profile('AutoFixtures/renamed-moss.safetensors'))
+    const refreshed=await prompt([{role:'system',content:'Custom surrounding instructions\n'+expanded+'\nCustom footer'}])
+    assert.match(refreshed,/MOSS · CAPTION SUBJECT SERIALIZER/);assert.doesNotMatch(refreshed,/ANIMA SUBJECT SERIALIZER/);assert.match(refreshed,/Custom surrounding instructions/);assert.match(refreshed,/Custom footer/)
+    userFiles.set('studio-generation-profile.json',profile('AutoFixtures/unknown.safetensors'));assert.match(await prompt(),/AUTO SUBJECT SERIALIZER/)
+    userFiles.set('studio-generation-profile.json',profile('AutoFixtures/anima_aesthetic.safetensors'));assert.match(await prompt(),/Aesthetic needs no quality score tags/)
+    userFiles.set('studio-generation-profile.json',profile('AutoFixtures/renamed-krea.safetensors'));assert.match(await prompt(),/KREA 2 SUBJECT SERIALIZER/)
+    userFiles.set('studio-generation-profile.json',profile('AutoFixtures/renamed-anime.safetensors'))
+    userFiles.set('output-folders.json',[{...fixtureFolder,binding:{...fixtureFolder.binding,checkpoint:'AutoFixtures/renamed-moss.safetensors'}}])
+    assert.match(await prompt(),/MOSS · CAPTION SUBJECT SERIALIZER/)
+    await request('set_tag_automation',{config:{...config,promptFamily:'anima-regional'}});assert.match(await prompt(),/Experimental Swarm regions are enabled/)
+    // Parser mode leaves the RP placement instruction light, then resolves each
+    // requested slot using the known character inclusion/recipe.
+    await request('set_tag_automation',{config:{...config,requestMode:'parser'}})
+    assert.doesNotMatch(await prompt(),/ANIMA SUBJECT SERIALIZER|MOSS · CAPTION SUBJECT SERIALIZER/)
+    spindle.generate.quiet=async(input,userId)=>{assert.equal(userId,'user-1');assert.equal(input.userId,'user-1');calls.push(structuredClone(input));return {content:'<swarm-image request="generate" slot="auto-actor">A person.</swarm-image><swarm-image request="generate" slot="auto-place">An empty room.</swarm-image>'}}
+    const content='<swarm-image request="parse" slot="auto-actor" character="active" persona="none">A person.</swarm-image><swarm-image request="parse" slot="auto-place" character="none" persona="none">An empty room.</swarm-image>'
+    const msg={id:'auto-authoring-parser',role:'assistant',content,metadata:{}};taggedMessages.push(msg)
+    eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:msg.id,generationId:msg.id,content},'user-1')
+    for(let attempt=0;attempt<200&&!sent.some(item=>item.payload.type==='parser_completion_result'&&item.payload.data?.messageId===msg.id);attempt++)await new Promise(resolve=>setTimeout(resolve,10))
+    assert.equal(calls.length,1);const instructions=calls[0].messages[0].content
+    assert.match(instructions,/PER-REQUEST COMPILER GUIDANCE/);assert.match(instructions,/slot auto-actor:\nBEGIN STUDIO COMPILER GUIDANCE\nMOSS · CAPTION SUBJECT SERIALIZER/);assert.match(instructions,/slot auto-place:\nBEGIN STUDIO COMPILER GUIDANCE\nANIMA SUBJECT SERIALIZER/)
+    assert.ok(sent.some(item=>item.payload.type==='parser_completion_result'&&item.payload.data?.messageId===msg.id))
+  }finally{spindle.cors=previousCors;spindle.generate.quiet=previousQuiet;userFiles.clear();for(const [k,v] of saved)userFiles.set(k,v)}
+}
+console.log('Auto authoring PASS: provider-first guidance, cached resolution, changed checkpoint and expanded macro refresh, unknown fallback, Aesthetic, manual override, and mixed parser slot dialects')
+
+// Reconstructed owned scene plans from the live izakaya CG metadata. These are
+// not claimed to be the original authored packet (only final metadata survived).
+{
+  for (const filename of ['izakaya-foreground.scene.txt','izakaya-background.scene.txt']) {
+    const source=(await readFile(new URL('../docs/prompt-compilers/examples/'+filename,import.meta.url),'utf8')).trim()
+    const plan=backendModule.parseImageScenePlan(source);assert.equal(plan.subjects.length,3)
+    const compiled=backendModule.serializeScenePlan(plan,'anima',[])
+    assert.match(compiled,/^2boys, 1girl$/m);assert.ok(compiled.includes(String.raw`Todoroki Shoto_\(My Hero Academia\)`));assert.ok(compiled.includes('(amber lantern:1.2)'))
+    const mina=compiled.split('\n').find(line=>line.includes('yellow horns'));assert.ok(mina);assert.match(mina,/pink skin/)
+    assert.equal((compiled.match(/yellow horns/g)||[]).length,1);assert.doesNotMatch(compiled,/^Left: subject,/m)
+    assert.equal(backendModule.serializeScenePlan(plan,'moss',[]).includes('Todoroki Shoto_(My Hero Academia)'),true)
+  }
+}
+console.log('Izakaya composition PASS: precise counts from explicit headings, authored qualifiers protected, explicit weights preserved, traits stay in their authored subject, caption dialect unchanged')
+
+// Optional explicit count: use grouped native weighting, not identity inference.
+{
+  const {parseExplicitCount,applyExplicitCount,parseImageScenePlan,serializeScenePlan,buildMossLayoutDraft,compileMossNativeLayout}=backendModule
+  assert.equal(parseExplicitCount('1girl, 2boys').tags,'2boys, 1girl')
+  for(const invalid of ['3','2boys, 1girl:1.5','2boy','1girls','1boy, 2boys','2boys, <lora:thing>','21boys','0girls','1girl,'])assert.equal(parseExplicitCount(invalid),null,invalid)
+  const scene='quality/meta: masterpiece, best quality, safe\nvisible count: 2boys, 1girl\nscene: Three characters around a table.\ncamera: medium wide three-shot\nleft man [other]: blond hair, red eyes, (black shirt:1.2)\ncenter man [other]: two-tone hair, heterochromia\nright woman [other]: pink skin, yellow horns\nenvironment: izakaya, amber lighting'
+  const plan=parseImageScenePlan(scene)
+  for(const family of ['anima','anima-aesthetic','anima-regional','illustrious']){
+    const before=serializeScenePlan(plan,family,[])
+    const result=applyExplicitCount(before,'2boys, 1girl',1.5,family,plan)
+    assert.equal((result.prompt.match(/\(2boys, 1girl:1\.5\)/g)||[]).length,1,family)
+    assert.equal((result.prompt.match(/2boys/g)||[]).length,1,family)
+    assert.ok(result.prompt.includes('(black shirt:1.2)'))
+    assert.ok(result.prompt.includes('yellow horns'))
+    assert.match(result.diagnostic,/Explicit count/)
+    assert.equal(applyExplicitCount(before,'2boys',1.5,family,plan).prompt,before)
+    assert.equal(applyExplicitCount(before,'2boys, 1girl',0,family,plan).prompt,before)
+  }
+  const original=serializeScenePlan(plan,'anima',[])
+  for(const malformed of ['2boys,','3','2boys 1girl','']){
+    const recovered=applyExplicitCount(original,malformed,1.5,'anima',plan)
+    assert.match(recovered.prompt,/\(2boys, 1girl:1\.5\)/);assert.match(recovered.diagnostic,/Recovered malformed/)
+  }
+  for(const bad of [undefined,'(2boys, 1girl:1.2)','2boys, <preset:foo>','1boy, 2girls'])assert.equal(applyExplicitCount(original,bad,1.5,'anima',plan).prompt,original)
+  const contradictory=parseImageScenePlan(scene.replace('right woman','right man'))
+  assert.equal(applyExplicitCount(original,'3',1.5,'anima',contradictory).prompt,original)
+  const incomplete=parseImageScenePlan(scene.replace('right woman [other]: pink skin, yellow horns\n',''))
+  assert.equal(applyExplicitCount(original,'3',1.5,'anima',incomplete).prompt,original)
+  const raw='masterpiece, 2boys, 1girl, (red hair, blue eyes:1.2), <preset:foo,bar>, izakaya' 
+  const result=applyExplicitCount(raw,'2boys, 1girl',1.5,'anima')
+  assert.match(result.prompt,/\(2boys, 1girl:1\.5\)/);assert.ok(result.prompt.includes('(red hair, blue eyes:1.2)'));assert.ok(result.prompt.includes('<preset:foo,bar>'))
+  for(const raw of ['(2boys, 1girl:1.3), izakaya','(2boys:1.2), 1girl, izakaya','1boy, 2girls, izakaya','solo, izakaya'])assert.equal(applyExplicitCount(raw,'2boys, 1girl',1.5,'anima').prompt,raw)
+  const caption=applyExplicitCount(serializeScenePlan(plan,'krea',[]),'2boys, 1girl',1.5,'krea',plan)
+  assert.match(caption.prompt,/Exactly 3 visible characters: 2 male characters, 1 female character/);assert.doesNotMatch(caption.prompt,/:1\.5\)/)
+  const layout=buildMossLayoutDraft(plan,'moss-layout',[])
+  layout.caption=applyExplicitCount(layout.caption,'2boys, 1girl',1.5,'moss-layout',plan).prompt
+  const native=JSON.parse(compileMossNativeLayout(layout,832,640))
+  assert.match(native.summary.caption,/Exactly 3 visible characters/);assert.equal(native.items.length,3)
+  const rawJson='{"summary":{"caption":"hello"},"items":[]}'
+  assert.equal(applyExplicitCount(rawJson,'1boy',1.5,'moss-layout').prompt,rawJson)
+}
+console.log('Explicit count PASS: strict validation, grouped weights, actor isolation, authored weight preservation, conflicting counts, off, caption and native JSON')
+
+// Studio Edit saves a distinct extension-owned PNG, never overwrites source bytes,
+// and replaces only the exact reference the editor originally opened.
+{
+ const originalGet=spindle.images.get,originalList=spindle.images.list,originalUpload=spindle.images.uploadFromDataUrl,originalDelete=spindle.images.delete
+ const libraryBefore=structuredClone(userFiles.get('cast-library.json')), images=new Map([['edit-source',{id:'edit-source',owner_chat_id:'chat-1'}],['other-expression',{id:'other-expression'}]])
+ const png='data:image/png;base64,'+(await readFile(new URL('./fixtures/cast-portrait.png',import.meta.url))).toString('base64')
+ let uploads=0
+ try{
+  spindle.images.get=async(id,options)=>{assert.equal(options.userId,'user-1');return images.get(id)||null}
+  spindle.images.list=async options=>{assert.equal(options.userId,'user-1');assert.equal(options.onlyOwned,true);return {data:[...images.values()],total:images.size}}
+  spindle.images.uploadFromDataUrl=async(data,options)=>{assert.equal(data,png);assert.equal(options.userId,'user-1');assert.equal(options.owner_chat_id,'chat-1');assert.match(options.originalFilename,/edit\.png$/);const id=`edited-${++uploads}`;const image={id};images.set(id,image);return image}
+  spindle.images.delete=async()=>{throw new Error('Editor must never delete images')}
+  await request('save_cast_library',{library:{groups:[{id:'edit-group',name:'Edit',backgrounds:[{key:'scene',id:'edit-source',name:'Scene'}]}],members:[{id:'edit-member',groupId:'edit-group',name:'Actor',prefix:'actor',images:{neutral:{id:'edit-source',url:'/api/v1/images/edit-source'}}},{id:'edit-other',groupId:'edit-group',name:'Other',prefix:'other',images:{neutral:{id:'other-expression',url:'/api/v1/images/other-expression'}}}]}})
+  const result=(await request('save_local_edit',{png,sourceId:'edit-source',label:'Actor'})).data
+  assert.equal(result.id,'edited-1');assert.equal(result.record.studioMetadata.studio_storage,'lumi_only');assert.equal(result.record.studioMetadata.studio_stage,'local_edit');assert.equal(result.record.swarmPathVerified,false)
+  assert.ok(result.record.parameters.width>0&&result.record.parameters.height>0)
+  await request('replace_cast_edit',{memberId:'edit-member',expression:'neutral',sourceId:'edit-source',imageId:result.id})
+  const current=()=>userFiles.get('cast-library.json')
+  assert.equal(current().members.find(m=>m.id==='edit-member').images.neutral.id,result.id)
+  assert.equal(current().members.find(m=>m.id==='edit-other').images.neutral.id,'other-expression')
+  const second=(await request('save_local_edit',{png,sourceId:'edit-source',label:'Actor'})).data
+  await assert.rejects(request('replace_cast_edit',{memberId:'edit-member',expression:'neutral',sourceId:'edit-source',imageId:second.id}),/changed while you were editing/)
+  assert.equal(current().members.find(m=>m.id==='edit-member').images.neutral.id,result.id)
+  await request('replace_cast_edit',{groupId:'edit-group',backgroundKey:'scene',sourceId:'edit-source',imageId:second.id})
+  assert.equal(current().groups[0].backgrounds[0].id,second.id)
+  await assert.rejects(request('save_local_edit',{png,sourceId:'unknown',label:'No access'}),/no longer available/)
+  assert.equal(uploads,2);assert.ok(images.has('edit-source'));assert.ok(images.has('edited-1'));assert.ok(images.has('edited-2'))
+ }finally{spindle.images.get=originalGet;spindle.images.list=originalList;spindle.images.uploadFromDataUrl=originalUpload;spindle.images.delete=originalDelete;userFiles.set('cast-library.json',libraryBefore)}
+}
+console.log('Studio Edit backend PASS: scoped PNG upload, local provenance, exact Cast expression/background replacement, stale edit rejection and original retention')
+
+// Alpha.12: run the real RPC and provider graph path with scoped, decodable
+// source images. No GPU required; every derivative gets an independent ID.
+{
+ const png=await readFile(new URL('./fixtures/cast-portrait.png',import.meta.url));const images=new Map([['post-source',{id:'post-source',mime_type:'image/png'}]])
+ const saved={get:spindle.images.get,read:spindle.images.readBinary,cors:spindle.cors,stream:spindle.imageGen.generateStream,delete:spindle.images.delete}
+ const calls=[];const fields=(keys)=>Object.fromEntries(keys.map(k=>[k,['STRING',{default:''}]]));const nodeInfo={
+  DownloadAndLoadSAM2Model:{input:{required:{...fields(['segmentor','precision']),model:[['sam2.1_hiera_small.safetensors']],device:[['cuda','cpu']]}}},
+  Sam2Segmentation:{input:{required:fields(['image','sam2_model','coordinates_positive','keep_model_loaded'])}},MaskToImage:{input:{required:fields(['mask'])}},
+  AnimaRefAdapter:{input:{required:fields(['model','vae','image','ref_guidance']),optional:fields(['ref_end'])}},
+  UltralyticsDetectorProvider:{input:{required:{model_name:[['bbox/face_yolov8m.pt','bbox/hand_yolov8s.pt']]}}},
+  FaceDetailer:{input:{required:fields(['image','bbox_detector','model','clip','vae','positive','negative','denoise','seed','steps','cfg','sampler_name','scheduler','guide_size','max_size','bbox_threshold','bbox_dilation','bbox_crop_factor','feather','cycle'])}},
+  LoadBackgroundRemovalModel:{input:{required:{bg_removal_name:[['birefnet.safetensors']]}}},
+ }
+ try{
+  spindle.images.get=async(id,opts)=>{assert.equal(opts.userId,'user-1');if(!images.has(id))return null;return images.get(id)}
+  spindle.images.readBinary=async(id,userId)=>{assert.equal(userId,'user-1');assert.ok(images.has(id));return png}
+  spindle.images.delete=async()=>assert.fail('postproduction must not delete the original or candidates')
+  spindle.cors=async function(url,options){const node=url.match(/\/object_info\/([^/?]+)$/)?.[1];if(node)return {status:200,body:JSON.stringify(nodeInfo[node]?{[node]:nodeInfo[node]}:{})};if(url.endsWith('/API/DescribeModel')){const name=JSON.parse(options.body).modelName;return {status:200,body:JSON.stringify({model:{name,architecture:'anima-v1/base',compat_class:'anima-v1'}})}}return saved.cors.call(this,url,options)}
+  spindle.imageGen.generateStream=async function*(input){assert.equal(input.userId,'user-1');assert.ok(input.parameters.referenceImages[0].data);assert.equal(input.parameters.animaRefGuidance,undefined);calls.push(input);yield {type:'progress',step:2,totalSteps:4};const id=`post-output-${calls.length}`;images.set(id,{id,mime_type:'image/png'});return {imageId:id,imageUrl:`/api/v1/images/${id}`}}
+  const caps=(await request('postproduction_capabilities',{connectionId:'swarm-1'})).data;assert.equal(caps.reference,true);assert.equal(caps.referenceEnd,true);assert.equal(caps.samModels.length,1);assert.equal(caps.detectors.length,2);assert.equal(caps.background,'installed');assert.ok(caps.upscalers.length)
+  const config={model:'postproduction-anima.safetensors',prompt:'anime portrait, blue eyes',negativePrompt:'blurry',parameters:{sampler:'euler',scheduler:'simple',loras:['line.safetensors'],loraWeights:[.7],rawRequestOverride:'{"untrusted":true}'}}
+  const base={imageId:'post-source',connectionId:'swarm-1',config,workspaceId:'fixture-workspace'}
+  const stage=async(stage,extra={})=>(await request('finalize_stage',{...base,...extra,stage})).data
+  const first=await stage({kind:'refine',scale:1.5,creativity:.2,steps:50,seed:42,cfg:3.5});assert.equal(first.record.initImageId,'post-source');assert.equal(first.record.studioMetadata.studio_stage,'refinement_result');assert.equal(calls[0].parameters.denoise,.2);assert.equal(calls[0].parameters.seed,42);assert.equal(calls[0].parameters.cfgScale,3.5);assert.equal(JSON.parse(calls[0].parameters.rawRequestOverride).untrusted,undefined)
+  const second=await stage({kind:'refine',reference:true,guidance:2.75,end:.6,creativity:.25,steps:40,seed:42,cfg:5},{imageId:first.id});assert.equal(second.record.initImageId,first.id);assert.equal(second.record.studioMetadata.studio_parent_id,first.record.studioMetadata.studio_asset_id)
+  const graph=(i)=>Object.values(JSON.parse(JSON.parse(calls[i].parameters.rawRequestOverride).comfyworkflowraw));const ref=graph(1).find(n=>n.class_type==='AnimaRefAdapter');assert.equal(ref.inputs.ref_guidance,2.75);assert.equal(ref.inputs.ref_end,.6);assert.equal(graph(1).find(n=>n.class_type==='KSampler').inputs.denoise,.25);assert.ok(graph(1).some(n=>n.class_type==='VAEEncode'));assert.ok(!graph(1).some(n=>n.class_type==='EmptyLatentImage'))
+  const detail=await stage({kind:'detail',detector:'bbox/hand_yolov8s.pt',creativity:.3,seed:42,detailGuide:640,detailMax:1280,detailThreshold:.45,detailCrop:2,detailFeather:8,detailCycles:2,detailPrompt:'detailed eyes',detailNegative:'muddy eyes'},{imageId:second.id});assert.equal(detail.record.studioMetadata.studio_stage,'detailer_result');assert.equal(graph(2).find(n=>n.class_type==='UltralyticsDetectorProvider').inputs.model_name,'bbox/hand_yolov8s.pt');assert.equal(graph(2).find(n=>n.class_type==='FaceDetailer').inputs.denoise,.3);const d=graph(2).find(n=>n.class_type==='FaceDetailer').inputs;assert.equal(d.guide_size,640);assert.equal(d.max_size,1280);assert.equal(d.bbox_threshold,.45);assert.equal(d.bbox_crop_factor,2);assert.equal(d.feather,8);assert.equal(d.cycle,2);assert.equal(calls[2].prompt,'detailed eyes');assert.equal(calls[2].negativePrompt,'muddy eyes')
+  const upscale=await stage({kind:'upscale',model:caps.upscalers[0],scale:2},{imageId:detail.id});assert.equal(upscale.record.initImageId,detail.id);assert.ok(graph(3).some(n=>n.class_type==='UpscaleModelLoader'))
+  const cutout=await stage({kind:'cutout'},{imageId:upscale.id});assert.equal(cutout.record.studioMetadata.studio_stage,'background_removed');assert.ok(graph(4).some(n=>n.class_type==='JoinImageWithAlpha'))
+  const mask=(await request('smart_selection',{...base,model:caps.samModels[0],device:'cpu',x:50,y:80})).data;assert.equal(mask.record.studioMetadata.studio_stage,'selection_mask');assert.equal(graph(5).find(n=>n.class_type==='DownloadAndLoadSAM2Model').inputs.precision,'fp32');assert.deepEqual(JSON.parse(graph(5).find(n=>n.class_type==='Sam2Segmentation').inputs.coordinates_positive),[{x:50,y:80}]);assert.equal(mask.record.initImageId,'post-source')
+  const before=calls.length;await assert.rejects(stage({kind:'refine'},{imageId:'not-owned'}),/not available/);await assert.rejects(stage({kind:'detail',detector:'not-installed'}),/available detector/);await assert.rejects(request('smart_selection',{...base,model:caps.samModels[0],x:-1,y:3}),/outside/);assert.equal(calls.length,before)
+  const beforeRecipes=(await request('finalize_recipes')).data;const recipe={name:'Fixture finishing',stages:[{kind:'refine',creativity:.2},{kind:'cutout',enabled:false}]};const recipes=(await request('save_finalize_recipe',{recipe})).data;assert.equal(recipes[0].name,recipe.name);assert.equal(recipes[0].stages[1].enabled,false);assert.deepEqual((await request('delete_finalize_recipe',{name:recipe.name})).data,beforeRecipes)
+  assert.equal(images.size,7);assert.ok(images.has('post-source'))
+  const manualInput={connection_id:'swarm-1',model:config.model,prompt:'anime portrait',negativePrompt:'blurry',studioSurface:'main_studio',parameters:{width:768,height:768,steps:30,cfgScale:3.5,animaRefGuidance:3.25,animaRefEnd:.7}}
+  await request('generate',{manualAnimaReference:{id:'post-source'},input:{...manualInput,clientJobId:'post-manual-a'}})
+  const manualGraph=graph(6),manualRef=manualGraph.find(n=>n.class_type==='AnimaRefAdapter');assert.equal(manualRef.inputs.ref_guidance,3.25);assert.equal(manualRef.inputs.ref_end,.7);assert.ok(manualGraph.some(n=>n.class_type==='EmptyLatentImage'));assert.match(manualGraph.find(n=>n.class_type==='KSampler').inputs.cfg,/cfg_scale/);assert.equal(calls[6].parameters.cfgScale,3.5)
+  await request('generate',{manualAnimaReference:{ids:['post-source',first.id],url:'data:image/png;base64,'+png.toString('base64')},input:{...manualInput,clientJobId:'post-manual-pair'}});assert.ok(graph(7).some(n=>n.class_type==='AnimaRefAdapter'))
+  await assert.rejects(request('generate',{manualAnimaReference:{id:'not-owned'},input:{...manualInput,clientJobId:'post-manual-denied'}}),/valid saved reference/);assert.equal(calls.length,8)
+  await frontendHandler({type:'finalize_protect',workspaceId:'fixture-workspace',release:true},'user-1')
+ }finally{spindle.images.get=saved.get;spindle.images.readBinary=saved.read;spindle.cors=saved.cors;spindle.imageGen.generateStream=saved.stream;spindle.images.delete=saved.delete}
+}
+console.log('Alpha.12 backend PASS: live-capability mock, native and reference img2img, detector graph, upscale, cutout, SAM2 coordinates, source ownership, recipe persistence and derivative lineage')
+
+// Alpha.17: exercise the real RPC, optimistic locks, shared artwork writes and
+// archive restoration. All image IDs are owned fixture references, not copies.
+{
+ const saved=structuredClone(userFiles),originalGet=spindle.images.get
+ try{
+  spindle.images.get=async(id,options)=>['registry-casual','registry-recovery','registry-edited','registry-other'].includes(id)?{id,mime_type:'image/png'}:originalGet(id,options)
+  const source={id:'registry-source',groupId:'registry-broad',name:'Actor',prefix:'actor',images:{neutral:{id:'registry-casual'},'recovery-neutral':{id:'registry-recovery'}},wardrobes:[{key:'default',name:'Everyday',slots:{neutral:'neutral'}},{key:'recovery',name:'Recovery',slots:{neutral:'recovery-neutral'}}]}
+  const target={id:'registry-target',groupId:'registry-duo',name:'Actor',prefix:'actor',images:{neutral:{id:'registry-casual'}},presentation:'portrait',presentationSide:'right'}
+  const other={id:'registry-other-member',groupId:'registry-third',name:'Other version',prefix:'actor',images:{neutral:{id:'registry-other'}}}
+  await request('save_cast_library',{library:{groups:[{id:'registry-broad',name:'Broad'},{id:'registry-duo',name:'Duo'},{id:'registry-third',name:'Third'}],members:[source,target,other]}})
+  const read=()=>userFiles.get('cast-library.json'),base=()=>JSON.stringify(read()),member=id=>read().members.find(m=>m.id===id)
+  const stale=base()
+  await request('cast_registry_attach',{sourceIds:[source.id],groupId:target.groupId,targetId:target.id,baseSignature:stale})
+  assert.equal(member(target.id).registryId,source.id);assert.equal(member(target.id).presentation,'portrait');assert.equal(member(target.id).presentationSide,'right');assert.equal(member(target.id).images['recovery-neutral'].id,'registry-recovery')
+  await assert.rejects(()=>request('cast_registry_copy_outfit',{sourceId:source.id,sourceKey:'recovery',targetId:other.id,name:'Recovery',baseSignature:stale}),/changed while/)
+  await request('cast_registry_copy_outfit',{sourceId:source.id,sourceKey:'recovery',targetId:other.id,name:'Recovery',baseSignature:base()})
+  assert.equal(member(other.id).images.neutral.id,'registry-other');assert.ok(Object.values(member(other.id).images).some(im=>im.id==='registry-recovery'))
+  await request('replace_cast_edit',{memberId:target.id,expression:'neutral',sourceId:'registry-casual',imageId:'registry-edited'})
+  assert.equal(member(source.id).images.neutral.id,'registry-edited');assert.equal(member(target.id).images.neutral.id,'registry-edited');assert.equal(member(other.id).images.neutral.id,'registry-other')
+  await request('set_cast_side',{memberId:target.id,side:'left'});assert.equal(member(target.id).presentationSide,'left');assert.equal(member(source.id).presentationSide,'auto')
+  const edited=structuredClone(read());edited.members.find(m=>m.id===target.id).identityPrompt='shared identity';await request('save_cast_library',{library:edited,baseSignature:base()});assert.equal(member(source.id).identityPrompt,'shared identity')
+  const conflicting=structuredClone(read());conflicting.members.find(m=>m.id===target.id).identityPrompt='one';conflicting.members.find(m=>m.id===source.id).identityPrompt='two';const before=base();await assert.rejects(()=>request('save_cast_library',{library:conflicting,baseSignature:before}),/Conflicting edits/);assert.equal(base(),before)
+  const wardrobeSignature=base();const oldDelete=spindle.images.delete;let deleteCalls=0
+  try{
+    spindle.images.delete=async()=>{deleteCalls++;throw new Error("Wardrobe operations must not delete files")}
+    await assert.rejects(()=>request('cast_wardrobe_lifecycle',{memberId:source.id,key:'default',action:'remove',baseSignature:wardrobeSignature}),/additional outfit/)
+    await request('cast_wardrobe_lifecycle',{memberId:source.id,key:'recovery',action:'hide',baseSignature:wardrobeSignature})
+    assert.deepEqual(member(source.id).hiddenWardrobes,['recovery']);assert.equal(member(target.id).hiddenWardrobes,undefined);assert.equal(member(source.id).wardrobes[1].archived,undefined);assert.equal(member(target.id).images['recovery-neutral'].id,'registry-recovery')
+    await assert.rejects(()=>request('cast_wardrobe_lifecycle',{memberId:source.id,key:'recovery',action:'unhide',baseSignature:wardrobeSignature}),/changed while/)
+    await request('cast_wardrobe_lifecycle',{memberId:source.id,key:'recovery',action:'archive',baseSignature:base()})
+    assert.equal(member(source.id).wardrobes[1].archived,true);assert.equal(member(target.id).wardrobes[1].archived,true);assert.equal(member(target.id).images['recovery-neutral'].id,'registry-recovery')
+    await assert.rejects(()=>request('cast_wardrobe_lifecycle',{memberId:source.id,key:'recovery',action:'remove',baseSignature:wardrobeSignature}),/changed while/)
+    await request('cast_wardrobe_lifecycle',{memberId:target.id,key:'recovery',action:'restore',baseSignature:base()})
+    assert.equal(member(source.id).wardrobes[1].archived,undefined);assert.equal(member(target.id).wardrobes[1].archived,undefined)
+    assert.deepEqual(member(source.id).hiddenWardrobes,['recovery']);assert.equal(member(target.id).hiddenWardrobes,undefined)
+    await request('cast_wardrobe_lifecycle',{memberId:source.id,key:'recovery',action:'unhide',baseSignature:base()})
+    assert.equal(member(source.id).hiddenWardrobes,undefined);assert.equal(member(target.id).hiddenWardrobes,undefined)
+    const beforeFolders=structuredClone(userFiles.get('output-folders.json'))
+    await request('cast_wardrobe_lifecycle',{memberId:other.id,key:'recovery',action:'remove',baseSignature:base()})
+    assert.equal(member(other.id).wardrobes.length,1);assert.equal(member(other.id).images.neutral.id,'registry-other');assert.equal(member(source.id).images['recovery-neutral'].id,'registry-recovery')
+    const beforeFolder=beforeFolders?.find(f=>f.id===`cast:${other.id}:recovery`);assert.ok(beforeFolder?.imageIds.includes('registry-recovery'))
+    assert.deepEqual(userFiles.get('output-folders.json').find(f=>f.id===beforeFolder.id),beforeFolder)
+    assert.equal(deleteCalls,0)
+  }finally{spindle.images.delete=oldDelete}
+  await request('remove_cast_member',{groupId:source.groupId,memberId:source.id});assert.equal(member(source.id),undefined);assert.equal(member(target.id).images['recovery-neutral'].id,'registry-recovery')
+  await request('remove_cast_member',{groupId:target.groupId,memberId:target.id});const archived=read().stash.find(m=>m.registryId===source.id);assert.ok(archived);assert.equal(archived.images.neutral.id,'registry-edited');assert.equal(archived.groupId,'')
+  await request('cast_registry_attach',{sourceIds:[archived.id],groupId:source.groupId,baseSignature:base()});assert.ok(read().members.some(m=>m.registryId===source.id&&m.groupId===source.groupId));assert.ok(!read().stash?.some(m=>m.registryId===source.id))
+ }finally{spindle.images.get=originalGet;userFiles.clear();for(const [k,v] of saved)userFiles.set(k,v)}
+}
+console.log('Alpha.17 backend PASS: shared registry RPC, scoped artwork propagation, independent staging, stale and conflicting save rejection, copy outfit, archive and restore')
+
+// Stage Direction integration: persisted overrides, prompt placement, macro
+// expansion in the actual chat scope, raw history preservation and cache prefix.
+{
+ const saved=structuredClone(userFiles)
+ try {
+  userFiles.delete('stage-direction.json');userFiles.set('tag-automation-config.json',{injectProtocol:false,historyImageMarkers:'strip'})
+  userFiles.set('cast-library.json',{activeGroupId:'stage-test',chatGroups:{'chat-1':'stage-test','other-chat':'stage-other'},groups:[{id:'stage-test',name:'Stage',inject:false,backgrounds:[{key:'kitchen',id:'stage-bg',name:'Kitchen'}]},{id:'stage-other',name:'Other',inject:false,backgrounds:[{key:'forest',id:'other-bg',name:'Forest'}]}],members:[]})
+  const initial=(await request('load_stage_direction')).data;assert.equal(initial.global.mode,'off');assert.equal(initial.groupId,'stage-test')
+  const raw={role:'assistant',__isChatHistory:true,content:'[[scene: kitchen]]\n[[lighting: moonlight]]\n[[atmosphere: rain]]\n\nQuiet.'}, history=[{role:'system',content:'Preset'},{role:'user',__isChatHistory:true,content:'Hello'},raw,{role:'system',content:'Tail'}]
+  const prompt=async (messages=history,chatId='chat-1')=>{const r=await interceptorHandler(messages,{chatId,userId:'user-1'});return Array.isArray(r)?r:r.messages}
+  assert.ok(!(await prompt()).some(m=>m.content.includes('SWARM STUDIO STAGE DIRECTION')))
+  const enabled=(await request('save_stage_direction',{scope:'global',expected:initial.global,config:{...initial.global,mode:'auto',generate:true}})).data
+  const first=await prompt();assert.equal(first[0].content,'Preset');assert.match(first[1].content,/SWARM STUDIO STAGE DIRECTION/);assert.match(first[1].content,/kitchen/);assert.match(first[1].content,/swarm-background=stage-test:/);assert.equal(first[1].role,'system');assert.doesNotMatch(first[3].content,/\[\[/);assert.match(raw.content,/\[\[scene:/)
+  const extended=await prompt([...history.slice(0,-1),{role:'assistant',__isChatHistory:true,content:'[[lighting: dawn]]\n\nMorning.'},history.at(-1)]);assert.deepEqual(extended.slice(0,4),first.slice(0,4),'Earlier prompt prefix changed on append')
+  const scoped=(await request('save_stage_direction',{scope:'cast',chatId:'chat-1',groupId:'stage-test',expected:null,config:{...enabled.global,mode:'auto',position:'depth',depth:1,role:'user',continuity:true,generate:false}})).data
+  const deep=await prompt();assert.equal(deep[2].role,'user');assert.match(deep[2].content,/SWARM STUDIO STAGE DIRECTION/);assert.match(deep.at(-2).content,/STAGE CONTINUITY.*scene=kitchen; lighting=moonlight; weather=rain/);assert.doesNotMatch(deep[2].content,/swarm-background=/)
+  assert.match((await prompt(history,'other-chat'))[1].content,/forest/)
+  const chat=(await request('save_stage_direction',{scope:'chat',chatId:'chat-1',groupId:'stage-test',expected:null,config:{...scoped.cast,mode:'macro'}})).data
+  assert.ok(!(await prompt()).some(m=>m.content.includes('SWARM STUDIO STAGE DIRECTION')))
+  const expanded=await visualMacroHandler({template:'{{swarm_stage_protocol}}',phase:'prompt',env:{chat:{id:'chat-1'}},userId:'user-1'});assert.match(expanded.text,/SWARM STUDIO STAGE DIRECTION/);assert.match(expanded.text,/kitchen/)
+  const other=await visualMacroHandler({template:'{{swarm_stage_locations}}',phase:'prompt',env:{chat:{id:'other-chat'}},userId:'user-1'});assert.match(other.text,/forest/);assert.doesNotMatch(other.text,/kitchen/)
+  const macroPrompt=await prompt([{role:'system',content:expanded.text},...history]);assert.equal(macroPrompt.filter(m=>m.content.includes('SWARM STUDIO STAGE DIRECTION')).length,1)
+  const clear=(await request('save_stage_direction',{scope:'chat',chatId:'chat-1',groupId:'stage-test',expected:chat.chat,inherit:true})).data;assert.equal(clear.chat,null);assert.ok((await prompt()).some(m=>m.content.includes('SWARM STUDIO STAGE DIRECTION')))
+  await assert.rejects(request('save_stage_direction',{scope:'cast',chatId:'chat-1',groupId:'wrong',expected:null,config:enabled.global}),/active chat or Cast changed/)
+  await assert.rejects(request('save_stage_direction',{scope:'global',expected:initial.global,config:initial.global}),/changed elsewhere/)
+ } finally {userFiles.clear();for(const [k,v] of saved)userFiles.set(k,v)}
+}
+console.log('Stage Direction backend PASS: independent narration backgrounds, scoped RPCs, prefix stability, macros, placement and stale-write protection')

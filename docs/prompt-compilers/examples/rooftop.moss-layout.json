@@ -1,0 +1,52 @@
+{
+  "summary": {
+    "meta": [],
+    "canvas": "single",
+    "caption": "editorial illustration\nTwo adults on a rooftop.\nVisible subjects: 2 people\nFraming: medium shot\nrooftop at dusk"
+  },
+  "items": [
+    {
+      "label": "object",
+      "caption": "right woman: silver hair, blue eyes, holding a book",
+      "bbox": [
+        -384,
+        25,
+        432,
+        576
+      ]
+    },
+    {
+      "label": "object",
+      "caption": "left man: black hair, red eyes, smiling",
+      "bbox": [
+        -384,
+        -576,
+        432,
+        -25
+      ]
+    },
+    {
+      "label": "object",
+      "caption": "a red cup",
+      "bbox": [
+        172,
+        -77,
+        327,
+        77
+      ]
+    },
+    {
+      "label": "text",
+      "caption": "White heading",
+      "text": "OPEN, \"TODAY\"\n第二行",
+      "bbox": [
+        -471,
+        -512,
+        -403,
+        512
+      ]
+    }
+  ],
+  "bbox_coord_space": "abs_centralized",
+  "bbox_format": "yxyx"
+}

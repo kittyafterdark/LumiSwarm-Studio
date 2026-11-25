@@ -1,0 +1,10 @@
+quality/meta: sfw, high detail, anime illustration
+visible count: 3 subjects
+scene: Comedic revelation at a late-night izakaya table.
+camera: medium close-up, focused on the two men side by side
+left man [other]: Bakugo Katsuki, blond spiky hair, red eyes, dark overshirt, blushing, shocked, holding beer mug
+center-right man [other]: Todoroki Shoto_(My Hero Academia), split dye, heterochromia, burn scar, charcoal sweater, deadpan, holding plum wine
+background left woman [other]: pink skin, short pink hair, yellow horns, black sclera, yellow irises, jacket, hands over mouth, laughing
+shared interaction: the men lock eyes
+spatial relation: the men sit shoulder to shoulder, woman opposite
+ environment: wooden booth, (amber lantern:1.2)

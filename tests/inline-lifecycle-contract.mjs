@@ -183,5 +183,28 @@ clock += 800
 card.querySelector('[data-action="menu"]').click()
 assert.deepEqual(actions, ['generate', 'menu', 'menu'])
 frame.window.close()
+// Diagnostics are read-only, source/compiled remain separate, and the dialog
+// is disposed on extension unload. Drive the real menu action.
+activeChatId='chat'
+message={...message,id:'message',swipe_id:0,content:tagA}
+const diagnostics=new TaggedImageController(ctx,defaultStudioBehavior(),()=>{},()=>false,()=>{})
+const diagnosticJob={...a,sourcePrompt:'left man [character]: <script>literal</script>',prompt:'Left: man, black hair',negativePrompt:'blurry',promptCompiler:'anima',clientJobId:'diagnostic-attempt',status:'failed'}
+diagnostics.onMessage({type:'tagged_image_job',data:diagnosticJob})
+// JSDOM may not implement the native dialog top-layer APIs.
+const dialogProto=dom.window.HTMLDialogElement.prototype
+if (!dialogProto.showModal) dialogProto.showModal=function(){this.setAttribute('open','')}
+if (!dialogProto.close) dialogProto.close=function(){this.removeAttribute('open');this.dispatchEvent(new dom.window.Event('close'))}
+;[...widgets.values()][0].handler({type:'menu'})
+menuResolve({selectedKey:'prompt-diagnostics'})
+await Promise.resolve()
+const diagnosticDialog=document.querySelector('.ss-inline-prompt-diagnostics')
+assert.ok(diagnosticDialog)
+assert.deepEqual([...diagnosticDialog.querySelectorAll('textarea')].map(e=>e.value),[diagnosticJob.sourcePrompt,diagnosticJob.prompt,diagnosticJob.negativePrompt])
+assert.ok([...diagnosticDialog.querySelectorAll('textarea')].every(e=>e.readOnly))
+assert.equal(diagnosticDialog.querySelector('script'),null)
+assert.match(diagnosticDialog.textContent,/Compiler: Anima/)
+diagnostics.destroy()
+assert.equal(document.querySelector('.ss-inline-prompt-diagnostics'),null)
+console.log('Prompt diagnostics: raw and compiled separation, safe text, readonly and disposal: PASS')
 dom.window.close()
 console.log('inline lifecycle: swipe/chat scope, stable frame identity, late actions/removal, no stale writes, and touch cancellation: ok')

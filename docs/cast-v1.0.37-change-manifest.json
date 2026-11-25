@@ -1,0 +1,72 @@
+{
+  "release": "1.0.37",
+  "base": "user-uploaded lumiswarm studio.zip (1.0.36)",
+  "delivery": "complete cumulative source overlay; original relative paths",
+  "modified_files": [
+    {
+      "path": "src/studio/cast.ts",
+      "before_sha256": "4ffa516657331f365a37247fcfc10ee43b7f1613473766ef63201231a7b51285",
+      "after_sha256": "9255ea106bd25771ef9e1c315c0c2dfc1ac9b18a8669b0b824f1c65704718690"
+    },
+    {
+      "path": "src/studio/styles.ts",
+      "before_sha256": "647dbe5cdf2f30778d4bd360479296135fa27a72ff2b4395ebcd3f491ad152ae",
+      "after_sha256": "93af96840e0d1f80e03a0ae88d8f4de15938fa3912278cbec639f149c43896b0"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "before_sha256": "ee7d29881b05a0ed97db496a4c4059356fa0c4787245fab418ca1e85242d56cb",
+      "after_sha256": "f7433f04fce41f28e98e9203a504af6e62289cc7fc1f5b51a8d49b1a48784ad0"
+    },
+    {
+      "path": "package.json",
+      "before_sha256": "c42293b71ecd5afaaf54c6775c87e6395a8947866c6f3b840654cf038ae84a01",
+      "after_sha256": "2d77ffd33dee4ea6588b458e112979aebd44d81b7bd77c52f87f8a29e02d0b4f"
+    },
+    {
+      "path": "package-lock.json",
+      "before_sha256": "b0ce19a08e3ae2e193a8106bace94e9b4abb74377816bf73af634eb9550bf04c",
+      "after_sha256": "bf815b543621d2d7b2de5ef07ccacb4d2b0a4393b103e5f9f837fb781f806c33"
+    },
+    {
+      "path": "README.md",
+      "before_sha256": "29d87a7423c67f72982a3f7d7be1ae9f490292a54752259cf3bf87634e579803",
+      "after_sha256": "c5a6a905d3d182996c55a52099c8a4baa37d2fc6cb6872c3150625a271d80459"
+    },
+    {
+      "path": "spindle.json",
+      "before_sha256": "c1eb2bce2f8fc0c3773bcb520e00a1de5d5ac8ca017af167490f7a798af803c4",
+      "after_sha256": "0122ff3bf8a8cf9c87375d6534cb1f88e2977227b7ac914eed5e4d5f21ffa9a0"
+    },
+    {
+      "path": "dist/frontend.js",
+      "before_sha256": "877c36a055d89ecc9c151fedec299665e20bbeb8cf535ac48bb22144a57b6db0",
+      "after_sha256": "c5b8b7d88216dec0f8074fbb52228cdca0d0ae29b844423febd6d26050d860f6"
+    },
+    {
+      "path": "docs/cast.md",
+      "before_sha256": "a06731f8800253e7e1eee2c9e55ff9e1fa3baf7f9601643c789d8fcd4db2774c",
+      "after_sha256": "e9c38043f28d2fe3e00eb18acf23cf5f16452a99b01ced69ec915432e6e7fbc3"
+    }
+  ],
+  "added_files": [
+    {
+      "path": "tests/cast-album-management-browser.py",
+      "after_sha256": "6e00aaed896dee69d71168116a264fd299080899dcc9d655e2a5ea023bc2e502"
+    }
+  ],
+  "checks": {
+    "node_build": "passed",
+    "strict_typescript": "passed using installed tsc",
+    "cast_contracts": "passed",
+    "backend_contract": "passed",
+    "cast_island_pipeline": "passed",
+    "cast_island_remount_chromium": "passed",
+    "cast_member_side_chromium": "passed",
+    "cast_narrow_view_chromium": "passed",
+    "new_cast_album_management_chromium": "passed",
+    "installed_Lumiverse": "not tested"
+  },
+  "asset_policy": "All original image IDs and character card assets retained; no image delete endpoint called.",
+  "notes": "Expression label renaming changes the Cast mapping key only; existing chat packet source remains unchanged."
+}

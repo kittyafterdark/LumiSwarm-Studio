@@ -7,7 +7,7 @@ import { frontendSources } from './frontend-sources.mjs'
 // Check the same compilation units as build.mjs, not the shared-scope fragments.
 const temporary = await mkdtemp(join(tmpdir(), 'swarm-types-'))
 try {
-  for (const [name, paths] of [['frontend', frontendSources], ['backend', ['src/state/recipes.ts', 'src/state/expression-set.ts', 'src/backend.ts']]]) {
+  for (const [name, paths] of [['frontend', frontendSources], ['backend', ['src/state/prompt-families.ts', 'src/state/recipes.ts', 'src/state/finalize.ts', 'src/state/expression-set.ts', 'src/state/cast-presentations.ts', 'src/state/cast.ts', 'src/state/stage-cues.ts', 'src/backend.ts', 'src/workflows/postproduction.ts']]]) {
     await writeFile(join(temporary, `${name}.ts`), (await Promise.all(paths.map(path => readFile(resolve(path), 'utf8')))).join('\n'))
   }
   const compiler = process.env.STUDIO_TSC || resolve('node_modules/typescript/bin/tsc')

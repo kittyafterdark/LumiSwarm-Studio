@@ -1,0 +1,21 @@
+/* Cast atmosphere compositor: background paint only, separate actor light. */
+.ss-cast-design[data-cast-atmosphere] .atelier-curated {
+  --world:var(--cast-atmosphere-wash),var(--cast-world,none),linear-gradient(145deg,color-mix(in srgb,var(--cast-color) 17%,#131217),#08080c);
+}
+/* The world stage also contains dialogue and actors: grade only its background paint.
+   Other scene presets already have dedicated scenery elements. Preserve their intrinsic filters. */
+.ss-cast-design[data-cast-atmosphere] .atelier-curated .stage.world{background-image:none;isolation:isolate}
+.ss-cast-design[data-cast-atmosphere] .atelier-curated .stage.world::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background-image:var(--world);background-size:cover;background-position:center;filter:var(--cast-atmosphere-scene,none);border-radius:inherit}
+.ss-cast-design[data-cast-atmosphere] .atelier-curated .postcard-photo{filter:var(--cast-atmosphere-scene,none)}
+.ss-cast-design[data-cast-atmosphere] .atelier-curated .film-cell{filter:var(--cast-atmosphere-scene,none) contrast(1.1) brightness(.85)}
+.ss-cast-design[data-cast-atmosphere] .atelier-curated .comic-world{filter:var(--cast-atmosphere-scene,none) grayscale(1) contrast(1.15) brightness(.92)}
+.ss-cast-design[data-cast-atmosphere] .atelier-curated .postcard-photo-rebellion{filter:var(--cast-atmosphere-scene,none) saturate(.9) contrast(.96)}
+.ss-cast-design[data-cast-atmosphere] .atelier-curated .actor img[data-cast-asset]{filter:var(--cast-atmosphere-actor,none)}
+.ss-cast-design[data-cast-atmosphere] .atelier-curated .comic-actor img[data-cast-asset]{filter:var(--cast-atmosphere-actor,none) grayscale(1) contrast(1.12)}
+/* No continuous effects, no layout animations, no full-card/dialogue filters. */
+@media (prefers-reduced-motion:no-preference){
+ .ss-cast-design[data-cast-atmosphere-transition="true"] .atelier-curated .actor img[data-cast-asset]{transition:filter 180ms ease-out}
+ @starting-style { .ss-cast-design[data-cast-atmosphere-transition="true"] .atelier-curated .actor img[data-cast-asset]{filter:none} .ss-cast-design[data-cast-atmosphere-transition="true"] .atelier-curated .comic-actor img[data-cast-asset]{filter:grayscale(1) contrast(1.12)} }
+ .ss-cast-design[data-cast-atmosphere-animation="true"] .atelier-curated .actor img[data-cast-asset]{animation:ss-cast-atmosphere-reveal 220ms ease-out both}
+}
+@keyframes ss-cast-atmosphere-reveal{from{opacity:.82}to{opacity:1}}

@@ -1,0 +1,9 @@
+quality/meta: score_9, editorial illustration
+visible count: 2 people
+scene: Two adults on a rooftop.
+camera: medium shot
+right woman [persona] [box .52,.1,.95,.95]: holding a book
+left man [character] [box .05,.1,.48,.95]: smiling
+object box [.44,.68,.56,.84]: a red cup
+text box [.1,.01,.9,.08]: {"caption":"White heading","text":"OPEN, \"TODAY\"\n第二行"}
+environment: rooftop at dusk

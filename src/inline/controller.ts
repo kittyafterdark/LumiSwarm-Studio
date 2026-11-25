@@ -10,6 +10,10 @@ interface TaggedImageJobView {
   messageId: string
   slot: string
   prompt: string
+  sourcePrompt?: string
+  promptCompiler?: ResolvedScenePromptFamily
+  compilerDiagnostics?: string[]
+  loreDiagnostics?: string[]
   negativePrompt: string
   aspect: string
   alt: string
@@ -25,7 +29,7 @@ interface TaggedImageJobView {
 interface StudioInlineImageTarget {
   jobId: string
   imageId: string
-  replace: (replacementId: string) => Promise<void>
+  replace: (replacementId: string, expectedId?: string) => Promise<void>
   onExit?: () => void
 }
 
@@ -92,6 +96,7 @@ class TaggedImageController {
   private urlActionFrame = 0
   private closeImageMenu: (() => void) | null = null
   private destroyed = false
+  private promptDiagnostics: HTMLDialogElement | null = null
 
   private eventClosest<T extends HTMLElement>(
     event: Event,
@@ -170,7 +175,7 @@ class TaggedImageController {
       onConfirm: (prompt: string, negativePrompt: string) => void,
     ) => boolean,
     openLibrary: () => void,
-    private readonly editInlineImage?: (action: "inpaint" | "replace", target: StudioInlineImageTarget) => void,
+    private readonly editInlineImage?: (action: "inpaint" | "replace" | "artwork", target: StudioInlineImageTarget) => void,
   ) {
     this.ctx = ctx
     this.behavior = { ...behavior }
@@ -368,6 +373,7 @@ class TaggedImageController {
 
   destroy(): void {
     this.destroyed = true
+    this.promptDiagnostics?.remove(); this.promptDiagnostics = null
     this.closeImageMenu?.()
     this.urlActionJobs.clear()
     for (const id of this.urlActions.keys()) this.removeUrlAction(id)
@@ -919,9 +925,9 @@ class TaggedImageController {
       }
       this.closeImageMenu = close
       const icons: Record<string, string> = {
-        inpaint: INPAINT_ICON, replace: INIT_IMAGE_ICON, finalize: EXPAND_ICON, draft: INIT_IMAGE_ICON,
+        artwork: SPARKLE_ICON, inpaint: INPAINT_ICON, replace: INIT_IMAGE_ICON, finalize: EXPAND_ICON, draft: INIT_IMAGE_ICON,
         final: INIT_IMAGE_ICON, "cancel-upscale": MINIMIZE_ICON, "retry-current": INLINE_IMAGE_ACTION_ICON,
-        "retry-original": INLINE_IMAGE_ACTION_ICON, edit: SPARKLE_ICON, studio: FRAME_WALL_ICON,
+        "retry-original": INLINE_IMAGE_ACTION_ICON, edit: SPARKLE_ICON, "prompt-diagnostics": PROMPT_DIAGNOSTICS_ICON, studio: FRAME_WALL_ICON,
         library: LIBRARY_ICON, "remove-chat": TRASH_ICON,
       }
       for (const item of items) {
@@ -969,6 +975,7 @@ class TaggedImageController {
     const canFinalize = job.output !== "url" && hasImage
     const items: InlineImageMenuItem[] = [
       ...(this.editInlineImage && hasImage ? [
+        { key: "artwork", label: "Open in Edit", disabled: variantBusy },
         { key: "inpaint", label: "Inpaint", disabled: variantBusy },
         { key: "replace", label: "Replace image…", disabled: variantBusy },
       ] : []),
@@ -981,6 +988,7 @@ class TaggedImageController {
       { key: "retry-current", label: job.inserted ? "Regenerate with Studio settings" : job.status === "requested" ? "Generate with current Studio settings" : "Retry with current Studio settings" },
       { key: "retry-original", label: "Retry with original settings", disabled: !job.clientJobId },
       { key: "edit", label: "Edit prompt in Quick Create", disabled: !job.prompt && !this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId)) },
+      { key: "prompt-diagnostics", label: "Inspect request & compiled prompt", disabled: !job.prompt },
       { key: "divider", label: "", type: "divider" },
       { key: "studio", label: "Open Swarm Studio" },
       { key: "library", label: "Open output library" },
@@ -993,11 +1001,11 @@ class TaggedImageController {
     this.sourceSnapshot = null
     if (this.destroyed || !this.isSelected(job)) return
     job = this.jobs.get(job.id) || job
-    if ((result.selectedKey === "inpaint" || result.selectedKey === "replace") &&
+    if ((result.selectedKey === "inpaint" || result.selectedKey === "replace" || result.selectedKey === "artwork") &&
         hasImage && expectedImageId === job.imageId && ![...this.variantRequests.values()].includes(job.id)) {
       const jobId = job.id
       this.editInlineImage?.(result.selectedKey, {
-        jobId, imageId: expectedImageId, replace: id => this.replaceInlineImage(jobId, expectedImageId, id),
+        jobId, imageId: expectedImageId, replace: (id, expected = expectedImageId) => this.replaceInlineImage(jobId, expected, id),
       })
     }
     if (result.selectedKey === "cancel-upscale") {
@@ -1018,7 +1026,7 @@ class TaggedImageController {
     if (result.selectedKey === "retry-original") this.retry(job, "original")
     if (result.selectedKey === "edit") {
       const tag = this.tagPayloads.get(this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId))
-      const prompt = String(tag?.content || job.prompt)
+      const prompt = String(job.sourcePrompt ?? tag?.content ?? job.prompt)
       const opened = this.openQuickCreateWithPrompt(prompt, job.negativePrompt, (editedPrompt, editedNegative) => {
         this.retry(job, "current", {
           prompt: editedPrompt,
@@ -1027,6 +1035,7 @@ class TaggedImageController {
       })
       if (!opened) this.openStudioWithPrompt(prompt, job.negativePrompt)
     }
+    if (result.selectedKey === "prompt-diagnostics") this.showPromptDiagnostics(job)
     if (result.selectedKey === "studio") this.openStudioWithPrompt("", "")
     if (result.selectedKey === "library") this.openLibrary()
     if (result.selectedKey === "remove-chat") {
@@ -1036,6 +1045,34 @@ class TaggedImageController {
         jobId: job.id,
       })
     }
+  }
+
+  private showPromptDiagnostics(job: TaggedImageJobView): void {
+    this.promptDiagnostics?.remove()
+    const dialog = document.createElement("dialog")
+    dialog.className = "ss-inline-prompt-diagnostics"
+    applyAppearanceVariables(dialog, storedStudioAppearance())
+    const header = document.createElement("header"); header.className="ss-diagnostic-heading"
+    const heading=document.createElement("h2");heading.textContent="Inline prompt diagnostics"
+    const closeTop=document.createElement("button");closeTop.type="button";closeTop.textContent="×";closeTop.setAttribute("aria-label","Close diagnostics");closeTop.addEventListener("click",()=>dialog.close())
+    header.append(heading,closeTop);dialog.append(header)
+    const body=document.createElement("div");body.className="ss-diagnostic-body";dialog.append(body)
+    const mode = document.createElement("p"); mode.textContent = job.promptCompiler ? `Compiler: ${promptFamilyLabel(job.promptCompiler)}` : "Compiler: not recorded (legacy or pending)"; body.append(mode)
+    if (job.inserted && job.error) { const note = document.createElement("p"); note.textContent = `Previous illustration retained. Last attempt: ${job.error}`; body.append(note) }
+    for (const line of job.compilerDiagnostics || []) { const note=document.createElement("p"); note.textContent=line; body.append(note) }
+    for (const [label,value] of [["Authored request body",job.sourcePrompt ?? this.tagPayloads.get(this.lookupKey(job.chatId,job.messageId,job.slot,job.swipeId))?.content ?? "Not retained"],["Compiled positive prompt (sent to provider)",job.clientJobId ? job.prompt : "Not generated yet"],["Negative prompt",job.negativePrompt]]) {
+      const caption=document.createElement("label"); caption.style.cssText="display:block;margin-top:10px;font-weight:600;"; caption.textContent=label
+      const text=document.createElement("textarea");text.readOnly=true;text.value=value;text.rows=5;text.style.cssText="display:block;width:100%;box-sizing:border-box;resize:vertical;margin-top:4px;padding:8px;background:transparent;color:inherit;border:1px solid var(--lumiverse-border,#555);border-radius:6px;font:12px/1.5 monospace;";caption.append(text);body.append(caption)
+    }
+    const loreHeading=document.createElement("h3");loreHeading.textContent="Visual Lore contributions";loreHeading.style.marginTop="12px";body.append(loreHeading)
+    if (job.loreDiagnostics?.length) {
+      const list=document.createElement("ul");list.style.cssText="padding-inline-start:20px;overflow-wrap:anywhere;";
+      for (const line of job.loreDiagnostics) { const row=document.createElement("li");row.textContent=line;list.append(row) }
+      body.append(list)
+    } else { const note=document.createElement("p");note.textContent=job.loreDiagnostics ? "No explicit visual lore contributions." : "Not recorded for this request.";body.append(note) }
+    const close=document.createElement("button");close.type="button";close.textContent="Close";close.addEventListener("click",()=>dialog.close());const footer=document.createElement("footer");footer.append(close);dialog.append(footer)
+    this.promptDiagnostics = dialog
+    dialog.addEventListener("close",()=>{dialog.remove();if(this.promptDiagnostics===dialog)this.promptDiagnostics=null},{once:true});document.body.append(dialog);dialog.showModal()
   }
 
   private replaceInlineImage(jobId: string, imageId: string, replacementId: string): Promise<void> {

@@ -1,0 +1,9 @@
+editorial illustration
+Two adults on a rooftop.
+Visible subjects: 2 people
+Framing: medium shot
+rooftop at dusk
+White heading Exact lettering: "OPEN, \"TODAY\"\n第二行".
+<bbox[0.52,0.1,0.95,0.95]:right woman: silver hair, blue eyes, holding a book>
+<bbox[0.05,0.1,0.48,0.95]:left man: black hair, red eyes, smiling>
+<bbox[0.44,0.68,0.56,0.84]:a red cup>

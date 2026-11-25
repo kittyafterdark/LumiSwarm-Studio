@@ -1,0 +1,68 @@
+{
+  "release": "1.0.40",
+  "base": "Lumiswarm Cast v1.0.39 cumulative",
+  "packaging": "full cumulative editable source + built runtime",
+  "changed_files": [
+    {
+      "path": "src/studio/cast.ts",
+      "before_sha256": "075c19a57d121be5d02b452a639b89c1a592086f05cf634bd22406ed3488a2a0",
+      "after_sha256": "82d0b858f76852d74ab1afef20a62db3119c5734bf902fcf841178e237817eea"
+    },
+    {
+      "path": "src/studio/styles.ts",
+      "before_sha256": "93af96840e0d1f80e03a0ae88d8f4de15938fa3912278cbec639f149c43896b0",
+      "after_sha256": "cfbdf0de816131a55420d70e5382cb81919b18a1b03f2d2f5ec110dd9deee6a1"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "before_sha256": "45e84b9011e6462192f291d36733b84e7d28ae676325b01fc0045bbef2d024dd",
+      "after_sha256": "c42a2159e3e1bcbbd97a0fffc95c36c6b47f7116485c93eb07a7a7dffd724e31"
+    },
+    {
+      "path": "package.json",
+      "before_sha256": "4df86611afa0924ca91eabbbd14c5bfe0b9864b20ab9bcd1b5db583909dc0fac",
+      "after_sha256": "0583cfd164585a3250311c08e657939f7ce215bcefcc0bcb43a0775e512dedaa"
+    },
+    {
+      "path": "package-lock.json",
+      "before_sha256": "dce9ee10f5bd6b2e743214bb02aa17626aec7f5c36e98fbbc01b954d9da786b3",
+      "after_sha256": "487928a829c0f1bd951c46bb7a547922d29a837a8e21006890bd667e665c9ac6"
+    },
+    {
+      "path": "spindle.json",
+      "before_sha256": "2c25e14f221ab48ad0ab8aa75981a115d86f64e96f707d0d4023f23b111d4236",
+      "after_sha256": "846e31c7bcefc91c8c43dd4932eee3a95f700c4a917ae1e66906c86cfedeaf48"
+    },
+    {
+      "path": "dist/frontend.js",
+      "before_sha256": "227d781d1e21230cc6c1f4502a19938a247ce48880a3ce40cca40f82f110c459",
+      "after_sha256": "1aa5d50dee4eba99d29503e85271aa8d9c4479753f3f4d9c35f35e68c3939cbe"
+    }
+  ],
+  "added_files": [
+    {
+      "path": "tests/cast-mobile-presentation-modal-browser.py",
+      "sha256": "b47879667d8334c650204a4c427cdd845fb6b03b0bec61716551261b8cbb8b05"
+    },
+    {
+      "path": "docs/cast-mobile-presentation-r40.md",
+      "sha256": "ba4e9131db7523df2af346d8325a225cce366445b34432cbd26fd1755b4a558e"
+    },
+    {
+      "path": "docs/screenshots/cast-mobile-modal-390.png",
+      "sha256": "3d154fa73184e23fa7115dd006f610dda55278d28bfd784cbfa385581d8b5b72"
+    }
+  ],
+  "verification": {
+    "build": "pass",
+    "typecheck": "pass (global TypeScript 5.8 via STUDIO_TSC)",
+    "mobile_real_browser": "320,390,430px pass",
+    "desktop_real_browser": "1024px pass",
+    "album_management_real_browser": "pass",
+    "cast_stage_geometry_306": "pass",
+    "cast_side_and_remount": "pass",
+    "Node_contract_chain": "passed through native image contracts; stopped at missing jsdom",
+    "live_Lumiverse": "not tested"
+  },
+  "scope": "Studio Cast mobile presentation modal only; no live renderer or presets changes"
+}

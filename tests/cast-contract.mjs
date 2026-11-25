@@ -1,0 +1,87 @@
+import assert from 'node:assert/strict'
+import {cleanCastLibrary,castPrompt,renderCastTags,castDialogue,castLibraryForChat,castLiteralSource} from '../dist/frontend.js'
+const library=cleanCastLibrary({activeGroupId:'g',inject:true,groups:[{id:'g',name:'Crew'}],members:[{id:'mina',groupId:'g',name:'Mina <script>',prefix:'Mina',images:{joy:{id:'saved-joy',url:'javascript:bad'},'soft smile':{id:'saved-smile'}},role:'persona',presentation:'card'}]})
+const escape=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;')
+const packet=(key,dialogue)=>`<swarm-cast=${key}>${dialogue}</swarm-cast>`
+assert.equal(library.version,2)
+assert.equal(library.members[0].images.joy.url,'/api/v1/images/saved-joy')
+assert.equal(library.members[0].images['soft-smile'].id,'saved-smile')
+assert.equal(library.members[0].presentation,'story','Legacy card presentation storage migrates')
+assert.equal(library.groups[0].defaultPresentation,'story')
+assert.match(castPrompt(library),/Mina-joy \(user persona\)/)
+assert.match(castPrompt(library),/Current presentation modes: Mina: story/)
+assert.match(castPrompt(library),/Never output opening-only Cast tags/)
+assert.equal(castPrompt({...library,inject:false}),'')
+const assertDialogueGuidance=prompt=>{
+ assert.match(prompt,/Color all spoken dialogue consistently by speaker, both inside and outside Cast packets/)
+ assert.match(prompt,/established color from the story or user instructions/)
+ assert.match(prompt,/including ordinary inline dialogue, speakers without artwork, and continuation after a narration beat/)
+ assert.match(prompt,/Keep narration and dialogue attribution outside the font wrapper and outside Cast packets/)
+ assert.match(prompt,/Color does not require a Cast packet/)
+ assert.match(prompt,/Follow any explicit user dialogue-color rules/)
+}
+assertDialogueGuidance(castPrompt(library))
+assert.match(castPrompt(library),/<\/swarm-cast> he said quietly\. <font color="#599CE3">"I was waiting for you\."<\/font>/)
+const emptyGenesis=cleanCastLibrary({activeGroupId:'g',inject:true,groups:[{id:'g',name:'Crew',genesis:{enabled:true}}],members:[]})
+assertDialogueGuidance(castPrompt(emptyGenesis))
+assert.match(castPrompt(emptyGenesis),/flag=create type=basics-pipeline><font color="#599CE3">/)
+assert.equal(castPrompt(cleanCastLibrary({...emptyGenesis,groups:[{id:'g',name:'Crew',genesis:{enabled:false}}]})),'')
+const source=`Hello ${packet('Mina-joy','"Hello."')}! <swarm-cast=unknown-joy>"Unknown."</swarm-cast>`
+const content=renderCastTags(source,library,escape)
+assert.match(content,/src="\/api\/v1\/images\/saved-joy"/)
+assert.match(content,/Mina &lt;script&gt;/)
+assert.match(content,/<swarm-cast=unknown-joy>/)
+assert.doesNotMatch(content,/javascript:|<script>/)
+assert.equal(renderCastTags(content,library,escape),content,'Idempotent')
+assert.equal(renderCastTags(packet('Mina-joy','"Hello."'),{...library,activeGroupId:''},escape),packet('Mina-joy','"Hello."'))
+assert.equal(cleanCastLibrary({...library,members:[...library.members,{...library.members[0],id:'other',prefix:'mina'}]}).members.length,1)
+assert.equal(castDialogue('“"Hello."”'),'“Hello.”')
+for(const body of ['"Hello."','“Hello.”','“"Hello."”', '\n"Hello."\n', '<font color="#599CE3">"Hello."</font>']){
+ const rendered=renderCastTags(packet('Mina-joy',body),library,escape)
+ assert.equal(rendered.split('Hello.').length-1,1,'Dialogue rendered once')
+ assert.equal(rendered.split('“').length-1,1,'Exactly one opening quote')
+ assert.equal(rendered.split('”').length-1,1,'Exactly one closing quote')
+ assert.doesNotMatch(rendered,/<q[ >]/,'No browser-generated second set of quotes')
+}
+const both=renderCastTags(`“Before.” ${packet('Mina-joy','“After.”')}`,library,escape)
+assert.equal(both.split('Before.').length-1,1);assert.equal(both.split('After.').length-1,1)
+for(const value of [
+ '<swarm-cast=Mina-joy>', '<swarm-cast=Mina-joy>"Open."',
+ '“Before.” <swarm-cast=Mina-joy> “After.”',
+ '`'+packet('Mina-joy','"Literal."')+'`',
+ '```xml\n'+packet('Mina-joy','"Literal."')+'\n```',
+])assert.equal(renderCastTags(value,library,escape),value,'Unclosed/code packets must be inert')
+assert.match(renderCastTags(packet('Mina','"Default."'),library,escape),/saved-joy/,'Prefix-only key uses default/fallback image')
+const portrait=cleanCastLibrary({...library,members:[{...library.members[0],presentation:'portrait'}]})
+const portraitMarkup=renderCastTags(packet('Mina-joy','"Hello."'),portrait,escape)
+assert.match(portraitMarkup,/display:block;max-width:100%;width:240px/)
+assert.match(portraitMarkup,/margin-top:10px;text-align:center;color:var\(--lumiverse-prose-dialogue,inherit\);font:inherit/)
+assert.equal(portraitMarkup.split('Hello.').length-1,1)
+const scoped={...library,chatGroups:{one:'g',two:''}}
+assert.equal(castLibraryForChat(scoped,'one').activeGroupId,'g')
+assert.equal(castPrompt(castLibraryForChat(scoped,'two')),'')
+const inherited=cleanCastLibrary({...library,groups:[{...library.groups[0],defaultPresentation:'sticker'}],members:[{...library.members[0],presentation:'inherit'}]})
+assert.match(renderCastTags(packet('Mina-joy','"Hi."'),inherited,escape),/border-radius:50%/)
+const cropped=cleanCastLibrary({...inherited,members:[{...inherited.members[0],sourceCharacterId:'char-1',folderId:'visuals',crop:{enabled:true,x:0,y:100,zoom:2}}]})
+assert.deepEqual(cropped.members[0].crop,{enabled:true,x:0,y:100,zoom:2})
+assert.equal(cropped.members[0].sourceCharacterId,'char-1')
+assert.match(renderCastTags(packet('Mina-joy','"Hi."'),cropped,escape),/object-fit:cover;object-position:0% 100%;transform-origin:0% 100%;transform:scale\(2\)/)
+assert.equal(cleanCastLibrary({...cropped,members:[{...cropped.members[0],crop:{enabled:true,x:-99,y:500,zoom:99}}]}).members[0].crop.zoom,3)
+assert.equal(castLiteralSource(content),`Hello ${packet('Mina-joy','“Hello.”')}! <swarm-cast=unknown-joy>"Unknown."</swarm-cast>`)
+assert.equal(castLiteralSource('```html\n'+portraitMarkup+'\n```'),'```html\n'+portraitMarkup+'\n```','Code samples stay literal')
+assert.equal(castLiteralSource('<span data-swarm-cast="Mina-joy">Unrelated authored HTML</span>'),'<span data-swarm-cast="Mina-joy">Unrelated authored HTML</span>')
+assert.equal((renderCastTags(packet('Mina-joy','\n"Hello."'),portrait,escape).match(/Hello\./g)||[]).length,1)
+for(const body of ['"Hello."','<font color="#599CE3">"Hello."</font>',"<font color='#599CE3'>\"Hello.\"</font>"]){
+ const rendered=renderCastTags(packet('Mina-joy',body),portrait,escape)
+ assert.equal(rendered.split('Hello.').length-1,1,'One dialogue in preview')
+ assert.doesNotMatch(rendered,/<font\b/i,'Original font markup consumed')
+ assert.match(rendered,/data-swarm-cast-dialogue/)
+ if(body.includes('<font'))assert.match(rendered,/color:#599CE3/i)
+}
+const braille=packet('Mina-joy','<font⠀color="#599CE3">"The⠀lighting⠀is⠀better."</font>')
+const normalized=renderCastTags(braille,portrait,escape)
+assert.match(normalized,/data-swarm-cast-dialogue/)
+assert.match(normalized,/color:#599CE3/i,'Braille blank in font attribute normalized before parsing')
+assert.match(normalized,/The lighting is better\./,'Braille words display as normal spaces')
+assert.equal((normalized.match(/data-swarm-cast-dialogue/g)||[]).length,1)
+console.log('Cast album model PASS: strict closed packets, braille normalization, safe assets, crop, colors and idempotence')

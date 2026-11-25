@@ -1,0 +1,71 @@
+/* Overlap art direction: keep the cast silhouette and the material independent
+   of authored dialogue paint. All quote boxes grow in flow. */
+.ss-cast-design[data-cast-side="right"] .shonen-burst-balloon{margin-left:0;margin-right:-24px;}
+.ss-cast-design .shonen-burst-balloon::before,.ss-cast-design .shonen-burst-balloon::after{content:"";position:absolute;inset:0;z-index:-2;pointer-events:none;clip-path:polygon(0 14px,13px 0,calc(100% - 26px) 3px,calc(100% - 13px) 0,calc(100% - 10px) 11px,100% 19px,calc(100% - 7px) 34%,100% 43%,calc(100% - 6px) 57%,100% calc(100% - 18px),calc(100% - 21px) 100%,12px calc(100% - 3px),0 calc(100% - 16px),6px 67%,0 57%,7px 41%);background:#f7f3e9;}
+.ss-cast-design .shonen-burst-balloon::after{inset:3px;z-index:-1;background:#08080a;}
+.ss-cast-design .shonen-burst-tag{color:#f7f3e9;font-family:system-ui,sans-serif;font-weight:900;font-style:italic;letter-spacing:.07em;transform:none;border-bottom:2px solid var(--cast-color);padding-bottom:4px;margin-bottom:7px;}
+.ss-cast-design .shonen-burst-text{font-size:var(--cast-dialogue-size,14px);line-height:1.44;font-weight:800;text-align:left;}
+.ss-cast-design[data-cast-ink="dark"] .shonen-burst-balloon::before{background:#17171a;}
+.ss-cast-design[data-cast-ink="dark"] .shonen-burst-balloon::after{background:#fff;}
+.ss-cast-design[data-cast-ink="dark"] .shonen-burst-tag{color:#17171a;}
+/* Graphic speed-line accents sit outside the reading field and mirror with the actor. */
+.ss-cast-design .shonen-burst-card::before{content:"";position:absolute;z-index:0;top:12%;bottom:12%;left:0;width:29%;opacity:.65;background:repeating-linear-gradient(145deg,transparent 0 19px,var(--cast-color) 19px 21px,transparent 21px 25px);clip-path:polygon(0 4%,97% 21%,82% 80%,0 100%,0 77%,63% 52%,0 26%);pointer-events:none;}
+.ss-cast-design[data-cast-side="right"] .shonen-burst-card::before{left:auto;right:0;transform:scaleX(-1);}
+/* At narrow widths, preserve a genuine overlap instead of a 90px text column. */
+@container (max-width:430px){
+ .ss-cast-design .shonen-burst-card{flex-direction:column;align-items:center;padding-inline:8px;}
+ .ss-cast-design .shonen-burst-card::before,.ss-cast-design[data-cast-side="right"] .shonen-burst-card::before{left:10%;right:auto;top:8px;bottom:auto;height:180px;width:80%;}
+ .ss-cast-design[data-cast-preset="shonen-burst"] .shonen-burst-figure{flex:none;width:min(70%,200px);height:218px;}
+ .ss-cast-design .shonen-burst-balloon,.ss-cast-design[data-cast-side="right"] .shonen-burst-balloon{flex:none;width:100%;margin:-28px 0 0;padding:19px 20px 21px;}
+}
+/* Manga SFX retains its pop-out punctuation and graphic offset shadow. */
+.ss-cast-design .manga-dialogue-bold{font-size:var(--cast-dialogue-size,14px);line-height:1.5;}
+.ss-cast-design[data-cast-ink="light"] .manga-floating-card{background:#08080a;border-color:#f5f1ea;}
+.ss-cast-design[data-cast-ink="light"] .manga-speaker-name{color:#f5f1ea;}
+.ss-cast-design .manga-floating-card::before{background:#f4efe8;color:#17171a;border-color:#17171a;}
+/* OVA: bare outlined subtitles, with only the speaker metadata on a plaque. */
+.ss-cast-design .vhs-tracking-header{z-index:4;max-width:calc(100% - 20px);overflow-wrap:anywhere;text-shadow:0 1px 2px #000,1px 0 #000,-1px 0 #000,0 -1px #000;font-size:11px;}
+.ss-cast-design .vhs-speaker-tag{display:inline-block;background:#efede8;color:#111;padding:3px 8px;margin:0 0 6px;border-radius:2px;letter-spacing:.08em;}
+.ss-cast-design .vhs-yellow-sub{--ova-outline:#08080a;font-size:var(--cast-dialogue-size,14px);text-shadow:1px 1px var(--ova-outline),-1px -1px var(--ova-outline),1px -1px var(--ova-outline),-1px 1px var(--ova-outline),0 2px 5px #0009;line-height:1.5;}
+.ss-cast-design[data-cast-ink="dark"] .vhs-yellow-sub{--ova-outline:#fff;}
+.ss-cast-design[data-cast-ink="dark"] .vhs-speaker-tag{background:#151519;color:#fff;}
+/* Paper stationery, with two genuine stock treatments (not voice washes). */
+.ss-cast-design .atelier-overlap .strip-washi{background:repeating-linear-gradient(0deg,#8e76530a 0 1px,transparent 1px 5px),linear-gradient(135deg,#fff8ec,#e8d9c1);border:1px solid #c5b497;padding:16px 19px 18px;}
+.ss-cast-design .atelier-overlap .washi-tape-strip{background:repeating-linear-gradient(125deg,#b5a17c9c 0 5px,#e5d7b59c 5px 10px);width:82px;}
+.ss-cast-design .atelier-overlap .washi-meta{gap:8px;flex-wrap:wrap;border-bottom:1px solid #9e89736b;padding-bottom:5px;}
+.ss-cast-design .atelier-overlap .washi-stamp{color:#6f554c;}
+.ss-cast-design[data-cast-ink="light"] .atelier-overlap .strip-washi{background:repeating-linear-gradient(0deg,#d4c5a60d 0 1px,transparent 1px 5px),linear-gradient(135deg,#10100e,#191510);border-color:#98876b;color:#f6e6cd;}
+.ss-cast-design .atelier-overlap .strip-docket{background:repeating-linear-gradient(0deg,#8e76530d 0 1px,transparent 1px 5px),#f8efda;padding:23px 20px 16px 30px;}
+.ss-cast-design .atelier-overlap .strip-docket::before{content:"";position:absolute;top:9px;bottom:9px;left:10px;width:9px;background:radial-gradient(circle at 4px 5px,#6a594d 0 2px,transparent 2.5px) 0 0/9px 15px repeat-y;border-right:1px dashed #99816a;pointer-events:none;}
+.ss-cast-design .atelier-overlap .docket-label{border-bottom:1px dashed #99816a;padding-bottom:7px;margin-bottom:8px;}
+.ss-cast-design[data-cast-ink="light"] .atelier-overlap .strip-docket{background:repeating-linear-gradient(0deg,#c4b2930e 0 1px,transparent 1px 5px),#12110f;color:#f8efda;}
+/* Cyber: a segmented communications instrument, not a tinted rectangle. */
+.ss-cast-design .atelier-overlap .strip-cyber{--telemetry:#8fd8c7;--telemetry-edge:#42665e;--telemetry-shell:#10191d;--telemetry-field:#060a0c;background:var(--telemetry-shell);border:1px solid var(--telemetry-edge);border-inline:6px solid var(--telemetry-edge);padding:10px 14px 8px;box-shadow:inset 0 0 0 3px var(--telemetry-field),0 7px 18px #0008;clip-path:polygon(0 9px,9px 0,calc(100% - 9px) 0,100% 9px,100% calc(100% - 9px),calc(100% - 9px) 100%,9px 100%,0 calc(100% - 9px));}
+.ss-cast-design .atelier-overlap .cyber-top-telemetry{background:var(--telemetry-field);color:var(--telemetry);border-bottom:1px solid var(--telemetry-edge);padding:6px 7px;gap:6px;flex-wrap:wrap;letter-spacing:.09em;}
+.ss-cast-design .atelier-overlap .cyber-pulse{background:var(--telemetry);}
+.ss-cast-design .atelier-overlap .strip-cyber .quote-render{background:var(--telemetry-field);border-inline:2px solid var(--telemetry-edge);padding:8px 10px;font-family:ui-monospace,monospace;font-weight:500;line-height:1.55;color:#e2f8ef;}
+.ss-cast-design .atelier-overlap .cyber-rail{display:flex;justify-content:flex-end;align-items:center;gap:10px;color:var(--telemetry);font:10px/1.2 ui-monospace,monospace;margin-top:6px;}
+.ss-cast-design .atelier-overlap .cyber-rail::before{content:"";height:4px;flex:1;background:repeating-linear-gradient(90deg,var(--telemetry-edge) 0 9px,transparent 9px 13px);}
+.ss-cast-design[data-cast-ink="dark"] .atelier-overlap .strip-cyber{--telemetry:#174f48;--telemetry-edge:#74968f;--telemetry-shell:#dbe8e5;--telemetry-field:#fff;}
+.ss-cast-design[data-cast-ink="dark"] .atelier-overlap .strip-cyber .cyber-top-telemetry{color:var(--telemetry);}
+/* Capsule: real portrait medallion, fixed circular shape even with long prose. */
+.ss-cast-design .atelier-overlap .strip-capsule{background:linear-gradient(145deg,#111319,#090a0d 65%);border:1px solid #777e89;border-radius:34px;padding:12px 19px 13px 13px;gap:13px;align-items:center;box-shadow:inset 0 1px 0 #ffffff24,0 8px 20px #0008;}
+.ss-cast-design .atelier-overlap .capsule-badge{width:52px;height:52px;flex:0 0 52px;background:var(--cast-badge-image,none) center 6%/200% auto no-repeat,radial-gradient(circle at 50% 30%,#677481,#272c35);border:2px solid #d1d7df;box-shadow:0 0 0 3px #080a0e,0 5px 12px #0008;}
+.ss-cast-design .atelier-overlap .capsule-name{color:#d5dce5;letter-spacing:.09em;}
+.ss-cast-design[data-cast-ink="dark"] .atelier-overlap .strip-capsule{background:linear-gradient(145deg,#fff,#dce1e7);border-color:#9da5b0;}
+.ss-cast-design[data-cast-ink="dark"] .atelier-overlap .capsule-name{color:#333a44;}
+/* Origami: folded ribbon ends and a layered crease, with a flat safe text field. */
+.ss-cast-design .atelier-overlap .strip-origami{--fold-face:#111218;--fold-edge:#777f8e;--fold-back:#3e4859;isolation:isolate;background:var(--fold-face);border:0;border-block:1px solid var(--fold-edge);width:calc(100% - 44px);padding:12px 19px 17px;box-shadow:0 8px 15px #0006;}
+.ss-cast-design .atelier-overlap .strip-origami::before,.ss-cast-design .atelier-overlap .strip-origami::after{content:"";position:absolute;z-index:-1;top:8px;bottom:-9px;width:22px;background:linear-gradient(140deg,var(--fold-back) 0 48%,var(--fold-edge) 49% 51%,var(--fold-back) 52%,var(--fold-edge) 53% 55%,var(--fold-back) 56%);clip-path:polygon(0 0,100% 10px,100% calc(100% - 10px),0 100%,5px 50%);pointer-events:none;}
+.ss-cast-design .atelier-overlap .strip-origami::before{left:-17px;}
+.ss-cast-design .atelier-overlap .strip-origami::after{right:-17px;transform:scaleX(-1);}
+.ss-cast-design .atelier-overlap .origami-crest{position:relative;left:auto;top:auto;display:table;max-width:100%;margin:-22px 0 8px;padding:5px 15px;background:linear-gradient(120deg,#ded8c8 0 80%,#a69a82 81%);color:#211e1a;clip-path:polygon(0 0,100% 0,calc(100% - 10px) 100%,0 100%);letter-spacing:.08em;box-shadow:none;}
+.ss-cast-design .atelier-overlap .strip-origami .quote-render{border-top:1px solid var(--fold-edge);padding-top:8px;font-weight:500;}
+.ss-cast-design[data-cast-ink="dark"] .atelier-overlap .strip-origami{--fold-face:#fff;--fold-edge:#9d9587;--fold-back:#c1b4a0;}
+@container(max-width:350px){
+ .ss-cast-design .atelier-overlap .strip-capsule{padding:10px 13px;gap:10px;}
+ .ss-cast-design .atelier-overlap .capsule-badge{width:40px;height:40px;flex-basis:40px;}
+ .ss-cast-design .atelier-overlap .strip-origami{width:calc(100% - 38px);padding-inline:12px;}
+ .ss-cast-design .atelier-overlap .strip-cyber{padding-inline:8px;}
+ .ss-cast-design[data-cast-preset="manga-sfx"] .manga-floating-card{padding-inline:13px;}
+}

@@ -1,0 +1,24 @@
+{
+  "cases": 72,
+  "minimum_contrast_by_style": {
+    "vn-hero": 5.64,
+    "corner-popout": 5.02,
+    "angled-cutout": 4.84,
+    "vn-standee": 5.39,
+    "tech-messenger": 5.2,
+    "agency-lanyard": 4.98,
+    "cyber-comms": 5.0,
+    "retro-rpg": 5.77,
+    "gothic-folio": 5.03,
+    "mecha-hud": 5.32,
+    "terminal-console": 5.98,
+    "cinematic-bleed": 5.2
+  },
+  "min_contrast": 4.84,
+  "image": "docs/screenshots/cast-material-three-voices-v48.png",
+  "speaker_colors": {
+    "Mina": "#ed7ca8",
+    "Shoto": "#599ce3",
+    "Katsuki": "#ffae35"
+  }
+}

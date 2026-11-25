@@ -1,0 +1,90 @@
+{
+  "release": "1.0.38",
+  "base": "Lumiswarm Cast Album 1.0.37 full cumulative overlay",
+  "type": "complete cumulative editable-source overlay with built frontend/backend",
+  "changed_files": [
+    {
+      "path": "src/state/cast-presentations.ts",
+      "before_sha256": "9a38574aaa43f1325183c6a1f7d743fa731daa37f83e133230a181137a9bb2d9",
+      "after_sha256": "74d0da8ee4e3045624bebd640b7c5461e0fe79903f4da0e8cf649571bb75ef7f"
+    },
+    {
+      "path": "src/studio/cast.ts",
+      "before_sha256": "9255ea106bd25771ef9e1c315c0c2dfc1ac9b18a8669b0b824f1c65704718690",
+      "after_sha256": "075c19a57d121be5d02b452a639b89c1a592086f05cf634bd22406ed3488a2a0"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "before_sha256": "f7433f04fce41f28e98e9203a504af6e62289cc7fc1f5b51a8d49b1a48784ad0",
+      "after_sha256": "d303d89ac633bc9b0ef2f1f6ee3b96f9c1f6c75997c4eed2822a3bdce5359410"
+    },
+    {
+      "path": "package.json",
+      "before_sha256": "2d77ffd33dee4ea6588b458e112979aebd44d81b7bd77c52f87f8a29e02d0b4f",
+      "after_sha256": "d4b8d973b59a1d7fbbd95a185634bad40a133e26eddefd30e2af1d0aa18a0d00"
+    },
+    {
+      "path": "package-lock.json",
+      "before_sha256": "bf815b543621d2d7b2de5ef07ccacb4d2b0a4393b103e5f9f837fb781f806c33",
+      "after_sha256": "ff513fac4b73213d567099d2b9231522543d8f7fa8cb9d9bd39177121434b91b"
+    },
+    {
+      "path": "spindle.json",
+      "before_sha256": "0122ff3bf8a8cf9c87375d6534cb1f88e2977227b7ac914eed5e4d5f21ffa9a0",
+      "after_sha256": "317f490df6be7c9e071b93dd59c6a3e40030a1f2e704ed93bd8863b70def4337"
+    },
+    {
+      "path": "dist/backend.js",
+      "before_sha256": "4a1c56b1887d3533689784e92252ed9dea609d170597c2e04c813c83e9b3fbc2",
+      "after_sha256": "f6bb68631eeaf09f6c9f3fcba5c8382699c3fbc5b6db7f0e04898c4cffea5202"
+    },
+    {
+      "path": "dist/frontend.js",
+      "before_sha256": "c5b8b7d88216dec0f8074fbb52228cdca0d0ae29b844423febd6d26050d860f6",
+      "after_sha256": "b0518c672eed9f589e3f98e51b756362cac3bcef7410ccf897a2fe1293ff3bf7"
+    },
+    {
+      "path": "scripts/build-cast-presets.py",
+      "before_sha256": "d07a7c1a096969822b54cc61a5d9efa0d783ec27fa1fa01979d828f19f250e3a",
+      "after_sha256": "97f765c0febd989b8e496cbfbdb98cbf757ac5a2d088758d381eb51458a3aeb6"
+    },
+    {
+      "path": "scripts/cast-expression-sides.css",
+      "before_sha256": "6a0b74a21e48a772ac6b4c641e4085c644e5efd3f8138de09a677a7df6cf284e",
+      "after_sha256": "c9f9cb892adb738948818e39559ae0d066d7d11483fc229d809324b3d2ee37c4"
+    }
+  ],
+  "added_files": [
+    {
+      "path": "tests/cast-stage-geometry-browser.py",
+      "sha256": "20d0013d60b29243be76fc99cf0905de394b1f1b3a534afef7c87ec83a7bfac7"
+    },
+    {
+      "path": "docs/screenshots/cast-stage-geometry-manga-sfx.png",
+      "sha256": "1e818ee0001b715069a8ea1fe12fc2a21e88a6f1afd56dab6101d45487f6554b"
+    },
+    {
+      "path": "docs/cast-stage-geometry-r38.md",
+      "sha256": "a53f363f0d7d6c9987bbd6f8f9a927cceba6d5f3e86effe8329a081c053a759a"
+    }
+  ],
+  "tests": {
+    "typecheck": "pass (global TypeScript)",
+    "build": "pass",
+    "cast_node_contracts": "pass",
+    "new_geometry_chromium": "pass (306 combinations)",
+    "album_chromium": "pass",
+    "stage_side_chromium": "pass",
+    "cast_island_remount_chromium": "pass",
+    "full_npm_test": "blocked at missing jsdom (after earlier contracts pass)",
+    "older_wardrobe_r8_browser": "obsolete light-DOM selector, not counted as passing",
+    "live_Lumiverse": "not tested"
+  },
+  "new_style_count": 0,
+  "modified_runtime_lifecycle": false,
+  "preserved_reference_presets": [
+    "chapter-tab",
+    "moonlit-halo",
+    "polaroid-side"
+  ]
+}

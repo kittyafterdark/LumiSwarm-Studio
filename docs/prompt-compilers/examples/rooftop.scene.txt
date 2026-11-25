@@ -1,0 +1,9 @@
+quality/meta: masterpiece, score_9, safe
+visible count: 3 people
+scene: Three people at a rooftop stall.
+camera: medium shot
+right woman [persona]: waving, looking at the left man
+center man [other]: round glasses, green coat
+left man [character]: black jacket, carrying a cup
+visible text: The sign reads "HELLO,, WORLD".
+environment: rooftop, sunset
