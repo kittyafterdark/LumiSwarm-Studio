@@ -68,6 +68,13 @@ interface InlineTagStream {
   id: string; chatId: string; owner: string; target: string; swipeId?: number
   source: string; gap: boolean; stopped: boolean; background: boolean; seq?: number; seqGap?: boolean; settlementContent?: string
   aliases: Set<string>
+  // A render callback may correct an ID-less terminal only when it matches
+  // the complete ended stream and a newly observed saved message.
+  initialMessageIds?: Set<string>
+  initialSwipeText?: Map<string, string>
+  initialTarget?: string
+  terminalMessageId?: string
+  terminalContent?: string
   requests: Map<string, { fullMatch: string; attrs: Record<string, string>; content: string }>
 }
 
@@ -279,8 +286,28 @@ class TaggedImageController {
       // swipe are known; quiet parser and impersonation streams are not.
       const background = /^(impersonate|quiet)/i.test(String(payload.generationType || "")) || payload.isUser === true
         || (!!payload.backgroundSwipe && (!target || this.swipeIndex(payload.targetSwipeId) === undefined))
+      let initialMessageIds: Set<string> | undefined
+      let initialSwipeText: Map<string, string> | undefined
+      try {
+        const recent = this.ctx.messages?.getRecent?.(200)
+        if (Array.isArray(recent)) {
+          initialMessageIds = new Set(recent.map((item: any) => String(item.id || "")))
+          // Only the target reply may be reused for a new alternative; retain
+          // its exact old source rather than using a lossy text fingerprint.
+          const previous = recent.find((item: any) => String(item.id) === target)
+          if (previous) {
+            initialSwipeText = new Map()
+            const active = this.swipeIndex(previous.swipe_id) ?? 0
+            const swipes = Array.isArray(previous.swipes) && previous.swipes.length ? previous.swipes : [previous.content]
+            swipes.forEach((value: unknown, index: number) => {
+              const text = index === active ? previous.content : value
+              if (typeof text === "string") initialSwipeText!.set(String(index), text.replace(/\r\n/g, "\n").trim())
+            })
+          }
+        }
+      } catch { /* Compatibility: no inferred owner without a baseline. */ }
       this.streams.set(id, { id, chatId, target, owner: target || `inline-stream:${id}`, swipeId: this.swipeIndex(payload.targetSwipeId),
-        source: "", gap: false, stopped: false, background, aliases: new Set(target ? [target] : []), requests: new Map() })
+        source: "", gap: false, stopped: false, background, initialMessageIds, initialSwipeText, initialTarget: target, aliases: new Set(target ? [target] : []), requests: new Map() })
       if (this.streams.size > 16) this.streams.delete(this.streams.keys().next().value!)
       return
     }
@@ -307,10 +334,23 @@ class TaggedImageController {
       return
     }
     if (name === "GENERATION_STOPPED") { stream.stopped = true; return }
-    if (name !== "GENERATION_ENDED" || this.terminalStreams.has(id)) return
+    if (name !== "GENERATION_ENDED") return
+    if (this.terminalStreams.has(id)) {
+      // A corrected terminal event is evidence, not a new generation. The
+      // backend decides which snapshot matches the persisted reply.
+      const correctedId = String(payload.messageId || "")
+      const correctedContent = typeof payload.content === "string" ? payload.content : ""
+      if (correctedId) { stream.target = correctedId; stream.terminalMessageId = correctedId; stream.aliases.add(correctedId) }
+      const correctedSwipe = this.swipeIndex(payload.swipeId ?? payload.targetSwipeId)
+      if (correctedSwipe !== undefined) stream.swipeId = correctedSwipe
+      if (correctedContent) { stream.terminalContent = correctedContent; this.submitStreamSettlement(stream, correctedContent) }
+      else if (correctedId && stream.terminalContent) this.submitStreamSettlement(stream, stream.terminalContent)
+      return
+    }
     const wasStopped = stream.stopped
     stream.stopped = true
-    stream.target = String(payload.messageId || stream.target || "")
+    stream.terminalMessageId = String(payload.messageId || "") || undefined
+    stream.target = stream.terminalMessageId || stream.target || ""
     if (stream.target) stream.aliases.add(stream.target)
     const terminalSwipe = this.swipeIndex(payload.swipeId ?? payload.targetSwipeId)
     if (terminalSwipe !== undefined) stream.swipeId = terminalSwipe
@@ -323,23 +363,27 @@ class TaggedImageController {
     // A terminal ID-only event can use the contiguous stream as proof for
     // reserved jobs. The backend still verifies the entire saved reply.
     const finalContent = suppliedContent || (!wasStopped && !stream.gap && !stream.seqGap ? stream.source : "")
+    stream.terminalContent = finalContent || undefined
     if (stream.target && finalContent) {
       // A missing token prefix is not a new owner. Recover only complete
       // terminal packets in this same generation and preserve reserved slots.
       if (!wasStopped && suppliedContent) for (const tag of inlineStreamTags(finalContent)) this.submitStreamTag(stream, tag)
-      if (stream.requests.size) this.submitStreamSettlement(stream, finalContent)
+      // A target from GENERATION_STARTED may still point at the previous
+      // turn. Do not advertise it as terminal authority without an end ID.
+      if (stream.terminalMessageId && stream.requests.size) this.submitStreamSettlement(stream, finalContent)
     }
   }
 
   private submitStreamSettlement(stream: InlineTagStream, content: string): void {
-    if (!stream.target || !content || stream.settlementContent || !inlineStreamTags(content).some(tag => {
+    const receipt = JSON.stringify([stream.target, stream.swipeId, content])
+    if (!stream.target || !content || stream.settlementContent === receipt || !inlineStreamTags(content).some(tag => {
       const reserved = stream.requests.get(inlineRequestSlot(tag))
       return reserved && inlinePacketIdentity(reserved) === inlinePacketIdentity(tag)
     })) return
     try {
       this.ctx.sendToBackend({ type: "settle_tagged_generation", requestId: createRequestId(), chatId: stream.chatId,
         messageId: stream.target, generationId: stream.id, swipeId: stream.swipeId, content })
-      stream.settlementContent = content
+      stream.settlementContent = receipt
     } catch { /* Backend terminal event remains available. */ }
   }
 
@@ -377,14 +421,47 @@ class TaggedImageController {
         return
       }
       if (active.length > 1) return // defer ambiguous delivery to the terminal event
+      const normalizeReply = (value: unknown) => typeof value === "string" ? value.replace(/\r\n/g, "\n").trim() : ""
+      const fullTextMatches = (stream: InlineTagStream) => typeof selected?.content === "string" && !!stream.terminalContent
+        && normalizeReply(selected.content) === normalizeReply(stream.terminalContent)
+      const uniqueNewOwner = (stream: InlineTagStream) => {
+        if (!stream.initialMessageIds || !fullTextMatches(stream)) return false
+        // Whole-reply equality is evidence only if exactly one newly visible
+        // assistant message/alternative matches. A known regeneration target
+        // also qualifies when its explicitly named swipe changed since start.
+        const recent = this.sourceSnapshot || []
+        const matches = recent.filter(item => item && (!item.chat_id || item.chat_id === chatId) && !item.is_user && (!item.role || item.role === "assistant")).flatMap(item => {
+          const id = String(item.id)
+          const active = this.swipeIndex(item.swipe_id) ?? 0
+          const swipes = Array.isArray(item.swipes) && item.swipes.length ? item.swipes : [item.content]
+          return swipes.flatMap((value: unknown, index: number) => {
+            const text = normalizeReply(index === active ? item.content : value)
+            if (text !== normalizeReply(stream.terminalContent)) return []
+            if (!stream.initialMessageIds!.has(id)) return [{ id, index }]
+            if (id !== stream.initialTarget || id !== stream.target || stream.swipeId !== index || !stream.initialSwipeText) return []
+            if (stream.initialSwipeText.get(String(index)) === text) return []
+            return [{ id, index }]
+          })
+        })
+        return matches.length === 1 && matches[0].id === messageId
+          && (incomingSwipe === undefined || incomingSwipe === matches[0].index)
+      }
       const terminals = [...this.terminalStreams.values()].filter(stream => compatible(stream)
-        && (explicitGeneration ? stream.id === explicitGeneration : stream.aliases.has(messageId) || stream.target === messageId)
+        && (explicitGeneration ? stream.id === explicitGeneration : stream.aliases.has(messageId) || stream.target === messageId
+          || (!stream.terminalMessageId && payload.isStreaming !== true && uniqueNewOwner(stream)))
         && stream.requests.has(slot)
         && (explicitGeneration || inlinePacketIdentity(stream.requests.get(slot)!) === inlinePacketIdentity(tag)))
       if (terminals.length === 1) {
         const terminal = terminals[0]
-        if (payload.isStreaming !== true && terminal.target === messageId && typeof selected?.content === "string") {
-          this.submitStreamSettlement(terminal, selected.content)
+        if (payload.isStreaming !== true && typeof selected?.content === "string" && fullTextMatches(terminal)
+            && (explicitSwipe === undefined || selectedSwipe === undefined || explicitSwipe === selectedSwipe)) {
+          if (!terminal.terminalMessageId && uniqueNewOwner(terminal)) {
+            terminal.target = messageId; terminal.terminalMessageId = messageId; terminal.aliases.add(messageId)
+          }
+          if (terminal.terminalMessageId === messageId) {
+            if (incomingSwipe !== undefined) terminal.swipeId = incomingSwipe
+            this.submitStreamSettlement(terminal, selected.content)
+          }
         }
         return
       }
@@ -424,6 +501,28 @@ class TaggedImageController {
             this.ctx.sendToBackend({ type: "settle_tagged_generation", requestId: createRequestId(), chatId, messageId,
               swipeId, content: selected.content })
           }
+        }
+      }
+    }
+    if (payload.isStreaming !== true && explicitGeneration && tag) {
+      // Even after controller remount, a host-supplied generation ID on a
+      // final callback can carry canonical settlement independently of GPU
+      // admission. Preserve background swipe ownership when the host exposes it.
+      const alternatives = Array.isArray(selected?.swipes) && selected.swipes.length
+        ? selected.swipes.map((value: unknown, index: number) => ({ swipeId: index, content: index === selectedSwipe ? selected.content : value }))
+        : [{ swipeId: selectedSwipe ?? explicitSwipe, content: selected?.content }]
+      const matches = alternatives.filter((item: {swipeId?: number; content: unknown}) => (explicitSwipe === undefined || explicitSwipe === item.swipeId)
+        && typeof item.content === "string" && inlineStreamTags(item.content).filter(t => inlinePacketIdentity(t) === inlinePacketIdentity(tag)).length === 1)
+      if (matches.length === 1) {
+        const source = matches[0]
+        const proofKey = `settle:${lookup}:${explicitGeneration}:${source.swipeId ?? ""}`
+        const proofFingerprint = widgetKeyHash(String(source.content))
+        if (this.tagFingerprints.get(proofKey) !== proofFingerprint) {
+          try {
+            this.ctx.sendToBackend({ type: "settle_tagged_generation", requestId: createRequestId(), chatId, messageId,
+              generationId: explicitGeneration, swipeId: source.swipeId, content: source.content })
+            this.tagFingerprints.set(proofKey, proofFingerprint)
+          } catch { /* Host terminal event remains authoritative. */ }
         }
       }
     }
@@ -491,6 +590,22 @@ class TaggedImageController {
         if (payload.type === "studio_error") replacement.reject(new Error(String(payload.error || "The chat image could not be replaced.")))
         else replacement.resolve()
       }
+    }
+    if (payload?.type === "tagged_request_deferred") {
+      const requestId = String(payload.requestId || "")
+      const id = this.jobRequests.get(requestId)
+      if (id) {
+        this.jobRequests.delete(requestId)
+        const pending = this.jobs.get(id)
+        if (pending && id.startsWith("pending-")) {
+          this.remove(pending); this.jobs.delete(id)
+          if (payload.data?.reason === "saved-source-not-proven") {
+            const receipt = pending.generationId ? `${pending.key}:generation:${pending.generationId}` : pending.key
+            this.tagFingerprints.delete(receipt)
+          }
+        }
+      }
+      return
     }
     if (payload?.type === "studio_error" && this.jobRequests.has(String(payload.requestId))) {
       const requestId = String(payload.requestId)

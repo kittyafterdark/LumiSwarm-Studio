@@ -27898,6 +27898,26 @@ class TaggedImageController {
                 return;
             }
             const background = /^(impersonate|quiet)/i.test(String(payload.generationType || "")) || payload.isUser === true || !!payload.backgroundSwipe && (!target || this.swipeIndex(payload.targetSwipeId) === undefined);
+            let initialMessageIds;
+            let initialSwipeText;
+            try {
+                const recent = this.ctx.messages?.getRecent?.(200);
+                if (Array.isArray(recent)) {
+                    initialMessageIds = new Set(recent.map((item)=>String(item.id || "")));
+                    const previous = recent.find((item)=>String(item.id) === target);
+                    if (previous) {
+                        initialSwipeText = new Map();
+                        const active = this.swipeIndex(previous.swipe_id) ?? 0;
+                        const swipes = Array.isArray(previous.swipes) && previous.swipes.length ? previous.swipes : [
+                            previous.content
+                        ];
+                        swipes.forEach((value, index)=>{
+                            const text = index === active ? previous.content : value;
+                            if (typeof text === "string") initialSwipeText.set(String(index), text.replace(/\r\n/g, "\n").trim());
+                        });
+                    }
+                }
+            } catch  {}
             this.streams.set(id, {
                 id,
                 chatId,
@@ -27908,6 +27928,9 @@ class TaggedImageController {
                 gap: false,
                 stopped: false,
                 background,
+                initialMessageIds,
+                initialSwipeText,
+                initialTarget: target,
                 aliases: new Set(target ? [
                     target
                 ] : []),
@@ -27940,10 +27963,27 @@ class TaggedImageController {
             stream.stopped = true;
             return;
         }
-        if (name !== "GENERATION_ENDED" || this.terminalStreams.has(id)) return;
+        if (name !== "GENERATION_ENDED") return;
+        if (this.terminalStreams.has(id)) {
+            const correctedId = String(payload.messageId || "");
+            const correctedContent = typeof payload.content === "string" ? payload.content : "";
+            if (correctedId) {
+                stream.target = correctedId;
+                stream.terminalMessageId = correctedId;
+                stream.aliases.add(correctedId);
+            }
+            const correctedSwipe = this.swipeIndex(payload.swipeId ?? payload.targetSwipeId);
+            if (correctedSwipe !== undefined) stream.swipeId = correctedSwipe;
+            if (correctedContent) {
+                stream.terminalContent = correctedContent;
+                this.submitStreamSettlement(stream, correctedContent);
+            } else if (correctedId && stream.terminalContent) this.submitStreamSettlement(stream, stream.terminalContent);
+            return;
+        }
         const wasStopped = stream.stopped;
         stream.stopped = true;
-        stream.target = String(payload.messageId || stream.target || "");
+        stream.terminalMessageId = String(payload.messageId || "") || undefined;
+        stream.target = stream.terminalMessageId || stream.target || "";
         if (stream.target) stream.aliases.add(stream.target);
         const terminalSwipe = this.swipeIndex(payload.swipeId ?? payload.targetSwipeId);
         if (terminalSwipe !== undefined) stream.swipeId = terminalSwipe;
@@ -27952,13 +27992,19 @@ class TaggedImageController {
         if (this.terminalStreams.size > 16) this.terminalStreams.delete(this.terminalStreams.keys().next().value);
         const suppliedContent = typeof payload.content === "string" ? payload.content : "";
         const finalContent = suppliedContent || (!wasStopped && !stream.gap && !stream.seqGap ? stream.source : "");
+        stream.terminalContent = finalContent || undefined;
         if (stream.target && finalContent) {
             if (!wasStopped && suppliedContent) for (const tag of inlineStreamTags(finalContent))this.submitStreamTag(stream, tag);
-            if (stream.requests.size) this.submitStreamSettlement(stream, finalContent);
+            if (stream.terminalMessageId && stream.requests.size) this.submitStreamSettlement(stream, finalContent);
         }
     }
     submitStreamSettlement(stream, content) {
-        if (!stream.target || !content || stream.settlementContent || !inlineStreamTags(content).some((tag)=>{
+        const receipt = JSON.stringify([
+            stream.target,
+            stream.swipeId,
+            content
+        ]);
+        if (!stream.target || !content || stream.settlementContent === receipt || !inlineStreamTags(content).some((tag)=>{
             const reserved = stream.requests.get(inlineRequestSlot(tag));
             return reserved && inlinePacketIdentity(reserved) === inlinePacketIdentity(tag);
         })) return;
@@ -27972,7 +28018,7 @@ class TaggedImageController {
                 swipeId: stream.swipeId,
                 content
             });
-            stream.settlementContent = content;
+            stream.settlementContent = receipt;
         } catch  {}
     }
     setBehavior(behavior) {
@@ -28005,13 +28051,53 @@ class TaggedImageController {
                 return;
             }
             if (active.length > 1) return;
+            const normalizeReply = (value)=>typeof value === "string" ? value.replace(/\r\n/g, "\n").trim() : "";
+            const fullTextMatches = (stream)=>typeof selected?.content === "string" && !!stream.terminalContent && normalizeReply(selected.content) === normalizeReply(stream.terminalContent);
+            const uniqueNewOwner = (stream)=>{
+                if (!stream.initialMessageIds || !fullTextMatches(stream)) return false;
+                const recent = this.sourceSnapshot || [];
+                const matches = recent.filter((item)=>item && (!item.chat_id || item.chat_id === chatId) && !item.is_user && (!item.role || item.role === "assistant")).flatMap((item)=>{
+                    const id = String(item.id);
+                    const active = this.swipeIndex(item.swipe_id) ?? 0;
+                    const swipes = Array.isArray(item.swipes) && item.swipes.length ? item.swipes : [
+                        item.content
+                    ];
+                    return swipes.flatMap((value, index)=>{
+                        const text = normalizeReply(index === active ? item.content : value);
+                        if (text !== normalizeReply(stream.terminalContent)) return [];
+                        if (!stream.initialMessageIds.has(id)) return [
+                            {
+                                id,
+                                index
+                            }
+                        ];
+                        if (id !== stream.initialTarget || id !== stream.target || stream.swipeId !== index || !stream.initialSwipeText) return [];
+                        if (stream.initialSwipeText.get(String(index)) === text) return [];
+                        return [
+                            {
+                                id,
+                                index
+                            }
+                        ];
+                    });
+                });
+                return matches.length === 1 && matches[0].id === messageId && (incomingSwipe === undefined || incomingSwipe === matches[0].index);
+            };
             const terminals = [
                 ...this.terminalStreams.values()
-            ].filter((stream)=>compatible(stream) && (explicitGeneration ? stream.id === explicitGeneration : stream.aliases.has(messageId) || stream.target === messageId) && stream.requests.has(slot) && (explicitGeneration || inlinePacketIdentity(stream.requests.get(slot)) === inlinePacketIdentity(tag)));
+            ].filter((stream)=>compatible(stream) && (explicitGeneration ? stream.id === explicitGeneration : stream.aliases.has(messageId) || stream.target === messageId || !stream.terminalMessageId && payload.isStreaming !== true && uniqueNewOwner(stream)) && stream.requests.has(slot) && (explicitGeneration || inlinePacketIdentity(stream.requests.get(slot)) === inlinePacketIdentity(tag)));
             if (terminals.length === 1) {
                 const terminal = terminals[0];
-                if (payload.isStreaming !== true && terminal.target === messageId && typeof selected?.content === "string") {
-                    this.submitStreamSettlement(terminal, selected.content);
+                if (payload.isStreaming !== true && typeof selected?.content === "string" && fullTextMatches(terminal) && (explicitSwipe === undefined || selectedSwipe === undefined || explicitSwipe === selectedSwipe)) {
+                    if (!terminal.terminalMessageId && uniqueNewOwner(terminal)) {
+                        terminal.target = messageId;
+                        terminal.terminalMessageId = messageId;
+                        terminal.aliases.add(messageId);
+                    }
+                    if (terminal.terminalMessageId === messageId) {
+                        if (incomingSwipe !== undefined) terminal.swipeId = incomingSwipe;
+                        this.submitStreamSettlement(terminal, selected.content);
+                    }
                 }
                 return;
             }
@@ -28052,6 +28138,37 @@ class TaggedImageController {
                             content: selected.content
                         });
                     }
+                }
+            }
+        }
+        if (payload.isStreaming !== true && explicitGeneration && tag) {
+            const alternatives = Array.isArray(selected?.swipes) && selected.swipes.length ? selected.swipes.map((value, index)=>({
+                    swipeId: index,
+                    content: index === selectedSwipe ? selected.content : value
+                })) : [
+                {
+                    swipeId: selectedSwipe ?? explicitSwipe,
+                    content: selected?.content
+                }
+            ];
+            const matches = alternatives.filter((item)=>(explicitSwipe === undefined || explicitSwipe === item.swipeId) && typeof item.content === "string" && inlineStreamTags(item.content).filter((t)=>inlinePacketIdentity(t) === inlinePacketIdentity(tag)).length === 1);
+            if (matches.length === 1) {
+                const source = matches[0];
+                const proofKey = `settle:${lookup}:${explicitGeneration}:${source.swipeId ?? ""}`;
+                const proofFingerprint = widgetKeyHash(String(source.content));
+                if (this.tagFingerprints.get(proofKey) !== proofFingerprint) {
+                    try {
+                        this.ctx.sendToBackend({
+                            type: "settle_tagged_generation",
+                            requestId: createRequestId(),
+                            chatId,
+                            messageId,
+                            generationId: explicitGeneration,
+                            swipeId: source.swipeId,
+                            content: source.content
+                        });
+                        this.tagFingerprints.set(proofKey, proofFingerprint);
+                    } catch  {}
                 }
             }
         }
@@ -28116,6 +28233,23 @@ class TaggedImageController {
                 if (payload.type === "studio_error") replacement.reject(new Error(String(payload.error || "The chat image could not be replaced.")));
                 else replacement.resolve();
             }
+        }
+        if (payload?.type === "tagged_request_deferred") {
+            const requestId = String(payload.requestId || "");
+            const id = this.jobRequests.get(requestId);
+            if (id) {
+                this.jobRequests.delete(requestId);
+                const pending = this.jobs.get(id);
+                if (pending && id.startsWith("pending-")) {
+                    this.remove(pending);
+                    this.jobs.delete(id);
+                    if (payload.data?.reason === "saved-source-not-proven") {
+                        const receipt = pending.generationId ? `${pending.key}:generation:${pending.generationId}` : pending.key;
+                        this.tagFingerprints.delete(receipt);
+                    }
+                }
+            }
+            return;
         }
         if (payload?.type === "studio_error" && this.jobRequests.has(String(payload.requestId))) {
             const requestId = String(payload.requestId);

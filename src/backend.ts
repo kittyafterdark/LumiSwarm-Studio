@@ -678,6 +678,7 @@ const FAVORITES_FOLDER_ID = "__swarm_studio_favorites__"
 const FAVORITES_FOLDER_NAME = "Favorites"
 const TAG_AUTOMATION_CONFIG_FILE = "tag-automation-config.json"
 const TAGGED_IMAGE_JOBS_FILE = "tagged-image-jobs.json"
+const TAGGED_REMOVED_RECEIPTS_FILE = "tagged-removed-receipts.json"
 const STUDIO_GENERATION_PROFILE_FILE = "studio-generation-profile.json"
 const UPSCALE_SETTINGS_FILE = "studio-upscale-settings.json"
 const CHARACTER_BASE_TAGS_FILE = "character-base-tags.json"
@@ -687,7 +688,6 @@ const STACK_PRESET_LIMIT = 40
 const PERSONA_VISUAL_PRESET_LIMIT = 80
 const GENERATION_RECORD_LIMIT = 100
 const OUTPUT_FOLDER_LIMIT = 80
-const TAGGED_IMAGE_JOB_LIMIT = 160
 // Assistant messages may remain transient for a surprisingly long time after
 // generation ends, especially when several image tags finish together.
 const TAGGED_FINALIZE_RETRY_DELAYS_MS = [
@@ -721,8 +721,33 @@ const removedTaggedJobs = new Set<string>()
 const settledTaggedSources = new Map<string, { messageId: string; swipeId?: number }>()
 // A terminal event can arrive before the provisional job is even persisted.
 // Keep bounded, user/chat/generation-scoped proof for delayed attachment.
-interface TaggedTerminalSource { messageId: string; content: string; swipeId?: number; verified?: boolean }
+interface TaggedTerminalSource { messageId: string; content: string; swipeId?: number; verified?: boolean; authoritative?: boolean }
 const taggedTerminalSources = new Map<string, TaggedTerminalSource>()
+// An unverified terminal packet is a candidate, not an ownership receipt.
+// Keep alternative snapshots until a canonical read proves one owner.
+const taggedTerminalCandidates = new Map<string, TaggedTerminalSource[]>()
+function rememberTaggedTerminal(key: string, candidate: TaggedTerminalSource): boolean {
+  const known = taggedTerminalSources.get(key)
+  if (known?.verified) return false
+  const candidates = taggedTerminalCandidates.get(key) || []
+  const duplicate = candidates.find(item => item.messageId === candidate.messageId && item.swipeId === candidate.swipeId
+      && sameTaggedTerminalText(item.content, candidate.content))
+  if (duplicate && (!candidate.authoritative || duplicate.authoritative)) return false
+  taggedTerminalCandidates.set(key, [...candidates.filter(item => item !== duplicate).slice(-7), candidate])
+  taggedTerminalSources.set(key, candidate)
+  if (taggedTerminalSources.size > 160) {
+    const oldest = taggedTerminalSources.keys().next().value!
+    taggedTerminalSources.delete(oldest); taggedTerminalCandidates.delete(oldest)
+  }
+  return true
+}
+function traceTaggedLifecycle(action: string, detail: { chatId: string; messageId?: string; generationId?: string; slot?: string; swipeId?: number; id?: string; clientJobId?: string; imageId?: string }, reason?: string): void {
+  // Never log the authored text, prompt, or image data. IDs are sufficient
+  // to correlate a reservation with the provider attempt and saved owner.
+  const { chatId, messageId, generationId, slot, swipeId, id, clientJobId, imageId } = detail
+  try { spindle.log.info(`[Swarm Studio inline] ${JSON.stringify({ action, reason, chatId, messageId, generationId, slot, swipeId, jobId: id, attemptId: clientJobId, imageId })}`) }
+  catch { /* Diagnostics must not change admission or attachment. */ }
+}
 const taggedTerminalSettlements = new Map<string, Promise<void>>()
 function taggedTerminalKey(userId: string | undefined, chatId: string, generationId: string): string {
   return JSON.stringify([userId || "scoped", chatId, generationId])
@@ -743,7 +768,6 @@ function waitTaggedAttachment(jobId: string, delay: number): Promise<void> {
     taggedAttachmentWakeups.set(jobId, finish)
   })
 }
-const taggedFinalizeMessageTargets = new Map<string, string>()
 const swarmProtocolContexts = new Map<string, SwarmProtocolContext>()
 
 const SWARM_IMAGE_OUTPUT_PROTOCOL = `OUTPUT CONTRACT
@@ -3651,8 +3675,10 @@ function cleanTaggedImageJob(value: unknown): TaggedImageJob | null {
 
 async function loadTaggedImageJobs(userId?: string): Promise<TaggedImageJob[]> {
   const value = await spindle.userStorage.getJson(TAGGED_IMAGE_JOBS_FILE, { fallback: [], userId })
-  if (!Array.isArray(value)) return []
-  return value.slice(0, TAGGED_IMAGE_JOB_LIMIT).flatMap((item): TaggedImageJob[] => {
+  if (!Array.isArray(value)) throw new Error("Inline reservation store is unreadable.")
+  // The persisted rows are also admission receipts. A gallery/history cap
+  // must never discard a reservation or a completed job's identity.
+  return value.flatMap((item): TaggedImageJob[] => {
     const job = cleanTaggedImageJob(item)
     return job ? [job] : []
   })
@@ -3661,9 +3687,25 @@ async function loadTaggedImageJobs(userId?: string): Promise<TaggedImageJob[]> {
 async function persistTaggedImageJobs(jobs: TaggedImageJob[], userId?: string): Promise<void> {
   await spindle.userStorage.setJson(
     TAGGED_IMAGE_JOBS_FILE,
-    jobs.slice(0, TAGGED_IMAGE_JOB_LIMIT),
+    jobs,
     { indent: 2, userId },
   )
+}
+
+interface TaggedRemovedReceipt { chatId: string; messageId: string; generationId?: string; slot: string; packetFingerprint: string; swipeId?: number }
+async function loadTaggedRemovedReceipts(userId?: string): Promise<TaggedRemovedReceipt[]> {
+  const value = await spindle.userStorage.getJson(TAGGED_REMOVED_RECEIPTS_FILE, { fallback: [], userId })
+  if (!Array.isArray(value)) throw new Error("Inline removal receipts are unreadable.")
+  return value.filter(item => item && typeof item.chatId === "string" && typeof item.slot === "string" && typeof item.packetFingerprint === "string")
+}
+async function rememberTaggedRemoval(job: TaggedImageJob, userId?: string): Promise<void> {
+  const receipt: TaggedRemovedReceipt = { chatId: job.chatId, messageId: job.messageId, generationId: job.generationId,
+    slot: job.slot, packetFingerprint: stableTextHash(taggedPacketIdentity(job.fullMatch)), swipeId: job.swipeId }
+  await withTaggedMessageFinalizeLock(`tagged-removed-store:${userId || "default"}`, async () => {
+    const rows = await loadTaggedRemovedReceipts(userId)
+    if (rows.some(item => JSON.stringify(item) === JSON.stringify(receipt))) return
+    await spindle.userStorage.setJson(TAGGED_REMOVED_RECEIPTS_FILE, [...rows, receipt], { userId })
+  })
 }
 
 async function persistTaggedSourceSettlement(jobId: string, userId?: string): Promise<TaggedImageJob | undefined> {
@@ -3680,6 +3722,20 @@ async function persistTaggedSourceSettlement(jobId: string, userId?: string): Pr
   })
 }
 
+async function adoptTaggedGeneration(jobId: string, generationId: string, userId?: string): Promise<TaggedImageJob | undefined> {
+  return withTaggedMessageFinalizeLock(`tagged-job-store:${userId || "default"}`, async () => {
+    const rows = await loadTaggedImageJobs(userId)
+    const job = rows.find(item => item.id === jobId)
+    if (!job || removedTaggedJobs.has(jobId) || !job.awaitingSource || (job.generationId && job.generationId !== generationId)) return job
+    if (!job.generationId) {
+      job.generationId = generationId; job.updatedAt = Date.now()
+      await persistTaggedImageJobs(rows, userId)
+      traceTaggedLifecycle("generation-adopted", job)
+    }
+    return job
+  })
+}
+
 async function upsertTaggedImageJob(job: TaggedImageJob, userId?: string): Promise<TaggedImageJob> {
   // Several independent CG jobs may persist at the same time. Serialize the
   // storage read/merge/write, not the provider rendering operations.
@@ -3688,7 +3744,15 @@ async function upsertTaggedImageJob(job: TaggedImageJob, userId?: string): Promi
     if (settled) { job.awaitingSource = false; job.messageId = settled.messageId; job.swipeId = settled.swipeId }
     if (removedTaggedJobs.has(job.id)) return job
     job.updatedAt = Date.now()
-    const jobs = (await loadTaggedImageJobs(userId)).filter((candidate) => candidate.id !== job.id)
+    const rows = await loadTaggedImageJobs(userId)
+    const current = rows.find(candidate => candidate.id === job.id)
+    // A running legacy worker can hold an older object while a later scoped
+    // callback adopts its reservation. Merge identity, not stale render state.
+    if (current?.generationId) job.generationId = current.generationId
+    if (current && !current.awaitingSource && job.awaitingSource) {
+      job.awaitingSource = false; job.messageId = current.messageId; job.swipeId = current.swipeId
+    }
+    const jobs = rows.filter(candidate => candidate.id !== job.id)
     jobs.unshift(job)
     await persistTaggedImageJobs(jobs, userId)
     return job
@@ -5501,7 +5565,12 @@ function replaceAttachedTaggedImage(content: string, job: TaggedImageJob, markup
 function taggedMessageSources(message: any, swipeId?: number): any[] {
   const swipes = Array.isArray(message?.swipes) ? message.swipes : []
   const active = cleanTaggedSwipeId(message?.swipe_id)
-  if (!swipes.length) return swipeId === undefined ? [message] : []
+  if (!message) return []
+  if (!swipes.length) {
+    if (swipeId !== undefined && swipeId !== (active ?? 0)) return []
+    const index = swipeId ?? active
+    return [index === undefined ? message : { ...message, studioSwipeId: index }]
+  }
   const indices = swipeId !== undefined ? [swipeId]
     : [...new Set([active, ...swipes.map((_item: unknown, index: number) => index)])]
   return indices.flatMap((index) => {
@@ -5513,7 +5582,7 @@ function taggedMessageSources(message: any, swipeId?: number): any[] {
 
 function taggedMessagePatch(target: any, content: string): JsonObject {
   const index = cleanTaggedSwipeId(target?.studioSwipeId)
-  if (index === undefined || !Array.isArray(target?.swipes)) return { content }
+  if (index === undefined || !Array.isArray(target?.swipes) || !target.swipes.length) return { content }
   const swipes = [...target.swipes]
   swipes[index] = content
   // The host projects content from its current selection. Do not write content
@@ -5539,8 +5608,8 @@ function findTaggedMessageTarget(messages: any[], job: TaggedImageJob): any | nu
   const direct = messages.find((message: any) => asString(message?.id) === job.messageId)
   // A generation-scoped job has a proven final owner. Deleting that reply
   // must not redirect the result to a different message with the same tag.
-  if (!direct && job.generationId) return null
-  const sources = (direct ? [direct] : messages).flatMap((message: any) => taggedMessageSources(message, job.swipeId))
+  if (!direct) return null
+  const sources = taggedMessageSources(direct, job.swipeId)
   const matches = sources.filter((message: any) => taggedMessageMatchScore(message, job) > 0)
   // Remapping a transient streaming ID must prove one destination. A copied
   // prompt elsewhere in the chat must not steal a completed image.
@@ -5632,6 +5701,7 @@ async function removeTaggedImageFromChat(
         swarm_studio_tagged_images: taggedImages,
       },
     })
+    await rememberTaggedRemoval(job, userId)
     removedTaggedJobs.add(job.id)
     settledTaggedSources.delete(job.id)
     job.status = "cancelled"
@@ -5640,7 +5710,6 @@ async function removeTaggedImageFromChat(
     })
     taggedFinalizeRetries.delete(job.id)
     wakeTaggedAttachment(job.id)
-    taggedFinalizeMessageTargets.delete(job.id)
     return { messageId, content: nextContent }
   })
 }
@@ -5680,7 +5749,7 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string, expe
       return true
     }
     if (expectedImageId && (targetMessageId !== initialMessageId ||
-        cleanTaggedSwipeId(target.studioSwipeId) !== cleanTaggedSwipeId(target.swipe_id) ||
+        (cleanTaggedSwipeId(target.studioSwipeId) ?? 0) !== (cleanTaggedSwipeId(target.swipe_id) ?? 0) ||
         asString(attachment.imageId) !== expectedImageId ||
         (job.output === "url" && content.includes(job.imageUrl)))) return false
     job.swipeId = cleanTaggedSwipeId(target.studioSwipeId)
@@ -5720,35 +5789,73 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string, expe
     await upsertTaggedImageJob(job, userId)
     sendTaggedJobState(job, userId)
     sendTaggedMessageReconciliation(job, replacement.content, content, userId)
+    traceTaggedLifecycle("attached", job)
     return true
   })
 }
 
 async function resolveTaggedTerminalSource(job: TaggedImageJob, userId?: string, sourceMessages?: any[]): Promise<void> {
   if (!job.awaitingSource || !job.generationId) return
-  const terminal = taggedTerminalSources.get(taggedTerminalKey(userId, job.chatId, job.generationId))
-  if (!terminal || !hasTaggedPacket(terminal.content, job.fullMatch)) return
-  if (terminal.swipeId !== undefined && job.swipeId !== undefined && terminal.swipeId !== job.swipeId) return
+  const alreadySettled = settledTaggedSources.get(job.id)
+  if (alreadySettled) {
+    job.awaitingSource = false; job.messageId = alreadySettled.messageId; job.swipeId = alreadySettled.swipeId
+    return
+  }
+  const key = taggedTerminalKey(userId, job.chatId, job.generationId)
+  const current = taggedTerminalSources.get(key)
   const messages = sourceMessages ?? await spindle.chat.getMessages(job.chatId)
-  const target = messages.find((item: any) => asString(item.id) === terminal.messageId)
-  if (!target || (target.role && target.role !== "assistant") || target.is_user === true) return
-  // The first exact canonical read proves the final swipe. After that, other
-  // CGs may have replaced their own tags in the same reply; keep the proved
-  // owner and still require this job's exact source before attachment.
-  const expectedSwipe = terminal.swipeId ?? job.swipeId
-  const activeSwipe = cleanTaggedSwipeId(target.swipe_id)
-  // Some hosts expose only the initial message content until an alternative
-  // is created. A matching active/initial swipe is still provable, but an
-  // unknown background alternative is not.
-  const singleSource = !target.swipes?.length && (expectedSwipe === undefined || expectedSwipe === (activeSwipe ?? 0))
-  const sources = singleSource ? [target] : taggedMessageSources(target, expectedSwipe)
-  const matches = sources.filter(item => terminal.verified
-    ? hasTaggedPacket(asString(item.content), job.fullMatch) : sameTaggedTerminalText(asString(item.content), terminal.content))
-  if (matches.length !== 1) return
-  const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
+  if (!current?.verified) {
+    // A sibling slot may have already proved the generation before a backend
+    // restart. The persisted owner is authoritative, not the cache lifetime.
+    const bound = (await loadTaggedImageJobs(userId)).filter(item => item.chatId === job.chatId && item.generationId === job.generationId && !item.awaitingSource)
+    const owners = new Map(bound.map(item => [JSON.stringify([item.messageId, item.swipeId]), item]))
+    if (owners.size > 1) return
+    if (owners.size === 1) {
+      const owner = owners.values().next().value!
+      const target = messages.find((item: any) => asString(item.id) === owner.messageId)
+      const matches = taggedMessageSources(target, owner.swipeId).filter(item => (!item.role || item.role === "assistant") && item.is_user !== true && hasTaggedPacket(asString(item.content), job.fullMatch))
+      if (matches.length === 1) {
+        const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
+        settledTaggedSources.set(job.id, { messageId: owner.messageId, swipeId })
+        job.awaitingSource = false; job.messageId = owner.messageId; job.swipeId = swipeId
+        traceTaggedLifecycle("owner-verified", job, "durable-sibling")
+        wakeTaggedAttachment(job.id)
+      }
+      return
+    }
+  }
+  // Re-read after the asynchronous host read. A correction or another slot
+  // may have proved ownership while the read was in flight.
+  const latest = taggedTerminalSources.get(key)
+  if (!latest) return
+  const candidates = latest.verified ? [latest] : taggedTerminalCandidates.get(key) || [latest]
+  const proofs = new Map<string, { terminal: TaggedTerminalSource; swipeId?: number }>()
+  for (const terminal of candidates) {
+    if (terminal.content && !hasTaggedPacket(terminal.content, job.fullMatch)) continue
+    const target = messages.find((item: any) => asString(item.id) === terminal.messageId)
+    if (!target || (target.role && target.role !== "assistant") || target.is_user === true) continue
+    // The provisional swipe is a hint, not authority. A terminal event can
+    // correct it; without a terminal swipe, require a unique whole reply.
+    const sources = taggedMessageSources(target, terminal.swipeId)
+    const matches = sources.filter(item => terminal.verified || !terminal.content
+      ? hasTaggedPacket(asString(item.content), job.fullMatch) : sameTaggedTerminalText(asString(item.content), terminal.content))
+    if (matches.length !== 1) continue
+    const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
+    const ownerKey = JSON.stringify([terminal.messageId, swipeId])
+    if (!proofs.get(ownerKey)?.terminal.authoritative || terminal.authoritative) proofs.set(ownerKey, { terminal, swipeId })
+  }
+  // A persisted exact match from the native backend end event outranks a
+  // conflicting unverified renderer hint. Two competing native proofs still
+  // fail closed; a previously verified owner cannot be moved by either path.
+  const nativeProofs = [...proofs.values()].filter(proof => proof.terminal.authoritative)
+  const eligible = nativeProofs.length ? nativeProofs : [...proofs.values()]
+  if (eligible.length !== 1) return
+  const { terminal, swipeId } = eligible[0]
   terminal.verified = true; terminal.swipeId = swipeId
+  taggedTerminalSources.set(key, terminal); taggedTerminalCandidates.delete(key)
   settledTaggedSources.set(job.id, { messageId: terminal.messageId, swipeId })
   job.awaitingSource = false; job.messageId = terminal.messageId; job.swipeId = swipeId
+  traceTaggedLifecycle("owner-verified", job)
   wakeTaggedAttachment(job.id)
 }
 
@@ -5766,16 +5873,13 @@ async function finalizeTaggedImageJobWithRetry(job: TaggedImageJob, userId?: str
       }
       if (removedTaggedJobs.has(job.id) || job.status !== "ready" || !job.imageUrl) return false
       try {
+        const latest = (await loadTaggedImageJobs(userId)).find(item => item.id === job.id)
+        if (!latest || latest.clientJobId !== job.clientJobId || latest.imageId !== job.imageId || latest.status !== "ready") return false
+        if (latest.inserted) { Object.assign(job, latest); return true }
+        if (latest.generationId) job.generationId = latest.generationId
+        if (!latest.awaitingSource) { job.awaitingSource = false; job.messageId = latest.messageId; job.swipeId = latest.swipeId }
         await resolveTaggedTerminalSource(job, userId)
-        const targetMessageId = taggedFinalizeMessageTargets.get(job.id)
-        if (targetMessageId && targetMessageId !== job.messageId) {
-          job.messageId = targetMessageId
-          job.key = `${job.chatId}:${job.messageId}:${job.slot}`
-        }
-        if (await finalizeTaggedImageJob(job, userId)) {
-          taggedFinalizeMessageTargets.delete(job.id)
-          return true
-        }
+        if (await finalizeTaggedImageJob(job, userId)) return true
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error)
       }
@@ -5983,6 +6087,7 @@ async function runTaggedImageJob(
     // can retire its progress UI even if result delivery is delayed or arrives
     // out of order with an earlier progress/list message.
     sendTaggedJobState(job, userId)
+    traceTaggedLifecycle("bitmap-saved", job)
     // Draft attachment must not wait on optional library queries.
     const draftResult = { ...result, imageId: job.imageId, imageUrl: job.imageUrl }
     const draftJob = taggedJobPublic(job)
@@ -6077,11 +6182,11 @@ async function runTaggedImageJob(
 }
 
 interface TaggedImageReservation {
-  job: TaggedImageJob
+  job?: TaggedImageJob
   work?: () => Promise<void>
 }
 
-async function requestTaggedImageGeneration(payload: any, userId?: string): Promise<TaggedImageJob> {
+async function requestTaggedImageGeneration(payload: any, userId?: string): Promise<TaggedImageJob | undefined> {
   const reservation = await withTaggedMessageFinalizeLock(taggedAdmissionKey(userId, asString(payload?.chatId).trim()),
     () => requestTaggedImageGenerationUnlocked(payload, userId))
   await reservation.work?.()
@@ -6109,9 +6214,15 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
   const useOriginalProfile = asString(payload?.retryMode) === "original"
   const config = await loadTagAutomationConfig(userId)
   const jobs = (await loadTaggedImageJobs(userId)).filter(job => job.chatId === chatId && job.slot === slot && !removedTaggedJobs.has(job.id))
+  const suppliedGeneration = generationId
   const messages = !streaming ? await spindle.chat.getMessages(chatId) : []
-  const message = messages.find((item: any) => asString(item.id) === messageId)
-  const matches = taggedMessageSources(message, swipeId).filter(item => hasTaggedPacket(asString(item?.content), fullMatch))
+  let message = messages.find((item: any) => asString(item.id) === messageId)
+  let matches = taggedMessageSources(message, swipeId).filter(item => (!item.role || item.role === "assistant") && item.is_user !== true && hasTaggedPacket(asString(item?.content), fullMatch))
+  const defer = (reason: string, existing?: TaggedImageJob): TaggedImageReservation => {
+    traceTaggedLifecycle("deferred", { chatId, messageId, generationId, slot, swipeId, id: existing?.id }, reason)
+    spindle.sendToFrontend({ type: "tagged_request_deferred", requestId: payload?.requestId, data: { jobId: existing?.id, reason } }, userId)
+    return { job: existing }
+  }
   if (swipeId === undefined && matches.length === 1) swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
   const samePacket = (job: TaggedImageJob) => taggedPacketIdentity(job.fullMatch) === packet
   const compatibleSwipe = (job: TaggedImageJob) => job.swipeId === swipeId || job.swipeId === undefined || swipeId === undefined
@@ -6120,7 +6231,7 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
   if (!generationId) {
     const terminalMatches = [...taggedTerminalSources.entries()].filter(([key, terminal]) => {
       const [owner, chat] = JSON.parse(key)
-      return owner === (userId || "scoped") && chat === chatId
+      return owner === (userId || "scoped") && chat === chatId && terminal.verified === true
       && terminal.messageId === messageId && (swipeId === undefined || terminal.swipeId === undefined || terminal.swipeId === swipeId)
       && hasTaggedPacket(terminal.content, fullMatch)
     })
@@ -6134,33 +6245,60 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
   // Prefer a proven swipe; an unknown swipe cannot pick between alternatives.
   const exactOwner = ownerMatches.filter(job => job.swipeId === swipeId)
   let job = sameGeneration || (exactOwner.length === 1 ? exactOwner[0] : ownerMatches.length === 1 ? ownerMatches[0] : undefined)
-  if (!job && ownerMatches.length > 1) throw new Error("This image request has ambiguous swipe ownership. Wait for the saved reply.")
-  // A final unscoped interceptor may arrive before GENERATION_ENDED. It
-  // cannot establish generation ownership; wait for the terminal proof
-  // instead of spending another render on a matching provisional packet.
-  if (!job && !generationId && !streaming) {
-    const pending = jobs.filter(candidate => candidate.generationId && candidate.awaitingSource && samePacket(candidate)
-      && compatibleSwipe(candidate) && !messages.some((item: any) => asString(item.id) === candidate.messageId))
-    if (pending.length > 1) throw new Error("This image request has ambiguous generation ownership.")
-    if (pending.length === 1) { sendTaggedJobState(pending[0], userId); return { job: pending[0] } }
+  if (!job && ownerMatches.length > 1) return defer("ambiguous-swipe")
+  // A generation-less callback is not a new reservation when an existing
+  // same-packet job still lacks canonical ownership. This applies equally
+  // to streaming replays, conflicting swipe hints, and changed message IDs.
+  // A new explicit generation is independent of other explicit generations.
+  if (!job) {
+    const pending = jobs.filter(candidate => candidate.awaitingSource && samePacket(candidate)
+      && (!generationId || !candidate.generationId || candidate.generationId === generationId))
+    if (pending.length) {
+      // Old interceptor-only workers may be bound by a unique persisted final
+      // callback, but never if the old owner exists or the swipe disagrees.
+      const legacy = pending.length === 1 && !pending[0].generationId && !streaming && matches.length === 1
+        && compatibleSwipe(pending[0]) && !messages.some((item: any) => asString(item.id) === pending[0].messageId)
+      if (legacy) job = pending[0]
+      else return defer("unresolved-reservation", pending.length === 1 ? pending[0] : undefined)
+    }
+    // A replay without a generation or persisted source cannot distinguish a
+    // completed packet from a fresh turn. Only a genuinely new legacy packet
+    // with no competing receipt may start early on old hosts.
+    if (!job && !generationId && streaming && jobs.some(samePacket)) return defer("unscoped-stream-replay")
   }
-  if (!job && !streaming && matches.length === 1) {
-    const provisional = jobs.filter(candidate => !candidate.generationId && candidate.awaitingSource && samePacket(candidate)
-      && compatibleSwipe(candidate) && !messages.some((item: any) => asString(item.id) === candidate.messageId))
-    if (provisional.length > 1) throw new Error("This image request has ambiguous provisional ownership.")
-    if (provisional.length === 1) job = provisional[0]
+  if (!job) {
+    const removed = (await loadTaggedRemovedReceipts(userId)).some(receipt => receipt.chatId === chatId && receipt.slot === slot
+      && (generationId ? receipt.generationId === generationId
+        : streaming && receipt.packetFingerprint === stableTextHash(packet)))
+    if (removed) return defer("removed-reservation")
+  }
+  if (!job && !streaming) {
+    // Native save can briefly lag the final callback. Bounded rereads of this
+    // exact owner are safe; scanning unrelated messages for a tag is not.
+    for (const delay of [100, 250, 500]) {
+      if (matches.length) break
+      await new Promise<void>(resolve => setTimeout(resolve, delay))
+      const next = await spindle.chat.getMessages(chatId)
+      message = next.find((item: any) => asString(item.id) === messageId)
+      matches = taggedMessageSources(message, swipeId).filter(item => (!item.role || item.role === "assistant") && item.is_user !== true && hasTaggedPacket(asString(item?.content), fullMatch))
+    }
+    if (matches.length !== 1) return defer("saved-source-not-proven")
+    swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
+  }
+  // Explicit generation-aware final callbacks can supply canonical proof;
+  // inferred/legacy callbacks cannot correct a provisional generation owner.
+  if (!streaming && suppliedGeneration && matches.length === 1 && generationId) {
+    rememberTaggedTerminal(taggedTerminalKey(userId, chatId, generationId), { messageId, content: asString(matches[0].content), swipeId: cleanTaggedSwipeId(matches[0].studioSwipeId) })
   }
   if (job) {
     // The slot is reserved for this generation. Conflicting text, attributes,
     // or swipe data are not permission to start another GPU request or rebind it.
-    if (!samePacket(job) || !compatibleSwipe(job)) { sendTaggedJobState(job, userId); return { job } }
+    if (!samePacket(job) || (!compatibleSwipe(job) && (!job.awaitingSource || !suppliedGeneration || streaming))) return defer("conflicting-reservation", job)
     if (generationId && !job.generationId && job.awaitingSource) {
-      // Preserve the legacy worker's attachment authority; do not overwrite
-      // a running record with a stale snapshot to adopt a new identity.
-      if (!runningTaggedJobs.has(job.id) && !pendingTaggedJobs.has(job.id) && !taggedFinalizeRetries.has(job.id)) {
-        job.generationId = generationId
-        await upsertTaggedImageJob(job, userId)
-      }
+      // Same owner, slot, packet and compatible swipe establish a safe alias.
+      // Adopt only identity in the current persisted record; the GPU worker
+      // may already be running and will merge the alias at its next write.
+      job = await adoptTaggedGeneration(job.id, generationId, userId) || job
     }
     if (!streaming && !job.inserted && job.awaitingSource) {
       if (job.generationId) await resolveTaggedTerminalSource(job, userId, messages)
@@ -6178,11 +6316,12 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
     // Force on a tag is only approval of a requested job. Regeneration has
     // its own explicit job-ID RPC; replays must never restart ready/failed jobs.
     if (busy || !force || job.status !== "requested") {
-      if (!busy && job.status === "ready" && !job.inserted && job.imageUrl && !job.error) {
+      if (!busy && job.status === "ready" && !job.inserted && job.imageUrl && !job.awaitingSource) {
         const saved = job
         return { job: saved, work: async () => { await finalizeTaggedImageJobWithRetry(saved, userId) } }
       }
       sendTaggedJobState(job, userId)
+      traceTaggedLifecycle("reused", job)
       return { job }
     }
     job.status = "queued"; job.error = ""
@@ -6202,13 +6341,14 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
     try { await resolveTaggedTerminalSource(reserved, userId) } catch { /* Native save may still be pending. */ }
     await upsertTaggedImageJob(reserved, userId)
     sendTaggedJobState(reserved, userId)
+    traceTaggedLifecycle("reserved", reserved, streaming ? "stream" : "saved-source")
   } catch (error) { pendingTaggedJobs.delete(reserved.id); throw error }
   return { job: reserved, work: async () => {
     try {
       if (reserved.status === "queued") await runTaggedImageJob(reserved, useOriginalProfile, userId)
       else if (reserved.awaitingSource && reserved.generationId) {
         const terminal = taggedTerminalSources.get(taggedTerminalKey(userId, reserved.chatId, reserved.generationId))
-        if (terminal) void settleTaggedImageSources({ chatId: reserved.chatId, generationId: reserved.generationId, ...terminal }, userId).catch(error => reportBackendError("Settling requested image", error))
+        if (terminal) void settleTaggedImageSources({ chatId: reserved.chatId, generationId: reserved.generationId, ...terminal }, userId, terminal.authoritative === true).catch(error => reportBackendError("Settling requested image", error))
       }
     } finally { pendingTaggedJobs.delete(reserved.id) }
   } }
@@ -6836,7 +6976,7 @@ async function retryTaggedImageGeneration(
   const receipt = requestId.slice(0, 200)
   const initial = (await loadTaggedImageJobs(userId)).find(candidate => candidate.id === jobId)
   if (!initial) throw new Error("That inline illustration job is no longer available.")
-  const reservation = await withTaggedMessageFinalizeLock(taggedAdmissionKey(userId, initial.chatId), async (): Promise<TaggedImageReservation> => {
+  const reservation = await withTaggedMessageFinalizeLock(taggedAdmissionKey(userId, initial.chatId), async (): Promise<TaggedImageReservation & { job: TaggedImageJob }> => {
     const job = (await loadTaggedImageJobs(userId)).find(candidate => candidate.id === jobId)
     if (!job || removedTaggedJobs.has(jobId)) throw new Error("That inline illustration job is no longer available.")
     if (receipt && job.retryRequestIds?.includes(receipt)) { sendTaggedJobState(job, userId); return { job } }
@@ -8096,11 +8236,20 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           if ((job.status === "queued" || job.status === "generating")
             && ((!runningTaggedJobs.has(job.id) && !pendingTaggedJobs.has(job.id))
               || stoppedGenerationKeys.has(generationKey(userId, job.clientJobId)))) {
-            const stopped = stoppedGenerationKeys.has(generationKey(userId, job.clientJobId))
-            job.status = stopped ? "cancelled" : "failed"
-            job.error = stopped ? "Generation wait stopped. SwarmUI cancellation is not confirmed."
-              : "The generation worker is no longer running. Retry to generate this illustration again."
-            await upsertTaggedImageJob(job, userId)
+            await withTaggedMessageFinalizeLock(`tagged-job-store:${userId || "default"}`, async () => {
+              const rows = await loadTaggedImageJobs(userId)
+              const current = rows.find(item => item.id === job.id)
+              if (!current || current.clientJobId !== job.clientJobId || current.status !== job.status
+                  || current.updatedAt !== job.updatedAt || removedTaggedJobs.has(job.id)) return
+              const stopped = stoppedGenerationKeys.has(generationKey(userId, current.clientJobId))
+              if (!stopped && (runningTaggedJobs.has(job.id) || pendingTaggedJobs.has(job.id))) return
+              current.status = stopped ? "cancelled" : "failed"
+              current.error = stopped ? "Generation wait stopped. SwarmUI cancellation is not confirmed."
+                : "The generation worker is no longer running. Retry to generate this illustration again."
+              current.updatedAt = Date.now()
+              await persistTaggedImageJobs(rows, userId)
+              Object.assign(job, current)
+            })
           }
         }
         // Read-only legacy recovery: existing failed retry records can regain
@@ -8124,12 +8273,20 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           data: jobs.map(taggedJobPublic),
         }, userId)
         for (const job of jobs) {
-          if (job.status === "ready" && !job.inserted && job.imageUrl && !job.error
-            && !runningTaggedJobs.has(job.id)) {
-            void finalizeTaggedImageJobWithRetry(job, userId).catch((error) => {
-              reportBackendError("Resuming image attachment", error, { jobId: job.id })
-            })
-          }
+          if (job.status !== "ready" || job.inserted || !job.imageUrl || runningTaggedJobs.has(job.id)
+              || pendingTaggedJobs.has(job.id) || taggedFinalizeRetries.has(job.id)) continue
+          void (async () => {
+            let source = attachmentSources.get(job.chatId)
+            if (!source) { source = Promise.resolve().then(() => spindle.chat.getMessages(job.chatId)).catch(() => []); attachmentSources.set(job.chatId, source) }
+            const messages = await source
+            if (runningTaggedJobs.has(job.id) || pendingTaggedJobs.has(job.id) || taggedFinalizeRetries.has(job.id)) return
+            if (job.awaitingSource) {
+              await resolveTaggedTerminalSource(job, userId, messages)
+              if (job.awaitingSource) return
+              await persistTaggedSourceSettlement(job.id, userId)
+            }
+            if (findTaggedMessageTarget(messages, job)) await finalizeTaggedImageJobWithRetry(job, userId)
+          })().catch(error => reportBackendError("Resuming image attachment", error, { jobId: job.id }))
         }
         return
       }
@@ -8732,33 +8889,22 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
         if (job.status !== "ready" || !job.imageUrl) {
           throw new Error("The image must finish generating before it can be attached.")
         }
-        const finalMessageId = asString(payload?.messageId).trim()
-        if (job.generationId) {
-          await resolveTaggedTerminalSource(job, userId)
-          if (job.awaitingSource || (finalMessageId && finalMessageId !== job.messageId)
-            || (cleanTaggedSwipeId(payload?.swipeId) !== undefined && cleanTaggedSwipeId(payload?.swipeId) !== job.swipeId)) {
-            throw new Error("This streamed illustration is still waiting for its verified final message and swipe.")
-          }
-        }
-        if (finalMessageId && finalMessageId !== job.messageId) {
+        const finalMessageId = asString(payload?.messageId).trim() || job.messageId
+        const requestedSwipe = cleanTaggedSwipeId(payload?.swipeId)
+        if (job.generationId) await resolveTaggedTerminalSource(job, userId)
+        if (job.awaitingSource && !job.generationId) {
           const messages = await spindle.chat.getMessages(job.chatId)
-          const original = messages.find((message: any) => asString(message.id) === job.messageId)
-          if (original && findTaggedMessageTarget([original], job)) {
-            throw new Error("That illustration still belongs to its original chat message.")
+          const target = messages.find((message: any) => asString(message.id) === finalMessageId)
+          const matches = taggedMessageSources(target, requestedSwipe ?? job.swipeId).filter(item => taggedMessageMatchScore(item, job) > 0)
+          if (matches.length === 1 && (finalMessageId === job.messageId || !messages.some((message: any) => asString(message.id) === job.messageId))) {
+            settledTaggedSources.set(job.id, { messageId: finalMessageId, swipeId: cleanTaggedSwipeId(matches[0].studioSwipeId) })
+            job.awaitingSource = false; job.messageId = finalMessageId; job.swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
           }
         }
-        if (finalMessageId) {
-          const swipeId = cleanTaggedSwipeId(payload?.swipeId) ?? job.swipeId
-          settledTaggedSources.set(job.id, { messageId: finalMessageId, swipeId })
-          job.awaitingSource = false
-          job.swipeId = swipeId
+        if (job.awaitingSource || finalMessageId !== job.messageId || (requestedSwipe !== undefined && requestedSwipe !== (job.swipeId ?? 0))) {
+          throw new Error("This streamed illustration is still waiting for its verified final message and swipe.")
         }
-        if (finalMessageId && finalMessageId !== job.messageId) {
-          taggedFinalizeMessageTargets.set(job.id, finalMessageId)
-          job.messageId = finalMessageId
-          job.key = `${job.chatId}:${job.messageId}:${job.slot}`
-          await upsertTaggedImageJob(job, userId)
-        }
+        await persistTaggedSourceSettlement(job.id, userId)
         await finalizeTaggedImageJobWithRetry(job, userId)
         return
       }
@@ -9660,31 +9806,36 @@ for (const macro of [
 }
 
 spindle.registerInterceptor(taggedImagePromptInterceptor, 90)
-async function settleTaggedImageSources(payload: any, userId?: string): Promise<void> {
+async function settleTaggedImageSources(payload: any, userId?: string, authoritativeEnd = false): Promise<void> {
   const chatId = asString(payload?.chatId)
   const messageId = asString(payload?.messageId)
   const content = asString(payload?.content)
-  if (!chatId || !messageId || !content || content.length > 1_000_000) return
   const generationId = asString(payload?.generationId).slice(0, 200)
+  // Only the host's actual terminal event can supply an ID-only proof. A
+  // renderer's final callback must include the canonical source text.
+  if (!chatId || !messageId || content.length > 1_000_000 || (!content && !(authoritativeEnd && generationId))) return
   const key = taggedTerminalKey(userId, chatId, generationId)
-  if (generationId && parseSwarmImageTags(content).length) {
-    const previous = taggedTerminalSources.get(key)
-    if (previous && (previous.messageId !== messageId || !sameTaggedTerminalText(previous.content, content))) return
-    if (!previous) {
-      taggedTerminalSources.set(key, { messageId, content, swipeId: cleanTaggedSwipeId(payload?.swipeId ?? payload?.targetSwipeId) })
-      if (taggedTerminalSources.size > 160) taggedTerminalSources.delete(taggedTerminalSources.keys().next().value!)
-    } else if (previous.swipeId === undefined && !previous.verified) previous.swipeId = cleanTaggedSwipeId(payload?.swipeId ?? payload?.targetSwipeId)
-  }
+  const changed = !!generationId && (!content || !!parseSwarmImageTags(content).length) && rememberTaggedTerminal(key, {
+    messageId, content, swipeId: cleanTaggedSwipeId(payload?.swipeId ?? payload?.targetSwipeId), authoritative: authoritativeEnd,
+  })
   const settlementKey = generationId ? key : taggedTerminalKey(userId, chatId, `legacy:${messageId}`)
   const existing = taggedTerminalSettlements.get(settlementKey)
-  if (existing) return existing
+  if (existing) {
+    await existing
+    if (!changed) return
+    // A correction arriving during a worker gets its own pass if the worker
+    // already finished reading the old candidate.
+    if (taggedTerminalSettlements.has(settlementKey)) return taggedTerminalSettlements.get(settlementKey)
+  }
   const task = (async () => {
     // Only manual/finished jobs need a delayed source settlement worker. A
     // running image job also resolves the cached proof on its own attachment.
     for (const delay of [0, 250, 750, 1500, 3000, 5000]) {
       if (delay) await new Promise<void>(resolve => setTimeout(resolve, delay))
-      const pending = (await loadTaggedImageJobs(userId)).filter(job => job.chatId === chatId && job.awaitingSource && !removedTaggedJobs.has(job.id)
-        && hasTaggedPacket(content, job.fullMatch) && (!job.generationId || job.generationId === generationId))
+      const allJobs = (await loadTaggedImageJobs(userId)).filter(job => job.chatId === chatId && !removedTaggedJobs.has(job.id))
+      const pending = allJobs.filter(job => job.awaitingSource
+        && (job.generationId ? job.generationId === generationId && (taggedTerminalCandidates.get(key) || [taggedTerminalSources.get(key)]).some(candidate => candidate && (!candidate.content || hasTaggedPacket(candidate.content, job.fullMatch)))
+          : hasTaggedPacket(content, job.fullMatch) && !allJobs.some(other => other.generationId === generationId && !!generationId && other.slot === job.slot && taggedPacketIdentity(other.fullMatch) === taggedPacketIdentity(job.fullMatch))))
       if (!pending.length) return
       const messages = await spindle.chat.getMessages(chatId)
       const message = messages.find((item: any) => asString(item.id) === messageId)
@@ -9726,7 +9877,7 @@ async function settleTaggedImageSources(payload: any, userId?: string): Promise<
 if (spindle.permissions.has("generation")) {
   spindle.on("GENERATION_ENDED", async (payload: any, userId?: string) => {
     const resolved = payload
-    void settleTaggedImageSources(resolved, userId).catch(error => reportBackendError("Resolving image source swipe", error))
+    void settleTaggedImageSources(resolved, userId, true).catch(error => reportBackendError("Resolving image source swipe", error))
     void Promise.all([completeCastBackgroundRequests(resolved,userId).catch(error=>reportBackendError("Cast background request",error)),completeCastGenesisRequests(resolved,userId).catch(error=>reportBackendError("Cast Genesis request",error))]).then(()=>completeParserImageRequests(resolved,userId))
   })
 }

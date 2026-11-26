@@ -1,6 +1,6 @@
 {
   "name": "lumiverse-swarm-studio",
-  "version": "1.1.0-alpha.17.16",
+  "version": "1.1.0-alpha.17.17",
   "private": true,
   "type": "module",
   "description": "Metadata-aware SwarmUI studio for Lumiverse",
@@ -28,6 +28,7 @@
     "test:theater:native": "python tests/theater-native-browser.py",
     "test:theater:density": "python tests/theater-density-browser.py",
     "test:inline:stream": "python tests/inline-stream-browser.py",
+    "test:inline:ownership": "node tests/inline-investigation-backend.mjs && python tests/inline-investigation-browser.py && node tests/inline-investigation-replay.mjs && node tests/inline-investigation-replay.mjs ./inline-investigation-original-traces.json",
     "test:theater:live": "python tests/theater-live-browser.py",
     "test:theater:scenery": "python tests/theater-scenery-browser.py",
     "test:theater:fx": "python tests/theater-fx-browser.py",

@@ -1,3 +1,9 @@
+## 1.1.0-alpha.17.17 - Inline reservation and ownership reconciliation
+
+- Separate durable render reservations from provisional and verified attachment ownership. Defer unscoped callbacks that collide with unresolved requests instead of spending a second render; require a unique persisted assistant packet for new non-streaming requests. Native terminal corrections can replace unverified evidence without moving an already verified owner. Recover ID-only terminal events, safely adopted legacy reservations, and proved sibling slots across backend restarts.
+- Retain inline job receipts beyond the old 160-row history cap and persist compact removal receipts. Reuse completed bitmaps for attachment-only recovery; check the current provider attempt before native mutation. Preserve independent generation IDs, swipes and slots, explicit retries, and draft-first automatic upscale. Do not restore automatic chat ribbons.
+- Add prompt-free `[Swarm Studio inline]` lifecycle diagnostics and original/current compiled frontend replay fixtures, including ambiguous ownership, controller/backend restart, history retention and source verification. See [inline ownership validation](docs/inline-ownership-validation.md).
+
 ## 1.1.0-alpha.17.16 - Draft attachment independence
 
 - Start native draft attachment independently of character filing and Output Library refresh. Bound optional library publication to four seconds, preserve existing gallery data on failure, and retain a saved bitmap if generation-history persistence fails. Keep draft publication ahead of automatic upscale; retain a draft rather than racing deletion against unfinished filing.

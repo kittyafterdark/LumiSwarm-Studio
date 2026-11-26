@@ -1,0 +1,285 @@
+[
+  {
+    "kind": "normal",
+    "slot": "front-normal",
+    "rows": [
+      {
+        "id": "final-normal",
+        "chat_id": "chat-1",
+        "content": "<swarm-image request=\"generate\" slot=\"front-normal\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "role": "assistant",
+        "swipe_id": 0,
+        "swipes": [
+          "<swarm-image request=\"generate\" slot=\"front-normal\" aspect=\"4:3\">harbor at dusk</swarm-image>"
+        ],
+        "metadata": {}
+      }
+    ],
+    "early": 1,
+    "sent": [
+      {
+        "type": "tag_generate",
+        "requestId": "82f64f21-833b-42a3-9538-c4d78e25e171",
+        "chatId": "chat-1",
+        "messageId": "inline-stream:front-normal",
+        "generationId": "front-normal",
+        "swipeId": null,
+        "fullMatch": "<swarm-image request=\"generate\" slot=\"front-normal\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "attrs": {
+          "request": "generate",
+          "slot": "front-normal",
+          "aspect": "4:3"
+        },
+        "content": "harbor at dusk",
+        "isStreaming": true
+      },
+      {
+        "type": "settle_tagged_generation",
+        "requestId": "6ad55771-8ecc-4e5e-b62a-95f17a3bd707",
+        "chatId": "chat-1",
+        "messageId": "final-normal",
+        "generationId": "front-normal",
+        "swipeId": 0,
+        "content": "<swarm-image request=\"generate\" slot=\"front-normal\" aspect=\"4:3\">harbor at dusk</swarm-image>"
+      }
+    ]
+  },
+  {
+    "kind": "wrong-owner-id-only",
+    "slot": "front-wrong-owner-id-only",
+    "rows": [
+      {
+        "id": "old-wrong-owner-id-only",
+        "chat_id": "chat-1",
+        "content": "Previous reply",
+        "role": "assistant",
+        "swipe_id": 0,
+        "swipes": [
+          "Previous reply"
+        ],
+        "metadata": {}
+      },
+      {
+        "id": "final-wrong-owner-id-only",
+        "chat_id": "chat-1",
+        "content": "<swarm-image request=\"generate\" slot=\"front-wrong-owner-id-only\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "role": "assistant",
+        "swipe_id": 0,
+        "swipes": [
+          "<swarm-image request=\"generate\" slot=\"front-wrong-owner-id-only\" aspect=\"4:3\">harbor at dusk</swarm-image>"
+        ],
+        "metadata": {}
+      }
+    ],
+    "early": 1,
+    "sent": [
+      {
+        "type": "tag_generate",
+        "requestId": "8a7151f5-1c55-4c49-bd54-92979d16b868",
+        "chatId": "chat-1",
+        "messageId": "old-wrong-owner-id-only",
+        "generationId": "front-wrong-owner-id-only",
+        "swipeId": 0,
+        "fullMatch": "<swarm-image request=\"generate\" slot=\"front-wrong-owner-id-only\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "attrs": {
+          "request": "generate",
+          "slot": "front-wrong-owner-id-only",
+          "aspect": "4:3"
+        },
+        "content": "harbor at dusk",
+        "isStreaming": true
+      },
+      {
+        "type": "settle_tagged_generation",
+        "requestId": "7191ab2d-829a-49d9-bd7a-5e9d126a79fb",
+        "chatId": "chat-1",
+        "messageId": "old-wrong-owner-id-only",
+        "generationId": "front-wrong-owner-id-only",
+        "swipeId": 0,
+        "content": "<swarm-image request=\"generate\" slot=\"front-wrong-owner-id-only\" aspect=\"4:3\">harbor at dusk</swarm-image>"
+      },
+      {
+        "type": "tag_generate",
+        "requestId": "af34ce64-33d9-4234-b671-0efb416c8735",
+        "chatId": "chat-1",
+        "messageId": "final-wrong-owner-id-only",
+        "fullMatch": "<swarm-image request=\"generate\" slot=\"front-wrong-owner-id-only\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "generationId": null,
+        "swipeId": 0,
+        "attrs": {
+          "request": "generate",
+          "slot": "front-wrong-owner-id-only",
+          "aspect": "4:3"
+        },
+        "content": "harbor at dusk",
+        "isStreaming": false
+      }
+    ]
+  },
+  {
+    "kind": "missing-terminal-wrong-swipe",
+    "slot": "front-missing-terminal-wrong-swipe",
+    "rows": [
+      {
+        "id": "final-missing-terminal-wrong-swipe",
+        "chat_id": "chat-1",
+        "content": "<swarm-image request=\"generate\" slot=\"front-missing-terminal-wrong-swipe\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "role": "assistant",
+        "swipe_id": 0,
+        "swipes": [
+          "<swarm-image request=\"generate\" slot=\"front-missing-terminal-wrong-swipe\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+          "Other"
+        ],
+        "metadata": {}
+      }
+    ],
+    "early": 1,
+    "sent": [
+      {
+        "type": "tag_generate",
+        "requestId": "82a18f0e-3307-4a14-a23d-465203a970f1",
+        "chatId": "chat-1",
+        "messageId": "final-missing-terminal-wrong-swipe",
+        "generationId": "front-missing-terminal-wrong-swipe",
+        "swipeId": 1,
+        "fullMatch": "<swarm-image request=\"generate\" slot=\"front-missing-terminal-wrong-swipe\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "attrs": {
+          "request": "generate",
+          "slot": "front-missing-terminal-wrong-swipe",
+          "aspect": "4:3"
+        },
+        "content": "harbor at dusk",
+        "isStreaming": true
+      },
+      {
+        "type": "tag_generate",
+        "requestId": "b2e406e3-359f-4110-9c60-cd9fb8b98fce",
+        "chatId": "chat-1",
+        "messageId": "final-missing-terminal-wrong-swipe",
+        "fullMatch": "<swarm-image request=\"generate\" slot=\"front-missing-terminal-wrong-swipe\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "generationId": null,
+        "swipeId": 0,
+        "attrs": {
+          "request": "generate",
+          "slot": "front-missing-terminal-wrong-swipe",
+          "aspect": "4:3"
+        },
+        "content": "harbor at dusk",
+        "isStreaming": false
+      }
+    ]
+  },
+  {
+    "kind": "remount-unscoped-stream",
+    "slot": "front-remount-unscoped-stream",
+    "rows": [
+      {
+        "id": "final-remount-unscoped-stream",
+        "chat_id": "chat-1",
+        "content": "<swarm-image request=\"generate\" slot=\"front-remount-unscoped-stream\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "role": "assistant",
+        "swipe_id": 0,
+        "swipes": [
+          "<swarm-image request=\"generate\" slot=\"front-remount-unscoped-stream\" aspect=\"4:3\">harbor at dusk</swarm-image>"
+        ],
+        "metadata": {}
+      }
+    ],
+    "early": 1,
+    "sent": [
+      {
+        "type": "tag_generate",
+        "requestId": "f7fa28e5-eedc-4083-9107-5ece707c700e",
+        "chatId": "chat-1",
+        "messageId": "inline-stream:front-remount-unscoped-stream",
+        "generationId": "front-remount-unscoped-stream",
+        "swipeId": null,
+        "fullMatch": "<swarm-image request=\"generate\" slot=\"front-remount-unscoped-stream\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "attrs": {
+          "request": "generate",
+          "slot": "front-remount-unscoped-stream",
+          "aspect": "4:3"
+        },
+        "content": "harbor at dusk",
+        "isStreaming": true
+      },
+      {
+        "type": "tag_generate",
+        "requestId": "b8de3d81-ef26-41ea-b11c-89f81fb73164",
+        "chatId": "chat-1",
+        "messageId": "final-remount-unscoped-stream",
+        "fullMatch": "<swarm-image request=\"generate\" slot=\"front-remount-unscoped-stream\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "generationId": null,
+        "swipeId": null,
+        "attrs": {
+          "request": "generate",
+          "slot": "front-remount-unscoped-stream",
+          "aspect": "4:3"
+        },
+        "content": "harbor at dusk",
+        "isStreaming": true
+      },
+      {
+        "type": "tag_generate",
+        "requestId": "8ceb5641-bed2-4101-a19c-2d9229277578",
+        "chatId": "chat-1",
+        "messageId": "final-remount-unscoped-stream",
+        "fullMatch": "<swarm-image request=\"generate\" slot=\"front-remount-unscoped-stream\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "generationId": null,
+        "swipeId": 0,
+        "attrs": {
+          "request": "generate",
+          "slot": "front-remount-unscoped-stream",
+          "aspect": "4:3"
+        },
+        "content": "harbor at dusk",
+        "isStreaming": false
+      }
+    ]
+  },
+  {
+    "kind": "stale-terminal-then-correct",
+    "slot": "front-stale-terminal-then-correct",
+    "rows": [
+      {
+        "id": "final-stale-terminal-then-correct",
+        "chat_id": "chat-1",
+        "content": "Actual <swarm-image request=\"generate\" slot=\"front-stale-terminal-then-correct\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "role": "assistant",
+        "swipe_id": 0,
+        "swipes": [
+          "Actual <swarm-image request=\"generate\" slot=\"front-stale-terminal-then-correct\" aspect=\"4:3\">harbor at dusk</swarm-image>"
+        ],
+        "metadata": {}
+      }
+    ],
+    "early": 1,
+    "sent": [
+      {
+        "type": "tag_generate",
+        "requestId": "d7082b17-4c01-4e7a-94c4-c7ca6ab2cb5d",
+        "chatId": "chat-1",
+        "messageId": "inline-stream:front-stale-terminal-then-correct",
+        "generationId": "front-stale-terminal-then-correct",
+        "swipeId": null,
+        "fullMatch": "<swarm-image request=\"generate\" slot=\"front-stale-terminal-then-correct\" aspect=\"4:3\">harbor at dusk</swarm-image>",
+        "attrs": {
+          "request": "generate",
+          "slot": "front-stale-terminal-then-correct",
+          "aspect": "4:3"
+        },
+        "content": "harbor at dusk",
+        "isStreaming": true
+      },
+      {
+        "type": "settle_tagged_generation",
+        "requestId": "ece4e18f-73d9-4715-9e3f-7a717ca438b5",
+        "chatId": "chat-1",
+        "messageId": "final-stale-terminal-then-correct",
+        "generationId": "front-stale-terminal-then-correct",
+        "swipeId": 0,
+        "content": "Stale <swarm-image request=\"generate\" slot=\"front-stale-terminal-then-correct\" aspect=\"4:3\">harbor at dusk</swarm-image>"
+      }
+    ]
+  }
+]

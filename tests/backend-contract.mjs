@@ -1611,6 +1611,8 @@ await frontendHandler({
   attrs: { request: "generate", slot: "remapped", aspect: "4:3", alt: "Remapped attachment" },
   content: remappedMatch[2],
 }, "user-1")
+assert.equal(taggedGenerationCount, 5, "Unscoped callback for a nonexistent owner must not generate")
+await frontendHandler({type:"tag_generate",requestId:"remapped-canonical",chatId:"chat-1",messageId:remappedTaggedMessage.id,fullMatch:remappedMatch[0],attrs:{request:"generate",slot:"remapped",aspect:"4:3",alt:"Remapped attachment"},content:remappedMatch[2]}, "user-1")
 for (
   let attempt = 0;
   attempt < 100 && !remappedTaggedMessage.content.includes('data-swarm-studio-image="true"');
@@ -1625,7 +1627,7 @@ const remappedReconciliation = sent.filter((entry) =>
   entry.payload.type === "tagged_message_reconciled"
   && entry.payload.data.messageId === remappedTaggedMessage.id
 ).at(-1)
-assert.ok(remappedReconciliation, "the backend should remap a transient streaming message ID without frontend assistance")
+assert.ok(remappedReconciliation, "the backend attaches only after the canonical owner is supplied")
 const remappedJobState = sent.filter((entry) =>
   entry.payload.type === "tagged_image_job"
   && entry.payload.data.messageId === remappedTaggedMessage.id
@@ -1828,7 +1830,7 @@ assert.equal(deleted.data.outputs.length, 0)
 assert.ok(deleted.data.folders.every((folder) => !folder.imageIds.includes("image-1")))
 
 assert.match(source, /TAGGED_FINALIZE_RETRY_DELAYS_MS[\s\S]*?25_000/)
-assert.match(source, /taggedFinalizeMessageTargets/)
+assert.match(source, /settledTaggedSources/); assert.doesNotMatch(source, /taggedFinalizeMessageTargets/)
 assert.match(source, /finalMessageId = asString\(payload\?\.messageId\)\.trim\(\)/)
 assert.match(source, /job\.messageId = finalMessageId/)
 assert.match(source, /SWARM STUDIO IMAGE PLACEMENT PROTOCOL/)
@@ -2047,7 +2049,10 @@ console.log('persistent Stop, orphaned job reconciliation and terminal stream ev
 const savedCors=spindle.cors,metadataEntered=deferred(),metadataLate=deferred()
 spindle.cors=async(url,...args)=>{if(String(url).endsWith('/API/ListImages')){metadataEntered.resolve();await metadataLate.promise}return savedCors.call(spindle,url,...args)}
 spindle.imageGen.generateStream=()=>({next:async()=>({done:true,value:{imageId:'metadata-stopped',imageUrl:'/api/v1/image-gen/results/metadata-stopped'}})})
-const metadataRun=frontendHandler({type:'tag_generate',requestId:'metadata-race',force:true,chatId:'chat-1',messageId:taggedMessage.id,fullMatch:'<swarm-image request="generate" slot="metadata-race">fixture</swarm-image>',attrs:{request:'generate',slot:'metadata-race',aspect:'4:3'},content:'fixture'},'user-1')
+const metadataTag='<swarm-image request="generate" slot="metadata-race">fixture</swarm-image>'
+const metadataOriginalContent=taggedMessage.content
+ taggedMessage.content+=metadataTag
+const metadataRun=frontendHandler({type:'tag_generate',requestId:'metadata-race',force:true,chatId:'chat-1',messageId:taggedMessage.id,fullMatch:metadataTag,attrs:{request:'generate',slot:'metadata-race',aspect:'4:3'},content:'fixture'},'user-1')
 await bounded(metadataEntered.promise)
 const metadataJob=userFiles.get('tagged-image-jobs.json').find(job=>job.slot==='metadata-race')
 const activeSnapshot=await request('list_tagged_jobs')
@@ -2059,6 +2064,7 @@ metadataLate.resolve();await new Promise(resolve=>setTimeout(resolve,0))
 const cancelledSnapshot=await request('list_tagged_jobs')
 assert.equal(cancelledSnapshot.data.find(job=>job.id===metadataJob.id).status,'cancelled','Late metadata cannot revive cancelled job')
 assert.ok(!sent.some(entry=>entry.payload.type==='tagged_generation_result' && entry.payload.clientJobId===metadataJob.clientJobId))
+taggedMessage.content=metadataOriginalContent
 spindle.cors=savedCors;spindle.imageGen.generateStream=originalStream
 console.log('post-bitmap metadata Stop and late completion race: ok')
 
@@ -2130,7 +2136,10 @@ assert.equal(urlMessage.metadata.swarm_studio_tagged_images[0].jobId,inlineJob.i
 for (const [id,prefix,suffix] of [['url-plain','',''],['url-markdown','![Harbor](',')']]) {
   const message={id,role:'assistant',content:prefix+urlTag+suffix,metadata:{}}
   taggedMessages.push(message)
-  const job=await submitUrl(message,urlTag,{messageId:`streaming-${id}`})
+  const beforeAlias=urlSequence
+  await submitUrl(message,urlTag,{messageId:`streaming-${id}`})
+  assert.equal(urlSequence,beforeAlias,'Unproved transient owner does not dispatch')
+  const job=await submitUrl(message,urlTag)
   const saved=userFiles.get('tagged-image-jobs.json').find(item=>item.slot==='broadcast' && item.messageId===id)
   assert.ok(saved)
   assert.equal(saved.output,'url')
