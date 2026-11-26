@@ -7775,6 +7775,32 @@ class CastBackgroundActivityTracker {
         };
     }
 }
+class TaggedLivePreviewCache {
+    entries = new Map();
+    accept(id, data) {
+        const old = this.entries.get(id);
+        const total = Number(data?.totalSteps) || old?.totalSteps || 0;
+        const step = Math.max(old?.step || 0, Number(data?.step) || 0);
+        const next = {
+            preview: typeof data?.preview === "string" && data.preview ? data.preview : old?.preview || "",
+            step: total > 0 ? Math.min(step, total) : step,
+            totalSteps: total
+        };
+        this.entries.delete(id);
+        this.entries.set(id, next);
+        while(this.entries.size > 16)this.entries.delete(this.entries.keys().next().value);
+        return next;
+    }
+    get(id) {
+        return this.entries.get(id);
+    }
+    delete(id) {
+        this.entries.delete(id);
+    }
+    clear() {
+        this.entries.clear();
+    }
+}
 function isWorkflowCoreParameter(id) {
     return WORKFLOW_CORE_PARAMETERS.has(String(id || "").toLowerCase().replace(/[^a-z0-9]+/g, ""));
 }
@@ -13430,6 +13456,7 @@ class MiniPlayerController {
     settledGenerationJobIds = new Set();
     settledTaggedJobIds = new Set();
     activeTaggedAttempts = new Map();
+    taggedLivePreviews = new TaggedLivePreviewCache();
     currentActivitySource = "";
     state = "idle";
     snapshotValue = {
@@ -13786,6 +13813,8 @@ class MiniPlayerController {
         });
     }
     begin(jobId, connectionId, label = "Preparing SwarmUI generation…", source = "manual") {
+        if (jobId && this.snapshotValue.active && this.snapshotValue.jobId === jobId && this.currentActivitySource === source) return;
+        const cached = source === "tagged" ? this.taggedLivePreviews.get(jobId) : undefined;
         this.state = "running";
         this.currentActivitySource = source;
         this.snapshotValue = {
@@ -13793,9 +13822,10 @@ class MiniPlayerController {
             active: true,
             jobId,
             connectionId,
-            step: 0,
-            totalSteps: 0,
-            status: label
+            preview: source === "tagged" ? cached?.preview || "" : this.snapshotValue.preview,
+            step: cached?.step || 0,
+            totalSteps: cached?.totalSteps || 0,
+            status: cached?.totalSteps ? `Rendering · ${cached.step} / ${cached.totalSteps}` : label
         };
         this.render();
     }
@@ -13869,7 +13899,7 @@ class MiniPlayerController {
         };
         this.snapshotValue = {
             ...this.snapshotValue,
-            preview: imageSrc,
+            preview: this.snapshotValue.active ? this.snapshotValue.preview : imageSrc,
             latestImage,
             status: this.snapshotValue.active ? this.snapshotValue.status : "Message illustration complete · synced to Studio"
         };
@@ -13905,9 +13935,15 @@ class MiniPlayerController {
     settleTaggedJob(jobId, taggedJobId = "") {
         const mappedJobId = taggedJobId ? String(this.activeTaggedAttempts.get(taggedJobId) || "") : "";
         const terminalJobId = jobId || mappedJobId;
+        if (jobId && mappedJobId && jobId !== mappedJobId) {
+            this.rememberSettledGenerationJob(jobId);
+            this.taggedLivePreviews.delete(jobId);
+            return;
+        }
         if (terminalJobId) {
             this.rememberSettledGenerationJob(terminalJobId);
             this.settledTaggedJobIds.add(terminalJobId);
+            this.taggedLivePreviews.delete(terminalJobId);
         }
         if (mappedJobId && mappedJobId !== terminalJobId) {
             this.rememberSettledGenerationJob(mappedJobId);
@@ -14004,7 +14040,15 @@ class MiniPlayerController {
             if ((job.status === "queued" || job.status === "generating") && jobId) {
                 if (this.settledGenerationJobIds.has(jobId)) return;
                 if (this.settledTaggedJobIds.has(jobId)) return;
-                if (taggedJobId) this.activeTaggedAttempts.set(taggedJobId, jobId);
+                if (taggedJobId) {
+                    const prior = this.activeTaggedAttempts.get(taggedJobId);
+                    if (prior && prior !== jobId) {
+                        this.rememberSettledGenerationJob(prior);
+                        this.taggedLivePreviews.delete(prior);
+                        if (this.snapshotValue.jobId === prior) this.snapshotValue.active = false;
+                    }
+                    this.activeTaggedAttempts.set(taggedJobId, jobId);
+                }
                 if (!this.snapshotValue.active || this.snapshotValue.jobId === jobId) {
                     this.begin(jobId, "", `Rendering message illustration · ${String(job.alt || job.slot || "SwarmUI")}`, "tagged");
                 }
@@ -14021,8 +14065,12 @@ class MiniPlayerController {
         if (payload?.type === "generation_progress") {
             const jobId = String(payload.clientJobId || "");
             if (jobId && this.settledGenerationJobIds.has(jobId)) return;
+            const tagged = [
+                ...this.activeTaggedAttempts.values()
+            ].includes(jobId);
+            const progress = tagged ? this.taggedLivePreviews.accept(jobId, data) : data;
             if (!this.snapshotValue.active || !this.snapshotValue.jobId || jobId !== this.snapshotValue.jobId) return;
-            this.progress(jobId, typeof data.preview === "string" ? data.preview : "", Number(data.step) || 0, Number(data.totalSteps) || 0);
+            this.progress(jobId, typeof progress.preview === "string" ? progress.preview : "", Number(progress.step) || 0, Number(progress.totalSteps) || 0);
             return;
         }
         if (payload?.type === "generation_result") {
@@ -14071,8 +14119,17 @@ class MiniPlayerController {
     onImageGenerationEvent(type, payload) {
         if (payload?.extensionIdentifier && payload.extensionIdentifier !== "swarm_studio") return;
         const jobId = String(payload?.assetId || "");
+        if (jobId && this.settledGenerationJobIds.has(jobId)) return;
+        if (type === "progress" && [
+            ...this.activeTaggedAttempts.values()
+        ].includes(jobId)) {
+            const progress = this.taggedLivePreviews.accept(jobId, payload);
+            if (this.snapshotValue.active && this.snapshotValue.jobId === jobId) this.progress(jobId, progress.preview, progress.step, progress.totalSteps);
+            return;
+        }
         if (!this.snapshotValue.active || !this.snapshotValue.jobId) return;
         if (this.snapshotValue.jobId && jobId && jobId !== this.snapshotValue.jobId) return;
+        if (this.currentActivitySource === "tagged" && type !== "progress") return;
         if (type === "progress") {
             this.progress(jobId, typeof payload?.preview === "string" ? payload.preview : "", Number(payload?.step) || 0, Number(payload?.totalSteps) || 0);
         } else if (type === "complete") {
@@ -14116,6 +14173,7 @@ class MiniPlayerController {
         this.quickPanel?.remove();
         this.contextMenu?.remove();
         this.stripMenu?.remove();
+        this.taggedLivePreviews.clear();
         this.widget.destroy();
     }
     syncVisibility() {
@@ -18331,6 +18389,7 @@ class StudioController {
     currentJobSource = "";
     activeTaggedJobs = new Map();
     activeTaggedAttempts = new Map();
+    taggedLivePreviews = new TaggedLivePreviewCache();
     settledGenerationJobIds = new Set();
     settledTaggedJobIds = new Set();
     progressStep = 0;
@@ -20958,9 +21017,9 @@ are removed when CSS is applied.</pre>
             const previousAttemptId = this.activeTaggedAttempts.get(taggedJobId);
             if (previousAttemptId && previousAttemptId !== jobId) {
                 this.activeTaggedJobs.delete(previousAttemptId);
-                if (this.currentJobSource === "tagged" && this.currentJobId === previousAttemptId) {
-                    this.currentJobId = jobId;
-                }
+                this.rememberSettledTaggedJob(previousAttemptId);
+                this.taggedLivePreviews.delete(previousAttemptId);
+                if (this.currentJobSource === "tagged" && this.currentJobId === previousAttemptId) this.currentJobId = "";
             }
             this.activeTaggedAttempts.set(taggedJobId, jobId);
         }
@@ -20973,13 +21032,24 @@ are removed when CSS is applied.</pre>
         this.currentJobConnectionId = "";
         this.currentJobSource = "tagged";
         this.setGenerating(true);
-        this.updateGenerationProgress(0, 0);
+        const cached = this.taggedLivePreviews.get(jobId);
+        this.updateGenerationProgress(cached?.step || 0, cached?.totalSteps || 0);
+        if (cached?.preview) this.showLivePreview(cached.preview, cached.step, cached.totalSteps);
         this.setRunStatus("Rendering a message illustration in SwarmUI…");
     }
     settleTaggedJob(jobId, taggedJobId = "") {
         const mappedJobId = taggedJobId ? String(this.activeTaggedAttempts.get(taggedJobId) || "") : "";
         const terminalJobId = jobId || mappedJobId;
-        if (terminalJobId) this.rememberSettledTaggedJob(terminalJobId);
+        if (jobId && mappedJobId && jobId !== mappedJobId) {
+            this.rememberSettledTaggedJob(jobId);
+            this.taggedLivePreviews.delete(jobId);
+            this.activeTaggedJobs.delete(jobId);
+            return false;
+        }
+        if (terminalJobId) {
+            this.rememberSettledTaggedJob(terminalJobId);
+            this.taggedLivePreviews.delete(terminalJobId);
+        }
         if (mappedJobId && mappedJobId !== terminalJobId) this.rememberSettledTaggedJob(mappedJobId);
         if (taggedJobId) this.activeTaggedAttempts.delete(taggedJobId);
         if (terminalJobId) this.activeTaggedJobs.delete(terminalJobId);
@@ -21461,7 +21531,7 @@ are removed when CSS is applied.</pre>
                     this.acceptOutputPage(data);
                     if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders;
                     const imageSrc = String(data.result?.imageDataUrl || data.result?.imageUrl || data.record?.imageUrl || "");
-                    if (imageSrc) {
+                    if (imageSrc && !this.generating) {
                         this.setCurrentImage({
                             id: data.result?.imageId || data.record?.imageId,
                             src: imageSrc,
@@ -21478,13 +21548,14 @@ are removed when CSS is applied.</pre>
             case "generation_progress":
                 {
                     if (this.settledGenerationJobIds.has(String(payload.clientJobId || ""))) break;
+                    const progress = this.activeTaggedJobs.has(String(payload.clientJobId || "")) ? this.taggedLivePreviews.accept(String(payload.clientJobId), data) : data;
                     if (!this.currentJobId || payload.clientJobId !== this.currentJobId) break;
-                    const step = Number.isFinite(data.step) ? Number(data.step) : 0;
-                    const totalSteps = Number.isFinite(data.totalSteps) ? Number(data.totalSteps) : 0;
+                    const step = Number.isFinite(progress.step) ? Number(progress.step) : 0;
+                    const totalSteps = Number.isFinite(progress.totalSteps) ? Number(progress.totalSteps) : 0;
                     if (this.inpaintJobId && payload.clientJobId === this.inpaintJobId) {
                         this.inpaintSession?.progress(totalSteps > 0 ? `Rendering · ${step} / ${totalSteps}` : "Rendering in SwarmUI…", typeof data.preview === "string" ? data.preview : undefined);
-                    } else if (typeof data.preview === "string" && data.preview) {
-                        this.showLivePreview(data.preview, step, totalSteps);
+                    } else if (typeof progress.preview === "string" && progress.preview) {
+                        this.showLivePreview(progress.preview, step, totalSteps);
                     }
                     this.updateGenerationProgress(step, totalSteps);
                     this.setRunStatus("Rendering in SwarmUI…");
@@ -21720,8 +21791,12 @@ are removed when CSS is applied.</pre>
         }
     }
     onImageGenerationEvent(type, payload) {
-        if (!this.currentJobId || payload?.assetId !== this.currentJobId) return;
         if (payload?.extensionIdentifier && payload.extensionIdentifier !== "swarm_studio") return;
+        const attemptId = String(payload?.assetId || "");
+        if (attemptId && this.settledGenerationJobIds.has(attemptId)) return;
+        if (type === "progress" && this.activeTaggedJobs.has(attemptId)) this.taggedLivePreviews.accept(attemptId, payload);
+        if (!this.currentJobId || payload?.assetId !== this.currentJobId) return;
+        if (this.currentJobSource === "tagged" && type !== "progress") return;
         if (type === "progress") {
             const step = Number.isFinite(payload?.step) ? Number(payload.step) : 0;
             const totalSteps = Number.isFinite(payload?.totalSteps) ? Number(payload.totalSteps) : 0;
@@ -27653,6 +27728,15 @@ function inlineStreamTags(source) {
     }
     return tags;
 }
+function inlinePacketIdentity(tag) {
+    return JSON.stringify([
+        Object.entries(tag.attrs).sort(([a], [b])=>a.localeCompare(b)),
+        tag.content.replace(/\r\n/g, "\n").trim()
+    ]);
+}
+function inlineRequestSlot(tag) {
+    return String(tag.attrs.slot || "").trim().replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || `image-${widgetKeyHash(inlinePacketIdentity(tag)).slice(0, 6)}`;
+}
 class TaggedImageController {
     editInlineImage;
     ctx;
@@ -27769,8 +27853,18 @@ class TaggedImageController {
         }
     }
     submitStreamTag(stream, tag) {
-        if (stream.requests.has(tag.fullMatch) || stream.requests.size >= 6) return;
-        stream.requests.set(tag.fullMatch, tag);
+        const slot = inlineRequestSlot(tag);
+        if (stream.requests.has(slot) || stream.requests.size >= 6) return;
+        const legacy = [
+            ...this.tagPayloads.values()
+        ].filter((payload)=>payload.isStreaming === true && !payload.generationId && String(payload.chatId) === stream.chatId && payload.slot === slot && inlineStreamTags(String(payload.fullMatch || "")).some((t)=>inlinePacketIdentity(t) === inlinePacketIdentity(tag)) && [
+                ...this.jobs.values()
+            ].some((job)=>job.chatId === stream.chatId && job.messageId === String(payload.messageId) && job.slot === slot && !job.inserted && (job.id.startsWith("pending-") || job.awaitingSource)) && (!stream.target || String(payload.messageId) === stream.target || stream.aliases.has(String(payload.messageId))));
+        if (legacy.length === 1 && !stream.requests.size) {
+            stream.owner = String(legacy[0].messageId);
+            stream.aliases.add(stream.owner);
+        }
+        stream.requests.set(slot, tag);
         try {
             this.ctx.sendToBackend({
                 type: "tag_generate",
@@ -27783,20 +27877,23 @@ class TaggedImageController {
                 isStreaming: true
             });
         } catch  {
-            stream.requests.delete(tag.fullMatch);
+            stream.requests.delete(slot);
         }
     }
     onStreamEvent(name, payload) {
         if (this.destroyed) return;
         const chatId = String(payload?.chatId || payload?.chat_id || "");
         const id = String(payload?.generationId || "");
-        if (!id || !chatId || chatId !== this.ctx.getActiveChat?.()?.chatId) return;
+        if (!id || !chatId || chatId !== this.ctx.getActiveChat?.()?.chatId && !this.streams.has(id) && !this.terminalStreams.has(id)) return;
         if (name === "GENERATION_STARTED" || name === "GENERATION_IN_PROGRESS") {
             if (this.terminalStreams.has(id)) return;
             const target = String(payload.targetMessageId || "");
             const current = this.streams.get(id);
             if (current && current.chatId === chatId) {
-                if (target) current.target = target;
+                if (target) {
+                    current.target = target;
+                    current.aliases.add(target);
+                }
                 if (this.swipeIndex(payload.targetSwipeId) !== undefined) current.swipeId = payload.targetSwipeId;
                 return;
             }
@@ -27811,6 +27908,9 @@ class TaggedImageController {
                 gap: false,
                 stopped: false,
                 background,
+                aliases: new Set(target ? [
+                    target
+                ] : []),
                 requests: new Map()
             });
             if (this.streams.size > 16) this.streams.delete(this.streams.keys().next().value);
@@ -27841,18 +27941,26 @@ class TaggedImageController {
             return;
         }
         if (name !== "GENERATION_ENDED" || this.terminalStreams.has(id)) return;
+        const wasStopped = stream.stopped;
         stream.stopped = true;
         stream.target = String(payload.messageId || stream.target || "");
+        if (stream.target) stream.aliases.add(stream.target);
+        const terminalSwipe = this.swipeIndex(payload.swipeId ?? payload.targetSwipeId);
+        if (terminalSwipe !== undefined) stream.swipeId = terminalSwipe;
         this.streams.delete(id);
         this.terminalStreams.set(id, stream);
         if (this.terminalStreams.size > 16) this.terminalStreams.delete(this.terminalStreams.keys().next().value);
         const finalContent = typeof payload.content === "string" ? payload.content : "";
-        if (stream.target && finalContent && stream.requests.size) this.submitStreamSettlement(stream, finalContent);
+        if (stream.target && finalContent) {
+            if (!wasStopped) for (const tag of inlineStreamTags(finalContent))this.submitStreamTag(stream, tag);
+            if (stream.requests.size) this.submitStreamSettlement(stream, finalContent);
+        }
     }
     submitStreamSettlement(stream, content) {
-        if (!stream.target || !content || stream.settlementContent || ![
-            ...stream.requests.keys()
-        ].some((tag)=>content.includes(tag))) return;
+        if (!stream.target || !content || stream.settlementContent || !inlineStreamTags(content).some((tag)=>{
+            const reserved = stream.requests.get(inlineRequestSlot(tag));
+            return reserved && inlinePacketIdentity(reserved) === inlinePacketIdentity(tag);
+        })) return;
         try {
             this.ctx.sendToBackend({
                 type: "settle_tagged_generation",
@@ -27875,40 +27983,48 @@ class TaggedImageController {
         if (this.destroyed || !payload?.chatId || !payload?.messageId || payload?.isUser) return;
         this.sourceSnapshot = null;
         const match = String(payload.fullMatch || "");
-        const candidates = [
-            ...this.streams.values()
-        ].filter((s)=>!s.background && (!s.stopped || s.requests.has(match)) && s.chatId === String(payload.chatId) && (payload.generationId ? payload.generationId === s.id : s.target === String(payload.messageId) || payload.isStreaming === true && (!s.target || s.source.includes(match))));
-        const stream = candidates.length === 1 ? candidates[0] : undefined;
-        if (stream && String(payload.attrs?.request || "").toLowerCase() === "generate" && match) {
-            const tag = inlineStreamTags(match)[0];
-            if (tag && (payload.isStreaming === true || stream.requests.has(match))) {
-                if (!stream.requests.size && !stream.target && payload.isStreaming === true) stream.owner = String(payload.messageId);
-                this.submitStreamTag(stream, tag);
-                if (stream.stopped && payload.isStreaming !== true && stream.target === String(payload.messageId)) {
-                    const selected = this.selectedMessage(stream.chatId, stream.target);
-                    if ((stream.swipeId === undefined || stream.swipeId === this.swipeIndex(selected?.swipe_id)) && typeof selected?.content === "string") this.submitStreamSettlement(stream, selected.content);
+        const chatId = String(payload.chatId), messageId = String(payload.messageId);
+        const selected = this.selectedMessage(chatId, messageId);
+        const explicitSwipe = this.swipeIndex(payload.swipeId ?? payload.targetSwipeId);
+        const selectedSwipe = this.swipeIndex(selected?.swipe_id);
+        const incomingSwipe = explicitSwipe ?? (payload.isStreaming !== true ? selectedSwipe : undefined);
+        const tag = inlineStreamTags(match)[0];
+        const explicitGeneration = String(payload.generationId || "");
+        if (tag) {
+            const slot = inlineRequestSlot(tag);
+            const compatible = (stream)=>stream.chatId === chatId && !stream.background && (incomingSwipe === undefined || stream.swipeId === undefined || incomingSwipe === stream.swipeId);
+            const active = [
+                ...this.streams.values()
+            ].filter((stream)=>compatible(stream) && (explicitGeneration ? stream.id === explicitGeneration : stream.aliases.has(messageId) || stream.target === messageId || stream.owner === messageId || !stream.target && (payload.isStreaming === true || stream.requests.has(slot)) || stream.requests.has(slot) && inlinePacketIdentity(stream.requests.get(slot)) === inlinePacketIdentity(tag)));
+            if (active.length === 1) {
+                const stream = active[0];
+                stream.aliases.add(messageId);
+                if (!stream.requests.size && !stream.target && payload.isStreaming === true) stream.owner = messageId;
+                if (!stream.stopped && (explicitGeneration || inlineStreamTags(stream.source).some((t)=>inlinePacketIdentity(t) === inlinePacketIdentity(tag)))) this.submitStreamTag(stream, tag);
+                return;
+            }
+            if (active.length > 1) return;
+            const terminals = [
+                ...this.terminalStreams.values()
+            ].filter((stream)=>compatible(stream) && (explicitGeneration ? stream.id === explicitGeneration : stream.aliases.has(messageId) || stream.target === messageId) && stream.requests.has(slot) && (explicitGeneration || inlinePacketIdentity(stream.requests.get(slot)) === inlinePacketIdentity(tag)));
+            if (terminals.length === 1) {
+                const terminal = terminals[0];
+                if (payload.isStreaming !== true && terminal.target === messageId && typeof selected?.content === "string") {
+                    this.submitStreamSettlement(terminal, selected.content);
                 }
                 return;
             }
+            if (terminals.length > 1) return;
         }
-        const terminal = [
-            ...this.terminalStreams.values()
-        ].reverse().find((s)=>s.chatId === String(payload.chatId) && s.target === String(payload.messageId) && s.requests.has(match) && (!payload.generationId || payload.generationId === s.id));
-        if (terminal && (payload.isStreaming !== true || payload.generationId === terminal.id)) {
-            const selected = this.selectedMessage(terminal.chatId, terminal.target);
-            if (terminal.swipeId === undefined || terminal.swipeId === this.swipeIndex(selected?.swipe_id)) {
-                if (typeof selected?.content === "string" && selected.content.includes(match)) this.submitStreamSettlement(terminal, selected.content);
-                return;
-            }
-        }
-        const slot = String(payload?.attrs?.slot || `image-${widgetKeyHash(String(payload.fullMatch || payload.content)).slice(0, 6)}`).replace(/[^a-z0-9_-]+/gi, "-").slice(0, 80);
+        const slot = tag ? inlineRequestSlot(tag) : String(payload?.attrs?.slot || `image-${widgetKeyHash(String(payload.fullMatch || payload.content)).slice(0, 6)}`).replace(/[^a-z0-9_-]+/gi, "-").slice(0, 80);
         const fingerprint = widgetKeyHash(String(payload.fullMatch || payload.content || ""));
-        const selected = this.selectedMessage(String(payload.chatId), String(payload.messageId));
+        const packetFingerprint = tag ? widgetKeyHash(inlinePacketIdentity(tag)) : undefined;
+        const samePacket = (job)=>job.tagFingerprint === fingerprint || !!packetFingerprint && job.packetFingerprint === packetFingerprint;
         const selectedKnown = [
             ...this.jobs.values()
-        ].find((job)=>job.chatId === String(payload.chatId) && job.messageId === String(payload.messageId) && job.tagFingerprint === fingerprint && this.isSelected(job));
+        ].find((job)=>job.chatId === chatId && job.messageId === messageId && samePacket(job) && this.isSelected(job) && (!explicitGeneration || !job.generationId || job.generationId === explicitGeneration));
         if (payload.isStreaming === true && selectedKnown?.inserted) return;
-        const swipeId = payload.isStreaming !== true && (selectedKnown || String(selected?.content || "").includes(String(payload.fullMatch))) ? this.swipeIndex(selected?.swipe_id) : undefined;
+        const swipeId = explicitSwipe ?? (payload.isStreaming !== true && (selectedKnown || String(selected?.content || "").includes(match)) ? selectedSwipe : undefined);
         const lookup = this.lookupKey(String(payload.chatId), String(payload.messageId), slot, swipeId);
         this.tagPayloads.set(lookup, {
             ...payload,
@@ -27917,34 +28033,46 @@ class TaggedImageController {
         });
         if (payload.isStreaming !== true) {
             this.settledTagLookups.add(lookup);
-            const content = String(payload.content || "").trim();
-            const existing = [
+            const candidates = [
                 ...this.jobs.values()
-            ].find((job)=>this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId) === lookup && (job.tagFingerprint === fingerprint || job.prompt === content)) || [
-                ...this.jobs.values()
-            ].find((job)=>job.chatId === String(payload.chatId) && job.slot === slot && !this.selectedMessage(job.chatId, job.messageId)?.content && (swipeId === undefined || job.swipeId === undefined || swipeId === job.swipeId) && (job.tagFingerprint === fingerprint || job.prompt === content) && !job.inserted);
-            if (existing) {
-                this.settledMessageTargets.set(existing.id, String(payload.messageId));
-                if (swipeId !== undefined && existing.swipeId === undefined) existing.swipeId = swipeId;
-                this.retrySettledAttachment(existing);
+            ].filter((job)=>!job.generationId && !job.inserted && job.chatId === chatId && job.slot === slot && samePacket(job) && (job.swipeId === undefined || job.swipeId === swipeId) && (job.messageId === messageId || !this.selectedMessage(job.chatId, job.messageId)?.content));
+            if (candidates.length === 1 && !candidates[0].id.startsWith("pending-")) {
+                const existing = candidates[0];
+                if (existing.awaitingSource && typeof selected?.content === "string" && selected.content.includes(match)) {
+                    const settlementKey = `${existing.id}:${messageId}:${swipeId ?? ""}`;
+                    if (!this.settledAttachmentRequests.has(settlementKey)) {
+                        this.settledAttachmentRequests.add(settlementKey);
+                        this.ctx.sendToBackend({
+                            type: "settle_tagged_generation",
+                            requestId: createRequestId(),
+                            chatId,
+                            messageId,
+                            swipeId,
+                            content: selected.content
+                        });
+                    }
+                }
             }
         }
-        if (this.tagFingerprints.get(lookup) === fingerprint) return;
-        this.tagFingerprints.set(lookup, fingerprint);
+        const receipt = explicitGeneration ? `${lookup}:generation:${explicitGeneration}` : lookup;
+        if (this.tagFingerprints.get(receipt) === fingerprint) return;
+        this.tagFingerprints.set(receipt, fingerprint);
         const known = [
             ...this.jobs.values()
-        ].find((job)=>this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId) === lookup && job.tagFingerprint === fingerprint);
+        ].find((job)=>this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId) === lookup && samePacket(job) && (!explicitGeneration || !job.generationId || job.generationId === explicitGeneration));
         if (known) return;
         for (const [id, existing] of this.jobs){
-            if (this.lookupKey(existing.chatId, existing.messageId, existing.slot, existing.swipeId) !== lookup) continue;
+            if (!id.startsWith("pending-") || this.lookupKey(existing.chatId, existing.messageId, existing.slot, existing.swipeId) !== lookup || explicitGeneration && existing.generationId !== explicitGeneration) continue;
             this.remove(existing);
             this.jobs.delete(id);
         }
         const optimistic = {
-            id: `pending-${widgetKeyHash(`${lookup}:${fingerprint}`)}`,
+            id: `pending-${widgetKeyHash(`${receipt}:${fingerprint}`)}`,
             key: lookup,
             swipeId,
             tagFingerprint: fingerprint,
+            packetFingerprint,
+            generationId: explicitGeneration || undefined,
             chatId: String(payload.chatId),
             messageId: String(payload.messageId),
             slot,
@@ -27967,6 +28095,7 @@ class TaggedImageController {
             chatId: payload.chatId,
             messageId: payload.messageId,
             fullMatch: payload.fullMatch,
+            generationId: explicitGeneration || undefined,
             swipeId,
             attrs: payload.attrs,
             content: payload.content,
@@ -28024,7 +28153,7 @@ class TaggedImageController {
                 if (!incoming?.id || !incoming?.messageId || this.removedJobs.has(incoming.id)) continue;
                 const job = this.latestJobState(incoming);
                 for (const [id, candidate] of this.jobs){
-                    if (id.startsWith("pending-") && candidate.chatId === job.chatId && candidate.messageId === job.messageId && candidate.slot === job.slot && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId) && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint)) {
+                    if (id.startsWith("pending-") && candidate.chatId === job.chatId && candidate.messageId === job.messageId && candidate.slot === job.slot && (!candidate.generationId || candidate.generationId === job.generationId) && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId) && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint || !!candidate.packetFingerprint && candidate.packetFingerprint === job.packetFingerprint)) {
                         this.remove(candidate);
                         this.jobs.delete(id);
                         this.acknowledgeJob(id);
@@ -28044,7 +28173,7 @@ class TaggedImageController {
             const job = payload.data;
             if (!job?.id || !job?.messageId || this.removedJobs.has(job.id)) return;
             for (const [id, candidate] of this.jobs){
-                if (id.startsWith("pending-") && candidate.chatId === job.chatId && candidate.messageId === job.messageId && candidate.slot === job.slot && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId) && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint)) {
+                if (id.startsWith("pending-") && candidate.chatId === job.chatId && candidate.messageId === job.messageId && candidate.slot === job.slot && (!candidate.generationId || candidate.generationId === job.generationId) && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId) && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint || !!candidate.packetFingerprint && candidate.packetFingerprint === job.packetFingerprint)) {
                     this.remove(candidate);
                     this.jobs.delete(id);
                     this.acknowledgeJob(id);
@@ -28109,7 +28238,7 @@ class TaggedImageController {
         this.retiredAttempts.clear();
     }
     retrySettledAttachment(job) {
-        if (job.status !== "ready" || job.inserted || !job.id) return;
+        if (job.generationId || job.status !== "ready" || job.inserted || !job.id) return;
         const messageId = this.settledMessageTargets.get(job.id) || job.messageId;
         const lookup = this.lookupKey(job.chatId, messageId, job.slot, job.swipeId);
         if (!this.settledTagLookups.has(lookup) || this.settledAttachmentRequests.has(job.id)) return;
@@ -28421,7 +28550,7 @@ class TaggedImageController {
     }
     shouldRenderPlaceholder(job) {
         if (job.inserted) return false;
-        return job.status === "requested" || job.status === "failed" || job.status === "cancelled" || job.status === "ready" && Boolean(job.error);
+        return job.status === "requested" || job.output !== "url" && (job.status === "queued" || job.status === "generating") || job.status === "failed" || job.status === "cancelled" || job.status === "ready" && Boolean(job.error || job.output !== "url" && job.awaitingSource);
     }
     reconcileMessage(value) {
         const jobId = String(value?.jobId || "");
@@ -28522,7 +28651,9 @@ class TaggedImageController {
         for (const match of source.matchAll(/<swarm-image\b[^>]*>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi)){
             if (job.tagFingerprint && widgetKeyHash(match[0]) === job.tagFingerprint) return true;
         }
-        return false;
+        if (job.packetFingerprint && inlineStreamTags(source).some((tag)=>widgetKeyHash(inlinePacketIdentity(tag)) === job.packetFingerprint)) return true;
+        const stream = job.generationId ? this.streams.get(job.generationId) : undefined;
+        return !!(job.awaitingSource && stream && !stream.stopped && stream.target === job.messageId && stream.swipeId !== undefined && stream.swipeId === this.swipeIndex(message.swipe_id) && stream.requests.has(job.slot));
     }
     onSelectionEvent(name, payload) {
         if (this.destroyed) return;
@@ -28531,8 +28662,6 @@ class TaggedImageController {
         if (name === "CHAT_SWITCHED") {
             this.selectedChatId = typeof payload?.chatId === "string" ? payload.chatId : null;
             this.selectedMessages.clear();
-            this.streams.clear();
-            this.terminalStreams.clear();
             this.clearHydrationTimers();
         }
         const message = payload?.message;
@@ -28584,11 +28713,11 @@ class TaggedImageController {
             requested: "Illustration requested",
             queued: "Queued for SwarmUI",
             generating: "Rendering in SwarmUI",
-            ready: "Illustration ready",
+            ready: job.awaitingSource && !job.error ? "Illustration ready · waiting for reply" : "Illustration ready",
             failed: "Illustration unavailable",
             cancelled: "Illustration stopped"
         };
-        const action = job.status === "requested" ? `<button class="primary" data-action="generate">Generate image</button>` : job.status === "ready" && !job.inserted ? `<button class="primary" data-action="attach">Attach image</button>` : job.status === "failed" || job.status === "cancelled" ? `<button class="primary" data-action="retry">Retry</button>` : "";
+        const action = job.status === "requested" ? `<button class="primary" data-action="generate">Generate image</button>` : job.status === "ready" && !job.inserted && job.error ? `<button class="primary" data-action="attach">Attach image</button>` : job.status === "failed" || job.status === "cancelled" ? `<button class="primary" data-action="retry">Retry</button>` : "";
         const error = job.error ? `<p class="error">${widgetEscape(job.error)}</p>` : "";
         const html = `
       <style>

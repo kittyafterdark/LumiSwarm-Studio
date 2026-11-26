@@ -80,6 +80,7 @@ class StudioController {
   private currentJobSource: "manual" | "tagged" | "" = ""
   private readonly activeTaggedJobs = new Map<string, any>()
   private readonly activeTaggedAttempts = new Map<string, string>()
+  private readonly taggedLivePreviews = new TaggedLivePreviewCache()
   private readonly settledGenerationJobIds = new Set<string>()
   private readonly settledTaggedJobIds = new Set<string>()
   private progressStep = 0
@@ -2512,9 +2513,9 @@ are removed when CSS is applied.</pre>
       const previousAttemptId = this.activeTaggedAttempts.get(taggedJobId)
       if (previousAttemptId && previousAttemptId !== jobId) {
         this.activeTaggedJobs.delete(previousAttemptId)
-        if (this.currentJobSource === "tagged" && this.currentJobId === previousAttemptId) {
-          this.currentJobId = jobId
-        }
+        this.rememberSettledTaggedJob(previousAttemptId)
+        this.taggedLivePreviews.delete(previousAttemptId)
+        if (this.currentJobSource === "tagged" && this.currentJobId === previousAttemptId) this.currentJobId = ""
       }
       this.activeTaggedAttempts.set(taggedJobId, jobId)
     }
@@ -2531,14 +2532,22 @@ are removed when CSS is applied.</pre>
     this.currentJobConnectionId = ""
     this.currentJobSource = "tagged"
     this.setGenerating(true)
-    this.updateGenerationProgress(0, 0)
+    const cached = this.taggedLivePreviews.get(jobId)
+    this.updateGenerationProgress(cached?.step || 0, cached?.totalSteps || 0)
+    if (cached?.preview) this.showLivePreview(cached.preview, cached.step, cached.totalSteps)
     this.setRunStatus("Rendering a message illustration in SwarmUI…")
   }
 
   private settleTaggedJob(jobId: string, taggedJobId = ""): boolean {
     const mappedJobId = taggedJobId ? String(this.activeTaggedAttempts.get(taggedJobId) || "") : ""
     const terminalJobId = jobId || mappedJobId
-    if (terminalJobId) this.rememberSettledTaggedJob(terminalJobId)
+    if (jobId && mappedJobId && jobId !== mappedJobId) {
+      this.rememberSettledTaggedJob(jobId)
+      this.taggedLivePreviews.delete(jobId)
+      this.activeTaggedJobs.delete(jobId)
+      return false
+    }
+    if (terminalJobId) { this.rememberSettledTaggedJob(terminalJobId); this.taggedLivePreviews.delete(terminalJobId) }
     if (mappedJobId && mappedJobId !== terminalJobId) this.rememberSettledTaggedJob(mappedJobId)
     if (taggedJobId) this.activeTaggedAttempts.delete(taggedJobId)
     if (terminalJobId) this.activeTaggedJobs.delete(terminalJobId)
@@ -2989,7 +2998,7 @@ are removed when CSS is applied.</pre>
         this.acceptOutputPage(data)
         if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
         const imageSrc = String(data.result?.imageDataUrl || data.result?.imageUrl || data.record?.imageUrl || "")
-        if (imageSrc) {
+        if (imageSrc && !this.generating) {
           this.setCurrentImage({
             id: data.result?.imageId || data.record?.imageId,
             src: imageSrc,
@@ -3007,13 +3016,15 @@ are removed when CSS is applied.</pre>
       }
       case "generation_progress": {
         if (this.settledGenerationJobIds.has(String(payload.clientJobId || ""))) break
+        const progress = this.activeTaggedJobs.has(String(payload.clientJobId || ""))
+          ? this.taggedLivePreviews.accept(String(payload.clientJobId), data) : data
         if (!this.currentJobId || payload.clientJobId !== this.currentJobId) break
-        const step = Number.isFinite(data.step) ? Number(data.step) : 0
-        const totalSteps = Number.isFinite(data.totalSteps) ? Number(data.totalSteps) : 0
+        const step = Number.isFinite(progress.step) ? Number(progress.step) : 0
+        const totalSteps = Number.isFinite(progress.totalSteps) ? Number(progress.totalSteps) : 0
         if (this.inpaintJobId && payload.clientJobId === this.inpaintJobId) {
           this.inpaintSession?.progress(totalSteps > 0 ? `Rendering · ${step} / ${totalSteps}` : "Rendering in SwarmUI…", typeof data.preview === "string" ? data.preview : undefined)
-        } else if (typeof data.preview === "string" && data.preview) {
-          this.showLivePreview(data.preview, step, totalSteps)
+        } else if (typeof progress.preview === "string" && progress.preview) {
+          this.showLivePreview(progress.preview, step, totalSteps)
         }
         this.updateGenerationProgress(step, totalSteps)
         this.setRunStatus("Rendering in SwarmUI…")
@@ -3250,8 +3261,14 @@ are removed when CSS is applied.</pre>
   }
 
   onImageGenerationEvent(type: "progress" | "complete" | "error", payload: any): void {
-    if (!this.currentJobId || payload?.assetId !== this.currentJobId) return
     if (payload?.extensionIdentifier && payload.extensionIdentifier !== "swarm_studio") return
+    const attemptId = String(payload?.assetId || "")
+    if (attemptId && this.settledGenerationJobIds.has(attemptId)) return
+    if (type === "progress" && this.activeTaggedJobs.has(attemptId)) this.taggedLivePreviews.accept(attemptId, payload)
+    if (!this.currentJobId || payload?.assetId !== this.currentJobId) return
+    // A provider-complete event may precede the backend's saved result. Let
+    // tagged job states own the handoff; native progress is still accepted.
+    if (this.currentJobSource === "tagged" && type !== "progress") return
 
     if (type === "progress") {
       const step = Number.isFinite(payload?.step) ? Number(payload.step) : 0

@@ -79,6 +79,7 @@ class MiniPlayerController {
   private readonly settledGenerationJobIds = new Set<string>()
   private readonly settledTaggedJobIds = new Set<string>()
   private readonly activeTaggedAttempts = new Map<string, string>()
+  private readonly taggedLivePreviews = new TaggedLivePreviewCache()
   private currentActivitySource: "manual" | "tagged" | "" = ""
   private state: "idle" | "running" | "done" | "error" = "idle"
   private snapshotValue: StudioActivitySnapshot = {
@@ -423,6 +424,10 @@ class MiniPlayerController {
     label = "Preparing SwarmUI generation…",
     source: "manual" | "tagged" = "manual",
   ): void {
+    // Repeated job-state announcements are not a new generation. Do not
+    // reset progress or replace the currently decoded preview.
+    if (jobId && this.snapshotValue.active && this.snapshotValue.jobId === jobId && this.currentActivitySource === source) return
+    const cached = source === "tagged" ? this.taggedLivePreviews.get(jobId) : undefined
     this.state = "running"
     this.currentActivitySource = source
     this.snapshotValue = {
@@ -430,9 +435,10 @@ class MiniPlayerController {
       active: true,
       jobId,
       connectionId,
-      step: 0,
-      totalSteps: 0,
-      status: label,
+      preview: source === "tagged" ? cached?.preview || "" : this.snapshotValue.preview,
+      step: cached?.step || 0,
+      totalSteps: cached?.totalSteps || 0,
+      status: cached?.totalSteps ? `Rendering · ${cached.step} / ${cached.totalSteps}` : label,
     }
     this.render()
   }
@@ -515,7 +521,7 @@ class MiniPlayerController {
     }
     this.snapshotValue = {
       ...this.snapshotValue,
-      preview: imageSrc,
+      preview: this.snapshotValue.active ? this.snapshotValue.preview : imageSrc,
       latestImage,
       status: this.snapshotValue.active
         ? this.snapshotValue.status
@@ -556,9 +562,17 @@ class MiniPlayerController {
   private settleTaggedJob(jobId: string, taggedJobId = ""): void {
     const mappedJobId = taggedJobId ? String(this.activeTaggedAttempts.get(taggedJobId) || "") : ""
     const terminalJobId = jobId || mappedJobId
+    if (jobId && mappedJobId && jobId !== mappedJobId) {
+      // A delayed result from a retired attempt may enter the output library,
+      // but cannot retire the newer attempt occupying this tagged slot.
+      this.rememberSettledGenerationJob(jobId)
+      this.taggedLivePreviews.delete(jobId)
+      return
+    }
     if (terminalJobId) {
       this.rememberSettledGenerationJob(terminalJobId)
       this.settledTaggedJobIds.add(terminalJobId)
+      this.taggedLivePreviews.delete(terminalJobId)
     }
     if (mappedJobId && mappedJobId !== terminalJobId) {
       this.rememberSettledGenerationJob(mappedJobId)
@@ -684,7 +698,14 @@ class MiniPlayerController {
       if ((job.status === "queued" || job.status === "generating") && jobId) {
         if (this.settledGenerationJobIds.has(jobId)) return
         if (this.settledTaggedJobIds.has(jobId)) return
-        if (taggedJobId) this.activeTaggedAttempts.set(taggedJobId, jobId)
+        if (taggedJobId) {
+          const prior = this.activeTaggedAttempts.get(taggedJobId)
+          if (prior && prior !== jobId) {
+            this.rememberSettledGenerationJob(prior); this.taggedLivePreviews.delete(prior)
+            if (this.snapshotValue.jobId === prior) this.snapshotValue.active = false
+          }
+          this.activeTaggedAttempts.set(taggedJobId, jobId)
+        }
         if (!this.snapshotValue.active || this.snapshotValue.jobId === jobId) {
           this.begin(
             jobId,
@@ -706,13 +727,10 @@ class MiniPlayerController {
     if (payload?.type === "generation_progress") {
       const jobId = String(payload.clientJobId || "")
       if (jobId && this.settledGenerationJobIds.has(jobId)) return
+      const tagged = [...this.activeTaggedAttempts.values()].includes(jobId)
+      const progress = tagged ? this.taggedLivePreviews.accept(jobId, data) : data
       if (!this.snapshotValue.active || !this.snapshotValue.jobId || jobId !== this.snapshotValue.jobId) return
-      this.progress(
-        jobId,
-        typeof data.preview === "string" ? data.preview : "",
-        Number(data.step) || 0,
-        Number(data.totalSteps) || 0,
-      )
+      this.progress(jobId, typeof progress.preview === "string" ? progress.preview : "", Number(progress.step) || 0, Number(progress.totalSteps) || 0)
       return
     }
     if (payload?.type === "generation_result") {
@@ -766,8 +784,15 @@ class MiniPlayerController {
   onImageGenerationEvent(type: "progress" | "complete" | "error", payload: any): void {
     if (payload?.extensionIdentifier && payload.extensionIdentifier !== "swarm_studio") return
     const jobId = String(payload?.assetId || "")
+    if (jobId && this.settledGenerationJobIds.has(jobId)) return
+    if (type === "progress" && [...this.activeTaggedAttempts.values()].includes(jobId)) {
+      const progress = this.taggedLivePreviews.accept(jobId, payload)
+      if (this.snapshotValue.active && this.snapshotValue.jobId === jobId) this.progress(jobId, progress.preview, progress.step, progress.totalSteps)
+      return
+    }
     if (!this.snapshotValue.active || !this.snapshotValue.jobId) return
     if (this.snapshotValue.jobId && jobId && jobId !== this.snapshotValue.jobId) return
+    if (this.currentActivitySource === "tagged" && type !== "progress") return
     if (type === "progress") {
       this.progress(
         jobId,
@@ -820,6 +845,7 @@ class MiniPlayerController {
     this.quickPanel?.remove()
     this.contextMenu?.remove()
     this.stripMenu?.remove()
+    this.taggedLivePreviews.clear()
     this.widget.destroy()
   }
 

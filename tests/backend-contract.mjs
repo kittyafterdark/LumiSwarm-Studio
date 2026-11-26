@@ -21,6 +21,8 @@ assert.match(source, /activated: activatedEntryIds\.has\(asString\(entry\?\.id\)
 assert.match(source, /async function resolveVisualReferenceImage/)
 assert.match(source, /parameters\.referenceImages = \[reference\]/)
 assert.match(source, /parameters\.denoise = \.6/)
+assert.match(source, /function normalizedTaggedPrompt\(/)
+assert.match(source, /taggedAdmissionKey/ )
 
 let frontendHandler
 const sent = []
@@ -2513,6 +2515,56 @@ await frontendHandler({type:'settle_tagged_generation',requestId:'repeat-proof',
 await repeatRuns
 assert.equal(swipeSequence,repeatBefore+1)
 assert.equal(userFiles.get('tagged-image-jobs.json').filter(j=>j.generationId===repeatGen).length,1)
+// Adversarial mixed transport: early token, reordered attribute interceptor,
+// unscoped final callback BEFORE terminal proof, same body in two slots,
+// conflicting same-slot replay, and repeated notifications AFTER attachment.
+{
+ const gen='slot-authority-race', owner={id:'inline-stream:'+gen}
+ const tagOne=swipeTag.replace('swipe-source','authority-one')
+ const tagTwo=swipeTag.replace('swipe-source','authority-two')
+ const formatted=tagOne.replace('request="generate" output="url"','output="url"   request="generate"')
+ assert.notEqual(formatted,tagOne)
+ const finalText=formatted+' Between. '+tagTwo
+ const msg={id:'authority-final',role:'assistant',content:otherSwipe,swipe_id:0,swipes:[otherSwipe,finalText],metadata:{}}
+ const before=swipeSequence
+ const first=submitUrl(owner,tagOne,{force:false,isStreaming:true,generationId:gen,swipeId:1})
+ await waitRace(()=>userFiles.get('tagged-image-jobs.json').some(j=>j.generationId===gen&&j.status==='ready'),'First render precedes final text')
+ taggedMessages.push(msg)
+ await submitUrl(msg,formatted,{force:false,swipeId:1}) // no generation ID yet
+ await submitUrl(msg,formatted,{force:false,isStreaming:true,generationId:gen,swipeId:1})
+ await submitUrl(msg,tagOne.replace('harbor at dusk','conflicting scene'),{force:false,isStreaming:true,generationId:gen,swipeId:1})
+ assert.equal(swipeSequence,before+1,'Mixed deliveries may not spend a second render for a reserved slot')
+ const second=submitUrl(owner,tagTwo,{force:false,isStreaming:true,generationId:gen,swipeId:1})
+ await waitRace(()=>userFiles.get('tagged-image-jobs.json').filter(j=>j.generationId===gen&&j.status==='ready').length===2,'A distinct slot with identical prompt still renders')
+ const update=spindle.chat.updateMessage;let mutations=0
+ spindle.chat.updateMessage=async(...args)=>{if(args[1]===msg.id)mutations++;return update.apply(spindle.chat,args)}
+ try {
+  const terminal={generationId:gen,chatId:'chat-1',messageId:msg.id,swipeId:1,content:finalText}
+  await Promise.all([frontendHandler({type:'settle_tagged_generation',...terminal},'user-1'),frontendHandler({type:'settle_tagged_generation',...terminal},'user-1')])
+  await Promise.all([first,second])
+  const rows=()=>userFiles.get('tagged-image-jobs.json').filter(j=>j.generationId===gen)
+  await waitRace(()=>rows().length===2&&rows().every(j=>j.inserted),'Canonical formatted source resolves both images')
+  assert.equal(mutations,2)
+  await Promise.all([submitUrl(msg,formatted,{force:false,swipeId:1}),submitUrl(owner,tagOne,{force:false,isStreaming:true,swipeId:1}),submitUrl(msg,tagTwo,{force:true,generationId:gen,swipeId:1})])
+  assert.equal(swipeSequence,before+2,'Late alias, unscoped and force replays do not regenerate')
+  assert.equal(mutations,2,'Replay never rewrites a committed message')
+  assert.equal(msg.content,otherSwipe);assert.equal(msg.swipe_id,0)
+  assert.equal(msg.metadata.swarm_studio_tagged_images.length,2)
+ } finally {spindle.chat.updateMessage=update}
+ // Same message, same packet, new generation and new swipe remains independent.
+ const newGen='slot-authority-new-swipe';msg.swipes.push(tagOne)
+ const newRun=submitUrl({id:'inline-stream:'+newGen},tagOne,{force:false,isStreaming:true,generationId:newGen,swipeId:2})
+ await waitRace(()=>userFiles.get('tagged-image-jobs.json').some(j=>j.generationId===newGen&&j.status==='ready'),'New swipe renders independently')
+ await frontendHandler({type:'settle_tagged_generation',generationId:newGen,chatId:'chat-1',messageId:msg.id,swipeId:2,content:tagOne},'user-1')
+ await newRun
+ assert.equal(swipeSequence,before+3);assert.match(msg.swipes[2],/^\/api\//);assert.equal(msg.content,otherSwipe)
+ const newJob=userFiles.get('tagged-image-jobs.json').find(j=>j.generationId===newGen)
+ const retry={type:'retry_tagged_job',jobId:newJob.id,retryMode:'current',requestId:'authority-manual-retry'}
+ await frontendHandler(retry,'user-1');assert.equal(swipeSequence,before+4,'Explicit regeneration remains available')
+ await frontendHandler(retry,'user-1');assert.equal(swipeSequence,before+4,'Completed retry receipt cannot regenerate again')
+ await submitUrl(msg,tagOne,{force:false,generationId:newGen,swipeId:2});assert.equal(swipeSequence,before+4,'Original packet receipt remains valid after regeneration')
+}
+console.log('inline authority: mixed transport, format variants, distinct slots, conflicting slot replay, idempotent attachment and new swipe: ok')
 console.log('inline stream: concurrent provider results, delayed native commit, generation remapping, replay, early terminal proof: ok')
 spindle.imageGen.generateStream=beforeSwipeStream
 console.log('swipe ownership: background generation/parser/removal, identical alternatives, edited requests, and ambiguous message remapping: ok')

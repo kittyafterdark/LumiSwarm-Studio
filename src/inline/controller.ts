@@ -8,6 +8,7 @@ interface TaggedImageJobView {
   id: string
   key: string
   tagFingerprint?: string
+  packetFingerprint?: string
   chatId: string
   messageId: string
   slot: string
@@ -66,6 +67,7 @@ function widgetKeyHash(value: string): string {
 interface InlineTagStream {
   id: string; chatId: string; owner: string; target: string; swipeId?: number
   source: string; gap: boolean; stopped: boolean; background: boolean; seq?: number; seqGap?: boolean; settlementContent?: string
+  aliases: Set<string>
   requests: Map<string, { fullMatch: string; attrs: Record<string, string>; content: string }>
 }
 
@@ -86,6 +88,15 @@ function inlineStreamTags(source: string): Array<{ fullMatch: string; attrs: Rec
     if (tags.length >= 6) break
   }
   return tags
+}
+
+function inlinePacketIdentity(tag: { attrs: Record<string, string>; content: string }): string {
+  return JSON.stringify([Object.entries(tag.attrs).sort(([a], [b]) => a.localeCompare(b)), tag.content.replace(/\r\n/g, "\n").trim()])
+}
+
+function inlineRequestSlot(tag: { attrs: Record<string, string>; content: string }): string {
+  return String(tag.attrs.slot || "").trim().replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80)
+    || `image-${widgetKeyHash(inlinePacketIdentity(tag)).slice(0, 6)}`
 }
 
 class TaggedImageController {
@@ -230,27 +241,37 @@ class TaggedImageController {
   }
 
   private submitStreamTag(stream: InlineTagStream, tag: { fullMatch: string; attrs: Record<string, string>; content: string }): void {
-    if (stream.requests.has(tag.fullMatch) || stream.requests.size >= 6) return
+    const slot = inlineRequestSlot(tag)
+    if (stream.requests.has(slot) || stream.requests.size >= 6) return
+    const legacy = [...this.tagPayloads.values()].filter(payload => payload.isStreaming === true && !payload.generationId
+      && String(payload.chatId) === stream.chatId && payload.slot === slot
+      && inlineStreamTags(String(payload.fullMatch || "")).some(t => inlinePacketIdentity(t) === inlinePacketIdentity(tag))
+      && [...this.jobs.values()].some(job => job.chatId === stream.chatId && job.messageId === String(payload.messageId)
+        && job.slot === slot && !job.inserted && (job.id.startsWith("pending-") || job.awaitingSource))
+      && (!stream.target || String(payload.messageId) === stream.target || stream.aliases.has(String(payload.messageId))))
+    if (legacy.length === 1 && !stream.requests.size) {
+      stream.owner = String(legacy[0].messageId); stream.aliases.add(stream.owner)
+    }
     // Stable generation identity bridges the provisional and committed IDs.
     // No optimistic widget is mounted against a synthetic message ID.
-    stream.requests.set(tag.fullMatch, tag)
+    stream.requests.set(slot, tag)
     try {
       this.ctx.sendToBackend({ type: "tag_generate", requestId: createRequestId(), chatId: stream.chatId,
         messageId: stream.owner, generationId: stream.id, swipeId: stream.swipeId, ...tag, isStreaming: true })
-    } catch { stream.requests.delete(tag.fullMatch) }
+    } catch { stream.requests.delete(slot) }
   }
 
   private onStreamEvent(name: string, payload: any): void {
     if (this.destroyed) return
     const chatId = String(payload?.chatId || payload?.chat_id || "")
     const id = String(payload?.generationId || "")
-    if (!id || !chatId || chatId !== this.ctx.getActiveChat?.()?.chatId) return
+    if (!id || !chatId || (chatId !== this.ctx.getActiveChat?.()?.chatId && !this.streams.has(id) && !this.terminalStreams.has(id))) return
     if (name === "GENERATION_STARTED" || name === "GENERATION_IN_PROGRESS") {
       if (this.terminalStreams.has(id)) return
       const target = String(payload.targetMessageId || "")
       const current = this.streams.get(id)
       if (current && current.chatId === chatId) {
-        if (target) current.target = target
+        if (target) { current.target = target; current.aliases.add(target) }
         if (this.swipeIndex(payload.targetSwipeId) !== undefined) current.swipeId = payload.targetSwipeId
         return
       }
@@ -259,7 +280,7 @@ class TaggedImageController {
       const background = /^(impersonate|quiet)/i.test(String(payload.generationType || "")) || payload.isUser === true
         || (!!payload.backgroundSwipe && (!target || this.swipeIndex(payload.targetSwipeId) === undefined))
       this.streams.set(id, { id, chatId, target, owner: target || `inline-stream:${id}`, swipeId: this.swipeIndex(payload.targetSwipeId),
-        source: "", gap: false, stopped: false, background, requests: new Map() })
+        source: "", gap: false, stopped: false, background, aliases: new Set(target ? [target] : []), requests: new Map() })
       if (this.streams.size > 16) this.streams.delete(this.streams.keys().next().value!)
       return
     }
@@ -287,19 +308,31 @@ class TaggedImageController {
     }
     if (name === "GENERATION_STOPPED") { stream.stopped = true; return }
     if (name !== "GENERATION_ENDED" || this.terminalStreams.has(id)) return
+    const wasStopped = stream.stopped
     stream.stopped = true
     stream.target = String(payload.messageId || stream.target || "")
+    if (stream.target) stream.aliases.add(stream.target)
+    const terminalSwipe = this.swipeIndex(payload.swipeId ?? payload.targetSwipeId)
+    if (terminalSwipe !== undefined) stream.swipeId = terminalSwipe
     this.streams.delete(id); this.terminalStreams.set(id, stream)
     if (this.terminalStreams.size > 16) this.terminalStreams.delete(this.terminalStreams.keys().next().value!)
     // A separate settlement message does not queue behind the GPU request.
     // The backend also consumes its own terminal event and validates both
     // paths against the persisted assistant reply before writing anything.
     const finalContent = typeof payload.content === "string" ? payload.content : ""
-    if (stream.target && finalContent && stream.requests.size) this.submitStreamSettlement(stream, finalContent)
+    if (stream.target && finalContent) {
+      // A missing token prefix is not a new owner. Recover only complete
+      // terminal packets in this same generation and preserve reserved slots.
+      if (!wasStopped) for (const tag of inlineStreamTags(finalContent)) this.submitStreamTag(stream, tag)
+      if (stream.requests.size) this.submitStreamSettlement(stream, finalContent)
+    }
   }
 
   private submitStreamSettlement(stream: InlineTagStream, content: string): void {
-    if (!stream.target || !content || stream.settlementContent || ![...stream.requests.keys()].some(tag => content.includes(tag))) return
+    if (!stream.target || !content || stream.settlementContent || !inlineStreamTags(content).some(tag => {
+      const reserved = stream.requests.get(inlineRequestSlot(tag))
+      return reserved && inlinePacketIdentity(reserved) === inlinePacketIdentity(tag)
+    })) return
     try {
       this.ctx.sendToBackend({ type: "settle_tagged_generation", requestId: createRequestId(), chatId: stream.chatId,
         messageId: stream.target, generationId: stream.id, swipeId: stream.swipeId, content })
@@ -315,45 +348,58 @@ class TaggedImageController {
     if (this.destroyed || !payload?.chatId || !payload?.messageId || payload?.isUser) return
     this.sourceSnapshot = null
     const match = String(payload.fullMatch || "")
-    const candidates = [...this.streams.values()].filter(s => !s.background && (!s.stopped || s.requests.has(match)) && s.chatId === String(payload.chatId)
-      && (payload.generationId ? payload.generationId === s.id : s.target === String(payload.messageId) ||
-        (payload.isStreaming === true && (!s.target || s.source.includes(match)))))
-    const stream = candidates.length === 1 ? candidates[0] : undefined
-    // Some hosts intercept the same packet in parallel with token delivery.
-    // Only adopt a packet from a known stream, not a historical render.
-    if (stream && String(payload.attrs?.request || "").toLowerCase() === "generate" && match) {
-      const tag = inlineStreamTags(match)[0]
-      if (tag && (payload.isStreaming === true || stream.requests.has(match))) {
-        if (!stream.requests.size && !stream.target && payload.isStreaming === true) stream.owner = String(payload.messageId)
-        this.submitStreamTag(stream, tag)
-        if (stream.stopped && payload.isStreaming !== true && stream.target === String(payload.messageId)) {
-          const selected = this.selectedMessage(stream.chatId, stream.target)
-          if ((stream.swipeId === undefined || stream.swipeId === this.swipeIndex(selected?.swipe_id)) && typeof selected?.content === "string") this.submitStreamSettlement(stream, selected.content)
+    const chatId = String(payload.chatId), messageId = String(payload.messageId)
+    const selected = this.selectedMessage(chatId, messageId)
+    const explicitSwipe = this.swipeIndex(payload.swipeId ?? payload.targetSwipeId)
+    const selectedSwipe = this.swipeIndex(selected?.swipe_id)
+    const incomingSwipe = explicitSwipe ?? (payload.isStreaming !== true ? selectedSwipe : undefined)
+    const tag = inlineStreamTags(match)[0]
+    const explicitGeneration = String(payload.generationId || "")
+    if (tag) {
+      const slot = inlineRequestSlot(tag)
+      const compatible = (stream: InlineTagStream) => stream.chatId === chatId && !stream.background
+        && (incomingSwipe === undefined || stream.swipeId === undefined || incomingSwipe === stream.swipeId)
+      const active = [...this.streams.values()].filter(stream => compatible(stream) && (explicitGeneration
+        ? stream.id === explicitGeneration
+        : stream.aliases.has(messageId) || stream.target === messageId || stream.owner === messageId
+          || (!stream.target && (payload.isStreaming === true || stream.requests.has(slot)))
+          || (stream.requests.has(slot) && inlinePacketIdentity(stream.requests.get(slot)!) === inlinePacketIdentity(tag))))
+      if (active.length === 1) {
+        const stream = active[0]
+        stream.aliases.add(messageId)
+        if (!stream.requests.size && !stream.target && payload.isStreaming === true) stream.owner = messageId
+        if (!stream.stopped && (explicitGeneration || inlineStreamTags(stream.source).some(t => inlinePacketIdentity(t) === inlinePacketIdentity(tag)))) this.submitStreamTag(stream, tag)
+        // Never use a render-time callback as proof that an in-flight stream
+        // ended. The terminal event or a saved reply after it owns settlement.
+        return
+      }
+      if (active.length > 1) return // defer ambiguous delivery to the terminal event
+      const terminals = [...this.terminalStreams.values()].filter(stream => compatible(stream)
+        && (explicitGeneration ? stream.id === explicitGeneration : stream.aliases.has(messageId) || stream.target === messageId)
+        && stream.requests.has(slot)
+        && (explicitGeneration || inlinePacketIdentity(stream.requests.get(slot)!) === inlinePacketIdentity(tag)))
+      if (terminals.length === 1) {
+        const terminal = terminals[0]
+        if (payload.isStreaming !== true && terminal.target === messageId && typeof selected?.content === "string") {
+          this.submitStreamSettlement(terminal, selected.content)
         }
         return
       }
+      if (terminals.length > 1) return
+      // An interceptor can beat GENERATION_STARTED. Retain the host-provided
+      // generation ID below; never silently downgrade it to a legacy owner.
     }
-    const terminal = [...this.terminalStreams.values()].reverse().find(s => s.chatId === String(payload.chatId) && s.target === String(payload.messageId)
-      && s.requests.has(match) && (!payload.generationId || payload.generationId === s.id))
-    if (terminal && (payload.isStreaming !== true || payload.generationId === terminal.id)) {
-      // If the terminal event lacked content, a later native interceptor can
-      // supply it, but only from the matching currently selected swipe.
-      const selected = this.selectedMessage(terminal.chatId, terminal.target)
-      if (terminal.swipeId === undefined || terminal.swipeId === this.swipeIndex(selected?.swipe_id)) {
-        if (typeof selected?.content === "string" && selected.content.includes(match)) this.submitStreamSettlement(terminal, selected.content)
-        return
-      }
-    }
-    const slot = String(payload?.attrs?.slot || `image-${widgetKeyHash(String(payload.fullMatch || payload.content)).slice(0, 6)}`)
-      .replace(/[^a-z0-9_-]+/gi, "-")
-      .slice(0, 80)
+    const slot = tag ? inlineRequestSlot(tag) : String(payload?.attrs?.slot || `image-${widgetKeyHash(String(payload.fullMatch || payload.content)).slice(0, 6)}`)
+      .replace(/[^a-z0-9_-]+/gi, "-").slice(0, 80)
     const fingerprint = widgetKeyHash(String(payload.fullMatch || payload.content || ""))
-    const selected = this.selectedMessage(String(payload.chatId), String(payload.messageId))
-    const selectedKnown = [...this.jobs.values()].find(job => job.chatId === String(payload.chatId)
-      && job.messageId === String(payload.messageId) && job.tagFingerprint === fingerprint && this.isSelected(job))
+    const packetFingerprint = tag ? widgetKeyHash(inlinePacketIdentity(tag)) : undefined
+    const samePacket = (job: TaggedImageJobView) => job.tagFingerprint === fingerprint || (!!packetFingerprint && job.packetFingerprint === packetFingerprint)
+    const selectedKnown = [...this.jobs.values()].find(job => job.chatId === chatId
+      && job.messageId === messageId && samePacket(job) && this.isSelected(job)
+      && (!explicitGeneration || !job.generationId || job.generationId === explicitGeneration))
     if (payload.isStreaming === true && selectedKnown?.inserted) return
-    const swipeId = payload.isStreaming !== true && (selectedKnown || String(selected?.content || "").includes(String(payload.fullMatch)))
-      ? this.swipeIndex(selected?.swipe_id) : undefined
+    const swipeId = explicitSwipe ?? (payload.isStreaming !== true && (selectedKnown || String(selected?.content || "").includes(match))
+      ? selectedSwipe : undefined)
     const lookup = this.lookupKey(String(payload.chatId), String(payload.messageId), slot, swipeId)
     this.tagPayloads.set(lookup, { ...payload, slot, swipeId })
     // The interceptor sees the same tag while the assistant is streaming and
@@ -361,41 +407,42 @@ class TaggedImageController {
     // that commit, so treat the non-streaming pass as the attachment boundary.
     if (payload.isStreaming !== true) {
       this.settledTagLookups.add(lookup)
-      const content = String(payload.content || "").trim()
-      const existing = [...this.jobs.values()].find((job) =>
-        this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId) === lookup
-        && (job.tagFingerprint === fingerprint || job.prompt === content),
-      ) || [...this.jobs.values()].find((job) =>
-        job.chatId === String(payload.chatId)
-        && job.slot === slot
-        && !this.selectedMessage(job.chatId, job.messageId)?.content
-        && (swipeId === undefined || job.swipeId === undefined || swipeId === job.swipeId)
-        && (job.tagFingerprint === fingerprint || job.prompt === content)
-        && !job.inserted,
-      )
-      if (existing) {
-        this.settledMessageTargets.set(existing.id, String(payload.messageId))
-        if (swipeId !== undefined && existing.swipeId === undefined) existing.swipeId = swipeId
-        this.retrySettledAttachment(existing)
+      const candidates = [...this.jobs.values()].filter(job => !job.generationId && !job.inserted && job.chatId === chatId
+        && job.slot === slot && samePacket(job) && (job.swipeId === undefined || job.swipeId === swipeId)
+        && (job.messageId === messageId || !this.selectedMessage(job.chatId, job.messageId)?.content))
+      if (candidates.length === 1 && !candidates[0].id.startsWith("pending-")) {
+        const existing = candidates[0]
+        // Backend verifies the owner and merges settlement into the latest
+        // record. Do not optimistically change the selected swipe here.
+        if (existing.awaitingSource && typeof selected?.content === "string" && selected.content.includes(match)) {
+          const settlementKey = `${existing.id}:${messageId}:${swipeId ?? ""}`
+          if (!this.settledAttachmentRequests.has(settlementKey)) {
+            this.settledAttachmentRequests.add(settlementKey)
+            this.ctx.sendToBackend({ type: "settle_tagged_generation", requestId: createRequestId(), chatId, messageId,
+              swipeId, content: selected.content })
+          }
+        }
       }
     }
-    if (this.tagFingerprints.get(lookup) === fingerprint) return
-    this.tagFingerprints.set(lookup, fingerprint)
+    const receipt = explicitGeneration ? `${lookup}:generation:${explicitGeneration}` : lookup
+    if (this.tagFingerprints.get(receipt) === fingerprint) return
+    this.tagFingerprints.set(receipt, fingerprint)
     const known = [...this.jobs.values()].find((job) =>
       this.lookupKey(job.chatId, job.messageId, job.slot, job.swipeId) === lookup
-      && job.tagFingerprint === fingerprint,
+      && samePacket(job) && (!explicitGeneration || !job.generationId || job.generationId === explicitGeneration),
     )
     if (known) return
     for (const [id, existing] of this.jobs) {
-      if (this.lookupKey(existing.chatId, existing.messageId, existing.slot, existing.swipeId) !== lookup) continue
+      if (!id.startsWith("pending-") || this.lookupKey(existing.chatId, existing.messageId, existing.slot, existing.swipeId) !== lookup
+        || (explicitGeneration && existing.generationId !== explicitGeneration)) continue
       this.remove(existing)
       this.jobs.delete(id)
     }
     const optimistic: TaggedImageJobView = {
-      id: `pending-${widgetKeyHash(`${lookup}:${fingerprint}`)}`,
+      id: `pending-${widgetKeyHash(`${receipt}:${fingerprint}`)}`,
       key: lookup,
       swipeId,
-      tagFingerprint: fingerprint,
+      tagFingerprint: fingerprint, packetFingerprint, generationId: explicitGeneration || undefined,
       chatId: String(payload.chatId),
       messageId: String(payload.messageId),
       slot,
@@ -420,6 +467,7 @@ class TaggedImageController {
       chatId: payload.chatId,
       messageId: payload.messageId,
       fullMatch: payload.fullMatch,
+      generationId: explicitGeneration || undefined,
       swipeId,
       attrs: payload.attrs,
       content: payload.content,
@@ -474,8 +522,8 @@ class TaggedImageController {
         const job = this.latestJobState(incoming)
         for (const [id, candidate] of this.jobs) {
           if (id.startsWith("pending-") && candidate.chatId === job.chatId && candidate.messageId === job.messageId
-            && candidate.slot === job.slot && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId)
-            && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint)) {
+            && candidate.slot === job.slot && (!candidate.generationId || candidate.generationId === job.generationId) && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId)
+            && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint || (!!candidate.packetFingerprint && candidate.packetFingerprint === job.packetFingerprint))) {
             this.remove(candidate); this.jobs.delete(id); this.acknowledgeJob(id)
           }
         }
@@ -494,8 +542,8 @@ class TaggedImageController {
       if (!job?.id || !job?.messageId || this.removedJobs.has(job.id)) return
       for (const [id, candidate] of this.jobs) {
         if (id.startsWith("pending-") && candidate.chatId === job.chatId && candidate.messageId === job.messageId
-            && candidate.slot === job.slot && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId)
-            && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint)) {
+            && candidate.slot === job.slot && (!candidate.generationId || candidate.generationId === job.generationId) && (candidate.swipeId === undefined || candidate.swipeId === job.swipeId)
+            && (!candidate.tagFingerprint || !job.tagFingerprint || candidate.tagFingerprint === job.tagFingerprint || (!!candidate.packetFingerprint && candidate.packetFingerprint === job.packetFingerprint))) {
           this.remove(candidate)
           this.jobs.delete(id)
           this.acknowledgeJob(id)
@@ -557,7 +605,7 @@ class TaggedImageController {
   }
 
   private retrySettledAttachment(job: TaggedImageJobView): void {
-    if (job.status !== "ready" || job.inserted || !job.id) return
+    if (job.generationId || job.status !== "ready" || job.inserted || !job.id) return
     const messageId = this.settledMessageTargets.get(job.id) || job.messageId
     const lookup = this.lookupKey(job.chatId, messageId, job.slot, job.swipeId)
     if (!this.settledTagLookups.has(lookup) || this.settledAttachmentRequests.has(job.id)) return
@@ -817,9 +865,10 @@ class TaggedImageController {
   private shouldRenderPlaceholder(job: TaggedImageJobView): boolean {
     if (job.inserted) return false
     return job.status === "requested"
+      || (job.output !== "url" && (job.status === "queued" || job.status === "generating"))
       || job.status === "failed"
       || job.status === "cancelled"
-      || (job.status === "ready" && Boolean(job.error))
+      || (job.status === "ready" && Boolean(job.error || (job.output !== "url" && job.awaitingSource)))
   }
 
   private reconcileMessage(value: any): void {
@@ -918,7 +967,10 @@ class TaggedImageController {
     for (const match of source.matchAll(/<swarm-image\b[^>]*>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi)) {
       if (job.tagFingerprint && widgetKeyHash(match[0]) === job.tagFingerprint) return true
     }
-    return false
+    if (job.packetFingerprint && inlineStreamTags(source).some(tag => widgetKeyHash(inlinePacketIdentity(tag)) === job.packetFingerprint)) return true
+    const stream = job.generationId ? this.streams.get(job.generationId) : undefined
+    return !!(job.awaitingSource && stream && !stream.stopped && stream.target === job.messageId
+      && stream.swipeId !== undefined && stream.swipeId === this.swipeIndex(message.swipe_id) && stream.requests.has(job.slot))
   }
 
   private onSelectionEvent(name: string, payload: any): void {
@@ -928,7 +980,6 @@ class TaggedImageController {
     if (name === "CHAT_SWITCHED") {
       this.selectedChatId = typeof payload?.chatId === "string" ? payload.chatId : null
       this.selectedMessages.clear()
-      this.streams.clear(); this.terminalStreams.clear()
       this.clearHydrationTimers()
     }
     const message = payload?.message
@@ -972,13 +1023,13 @@ class TaggedImageController {
       requested: "Illustration requested",
       queued: "Queued for SwarmUI",
       generating: "Rendering in SwarmUI",
-      ready: "Illustration ready",
+      ready: job.awaitingSource && !job.error ? "Illustration ready · waiting for reply" : "Illustration ready",
       failed: "Illustration unavailable",
       cancelled: "Illustration stopped",
     }
     const action = job.status === "requested"
       ? `<button class="primary" data-action="generate">Generate image</button>`
-      : job.status === "ready" && !job.inserted
+      : job.status === "ready" && !job.inserted && job.error
         ? `<button class="primary" data-action="attach">Attach image</button>`
       : job.status === "failed" || job.status === "cancelled"
         ? `<button class="primary" data-action="retry">Retry</button>`

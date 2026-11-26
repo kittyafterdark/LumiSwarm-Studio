@@ -1,3 +1,10 @@
+## 1.1.0-alpha.17.14 - Inline request authority and preview handoff
+
+- Reserve each generation/slot before provider work starts. Serialize admission across provisional and canonical message IDs without blocking independent renders. Recognize equivalent packet formatting without merging distinct slots or swipes; conflicting or ambiguous deliveries wait for verified ownership rather than creating another render.
+- Preserve authored request receipts across regeneration, deduplicate explicit retry request IDs, and treat repeated tag deliveries as recovery, not permission to spend another GPU job. Attachment is idempotent and remains bound to the verified saved message/swipe.
+- Restore active normal-inline status cards while preserving the no-transient-widget contract for URL-only output. Retain attempt-local previews in Studio and the Locket, including concurrent renders, repeated state notifications and late terminal results. Provider completion alone does not retire a tagged attempt before its backend state settles.
+- Expand mocked backend and compiled Chromium regressions for mixed delivery, formatted packets, independent slots and swipes, explicit retry replay, duplicate mutation prevention, and preview handoff. No presentation or rendering-recipe changes.
+
 ## 1.1.0-alpha.17.13 - Inline streaming and attachment recovery
 
 - Dispatch explicit complete inline generation tags from generation-scoped token events, independent of native interceptor timing. Deduplicate stream/interceptor replays and provisional/final message IDs; leave incomplete tags, code examples, reasoning and parser requests out of this path.

@@ -98,3 +98,21 @@ class CastBackgroundActivityTracker {
     return { job, count: pending.length, label, detail, progress: job.status === "ready" ? 100 : job.status === "generating" && job.totalSteps > 0 ? Math.min(100, job.step / job.totalSteps * 100) : null }
   }
 }
+
+interface TaggedLivePreview { preview: string; step: number; totalSteps: number }
+class TaggedLivePreviewCache {
+  private readonly entries = new Map<string, TaggedLivePreview>()
+  accept(id: string, data: any): TaggedLivePreview {
+    const old = this.entries.get(id)
+    const total = Number(data?.totalSteps) || old?.totalSteps || 0
+    const step = Math.max(old?.step || 0, Number(data?.step) || 0)
+    const next = { preview: typeof data?.preview === "string" && data.preview ? data.preview : old?.preview || "",
+      step: total > 0 ? Math.min(step, total) : step, totalSteps: total }
+    this.entries.delete(id); this.entries.set(id, next)
+    while (this.entries.size > 16) this.entries.delete(this.entries.keys().next().value!)
+    return next
+  }
+  get(id: string): TaggedLivePreview | undefined { return this.entries.get(id) }
+  delete(id: string): void { this.entries.delete(id) }
+  clear(): void { this.entries.clear() }
+}

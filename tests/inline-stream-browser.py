@@ -5,7 +5,7 @@ import os, base64
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 ROOT=Path(__file__).resolve().parents[1]
-code=(ROOT/'dist/frontend.js').read_text().rsplit('export {',1)[0].replace('export function ','function ')+ '\nwindow.T={TaggedImageController,defaultStudioBehavior,StoryTheaterController};'
+code=(ROOT/'dist/frontend.js').read_text().rsplit('export {',1)[0].replace('export function ','function ')+ '\nwindow.T={TaggedImageController,defaultStudioBehavior,StoryTheaterController,MiniPlayerController,StudioController};'
 with sync_playwright() as p:
  browser=p.chromium.launch(headless=True,executable_path=os.environ.get('CHROMIUM_PATH','/usr/bin/chromium'),args=['--no-sandbox','--disable-dev-shm-usage'])
  for width,height in [(1440,900),(390,844),(320,640)]:
@@ -43,6 +43,64 @@ with sync_playwright() as p:
    start('bg',{targetMessageId:'bg-real',targetSwipeId:2,backgroundSwipe:true});push('bg',tag('bg'),0);check(genCalls().length===4&&genCalls()[3].swipeId===2,'Known background swipe');
    emit('STREAM_TOKEN_RECEIVED',{chatId:'other-chat',generationId:'bg',token:tag('foreign'),offset:tag('bg').length});check(genCalls().length===4,'Foreign chat');
    inline.destroy();check([...events.values()].every(s=>s.size===0),'Inline listener cleanup');
+  }''')
+  # Mixed transport before the canonical ID exists, duplicate slot and new swipe.
+  page.evaluate('''()=>{
+   window.inline=new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});sent.length=0;
+   const check=(b,m)=>{if(!b)throw Error(m)};const one=tag('one'),two=tag('two');
+   start('mixed');push('mixed',one,0);
+   const reordered=one.replace('request="generate" slot="one"','slot="one"   request="generate"');
+   const msg=add('mixed-final',reordered);inline.handleTag({chatId,messageId:msg.id,fullMatch:reordered,attrs:{request:'generate',slot:'one'},content:'a garden',isStreaming:false});
+   check(genCalls().length===1,'Unscoped final callback before terminal must not dispatch');
+   push('mixed',one.replace('a garden','a different prompt')+two,one.length);
+   check(genCalls().length===2,'Conflicting slot suppressed; distinct identical prompt permitted');
+   const final=reordered+two;msg.content=final;msg.swipes=[final];emit('GENERATION_ENDED',{generationId:'mixed',messageId:msg.id,content:final,swipeId:0});
+   check(settles().length===1,'Canonical attribute reorder settles existing slot');
+   inline.handleTag({chatId,messageId:msg.id,fullMatch:reordered,attrs:{request:'generate',slot:'one'},content:'a garden',isStreaming:false});check(genCalls().length===2,'Final replay suppressed');
+   start('mixed-new',{targetMessageId:msg.id,targetSwipeId:1});push('mixed-new',one,0);check(genCalls().length===3&&genCalls()[2].swipeId===1,'New generation owns its separate swipe');
+   inline.destroy();rows.length=0;sent.length=0;
+  }''')
+  # Actual compiled Studio and Locket controllers: queued render previews must
+  # survive repeated announcements, concurrent GPU streams, and late results.
+  page.evaluate('''()=>{
+   const check=(b,m)=>{if(!b)throw Error(m)};
+   const miniRoot=document.createElement('div'),studioRoot=document.createElement('div');document.body.append(miniRoot,studioRoot);
+   const host={sendToBackend(){},getActiveChat:()=>({chatId:'chat'})};
+   const mini=new T.MiniPlayerController(host,{root:miniRoot,destroy(){miniRoot.remove()}},()=>{},()=>{},()=>{},()=>null,T.defaultStudioBehavior(),()=>{});
+   const studio=new T.StudioController(host,{root:studioRoot},()=>{},()=>{},T.defaultStudioBehavior(),()=>{});
+   const surfaces=[mini,studio];const emit=p=>surfaces.forEach(s=>s.onMessage(p));const make=(color)=>{const c=document.createElement('canvas');c.width=c.height=8;const x=c.getContext('2d');x.fillStyle=color;x.fillRect(0,0,8,8);return c.toDataURL()};
+   const a=make('red'),b=make('green'),c=make('blue');
+   const job=(id,attempt,status='generating')=>emit({type:'tagged_image_job',data:{id,clientJobId:attempt,status}});
+   const progress=(attempt,preview,step)=>emit({type:'generation_progress',clientJobId:attempt,data:{preview,step,totalSteps:10}});
+   const result=(id,attempt,preview)=>emit({type:'tagged_generation_result',clientJobId:attempt,data:{taggedJob:{id,clientJobId:attempt},result:{imageId:attempt,imageDataUrl:preview},outputs:[],total:0,offset:0,limit:12}});
+   const studioPreview=()=>studioRoot.querySelector('[data-role="preview-image"]').getAttribute('src');
+   job('first','a');progress('a',a,4);job('first','a');
+   check(mini.snapshot().preview===a&&mini.snapshot().step===4&&studioPreview()===a,'Repeated job announcement preserves live preview');
+   job('second','b');progress('b',b,7);
+   check(mini.snapshot().preview===a&&studioPreview()===a,'Background job does not overwrite current preview');
+   for(const surface of surfaces)surface.onImageGenerationEvent('complete',{assetId:'a',extensionIdentifier:'swarm_studio',imageId:'early'});
+   check(mini.snapshot().jobId==='a'&&studio.currentJobId==='a','Native complete is not authoritative tagged settlement');
+   job('first','a','ready');result('first','a',a);
+   check(mini.snapshot().jobId==='b'&&mini.snapshot().preview===b&&mini.snapshot().step===7,'Handoff restores cached next preview');
+   check(studio.currentJobId==='b'&&studioPreview()===b,'Studio handoff retains next preview after prior output');
+   job('second','b-retry');progress('b-retry',c,5);job('second','b','ready');result('second','b',b);
+   check(mini.snapshot().jobId==='b-retry'&&mini.snapshot().preview===c,'Old completion cannot retire new attempt');
+   check(studio.currentJobId==='b-retry'&&studioPreview()===c,'Studio old completion cannot retire new attempt');
+   job('second','b-retry','ready');result('second','b-retry',c);
+   check(!mini.snapshot().active&&!studio.generating&&studioPreview()===c,'Final completion settles both surfaces');
+   studio.dispose();studioRoot.remove();mini.destroy();
+  }''')
+  # A normal inline request may show its active strip; URL-only requests keep
+  # authored HTML free of transient widgets. Repeated states are stable.
+  page.evaluate('''()=>{
+   window.inline=new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});widgets.length=0;
+   const raw=tag('active');add('active-reply',raw);render('active-reply',raw);
+   const job={id:'active',key:'active',chatId,messageId:'active-reply',slot:'active',status:'queued',inserted:false,output:'inline',tagFingerprint:(()=>{let h=2166136261;for(const v of raw){h=Math.imul(h^v.charCodeAt(0),16777619)}return (h>>>0).toString(36)})(),clientJobId:'attempt',swipeId:0,error:''};
+   inline.onMessage({type:'tagged_image_job',data:job});inline.onMessage({type:'tagged_image_job',data:job});
+   if(widgets.length!==1||!widgets[0].html.includes('Queued for SwarmUI'))throw Error('Active placeholder missing or churned');
+   inline.onMessage({type:'tagged_image_job',data:{...job,status:'generating'}});if(!widgets.at(-1).html.includes('Rendering in SwarmUI'))throw Error('Generating strip missing');
+   inline.onMessage({type:'tagged_image_job',data:{...job,id:'url-active',output:'url'}});if(widgets.length!==2)throw Error('URL-only active widget polluted authored HTML');
+   inline.destroy();rows.length=0;widgets.length=0;document.querySelector('#chat').replaceChildren();
   }''')
   # A confirmed native attachment arrives before the selected-source API and
   # native message DOM hydrate. The fallback must appear without another LLM
