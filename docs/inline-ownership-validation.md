@@ -1,4 +1,4 @@
-# Inline reservation and ownership validation (.17.17)
+# Inline reservation and ownership validation (.17.22)
 
 ## Invariants
 
@@ -25,3 +25,14 @@ The .17.19 backend fixture delivers three saved provider terminal chunks without
 ## Migration and limitations
 
 Existing `tagged-image-jobs.json` is retained. Its rows are now durable admission receipts rather than a capped history list; storage can grow until a safe receipt-compaction policy exists. `tagged-removed-receipts.json` holds compact removal receipts. Neither file is reset or silently pruned by this update. Previously evicted/deleted rows from older versions cannot be reconstructed automatically, and historical duplicate gallery assets are not deleted or reassigned. In-memory unverified terminal candidates are bounded and need new evidence after a restart; persisted verified ownership and job/bitmap receipts survive. If ownership remains ambiguous because the host never supplies enough evidence, the bitmap is retained rather than re-rendered or attached to a guessed source. Legacy hosts without generation IDs can be conservatively deferred on matching unresolved packets. The optional automatic upscale is still not replayed on delayed attachment-only recovery after the worker has exited. Live Lumiverse/SwarmUI verification is required.
+
+For the .17.20 diagnostic build, use [provider timing investigation](provider-timing-investigation.md) to correlate provider dispatch, sampling progress and result receipt with the attachment events above.
+
+
+## .17.22: committed slot identity
+
+The live .17.21 diagnostic trace recorded three generation-scoped stream reservations followed by three `saved-source` reservations without generation IDs, all with the same respective message/swipe/slot. All six drafts returned; only the latter three attached. The raw packets were not logged, so the exact source transformation is not established. The regression uses synthetic raw and committed packets with different text and replays this ordering on the compiled backend (six dispatches before the fix, three afterward). The compiled frontend fixture also produces a generation-less final callback after a rewritten terminal packet. A separate full-contract case leaves automatic Finalize enabled and asserts exactly three draft requests, three derivative requests, three mounted drafts before the derivatives return, and three mounted finals with the original job IDs.
+
+For existing named slots on a compatible exact owner, a changed packet is a reconciliation conflict, not new automatic admission. A native terminal receipt naming the owner can also prevent duplicate admission across a provisional ID change. Verification still requires a uniquely identified saved assistant source: an authoritative terminal snapshot matching the whole saved reply, or matching native generation evidence plus the original exact message/swipe and a unique exact saved-source callback. Output mode changes and ambiguous slots/swipes defer. The exact verified `attachmentFullMatch` is stored separately from the immutable `fullMatch` used for rendering/provenance. Attachments continue to use exact packet replacement, not slot-only replacement. Unnamed packets continue to require exact packet identity. If evidence is missing, the original result is retained rather than spending GPU work on a replacement. A bounded in-memory candidate cache (64 entries) covers saved-source-before-terminal delivery; unverified candidates may require a fresh callback after restart. Existing historical duplicate images are not silently migrated or removed.
+
+Diagnostics now report `packetFingerprint` and, after verification, `attachmentPacketFingerprint`. A changed packet may appear as `owner-verified` with reason `saved-slot-reconciled`; `reused` indicates no new draft. Fingerprints are noncryptographic diagnostic correlators, not proof of identity or prompt contents. Export the capture from Studio settings → Diagnostics before restarting. Provider timing and UI preview scheduling are unchanged; the repeated draft cycle was a separate source of queue pressure.

@@ -920,4 +920,105 @@ async function recover(slot,before,g,m,content,swipeId=0){
  onlyDraft(slot,before);assert.equal(summary(slot)[0].owner,right.id);assert.equal(summary(slot)[0].inserted,true);assert.equal(wrong.content,raw);
  log('native end outranks unverified renderer hint',slot,before);
 }
+// Live .17.21 trace shape: same message ID, swipe zero, three stream slots;
+// native terminal precedes generation-less saved-source callbacks while all
+// provider streams are open. Model output normalization is synthetic here:
+// the live trace proves the repeated reservation but does not contain prompts.
+{
+ const slots=['audit-live-slot-a','audit-live-slot-b','audit-live-slot-c'];
+ const raw=slots.map(slot=>tag(slot,'harbor at dusk, raw token'));
+ const saved=slots.map(slot=>tag(slot,'harbor at dusk, committed token'));
+ const g='audit-live-three-g',before=renders, m=add('audit-live-three','');
+ const provider=spindle.imageGen.generateStream;let release;const gate=new Promise(r=>release=r);let dispatches=0;
+ spindle.imageGen.generateStream=async function*(input){dispatches++;await gate;return yield* provider(input)};
+ const runs=raw.map(t=>submit(m.id,t,{generationId:g,isStreaming:true,swipeId:0}));
+ const callbacks=[];
+ try {
+  await waitFor(()=>dispatches===3,'All three streams dispatch before terminal');
+  const originals=slots.map(slot=>rows().find(j=>j.slot===slot).id);
+  m.content='Saved narrative '+saved.join(' between '); // no swipes array on first reply
+  const terminalContent='Raw narrative '+raw.join(' between ');
+  eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:m.id,generationId:g,content:terminalContent},'user-1');
+  await pause();
+  callbacks.push(...saved.map(t=>submit(m.id,t,{isStreaming:false,swipeId:0})));
+  await waitFor(()=>callbacks.length===3 && slots.every(slot=>rows().some(j=>j.slot===slot && (!j.awaitingSource || dispatches>3))),'Reconcile persisted slots');
+  assert.equal(dispatches,3,'Saved-source callbacks must not dispatch a second cycle');
+  assert.deepEqual(slots.map(slot=>rows().filter(j=>j.slot===slot).map(j=>j.id)),originals.map(id=>[id]));
+  release();await Promise.all([...runs,...callbacks]);
+  await waitFor(()=>slots.every(slot=>summary(slot)[0]?.inserted),'All original bitmaps attach');
+  assert.equal(renders-before,3);assert.equal(m.metadata.swarm_studio_tagged_images.length,3);
+  for(let i=0;i<slots.length;i++){const job=rows().find(j=>j.slot===slots[i]);assert.equal(job.id,originals[i]);assert.equal(job.generationId,g);assert.equal(job.fullMatch,raw[i]);assert.equal(job.attachmentFullMatch,saved[i]);assert.equal(job.swipeId,0);}
+  assert.doesNotMatch(m.content,/<swarm-image/);
+ }finally{release();await Promise.allSettled([...runs,...callbacks]);spindle.imageGen.generateStream=provider}
+ console.log('OWNERSHIP live three-slot saved-source replay passed');
+}
+// A changed packet without terminal proof is not a new request and cannot
+// by itself bind a generation. Correct native proof recovers the first bitmap.
+{
+ const slot='audit-changed-unproved',raw=tag(slot,'raw'),saved=tag(slot,'committed'),g='changed-unproved-g',before=renders;
+ const m=add('changed-unproved','');await submit(m.id,raw,{generationId:g,isStreaming:true,swipeId:0});
+ const first=onlyDraft(slot,before);m.content=saved;
+ await submit(m.id,saved,{isStreaming:false,swipeId:0});assert.equal(onlyDraft(slot,before),first);assert.equal(summary(slot)[0].inserted,false);assert.equal(m.content,saved);
+ eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:m.id,generationId:g,content:saved,swipeId:0},'user-1');
+ await waitFor(()=>summary(slot)[0]?.inserted,'Native exact saved snapshot establishes rewritten attachment');assert.equal(onlyDraft(slot,before),first);
+ const committed=rows().find(j=>j.slot===slot);assert.equal(committed.fullMatch,raw);assert.equal(committed.attachmentFullMatch,saved);
+ // After restart, replaying the saved packet still cannot render again, even
+ // when the host callback has no generation ID. Attachment uses canonical text.
+ m.content=saved;m.metadata={};userFiles.set('tagged-image-jobs.json',rows().map(j=>j.id===committed.id?{...j,inserted:false}:j));
+ await import('../dist/backend.js?ownership-rewritten-restart');
+ await submit(m.id,saved,{isStreaming:false,swipeId:0});await waitFor(()=>summary(slot)[0]?.inserted,'Canonical packet persisted across restart');
+ assert.equal(onlyDraft(slot,before),first);assert.match(m.content,/data-swarm-studio-image/);
+ log('changed packet without proof, canonical recovery and restart',slot,before);
+}
+// Duplicate explicit slots in one reply are ambiguous, including differently
+// authored packets. A changed output mode also cannot borrow a reservation.
+for(const kind of ['duplicate','output-mode']){
+ const slot='audit-changed-'+kind,raw=tag(slot,'raw'),saved=tag(slot,'committed'),g='changed-'+kind+'-g',before=renders;
+ const m=add('changed-'+kind,'');await submit(m.id,raw,{generationId:g,isStreaming:true,swipeId:0});
+ const final=kind==='duplicate'?saved+' and '+tag(slot,'other packet'):saved.replace('aspect="4:3"','aspect="4:3" output="url"');m.content=final;
+ eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:m.id,generationId:g,content:final,swipeId:0},'user-1');await pause();
+ await submit(m.id,kind==='duplicate'?saved:final,{isStreaming:false,swipeId:0});
+ onlyDraft(slot,before);assert.equal(summary(slot)[0].inserted,false);assert.equal(m.content,final);
+ log('unsafe changed slot '+kind,slot,before);
+}
+// A matching slot on another alternative is not proof that the generation
+// belongs to it. A native terminal lacking a swipe may not adopt an ambiguous
+// pre-save rewrite. A later authoritative exact snapshot may resolve it.
+{
+ const slot='audit-ambiguous-rewrite',raw=tag(slot,'raw'),saved=tag(slot,'committed'),g='ambiguous-rewrite-g',before=renders;
+ const m=add('ambiguous-rewrite','');await submit(m.id,raw,{generationId:g,isStreaming:true,swipeId:0});
+ m.swipes=[saved,tag(slot,'other swipe')];m.swipe_id=0;m.content=saved;
+ eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:m.id,generationId:g,content:raw},'user-1');await pause();
+ await submit(m.id,saved,{isStreaming:false,swipeId:0});onlyDraft(slot,before);assert.equal(summary(slot)[0].inserted,false);
+ eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:m.id,generationId:g,content:saved,swipeId:0},'user-1');
+ await waitFor(()=>summary(slot)[0]?.inserted,'Exact corrected terminal owns swipe zero');assert.equal(m.swipes[1],tag(slot,'other swipe'));
+ // A new explicit generation on another swipe gets its own image.
+ const next=m.swipes[1];m.swipe_id=1;m.content=next;await submit(m.id,next,{generationId:g+'-new',isStreaming:true,swipeId:1});
+ eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:m.id,generationId:g+'-new',content:next,swipeId:1},'user-1');
+ await waitFor(()=>summary(slot).filter(j=>j.inserted).length===2,'New swipe remains independent');assert.equal(renders-before,2);assert.notEqual(m.swipes[0],m.swipes[1]);
+ log('ambiguous rewritten swipes and independent new generation',slot,before);
+}
+// Native generation proof can block duplicate dispatch even when the
+// provisional ID differs. A slot name by itself never redirects the bitmap.
+{
+ const slot='audit-rewrite-provisional',raw=tag(slot,'raw'),saved=tag(slot,'committed'),g='rewrite-provisional-g',before=renders;
+ await submit('inline-stream:'+g,raw,{generationId:g,isStreaming:true,swipeId:0});const first=onlyDraft(slot,before);
+ const m=add('rewrite-provisional-final',saved,[saved]);
+ eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:m.id,generationId:g,content:raw,swipeId:0},'user-1');await pause();
+ await submit(m.id,saved,{isStreaming:false,swipeId:0});assert.equal(onlyDraft(slot,before),first);assert.equal(summary(slot)[0].inserted,false);
+ eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:m.id,generationId:g,content:saved,swipeId:0},'user-1');
+ await waitFor(()=>summary(slot)[0]?.inserted,'Authoritative exact saved reply corrects provisional ID and packet');assert.equal(onlyDraft(slot,before),first);assert.equal(summary(slot)[0].owner,m.id);
+ log('changed packet with different provisional owner',slot,before);
+}
+// Saved-source can precede the native end event. Its exact current packet is
+// only a candidate until the authoritative generation boundary arrives.
+{
+ const slot='audit-saved-before-end',raw=tag(slot,'raw'),saved=tag(slot,'committed'),g='saved-before-end-g',before=renders;
+ const m=add('saved-before-end','');await submit(m.id,raw,{generationId:g,isStreaming:true,swipeId:0});const first=onlyDraft(slot,before);
+ m.content=saved;await submit(m.id,saved,{isStreaming:false,swipeId:0});await submit(m.id,saved,{isStreaming:true,swipeId:0});
+ assert.equal(onlyDraft(slot,before),first);assert.equal(summary(slot)[0].inserted,false);
+ eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:m.id,generationId:g,content:raw},'user-1');
+ await waitFor(()=>summary(slot)[0]?.inserted,'Saved callback candidate reconciles when native terminal arrives');assert.equal(onlyDraft(slot,before),first);
+ log('saved-source before native end and unscoped changed streaming replay',slot,before);
+}
 console.log('OWNERSHIP regressions completed');

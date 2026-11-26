@@ -3257,6 +3257,12 @@ function taggedAdmissionKey(userId, chatId) {
 }
 const removedTaggedJobs = new Set();
 const settledTaggedSources = new Map();
+function applyTaggedSourceSettlement(job, settled) {
+    job.awaitingSource = false;
+    job.messageId = settled.messageId;
+    job.swipeId = settled.swipeId;
+    if (settled.attachmentFullMatch) job.attachmentFullMatch = settled.attachmentFullMatch;
+}
 const taggedTerminalSources = new Map();
 const taggedTerminalCandidates = new Map();
 function rememberTaggedTerminal(key, candidate) {
@@ -3277,22 +3283,78 @@ function rememberTaggedTerminal(key, candidate) {
     }
     return true;
 }
-function traceTaggedLifecycle(action, detail, reason) {
-    const { chatId, messageId, generationId, slot, swipeId, id, clientJobId, imageId } = detail;
+const studioDiagnosticLimit = 1000;
+const studioDiagnosticScopeLimit = 8;
+const studioDiagnosticCharacterLimit = 512 * 1024;
+const studioDiagnosticEpoch = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+let studioDiagnosticScopeSerial = 0;
+const studioDiagnosticCaptures = new Map();
+function recordStudioDiagnostic(kind, fields, userId) {
+    let line;
     try {
-        spindle.log.info(`[Swarm Studio inline] ${JSON.stringify({
-            action,
-            reason,
-            chatId,
-            messageId,
-            generationId,
-            slot,
-            swipeId,
-            jobId: id,
-            attemptId: clientJobId,
-            imageId
-        })}`);
+        line = `[Swarm Studio ${kind}] ${JSON.stringify(fields)}`;
+    } catch  {
+        return;
+    }
+    try {
+        if (userId && line.length <= 8192) {
+            let capture = studioDiagnosticCaptures.get(userId);
+            if (!capture) capture = {
+                id: `${studioDiagnosticEpoch}-${++studioDiagnosticScopeSerial}`,
+                next: 1,
+                lines: [],
+                characters: 0
+            };
+            studioDiagnosticCaptures.delete(userId);
+            studioDiagnosticCaptures.set(userId, capture);
+            if (studioDiagnosticCaptures.size > studioDiagnosticScopeLimit) studioDiagnosticCaptures.delete(studioDiagnosticCaptures.keys().next().value);
+            capture.lines.push(line);
+            capture.next++;
+            capture.characters += line.length;
+            while(capture.lines.length > studioDiagnosticLimit || capture.characters > studioDiagnosticCharacterLimit){
+                capture.characters -= capture.lines.shift().length;
+            }
+        }
     } catch  {}
+    try {
+        spindle.log.info(line);
+    } catch  {}
+}
+function readStudioDiagnostics(userId, captureId, after) {
+    const capture = userId ? studioDiagnosticCaptures.get(userId) : undefined;
+    const last = capture ? capture.next - 1 : 0;
+    const first = capture ? capture.next - capture.lines.length : 1;
+    const cursor = typeof after === "number" && Number.isSafeInteger(after) ? after : -1;
+    const reset = captureId !== (capture?.id || "") || cursor < first - 1 || cursor > last;
+    return {
+        available: Boolean(userId),
+        captureId: capture?.id || "",
+        reset,
+        lastSequence: last,
+        dropped: first - 1,
+        limit: studioDiagnosticLimit,
+        lines: capture ? capture.lines.slice(reset ? 0 : cursor - first + 1) : []
+    };
+}
+function traceTaggedLifecycle(action, detail, reason, userId) {
+    const { chatId, messageId, generationId, slot, swipeId, id, clientJobId, imageId } = detail;
+    const packetFingerprint = detail.fullMatch ? stableTextHash(taggedPacketIdentity(detail.fullMatch)) : undefined;
+    const attachmentPacketFingerprint = detail.attachmentFullMatch ? stableTextHash(taggedPacketIdentity(detail.attachmentFullMatch)) : undefined;
+    recordStudioDiagnostic("inline", {
+        action,
+        atMs: Date.now(),
+        reason,
+        chatId,
+        messageId,
+        generationId,
+        slot,
+        swipeId,
+        jobId: id,
+        attemptId: clientJobId,
+        imageId,
+        packetFingerprint,
+        attachmentPacketFingerprint
+    }, userId);
 }
 const taggedTerminalSettlements = new Map();
 function taggedTerminalKey(userId, chatId, generationId) {
@@ -5650,16 +5712,155 @@ function normalizePromptSpaces(value) {
     }
     return text.replace(/\u2800/g, " ");
 }
-async function generateWithProgress(input, controller, clientJobId, userId, onProgress) {
-    controller.signal.throwIfAborted();
-    const studioMetadata = await awaitGenerationTask(controller.signal, ()=>tagStudioGeneration(input, userId));
-    const result = await executeGenerationWithProgress(input, controller, clientJobId, userId, onProgress);
+function traceProviderTiming(action, fields, userId) {
+    recordStudioDiagnostic("timing", {
+        action,
+        atMs: Date.now(),
+        ...fields
+    }, userId);
+}
+function providerClock() {
+    return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+function providerElapsed(start) {
+    return Math.max(0, Math.round(providerClock() - start));
+}
+function createProviderTiming(input, clientJobId, userId) {
+    const started = providerClock();
+    const stage = studioGenerationStage(asString(input.studioStage) || "general_generation", asString(input.studioSurface));
+    const identity = {
+        attemptId: clientJobId,
+        stage,
+        parentImageId: asString(input.studioParentImageId) || undefined
+    };
+    let dispatchAt, previousEventAt, firstEventMs;
+    let firstProgressMs, lastProgressMs, firstPreviewMs;
+    let eventCount = 0, progressCount = 0, previewCount = 0, maxEventGapMs = 0, maxReadWaitMs = 0, maxForwardMs = 0;
+    let lastStep = 0, lastTotal = 0, previousStep, previousTotal, previousNode = "";
+    let transport = "not-dispatched", phase = "metadata", nearEndSeen = false;
+    const sinceDispatch = ()=>dispatchAt === undefined ? undefined : providerElapsed(dispatchAt);
+    const emit = (action, fields = {})=>traceProviderTiming(action, {
+            ...identity,
+            elapsedMs: providerElapsed(started),
+            sinceDispatchMs: sinceDispatch(),
+            ...fields
+        }, userId);
     return {
-        ...result,
-        studioMetadata
+        emit,
+        dispatch (mode) {
+            transport = mode;
+            phase = "provider";
+            dispatchAt = providerClock();
+            emit("provider-dispatch", {
+                transport
+            });
+        },
+        read (waitStarted) {
+            maxReadWaitMs = Math.max(maxReadWaitMs, providerElapsed(waitStarted));
+        },
+        event () {
+            const now = providerClock();
+            eventCount++;
+            if (previousEventAt !== undefined) maxEventGapMs = Math.max(maxEventGapMs, Math.max(0, Math.round(now - previousEventAt)));
+            previousEventAt = now;
+            if (firstEventMs === undefined) {
+                firstEventMs = sinceDispatch();
+                emit("provider-first-event");
+            }
+        },
+        progress (data, explicitStep) {
+            if (data.preview) {
+                previewCount++;
+                if (firstPreviewMs === undefined) {
+                    firstPreviewMs = sinceDispatch();
+                    emit("provider-first-preview");
+                }
+            }
+            if (!explicitStep || !Number.isFinite(data.step) || !Number.isFinite(data.totalSteps) || data.totalSteps <= 0) return;
+            if (data.step === previousStep && data.totalSteps === previousTotal && data.nodeId === previousNode) return;
+            previousStep = data.step;
+            previousTotal = data.totalSteps;
+            previousNode = data.nodeId;
+            lastStep = data.step;
+            lastTotal = data.totalSteps;
+            progressCount++;
+            lastProgressMs = sinceDispatch();
+            if (firstProgressMs === undefined) {
+                firstProgressMs = lastProgressMs;
+                emit("provider-first-progress", {
+                    step: data.step,
+                    totalSteps: data.totalSteps
+                });
+            }
+            if (!nearEndSeen && data.step / data.totalSteps >= .9) {
+                nearEndSeen = true;
+                emit("provider-near-end", {
+                    step: data.step,
+                    totalSteps: data.totalSteps
+                });
+            }
+        },
+        forward (start) {
+            maxForwardMs = Math.max(maxForwardMs, providerElapsed(start));
+        },
+        finish (outcome, result) {
+            const lastProgressToResultMs = lastProgressMs === undefined || dispatchAt === undefined ? undefined : Math.max(0, providerElapsed(dispatchAt) - lastProgressMs);
+            emit("provider-summary", {
+                outcome,
+                phase,
+                transport,
+                firstEventMs,
+                firstProgressMs,
+                lastProgressMs,
+                firstPreviewMs,
+                eventCount,
+                progressCount,
+                previewCount,
+                maxEventGapMs,
+                maxReadWaitMs,
+                maxForwardMs,
+                lastStep,
+                lastTotal,
+                lastProgressToResultMs,
+                imageId: asString(result?.imageId) || undefined
+            });
+        }
     };
 }
-async function executeGenerationWithProgress(input, controller, clientJobId, userId, onProgress) {
+function traceSwarmReportedTiming(attemptId, timing, imageId, userId) {
+    const seconds = (value)=>{
+        const match = /^\s*(\d+(?:\.\d+)?)\s*(?:s|sec(?:ond)?s?)?\s*$/i.exec(value);
+        return match && Number.isFinite(Number(match[1])) ? Number(match[1]) : undefined;
+    };
+    traceProviderTiming("swarm-reported-timing", {
+        attemptId,
+        imageId,
+        source: timing.source,
+        prepSeconds: timing.source === "swarm" ? seconds(timing.prep) : undefined,
+        generationSeconds: timing.source === "swarm" ? seconds(timing.generation) : undefined
+    }, userId);
+}
+async function generateWithProgress(input, controller, clientJobId, userId, onProgress) {
+    controller.signal.throwIfAborted();
+    const timing = createProviderTiming(input, clientJobId, userId);
+    timing.emit("metadata-start");
+    try {
+        const studioMetadata = await awaitGenerationTask(controller.signal, ()=>tagStudioGeneration(input, userId));
+        timing.emit("metadata-ready", {
+            assetId: studioMetadata.studio_asset_id
+        });
+        const result = await executeGenerationWithProgress(input, controller, clientJobId, userId, onProgress, timing);
+        timing.finish("returned", result);
+        return {
+            ...result,
+            studioMetadata
+        };
+    } catch (error) {
+        timing.finish(controller.signal.aborted || isAbortError(error) ? "aborted" : "error");
+        throw error;
+    }
+}
+async function executeGenerationWithProgress(input, controller, clientJobId, userId, onProgress, timing = createProviderTiming(input, clientJobId, userId)) {
     input.prompt = normalizePromptSpaces(input.prompt);
     input.negativePrompt = normalizePromptSpaces(input.negativePrompt);
     const providerInput = {
@@ -5679,13 +5880,16 @@ async function executeGenerationWithProgress(input, controller, clientJobId, use
             legacyGenerationFallbackLogged = true;
             spindle.log.warn("[Swarm Studio] Lumiverse imageGen.generateStream is unavailable; using legacy generation without AbortSignal.");
         }
+        timing.dispatch("legacy");
         return asRecord(await awaitGenerationTask(controller.signal, ()=>spindle.imageGen.generate(providerInput)));
     }
     const generationInput = {
         ...providerInput,
         signal: controller.signal
     };
+    timing.dispatch("stream");
     const iterator = await awaitGenerationTask(controller.signal, ()=>streamFactory.call(spindle.imageGen, generationInput));
+    timing.emit("provider-stream-open");
     if (!iterator || typeof iterator.next !== "function") {
         throw new Error("Lumiverse returned an invalid image generation stream.");
     }
@@ -5693,7 +5897,10 @@ async function executeGenerationWithProgress(input, controller, clientJobId, use
     let lastTotalSteps = 0;
     let streamedResult = null;
     while(true){
+        const readStarted = providerClock();
         const next = await awaitGenerationTask(controller.signal, ()=>iterator.next());
+        timing.read(readStarted);
+        timing.event();
         if (next.done) {
             const returned = asRecord(next.value);
             if (Object.keys(returned).length) return returned;
@@ -5719,12 +5926,15 @@ async function executeGenerationWithProgress(input, controller, clientJobId, use
             preview: metadataString(chunk, "preview", "imageDataUrl", "image_data_url") || metadataString(chunkData, "preview", "imageDataUrl", "image_data_url"),
             nodeId: metadataString(chunk, "nodeId", "node_id") || metadataString(chunkData, "nodeId", "node_id")
         };
+        timing.progress(data, metadataNumber(chunk, "step") !== null || metadataNumber(chunkData, "step") !== null);
+        const forwardStarted = providerClock();
         if (onProgress) onProgress(data);
         else spindle.sendToFrontend({
             type: "generation_progress",
             clientJobId,
             data
         }, userId);
+        timing.forward(forwardStarted);
     }
 }
 async function interruptSwarmGeneration(connection, token, userId) {
@@ -5987,6 +6197,25 @@ function matchingTaggedPackets(content, fullMatch) {
 function hasTaggedPacket(content, fullMatch) {
     return matchingTaggedPackets(content, fullMatch).length === 1;
 }
+function taggedSourcePacket(content, job, allowRewrite = false) {
+    const expected = job.attachmentFullMatch || job.fullMatch;
+    if (!allowRewrite || job.attachmentFullMatch) {
+        const exact = matchingTaggedPackets(content, expected);
+        return exact.length === 1 ? exact[0].fullMatch : undefined;
+    }
+    const original = parseSwarmImageTags(job.fullMatch)[0];
+    const slot = asString(original?.attrs.slot).trim();
+    if (!slot || cleanTagSlot(slot) !== job.slot) {
+        const exact = matchingTaggedPackets(content, expected);
+        return exact.length === 1 ? exact[0].fullMatch : undefined;
+    }
+    const named = parseSwarmImageTags(content, Infinity).filter((tag)=>cleanTagSlot(tag.attrs.slot) === job.slot);
+    if (named.length !== 1 || asString(named[0].attrs.slot).trim() !== slot || cleanTaggedImageOutput(named[0].attrs.output) !== job.output) return undefined;
+    return named[0].fullMatch;
+}
+function taggedPacketMatchesJob(job, identity) {
+    return taggedPacketIdentity(job.fullMatch) === identity || !!job.attachmentFullMatch && taggedPacketIdentity(job.attachmentFullMatch) === identity;
+}
 function sameTaggedTerminalText(a, b) {
     const canonical = (value)=>{
         const source = value.replace(/\r\n/g, "\n").trim();
@@ -6053,6 +6282,7 @@ function cleanTaggedImageJob(value) {
         aspect: cleanAspect(record.aspect) || "4:3",
         alt: asString(record.alt).slice(0, 300),
         fullMatch: asString(record.fullMatch).slice(0, 24_000),
+        attachmentFullMatch: asString(record.attachmentFullMatch).slice(0, 24_000) || undefined,
         swipeId: cleanTaggedSwipeId(record.swipeId),
         awaitingSource: record.awaitingSource === true,
         generationId: asString(record.generationId).slice(0, 200) || undefined,
@@ -6126,9 +6356,7 @@ async function persistTaggedSourceSettlement(jobId, userId) {
         const jobs = await loadTaggedImageJobs(userId);
         const job = jobs.find((candidate)=>candidate.id === jobId);
         if (!job || !job.awaitingSource) return job;
-        job.awaitingSource = false;
-        job.messageId = settled.messageId;
-        job.swipeId = settled.swipeId;
+        applyTaggedSourceSettlement(job, settled);
         job.updatedAt = Date.now();
         await persistTaggedImageJobs(jobs, userId);
         return job;
@@ -6143,7 +6371,7 @@ async function adoptTaggedGeneration(jobId, generationId, userId) {
             job.generationId = generationId;
             job.updatedAt = Date.now();
             await persistTaggedImageJobs(rows, userId);
-            traceTaggedLifecycle("generation-adopted", job);
+            traceTaggedLifecycle("generation-adopted", job, undefined, userId);
         }
         return job;
     });
@@ -6151,21 +6379,14 @@ async function adoptTaggedGeneration(jobId, generationId, userId) {
 async function upsertTaggedImageJob(job, userId) {
     return withTaggedMessageFinalizeLock(`tagged-job-store:${userId || "default"}`, async ()=>{
         const settled = settledTaggedSources.get(job.id);
-        if (settled) {
-            job.awaitingSource = false;
-            job.messageId = settled.messageId;
-            job.swipeId = settled.swipeId;
-        }
+        if (settled) applyTaggedSourceSettlement(job, settled);
         if (removedTaggedJobs.has(job.id)) return job;
         job.updatedAt = Date.now();
         const rows = await loadTaggedImageJobs(userId);
         const current = rows.find((candidate)=>candidate.id === job.id);
         if (current?.generationId) job.generationId = current.generationId;
-        if (current && !current.awaitingSource && job.awaitingSource) {
-            job.awaitingSource = false;
-            job.messageId = current.messageId;
-            job.swipeId = current.swipeId;
-        }
+        if (current && !current.awaitingSource && job.awaitingSource) applyTaggedSourceSettlement(job, current);
+        if (current?.attachmentFullMatch) job.attachmentFullMatch = current.attachmentFullMatch;
         const jobs = rows.filter((candidate)=>candidate.id !== job.id);
         jobs.unshift(job);
         await persistTaggedImageJobs(jobs, userId);
@@ -6489,11 +6710,11 @@ function parseTagAttributes(raw) {
     }
     return attrs;
 }
-function parseSwarmImageTags(content) {
+function parseSwarmImageTags(content, limit = 6) {
     const tags = [];
     const pattern = /<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi;
     let match;
-    while((match = pattern.exec(content)) && tags.length < 6){
+    while((match = pattern.exec(content)) && tags.length < limit){
         const attrs = parseTagAttributes(match[1]);
         const strict = attrs.request?.toLowerCase() === "generate";
         const legacy = !attrs.request && Boolean(attrs.slot && (attrs.aspect || attrs.alt));
@@ -8088,8 +8309,8 @@ function taggedJobPublic(job) {
     return {
         id: job.id,
         key: job.key,
-        tagFingerprint: stableTextHash(job.fullMatch),
-        packetFingerprint: stableTextHash(taggedPacketIdentity(job.fullMatch)),
+        tagFingerprint: stableTextHash(job.attachmentFullMatch || job.fullMatch),
+        packetFingerprint: stableTextHash(taggedPacketIdentity(job.attachmentFullMatch || job.fullMatch)),
         draftImageId: job.draftImage?.id || "",
         finalImageId: job.finalImage?.id || "",
         swipeId: job.swipeId,
@@ -8167,7 +8388,7 @@ function taggedImageAttachment(message, job) {
     return asRecord(Array.isArray(attachments) ? attachments.find((item)=>asString(item?.jobId) === job.id) : null);
 }
 function replaceTaggedImagePlaceholder(content, job, markup, previousImageUrl = "") {
-    const matches = matchingTaggedPackets(content, job.fullMatch);
+    const matches = matchingTaggedPackets(content, job.attachmentFullMatch || job.fullMatch);
     if (matches.length === 1) return {
         content: content.replace(matches[0].fullMatch, ()=>markup),
         replaced: true
@@ -8266,7 +8487,7 @@ function taggedMessageMatchScore(message, job) {
         if (previousImageUrl && content.includes(previousImageUrl)) return 4;
     }
     if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) return 4;
-    if (job.fullMatch && hasTaggedPacket(content, job.fullMatch)) return 3;
+    if (job.fullMatch && hasTaggedPacket(content, job.attachmentFullMatch || job.fullMatch)) return 3;
     return 0;
 }
 function findTaggedMessageTarget(messages, job) {
@@ -8369,11 +8590,7 @@ async function removeTaggedImageFromChat(job, userId) {
 }
 async function finalizeTaggedImageJob(job, userId, expectedImageId) {
     const settled = settledTaggedSources.get(job.id);
-    if (settled) {
-        job.awaitingSource = false;
-        job.messageId = settled.messageId;
-        job.swipeId = settled.swipeId;
-    }
+    if (settled) applyTaggedSourceSettlement(job, settled);
     if (job.awaitingSource || removedTaggedJobs.has(job.id) || !job.imageUrl || !spindle.permissions.has("chat_mutation")) return false;
     const initialMessages = await spindle.chat.getMessages(job.chatId);
     const initialTarget = findTaggedMessageTarget(initialMessages, job);
@@ -8414,7 +8631,7 @@ async function finalizeTaggedImageJob(job, userId, expectedImageId) {
         }
         const metadata = asRecord(target.metadata);
         const previous = Array.isArray(metadata.swarm_studio_tagged_images) ? metadata.swarm_studio_tagged_images.filter((item)=>asString(item?.jobId) !== job.id) : [];
-        traceTaggedLifecycle("attachment-write-start", job);
+        traceTaggedLifecycle("attachment-write-start", job, undefined, userId);
         await spindle.chat.updateMessage(job.chatId, job.messageId, {
             ...taggedMessagePatch(target, replacement.content),
             metadata: {
@@ -8440,17 +8657,23 @@ async function finalizeTaggedImageJob(job, userId, expectedImageId) {
         await upsertTaggedImageJob(job, userId);
         sendTaggedJobState(job, userId);
         sendTaggedMessageReconciliation(job, replacement.content, content, userId);
-        traceTaggedLifecycle("attached", job);
+        traceTaggedLifecycle("attached", job, undefined, userId);
         return true;
     });
 }
-async function resolveTaggedTerminalSource(job, userId, sourceMessages) {
+const taggedSavedSourceCandidates = new Map();
+async function resolveTaggedTerminalSource(job, userId, sourceMessages, savedSource) {
     if (!job.awaitingSource || !job.generationId) return;
+    if (savedSource && savedSource.messageId === (job.sourceMessageId || job.messageId)) {
+        taggedSavedSourceCandidates.delete(job.id);
+        taggedSavedSourceCandidates.set(job.id, savedSource);
+        if (taggedSavedSourceCandidates.size > 64) taggedSavedSourceCandidates.delete(taggedSavedSourceCandidates.keys().next().value);
+    }
+    savedSource = savedSource || taggedSavedSourceCandidates.get(job.id);
     const alreadySettled = settledTaggedSources.get(job.id);
     if (alreadySettled) {
-        job.awaitingSource = false;
-        job.messageId = alreadySettled.messageId;
-        job.swipeId = alreadySettled.swipeId;
+        applyTaggedSourceSettlement(job, alreadySettled);
+        taggedSavedSourceCandidates.delete(job.id);
         return;
     }
     const key = taggedTerminalKey(userId, job.chatId, job.generationId);
@@ -8469,17 +8692,18 @@ async function resolveTaggedTerminalSource(job, userId, sourceMessages) {
         if (owners.size === 1) {
             const owner = owners.values().next().value;
             const target = messages.find((item)=>asString(item.id) === owner.messageId);
-            const matches = taggedMessageSources(target, owner.swipeId).filter((item)=>(!item.role || item.role === "assistant") && item.is_user !== true && hasTaggedPacket(asString(item.content), job.fullMatch));
+            const matches = taggedMessageSources(target, owner.swipeId).filter((item)=>(!item.role || item.role === "assistant") && item.is_user !== true && taggedSourcePacket(asString(item.content), job));
             if (matches.length === 1) {
-                const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId);
-                settledTaggedSources.set(job.id, {
+                const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId) ?? 0;
+                const settlement = {
                     messageId: owner.messageId,
-                    swipeId
-                });
-                job.awaitingSource = false;
-                job.messageId = owner.messageId;
-                job.swipeId = swipeId;
-                traceTaggedLifecycle("owner-verified", job, "durable-sibling");
+                    swipeId,
+                    attachmentFullMatch: taggedSourcePacket(asString(matches[0].content), job)
+                };
+                settledTaggedSources.set(job.id, settlement);
+                applyTaggedSourceSettlement(job, settlement);
+                taggedSavedSourceCandidates.delete(job.id);
+                traceTaggedLifecycle("owner-verified", job, "durable-sibling", userId);
                 wakeTaggedAttachment(job.id);
             }
             return;
@@ -8494,20 +8718,37 @@ async function resolveTaggedTerminalSource(job, userId, sourceMessages) {
     ];
     const proofs = new Map();
     for (const terminal of candidates){
-        if (terminal.content && !hasTaggedPacket(terminal.content, job.fullMatch)) continue;
+        const mayRewrite = terminal.verified === true || terminal.authoritative === true;
+        const terminalPacket = terminal.content ? taggedSourcePacket(terminal.content, job, mayRewrite) : undefined;
+        if (terminal.content && !terminalPacket) continue;
         const target = messages.find((item)=>asString(item.id) === terminal.messageId);
         if (!target || target.role && target.role !== "assistant" || target.is_user === true) continue;
         const sources = taggedMessageSources(target, terminal.swipeId);
-        const matches = sources.filter((item)=>terminal.verified || !terminal.content ? hasTaggedPacket(asString(item.content), job.fullMatch) : sameTaggedTerminalText(asString(item.content), terminal.content));
+        const uniqueSlotSource = sources.filter((item)=>taggedSourcePacket(asString(item.content), job, mayRewrite)).length === 1;
+        const matches = sources.flatMap((item)=>{
+            const source = asString(item.content);
+            const attachmentFullMatch = terminal.verified && terminalPacket ? matchingTaggedPackets(source, terminalPacket).length === 1 ? matchingTaggedPackets(source, terminalPacket)[0].fullMatch : undefined : taggedSourcePacket(source, job, mayRewrite && !!terminal.content);
+            if (!attachmentFullMatch) return [];
+            const swipeId = cleanTaggedSwipeId(item.studioSwipeId) ?? 0;
+            const corrected = !!savedSource && terminal.authoritative === true && !!terminal.content && terminal.messageId === savedSource.messageId && (job.sourceMessageId || job.messageId) === terminal.messageId && uniqueSlotSource && job.swipeId === swipeId && (savedSource.swipeId === undefined || savedSource.swipeId === swipeId) && taggedPacketIdentity(attachmentFullMatch) === taggedPacketIdentity(savedSource.fullMatch);
+            if (!terminal.verified && terminal.content && !sameTaggedTerminalText(source, terminal.content) && !corrected) return [];
+            return [
+                {
+                    swipeId,
+                    attachmentFullMatch,
+                    savedContent: source
+                }
+            ];
+        });
         if (matches.length !== 1) continue;
-        const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId);
+        const proof = matches[0];
         const ownerKey = JSON.stringify([
             terminal.messageId,
-            swipeId
+            proof.swipeId
         ]);
         if (!proofs.get(ownerKey)?.terminal.authoritative || terminal.authoritative) proofs.set(ownerKey, {
             terminal,
-            swipeId
+            ...proof
         });
     }
     const nativeProofs = [
@@ -8517,19 +8758,22 @@ async function resolveTaggedTerminalSource(job, userId, sourceMessages) {
         ...proofs.values()
     ];
     if (eligible.length !== 1) return;
-    const { terminal, swipeId } = eligible[0];
+    const { terminal, swipeId, attachmentFullMatch, savedContent } = eligible[0];
+    const rewritten = taggedPacketIdentity(attachmentFullMatch) !== taggedPacketIdentity(job.fullMatch);
+    if (!terminal.verified) terminal.content = savedContent;
     terminal.verified = true;
     terminal.swipeId = swipeId;
     taggedTerminalSources.set(key, terminal);
     taggedTerminalCandidates.delete(key);
-    settledTaggedSources.set(job.id, {
+    const settlement = {
         messageId: terminal.messageId,
-        swipeId
-    });
-    job.awaitingSource = false;
-    job.messageId = terminal.messageId;
-    job.swipeId = swipeId;
-    traceTaggedLifecycle("owner-verified", job);
+        swipeId,
+        attachmentFullMatch
+    };
+    settledTaggedSources.set(job.id, settlement);
+    applyTaggedSourceSettlement(job, settlement);
+    taggedSavedSourceCandidates.delete(job.id);
+    traceTaggedLifecycle("owner-verified", job, rewritten ? "saved-slot-reconciled" : undefined, userId);
     wakeTaggedAttachment(job.id);
 }
 async function finalizeTaggedImageJobWithRetry(job, userId) {
@@ -8552,11 +8796,7 @@ async function finalizeTaggedImageJobWithRetry(job, userId) {
                     return true;
                 }
                 if (latest.generationId) job.generationId = latest.generationId;
-                if (!latest.awaitingSource) {
-                    job.awaitingSource = false;
-                    job.messageId = latest.messageId;
-                    job.swipeId = latest.swipeId;
-                }
+                if (!latest.awaitingSource) applyTaggedSourceSettlement(job, latest);
                 await resolveTaggedTerminalSource(job, userId);
                 if (await finalizeTaggedImageJob(job, userId)) return true;
             } catch (error) {
@@ -8564,7 +8804,7 @@ async function finalizeTaggedImageJobWithRetry(job, userId) {
             }
         }
         if (removedTaggedJobs.has(job.id)) return false;
-        traceTaggedLifecycle("attachment-pending", job, job.awaitingSource ? "owner-unverified" : lastError ? "host-write-error" : "packet-not-found");
+        traceTaggedLifecycle("attachment-pending", job, job.awaitingSource ? "owner-unverified" : lastError ? "host-write-error" : "packet-not-found", userId);
         if (job.awaitingSource && job.generationId && !taggedTerminalSources.has(taggedTerminalKey(userId, job.chatId, job.generationId))) return false;
         job.inserted = false;
         job.error = lastError ? `Image generated, but Lumiverse could not attach it to the chat yet: ${lastError}` : "Image generated, but the chat message was not ready for attachment. Use Attach image to try again.";
@@ -8583,6 +8823,7 @@ async function finalizeTaggedImageJobWithRetry(job, userId) {
 async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}) {
     if (runningTaggedJobs.has(job.id)) return;
     runningTaggedJobs.add(job.id);
+    traceTaggedLifecycle("prepare-start", job, undefined, userId);
     let controller;
     let controllerKey = "";
     try {
@@ -8726,6 +8967,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         sendTaggedJobState(job, userId);
         const source = characterLayer.animaReference;
         const renderInput = source ? await awaitGenerationTask(signal, ()=>withAnimaReference(input, source, userId)) : input;
+        traceTaggedLifecycle("prepare-complete", job, undefined, userId);
         const result = await generateWithProgress({
             ...renderInput,
             studioStage: "inline_illustration",
@@ -8742,13 +8984,13 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         if (!job.imageUrl && job.imageId) job.imageUrl = `/api/v1/image-gen/results/${encodeURIComponent(job.imageId)}`;
         if (!job.imageUrl) throw new Error("Lumiverse completed the image job without returning a saved image URL.");
         savedTaggedAttempts.add(controllerKey);
-        traceTaggedLifecycle("provider-returned", job);
+        traceTaggedLifecycle("provider-returned", job, undefined, userId);
         if (generationControllers.get(controllerKey)?.controller === controller) generationControllers.delete(controllerKey);
         job.status = "ready";
         job.error = "";
         await upsertTaggedImageJob(job, userId);
         sendTaggedJobState(job, userId);
-        traceTaggedLifecycle("bitmap-saved", job);
+        traceTaggedLifecycle("bitmap-saved", job, undefined, userId);
         const draftResult = {
             ...result,
             imageId: job.imageId,
@@ -8772,11 +9014,12 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
                             ...input,
                             studioMetadata: result.studioMetadata
                         }, totalMs, userId);
+                        traceSwarmReportedTiming(job.clientJobId, timing, asString(draftResult.imageId), userId);
                         const saved = await saveGenerationRecord(draftResult, input, {
                             ...asRecord(profile?.recordHints),
                             source: "message-tag"
                         }, timing, userId);
-                        traceTaggedLifecycle("history-saved", job);
+                        traceTaggedLifecycle("history-saved", job, undefined, userId);
                         return saved;
                     })(),
                     new Promise((resolve)=>{
@@ -8951,7 +9194,7 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
     const config = await loadTagAutomationConfig(userId);
     const jobs = (await loadTaggedImageJobs(userId)).filter((job)=>job.chatId === chatId && job.slot === slot && !removedTaggedJobs.has(job.id));
     const suppliedGeneration = generationId;
-    const messages = !streaming ? await spindle.chat.getMessages(chatId) : [];
+    let messages = !streaming ? await spindle.chat.getMessages(chatId) : [];
     let message = messages.find((item)=>asString(item.id) === messageId);
     let matches = taggedMessageSources(message, swipeId).filter((item)=>(!item.role || item.role === "assistant") && item.is_user !== true && hasTaggedPacket(asString(item?.content), fullMatch));
     const defer = (reason, existing)=>{
@@ -8961,8 +9204,10 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
             generationId,
             slot,
             swipeId,
-            id: existing?.id
-        }, reason);
+            id: existing?.id,
+            fullMatch,
+            attachmentFullMatch: existing?.attachmentFullMatch
+        }, reason, userId);
         spindle.sendToFrontend({
             type: "tagged_request_deferred",
             requestId: payload?.requestId,
@@ -8976,7 +9221,7 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
         };
     };
     if (swipeId === undefined && matches.length === 1) swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId);
-    const samePacket = (job)=>taggedPacketIdentity(job.fullMatch) === packet;
+    const samePacket = (job)=>taggedPacketMatchesJob(job, packet);
     const compatibleSwipe = (job)=>job.swipeId === swipeId || job.swipeId === undefined || swipeId === undefined;
     if (!generationId) {
         const terminalMatches = [
@@ -8994,6 +9239,22 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
     const exactOwner = ownerMatches.filter((job)=>job.swipeId === swipeId);
     let job = sameGeneration || (exactOwner.length === 1 ? exactOwner[0] : ownerMatches.length === 1 ? ownerMatches[0] : undefined);
     if (!job && ownerMatches.length > 1) return defer("ambiguous-swipe");
+    if (!job && !generationId && asString(attrs.slot).trim()) {
+        const slotOwners = jobs.filter((candidate)=>{
+            if ((candidate.messageId === messageId || candidate.awaitingSource && candidate.sourceMessageId === messageId) && compatibleSwipe(candidate)) return true;
+            if (streaming || !candidate.awaitingSource || !candidate.generationId) return false;
+            const terminalKey = taggedTerminalKey(userId, chatId, candidate.generationId);
+            const terminal = taggedTerminalSources.get(terminalKey);
+            return !!terminal && (taggedTerminalCandidates.get(terminalKey) || [
+                terminal
+            ]).some((proof)=>proof.authoritative === true && proof.messageId === messageId && (proof.swipeId === undefined || proof.swipeId === swipeId) && !!proof.content && !!taggedSourcePacket(proof.content, candidate, true));
+        });
+        if (slotOwners.length > 1) return defer("ambiguous-slot-owner");
+        if (slotOwners.length === 1) {
+            if (streaming) return defer("unscoped-slot-replay", slotOwners[0]);
+            job = slotOwners[0];
+        }
+    }
     if (!job) {
         const pending = jobs.filter((candidate)=>candidate.awaitingSource && samePacket(candidate) && (!generationId || !candidate.generationId || candidate.generationId === generationId));
         if (pending.length) {
@@ -9004,10 +9265,10 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
         if (!job && !generationId && streaming && jobs.some(samePacket)) return defer("unscoped-stream-replay");
     }
     if (!job) {
-        const removed = (await loadTaggedRemovedReceipts(userId)).some((receipt)=>receipt.chatId === chatId && receipt.slot === slot && (generationId ? receipt.generationId === generationId : streaming && receipt.packetFingerprint === stableTextHash(packet)));
+        const removed = (await loadTaggedRemovedReceipts(userId)).some((receipt)=>receipt.chatId === chatId && receipt.slot === slot && (generationId ? receipt.generationId === generationId : streaming ? receipt.packetFingerprint === stableTextHash(packet) : receipt.messageId === messageId && (receipt.swipeId === swipeId || receipt.swipeId === undefined || swipeId === undefined)));
         if (removed) return defer("removed-reservation");
     }
-    if (!job && !streaming) {
+    if (!streaming && (!job || job.awaitingSource && matches.length !== 1)) {
         for (const delay of [
             100,
             250,
@@ -9015,8 +9276,8 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
         ]){
             if (matches.length) break;
             await new Promise((resolve)=>setTimeout(resolve, delay));
-            const next = await spindle.chat.getMessages(chatId);
-            message = next.find((item)=>asString(item.id) === messageId);
+            messages = await spindle.chat.getMessages(chatId);
+            message = messages.find((item)=>asString(item.id) === messageId);
             matches = taggedMessageSources(message, swipeId).filter((item)=>(!item.role || item.role === "assistant") && item.is_user !== true && hasTaggedPacket(asString(item?.content), fullMatch));
         }
         if (matches.length !== 1) return defer("saved-source-not-proven");
@@ -9030,12 +9291,16 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
         });
     }
     if (job) {
-        if (!samePacket(job) || !compatibleSwipe(job) && (!job.awaitingSource || !suppliedGeneration || streaming)) return defer("conflicting-reservation", job);
+        if (!samePacket(job) && (streaming || !job.awaitingSource || !job.generationId || matches.length !== 1) || !compatibleSwipe(job) && (!job.awaitingSource || !job.generationId || streaming)) return defer("conflicting-reservation", job);
         if (generationId && !job.generationId && job.awaitingSource) {
             job = await adoptTaggedGeneration(job.id, generationId, userId) || job;
         }
         if (!streaming && !job.inserted && job.awaitingSource) {
-            if (job.generationId) await resolveTaggedTerminalSource(job, userId, messages);
+            if (job.generationId) await resolveTaggedTerminalSource(job, userId, messages, matches.length === 1 ? {
+                messageId,
+                swipeId,
+                fullMatch
+            } : undefined);
             else if (matches.length === 1 && (job.messageId === messageId || !messages.some((item)=>asString(item.id) === job.messageId))) {
                 settledTaggedSources.set(job.id, {
                     messageId,
@@ -9049,9 +9314,11 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
                 job = await persistTaggedSourceSettlement(job.id, userId) || job;
             }
         }
+        if (!samePacket(job) || !compatibleSwipe(job)) return defer("unverified-saved-slot", job);
         const busy = runningTaggedJobs.has(job.id) || pendingTaggedJobs.has(job.id) || taggedFinalizeRetries.has(job.id) || upscalingImages.has(generationKey(userId, job.id));
         if (busy || !force || job.status !== "requested") {
             if (!busy && job.status === "ready" && !job.inserted && job.imageUrl && !job.awaitingSource) {
+                traceTaggedLifecycle("reused", job, "attachment-recovery", userId);
                 const saved = job;
                 return {
                     job: saved,
@@ -9061,7 +9328,7 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
                 };
             }
             sendTaggedJobState(job, userId);
-            traceTaggedLifecycle("reused", job);
+            traceTaggedLifecycle("reused", job, undefined, userId);
             return {
                 job
             };
@@ -9105,7 +9372,7 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
         } catch  {}
         await upsertTaggedImageJob(reserved, userId);
         sendTaggedJobState(reserved, userId);
-        traceTaggedLifecycle("reserved", reserved, streaming ? "stream" : "saved-source");
+        traceTaggedLifecycle("reserved", reserved, streaming ? "stream" : "saved-source", userId);
     } catch (error) {
         pendingTaggedJobs.delete(reserved.id);
         throw error;
@@ -9726,6 +9993,12 @@ export function encodedImageDimensions(bytes, mime) {
 }
 async function upscaleOutput(imageId, connection, userId, job, controller = new AbortController(), requestedSettings, operation, onProgress, surface = job ? "inline" : "main_studio") {
     const { signal } = controller;
+    const upscalePreparationStarted = providerClock();
+    traceProviderTiming("derivative-prepare-start", {
+        parentImageId: imageId,
+        stage: studioGenerationStage(operation === "remove-background" ? "background_removed" : "upscale_result", surface),
+        relatedAttemptId: job?.clientJobId
+    }, userId);
     if (!spindle.permissions.has("images") || !spindle.permissions.has("image_gen")) {
         throw new Error("Grant Images and Image Generation permission to upscale.");
     }
@@ -9807,6 +10080,12 @@ async function upscaleOutput(imageId, connection, userId, job, controller = new 
         }
     };
     const started = Date.now();
+    traceProviderTiming("derivative-prepare-complete", {
+        parentImageId: imageId,
+        stage: studioGenerationStage(operation === "remove-background" ? "background_removed" : "upscale_result", surface),
+        relatedAttemptId: job?.clientJobId,
+        preparationMs: providerElapsed(upscalePreparationStarted)
+    }, userId);
     const result = await generateWithProgress({
         ...input,
         userId,
@@ -11622,6 +11901,15 @@ async function handleMessage(payload, userId) {
     const requestId = asString(payload?.requestId);
     try {
         switch(type){
+            case "read_studio_diagnostics":
+                {
+                    spindle.sendToFrontend({
+                        type: "studio_diagnostics_result",
+                        requestId,
+                        data: readStudioDiagnostics(userId, payload.captureId, payload.after)
+                    }, userId);
+                    return;
+                }
             case "load_stage_direction":
             case "save_stage_direction":
                 {
@@ -13587,6 +13875,10 @@ async function handleMessage(payload, userId) {
                         nativeStream: typeof spindle.imageGen?.generateStream === "function"
                     };
                     generationControllers.set(controllerKey, controllerEntry);
+                    const manualPreparationStarted = providerClock();
+                    traceProviderTiming("manual-prepare-start", {
+                        attemptId: clientJobId
+                    }, userId);
                     if (stoppedGenerationKeys.has(controllerKey)) controller.abort("Stopped before preparation");
                     try {
                         if (!inpaint) await awaitGenerationTask(controller.signal, ()=>saveStudioGenerationProfile(Object.keys(asRecord(payload?.profileInput)).length ? payload.profileInput : input, payload?.recordHints, userId));
@@ -13647,6 +13939,10 @@ async function handleMessage(payload, userId) {
                                 } else throw new Error("Choose valid saved reference images.");
                             }
                             const renderInput = inpaint ? await awaitGenerationTask(controller.signal, ()=>prepareInpaintInput(input, inpaint, userId)) : source ? await awaitGenerationTask(controller.signal, ()=>withAnimaReference(input, source, userId)) : input;
+                            traceProviderTiming("manual-prepare-complete", {
+                                attemptId: clientJobId,
+                                preparationMs: providerElapsed(manualPreparationStarted)
+                            }, userId);
                             result = await generateWithProgress({
                                 ...renderInput,
                                 studioSurface: [
@@ -13676,6 +13972,7 @@ async function handleMessage(payload, userId) {
                                 ...input,
                                 studioMetadata: result.studioMetadata
                             }, totalMs, userId));
+                        traceSwarmReportedTiming(clientJobId, timing, asString(result.imageId), userId);
                         let record = null;
                         try {
                             record = await saveGenerationRecord(result, input, {
@@ -13712,6 +14009,10 @@ async function handleMessage(payload, userId) {
                                 outputFolders: await loadOutputFolders(userId),
                                 ...outputPage
                             }
+                        }, userId);
+                        traceProviderTiming("manual-result-published", {
+                            attemptId: clientJobId,
+                            imageId: asString(result.imageId)
                         }, userId);
                         completedGenerationKeys.add(controllerKey);
                         if (completedGenerationKeys.size > 256) completedGenerationKeys.delete(completedGenerationKeys.values().next().value);
@@ -14291,7 +14592,7 @@ async function settleTaggedImageSources(payload, userId, authoritativeEnd = fals
         messageId,
         generationId,
         swipeId: cleanTaggedSwipeId(payload?.swipeId ?? payload?.targetSwipeId)
-    }, `${authoritativeEnd ? "native" : "renderer"}:${!messageId ? "no-message-id" : !content ? "no-content" : "content-present"}`);
+    }, `${authoritativeEnd ? "native" : "renderer"}:${!messageId ? "no-message-id" : !content ? "no-content" : "content-present"}`, userId);
     if (!chatId || !messageId || content.length > 1_000_000 || !content && !(authoritativeEnd && generationId)) return;
     const key = taggedTerminalKey(userId, chatId, generationId);
     const changed = !!generationId && (!content || !!parseSwarmImageTags(content).length) && rememberTaggedTerminal(key, {
@@ -14320,7 +14621,7 @@ async function settleTaggedImageSources(payload, userId, authoritativeEnd = fals
             const allJobs = (await loadTaggedImageJobs(userId)).filter((job)=>job.chatId === chatId && !removedTaggedJobs.has(job.id));
             const pending = allJobs.filter((job)=>job.awaitingSource && (job.generationId ? job.generationId === generationId && (taggedTerminalCandidates.get(key) || [
                     taggedTerminalSources.get(key)
-                ]).some((candidate)=>candidate && (!candidate.content || hasTaggedPacket(candidate.content, job.fullMatch))) : hasTaggedPacket(content, job.fullMatch) && !allJobs.some((other)=>other.generationId === generationId && !!generationId && other.slot === job.slot && taggedPacketIdentity(other.fullMatch) === taggedPacketIdentity(job.fullMatch))));
+                ]).some((candidate)=>candidate && (!candidate.content || taggedSourcePacket(candidate.content, job, candidate.authoritative === true || candidate.verified === true))) : hasTaggedPacket(content, job.fullMatch) && !allJobs.some((other)=>other.generationId === generationId && !!generationId && other.slot === job.slot && taggedPacketIdentity(other.fullMatch) === taggedPacketIdentity(job.fullMatch))));
             if (!pending.length) return;
             const messages = await spindle.chat.getMessages(chatId);
             const message = messages.find((item)=>asString(item.id) === messageId);

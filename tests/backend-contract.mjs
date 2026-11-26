@@ -2582,7 +2582,8 @@ assert.equal(userFiles.get('tagged-image-jobs.json').filter(j=>j.generationId===
  const gen='three-saved-stopped', owner={id:'inline-stream:'+gen}
  const tags=[1,2,3].map(n=>inlineTag.replace('ordinary','stop-saved-'+n))
  const text=tags.join(' Between. '), msg={id:'three-saved-stopped-reply',role:'assistant',content:text,swipe_id:0,swipes:[text],metadata:{}}
- const savedSet=spindle.userStorage.setJson,savedStream=spindle.imageGen.generateStream
+ const savedSet=spindle.userStorage.setJson,savedStream=spindle.imageGen.generateStream,savedInfo=spindle.log.info
+ const timings=[];spindle.log.info=line=>{if(line.startsWith('[Swarm Studio timing] '))timings.push(JSON.parse(line.slice('[Swarm Studio timing] '.length)))}
  const entered=deferred(),release=deferred();let renders=0
  spindle.userStorage.setJson=async function(path,...args){if(path==='generation-records.json'){entered.resolve();await release.promise}return savedSet.call(this,path,...args)}
  spindle.imageGen.generateStream=function(input){assert.equal(input.includeDataUrl,false);const imageId='three-saved-bitmap-'+(++renders);let delivered=false;return {next(){if(delivered) return new Promise(()=>{});delivered=true;return Promise.resolve({done:false,value:{type:'done',result:{imageId,imageUrl:'/api/v1/image-gen/results/'+imageId}}})}}}
@@ -2600,8 +2601,13 @@ assert.equal(userFiles.get('tagged-image-jobs.json').filter(j=>j.generationId===
   await waitRace(()=>jobs().length===3&&jobs().every(j=>j.inserted),'All three attach during stalled history after stop')
   assert.equal(msg.metadata.swarm_studio_tagged_images.length,3);assert.ok(jobs().every(j=>msg.content.includes(j.imageUrl)))
   assert.equal(renders,3)
- } finally {release.resolve();spindle.userStorage.setJson=savedSet;spindle.imageGen.generateStream=savedStream;await runs}
+ } finally {release.resolve();spindle.userStorage.setJson=savedSet;spindle.imageGen.generateStream=savedStream;try{await runs}finally{spindle.log.info=savedInfo}}
  assert.ok(jobs().every(j=>userFiles.get('generation-records.json').some(r=>r.imageId===j.imageId)))
+ for(const job of jobs()){
+  const events=timings.filter(e=>e.attemptId===job.clientJobId)
+  assert.equal(events.filter(e=>e.action==='provider-dispatch').length,1)
+  const results=events.filter(e=>e.action==='provider-summary');assert.equal(results.length,1);assert.equal(results[0].imageId,job.imageId);assert.equal(results[0].stage,'inline_illustration')
+ }
  console.log('three saved bitmaps: terminal chunk, stopped partial reply, blocked history, three attachments and no duplicate renders: ok')
 }
 // Optional library failure or delay must never strand an already saved image.
@@ -2811,7 +2817,8 @@ console.log("upscale graph, draft/final round trip and swipe-safe completion: ok
 // Automatic upscale is a derivative, not the gate for the initial mount.
 {
  const savedConfig=structuredClone(userFiles.get('tag-automation-config.json')),savedSettings=structuredClone(userFiles.get('studio-upscale-settings.json'))
- const original={stream:spindle.imageGen.generateStream,get:spindle.images.get,read:spindle.images.readBinary}
+ const original={stream:spindle.imageGen.generateStream,get:spindle.images.get,read:spindle.images.readBinary,info:spindle.log.info}
+ const timingEvents=[];spindle.log.info=line=>{if(line.startsWith('[Swarm Studio timing] '))timingEvents.push(JSON.parse(line.slice('[Swarm Studio timing] '.length)))}
  await request('set_tag_automation',{config:{...savedConfig,autoGenerate:true,autoFinalizeInline:true,deleteDrafts:false}})
  userFiles.set('studio-upscale-settings.json',{'swarm-1':{mode:'model',factor:2,model:'RealESRGAN_x4plus_anime_6B.pth'}})
  let calls=0
@@ -2840,8 +2847,49 @@ console.log("upscale graph, draft/final round trip and swipe-safe completion: ok
    assert.ok(msg.content.includes(failure?draftId:finalId))
   }
   assert.equal(calls,4,'Each request has one draft and one upscale, no extra renders')
+  for(const suffix of ['ok','fail']){
+   const parent='auto-draft-'+suffix
+   const draft=timingEvents.find(e=>e.action==='provider-summary'&&e.imageId===parent)
+   const derivative=timingEvents.find(e=>e.action==='provider-summary'&&e.parentImageId===parent)
+   assert.equal(draft.stage,'inline_illustration');assert.equal(derivative.stage,'inline_upscale_result');assert.notEqual(draft.attemptId,derivative.attemptId);assert.equal(derivative.outcome,suffix==='ok'?'returned':'error')
+  }
+  // Live trace replay with Finalize enabled: three provider drafts already
+  // dispatched at native end, then the three rewritten saved-source packets.
+  // Draft and derivative counts must remain three each, never six drafts.
+  {
+   const slots=['live-replay-a','live-replay-b','live-replay-c'];
+   const raw=slots.map(slot=>inlineTag.replace('slot="ordinary"',`slot="${slot}"`));
+   const saved=raw.map(t=>t.replace('ordinary portrait','committed portrait'));
+   const msg={id:'live-replay-finalize',role:'assistant',content:'',metadata:{}};
+   const generationId='live-replay-finalize-g';taggedMessages.push(msg);
+   const draftGate=deferred(),draftsEntered=deferred(),finalGate=deferred(),finalsEntered=deferred();let drafts=0,finals=0;
+   spindle.imageGen.generateStream=async function* (input){
+    if(input.parameters.referenceImages?.length){const id='auto-final-live-'+(++finals);if(finals===3)finalsEntered.resolve();await finalGate.promise;return {imageId:id,imageUrl:'/api/v1/image-gen/results/'+id}}
+    const id='auto-draft-live-'+(++drafts);if(drafts===3)draftsEntered.resolve();await draftGate.promise;return {imageId:id,imageUrl:'/api/v1/image-gen/results/'+id}
+   }
+   const runs=raw.map(t=>submitUrl(msg,t,{force:false,isStreaming:true,generationId,swipeId:0}));const callbacks=[];
+   try {
+    await bounded(draftsEntered.promise);
+    const jobRows=()=>userFiles.get('tagged-image-jobs.json').filter(j=>slots.includes(j.slot));
+    const originalIds=slots.map(slot=>jobRows().find(j=>j.slot===slot).id);
+    msg.content='Committed narrative '+saved.join(' and ');
+    eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',messageId:msg.id,generationId,content:'Raw narrative '+raw.join(' and ')},'user-1');
+    callbacks.push(...saved.map(t=>submitUrl(msg,t,{force:false,isStreaming:false,swipeId:0})));
+    await bounded(Promise.all(callbacks));assert.equal(drafts,3);assert.equal(finals,0);assert.equal(jobRows().length,3);
+    draftGate.resolve();await bounded(finalsEntered.promise);
+    assert.equal(jobRows().filter(j=>j.inserted&&j.imageId.startsWith('auto-draft-live-')).length,3);
+    assert.equal(msg.metadata.swarm_studio_tagged_images.length,3);
+    finalGate.resolve();await bounded(Promise.all(runs));
+    assert.equal(drafts,3);assert.equal(finals,3);
+    assert.equal(jobRows().length,3);assert.deepEqual(slots.map(slot=>jobRows().find(j=>j.slot===slot).id),originalIds);
+    for(const job of jobRows()){assert.equal(job.inserted,true);assert.ok(job.finalImage?.id.startsWith('auto-final-live-'));assert.ok(job.draftImage?.id.startsWith('auto-draft-live-'));assert.ok(msg.content.includes(job.finalImage.id))}
+    const derivativeParents=timingEvents.filter(e=>e.action==='provider-summary'&&e.stage==='inline_upscale_result'&&e.parentImageId?.startsWith('auto-draft-live-')).map(e=>e.parentImageId);
+    assert.deepEqual(derivativeParents.sort(),jobRows().map(j=>j.draftImage.id).sort());
+    console.log('live saved-source replay with Finalize: three original drafts, three derivatives, three mounted final images: ok');
+   }finally{draftGate.resolve();finalGate.resolve();await Promise.allSettled([...runs,...callbacks])}
+  }
  } finally {
-  spindle.imageGen.generateStream=original.stream;spindle.images.get=original.get;spindle.images.readBinary=original.read
+  spindle.imageGen.generateStream=original.stream;spindle.images.get=original.get;spindle.images.readBinary=original.read;spindle.log.info=original.info
   userFiles.set('tag-automation-config.json',savedConfig);userFiles.set('studio-upscale-settings.json',savedSettings)
  }
 }
@@ -4312,3 +4360,98 @@ console.log('Alpha.17 backend PASS: shared registry RPC, scoped artwork propagat
  } finally {userFiles.clear();for(const [k,v] of saved)userFiles.set(k,v)}
 }
 console.log('Stage Direction backend PASS: independent narration backgrounds, scoped RPCs, prefix stability, macros, placement and stale-write protection')
+
+// Provider timing is observed at the compiled extension boundary, not inferred
+// from Locket progress. Exercise delayed terminal delivery, preview-only events,
+// the legacy provider, errors and a failing log sink without altering dispatch.
+{
+  const previous={stream:spindle.imageGen.generateStream,generate:spindle.imageGen.generate,info:spindle.log.info,files:structuredClone(userFiles)}
+  const events=[], lines=[]
+  const collect=line=>{if(line.startsWith('[Swarm Studio timing] ')){lines.push(line);events.push(JSON.parse(line.slice('[Swarm Studio timing] '.length)))}}
+  const forAttempt=id=>events.filter(e=>e.attemptId===id)
+  const run=id=>frontendHandler({type:'generate',requestId:id,input:{connection_id:'swarm-1',clientJobId:id,model:'base.safetensors',prompt:'PRIVATE_TIMING_PROMPT',negativePrompt:'PRIVATE_TIMING_NEGATIVE',parameters:{seed:42}}},'user-1')
+  const summary=id=>forAttempt(id).find(e=>e.action==='provider-summary')
+  try {
+    spindle.log.info=collect
+    const entered=deferred(), release=deferred()
+    let calls=0, reads=0
+    spindle.imageGen.generateStream=()=>{
+      calls++
+      return {async next(){
+        reads++
+        if(reads===1)return {done:false,value:{type:'status'}}
+        if(reads===2)return {done:false,value:{type:'progress',step:1,totalSteps:25}}
+        if(reads===3)return {done:false,value:{type:'progress',step:23,totalSteps:25,preview:'PRIVATE_TIMING_PREVIEW'}}
+        if(reads===4)return {done:false,value:{type:'preview',preview:'PRIVATE_TIMING_PREVIEW'}}
+        if(reads===5){entered.resolve();await release.promise;return {done:false,value:{type:'done',result:{imageId:'timing-draft',imageUrl:'/api/v1/image-gen/results/timing-draft'}}}}
+        assert.fail('A terminal result must not require another iterator read')
+      }}
+    }
+    const id='timing-stream-fixture', pending=run(id)
+    await bounded(entered.promise)
+    assert.equal(calls,1)
+    assert.equal(forAttempt(id).filter(e=>e.action==='provider-near-end').length,1)
+    assert.equal(summary(id),undefined,'A delayed final result is not reported prematurely')
+    const snapshot=(await request('read_studio_diagnostics')).data
+    assert.ok(snapshot.available&&snapshot.reset&&snapshot.captureId)
+    assert.ok(snapshot.lines.some(line=>line.includes(id)&&line.includes('provider-near-end')),'Active capture is readable before the provider returns')
+    assert.ok(!snapshot.lines.some(line=>line.includes(id)&&line.includes('provider-summary')))
+    assert.doesNotMatch(snapshot.lines.join('\n'),/PRIVATE_TIMING_/)
+    const unchanged=(await request('read_studio_diagnostics',{captureId:snapshot.captureId,after:snapshot.lastSequence})).data
+    assert.equal(unchanged.reset,false);assert.deepEqual(unchanged.lines,[])
+    await frontendHandler({type:'read_studio_diagnostics',requestId:'diagnostic-other-scope',userId:'user-1',captureId:snapshot.captureId,after:0},'other-user')
+    const foreign=sent.findLast(e=>e.payload.requestId==='diagnostic-other-scope')
+    assert.equal(foreign.userId,'other-user');assert.ok(!foreign.payload.data.lines.some(line=>line.includes(id)))
+    await frontendHandler({type:'read_studio_diagnostics',requestId:'diagnostic-unscoped',userId:'user-1'})
+    const unscoped=sent.findLast(e=>e.payload.requestId==='diagnostic-unscoped').payload.data
+    assert.equal(unscoped.available,false);assert.deepEqual(unscoped.lines,[])
+    await new Promise(resolve=>setTimeout(resolve,30));release.resolve();await pending
+    const delta=(await request('read_studio_diagnostics',{captureId:snapshot.captureId,after:snapshot.lastSequence})).data
+    assert.equal(delta.reset,false);assert.ok(delta.lines.some(line=>line.includes(id)&&line.includes('provider-summary')))
+    assert.ok(!delta.lines.some(line=>line.includes(id)&&line.includes('provider-near-end')))
+    const result=summary(id)
+    assert.ok(result);assert.equal(result.outcome,'returned');assert.equal(result.transport,'stream');assert.equal(result.eventCount,5);assert.equal(result.progressCount,2);assert.equal(result.previewCount,2)
+    assert.equal(result.lastStep,23);assert.equal(result.lastTotal,25);assert.ok(result.lastProgressToResultMs>=15);assert.ok(result.maxReadWaitMs>=15)
+    assert.equal(result.imageId,'timing-draft');assert.equal(reads,5)
+    const sequence=forAttempt(id).map(e=>e.action)
+    for(const action of ['manual-prepare-start','manual-prepare-complete','metadata-start','metadata-ready','provider-dispatch','provider-stream-open','provider-first-event','provider-first-progress','provider-first-preview','provider-summary','swarm-reported-timing','manual-result-published'])assert.ok(sequence.includes(action),action)
+    assert.ok(sequence.indexOf('provider-summary')<sequence.indexOf('manual-result-published'))
+    assert.equal(sent.filter(e=>e.payload.clientJobId===id&&e.payload.type==='generation_progress').length,4,'Diagnostics must not suppress or add progress messages')
+    delete spindle.imageGen.generateStream
+    spindle.imageGen.generate=async()=>({imageId:'timing-legacy',imageUrl:'/api/v1/image-gen/results/timing-legacy'})
+    await run('timing-legacy-fixture');assert.equal(summary('timing-legacy-fixture').transport,'legacy');assert.equal(summary('timing-legacy-fixture').firstProgressMs,undefined)
+    spindle.imageGen.generateStream=()=>{throw Error('PRIVATE_TIMING_ERROR')}
+    await run('timing-error-fixture');assert.equal(summary('timing-error-fixture').outcome,'error')
+    const abortEntered=deferred(), abortRelease=deferred()
+    spindle.imageGen.generateStream=()=>({next(){abortEntered.resolve();return abortRelease.promise}})
+    const aborted=run('timing-abort-fixture');await bounded(abortEntered.promise)
+    await request('interrupt_generation',{clientJobId:'timing-abort-fixture',connectionId:'swarm-1'});await bounded(aborted)
+    assert.equal(summary('timing-abort-fixture').outcome,'aborted');abortRelease.resolve({done:true,value:{imageId:'late'}})
+    assert.doesNotMatch(lines.join('\n'),/PRIVATE_TIMING_/,'Timing records must not leak prompts, preview contents or error text')
+    spindle.log.info=line=>{if(line.startsWith('[Swarm Studio timing] '))throw Error('mock logger failure')}
+    spindle.imageGen.generateStream=async function*(){return {imageId:'timing-log-failure',imageUrl:'/api/v1/image-gen/results/timing-log-failure'}}
+    await run('timing-log-failure-fixture');assert.ok(sent.some(e=>e.payload.type==='generation_result'&&e.payload.clientJobId==='timing-log-failure-fixture'))
+    assert.ok((await request('read_studio_diagnostics')).data.lines.some(line=>line.includes('timing-log-failure-fixture')&&line.includes('provider-summary')),'Capture independent of failing host logger')
+  } finally {spindle.imageGen.generateStream=previous.stream;spindle.imageGen.generate=previous.generate;spindle.log.info=previous.info;userFiles.clear();for(const [k,v] of previous.files)userFiles.set(k,v)}
+}
+console.log('Provider timing: delayed result, progress semantics, legacy, abort, error, privacy and log failure: ok')
+
+// Exercise the real trace path with harmless ID-only renderer events, not an
+// artificial append API. The cap and stale cursor must survive log rollover.
+{
+  const readCapture=async(extra={})=>{
+    const requestId='diagnostic-cap-read';await frontendHandler({type:'read_studio_diagnostics',requestId,...extra},'diagnostic-cap-user')
+    return sent.findLast(e=>e.payload.requestId===requestId).payload.data
+  }
+  const emit=async n=>frontendHandler({type:'settle_tagged_generation',chatId:'diagnostic-cap-chat',generationId:`capture-${n}`},'diagnostic-cap-user')
+  await emit(0);const first=await readCapture();assert.equal(first.lines.length,1)
+  for(let i=1;i<=1005;i++)await emit(i)
+  const rolled=await readCapture({captureId:first.captureId,after:first.lastSequence})
+  assert.equal(rolled.reset,true);assert.equal(rolled.lines.length,1000);assert.equal(rolled.dropped,6);assert.equal(rolled.lastSequence,1006)
+  assert.ok(rolled.lines[0].includes('capture-6'));assert.ok(rolled.lines.at(-1).includes('capture-1005'))
+  await emit(1006);const delta=await readCapture({captureId:rolled.captureId,after:rolled.lastSequence})
+  assert.equal(delta.reset,false);assert.equal(delta.dropped,7);assert.equal(delta.lines.length,1)
+  const wrongEpoch=await readCapture({captureId:'old-worker',after:999999});assert.equal(wrongEpoch.reset,true);assert.equal(wrongEpoch.lines.length,1000)
+  assert.ok(!wrongEpoch.lines.some(line=>line.includes('timing-stream-fixture')))
+}
+console.log('Studio diagnostic capture: active reads, deltas, user isolation, rollover, epoch recovery, logger failure: ok')

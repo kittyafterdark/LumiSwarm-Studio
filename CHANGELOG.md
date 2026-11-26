@@ -1,3 +1,21 @@
+## 1.1.0-alpha.17.22 - Saved-source slot reconciliation
+
+- Fix the live three-slot replay where native terminal delivery was followed by generation-less saved-source callbacks that reserved three extra drafts. A named slot already reserved for the same message/swipe, or linked by native generation evidence, is not a new automatic render just because the packet text changed. Defer conflicting or ambiguous callbacks without spending another provider attempt.
+- Keep the authored streaming packet immutable and persist a separate exact attachment packet when verified native/saved-source evidence establishes the committed slot. Require unique explicit slot names, compatible output mode, and proved message/swipe ownership; never replace a later edit by slot alone. Bounded pre-terminal saved-source candidates can reconcile when native end arrives. Verified attachment packets survive restart.
+- Add original and attachment packet fingerprints (not prompt bodies) and a saved-slot-reconciled reason to the existing diagnostics. Preserve early dispatch, silent automatic ribbons, provider transport, scheduling, preview delivery, and draft-first Finalize. Compiled frontend unchanged.
+- Add a sanitized live-event-shape regression that fails on .17.21 (six draft dispatches instead of three), compiled frontend replay, reversed event order, ambiguous slots/swipes, output mismatch, different provisional ID, restart and independent-generation controls. With Finalize enabled, assert three original drafts and three derivatives, all attached, without a replacement draft cycle.
+
+## 1.1.0-alpha.17.21 - In-Studio diagnostics capture
+
+- Capture existing structured provider timing and inline lifecycle events directly in an account-scoped, bounded backend memory buffer, independently of the host logger. Read-only incremental snapshots, no host file access, extra provider calls or storage writes. Unscoped events stay console-only. The capture survives frontend closure but resets on extension restart; oldest events roll off (1,000 records or 512 Ki characters per account, up to eight active capture scopes).
+- Add Studio settings → Diagnostics: live view, pause, refresh, recent attempt timing table, raw trace, clipboard and text download compatible with the existing offline summarizer. Poll only while the tab is visible, ignore late replies, and release timers on close/dispose. No change to generation scheduling, cancellation, admission, dedupe, attachment, preview delivery or automatic ribbons.
+- Add compiled backend tests for live capture during a blocked provider result, user isolation, rollover, logger failure and cursor reset; compiled Chromium tests cover desktop and mobile settings, pause/resume, copy/download, and hidden/disposed cleanup.
+
+## 1.1.0-alpha.17.20 - Provider timing diagnostic build
+
+- Add observation-only, attempt-local timestamps across inline/manual preparation, asset metadata, provider dispatch, stream opening, first event, first progress, preview, near-end progress and terminal result. Report largest completed iterator wait, progress-event gap, forwarding-call time and last-progress-to-result delay. Separate derivative attempts by parent image and report numeric Swarm timing when exact asset metadata is available. No generation scheduling, reservation, attachment, cancellation, preview delivery or frontend changes.
+- Add offline timing-log summarizer (UTF-8/UTF-16LE; redacted run aliases) and controlled live comparison protocol. Validate against mocked compiled backend and prior lifecycle-only logs; real provider measurements still require the local host.
+
 ## 1.1.0-alpha.17.19 - Saved bitmap settlement
 
 - Persist completed inline provider results as ready before optional metadata, provenance/history, or library synchronization; attach independently of those operations. Request saved image references without transferring the final bitmap again.

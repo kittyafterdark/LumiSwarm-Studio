@@ -764,6 +764,7 @@ for(const c of traces){
  await frontendHandler({type:'refresh_outputs',requestId:'audit-refresh'},'user-1');
  await frontendHandler({type:'list_tagged_jobs',requestId:'audit-recovery'},'user-1');
  const afterGallery=renders-before;
+ if(c.kind==='saved-source-rewrite')eventHandlers.get('GENERATION_ENDED')({chatId:'chat-1',generationId:c.slot,messageId:final.id,content:c.sent[0].fullMatch},'user-1');
  const tail=c.sent.slice(c.early);
  for(let i=0;i<tail.length;i++){
   const rpc=tail[i];
@@ -782,7 +783,7 @@ for(const c of traces){
  assert.equal(renders-before,1,'No subsequent automatic callback commissions a second provider draft');
  assert.equal(jobs.length,1);assert.equal(jobs[0].image,first[0].image);
  const canonical=taggedMessages.find(m=>m.id===final.id);
- const hasProof=tail.some(rpc=>rpc.type==='settle_tagged_generation'&&rpc.messageId===final.id&&rpc.content===final.content);
+ const hasProof=c.kind==='saved-source-rewrite'||tail.some(rpc=>rpc.type==='settle_tagged_generation'&&rpc.messageId===final.id&&rpc.content===final.content);
  assert.equal(jobs[0].inserted,hasProof,'Only verified evidence may attach');
  if(!hasProof){
    // Missing/contradictory evidence is deliberately not guessed. Deliver the

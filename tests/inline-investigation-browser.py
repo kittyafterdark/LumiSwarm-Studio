@@ -9,7 +9,7 @@ with sync_playwright() as p:
  cases=page.evaluate('''()=>{
  const tag=slot=>`<swarm-image request="generate" slot="${slot}" aspect="4:3">harbor at dusk</swarm-image>`;
  const cases=[];
- for(const kind of ['normal','wrong-owner-id-only','missing-terminal-wrong-swipe','remount-unscoped-stream','stale-terminal-then-correct','explicit-generation-final-remount','idless-ambiguous-two-matches','idless-existing-new-swipe','native-before-token','native-after-token-gap']){
+ for(const kind of ['normal','wrong-owner-id-only','missing-terminal-wrong-swipe','remount-unscoped-stream','stale-terminal-then-correct','explicit-generation-final-remount','idless-ambiguous-two-matches','idless-existing-new-swipe','native-before-token','native-after-token-gap','saved-source-rewrite']){
    let sent=[],rows=[],events=new Map();const chatId='chat-1',g='front-'+kind,raw=tag(g),old='old-'+kind,final='final-'+kind;
    const ctx={getActiveChat:()=>({chatId}),sendToBackend:p=>sent.push(structuredClone(p)),events:{on(n,f){events.set(n,f);return()=>events.delete(n)}},messages:{getRecent:()=>structuredClone(rows),getContent:id=>rows.find(m=>m.id===id)?.content??null,renderWidget:()=>()=>{}}};
    const create=()=>new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});
@@ -17,7 +17,7 @@ with sync_playwright() as p:
    if(kind==='wrong-owner-id-only') rows.push({id:old,chat_id:chatId,content:'Previous reply',role:'assistant',swipe_id:0,swipes:['Previous reply'],metadata:{}});
    if(kind==='idless-existing-new-swipe') rows.push({id:final,chat_id:chatId,content:'Previous reply',role:'assistant',swipe_id:0,swipes:['Previous reply'],metadata:{}});
    if(kind==='missing-terminal-wrong-swipe') rows.push({id:final,chat_id:chatId,content:raw,role:'assistant',swipe_id:0,swipes:[raw,'Other'],metadata:{}});
-   const start=kind==='wrong-owner-id-only'?{targetMessageId:old,targetSwipeId:0}:['missing-terminal-wrong-swipe','idless-existing-new-swipe'].includes(kind)?{targetMessageId:final,targetSwipeId:1}:{};
+   const start=kind==='saved-source-rewrite'?{targetMessageId:final,targetSwipeId:0}:kind==='wrong-owner-id-only'?{targetMessageId:old,targetSwipeId:0}:['missing-terminal-wrong-swipe','idless-existing-new-swipe'].includes(kind)?{targetMessageId:final,targetSwipeId:1}:{};
    emit('GENERATION_STARTED',{generationId:g,generationType:'normal',...(['native-before-token','native-after-token-gap'].includes(kind)?{targetMessageId:final,targetSwipeId:0}:start)});
    if(['native-before-token','native-after-token-gap'].includes(kind)){
      if(kind==='native-after-token-gap')emit('STREAM_TOKEN_RECEIVED',{generationId:g,token:raw,offset:100,type:'text'});
@@ -27,10 +27,11 @@ with sync_playwright() as p:
      if(kind==='native-before-token')emit('STREAM_TOKEN_RECEIVED',{generationId:g,token:raw,offset:0,type:'text'});
      if(sent.filter(x=>x.type==='tag_generate').length!==1)throw Error(kind+': token replay must not dispatch twice');
    }else emit('STREAM_TOKEN_RECEIVED',{generationId:g,token:raw,offset:0,type:'text'});
-   const early=sent.length;
+   const early=sent.length;const savedRaw=kind==='saved-source-rewrite'?raw.replace('harbor at dusk','harbor at twilight'):raw;
    if(kind==='idless-existing-new-swipe'){rows[0].swipes.push(raw);rows[0].swipe_id=1;rows[0].content=raw;}
-   else if(kind!=='missing-terminal-wrong-swipe')rows.push({id:final,chat_id:chatId,content:raw,role:'assistant',swipe_id:0,swipes:[raw],metadata:{}});
+   else if(kind!=='missing-terminal-wrong-swipe')rows.push({id:final,chat_id:chatId,content:savedRaw,role:'assistant',swipe_id:0,swipes:[savedRaw],metadata:{}});
    if(['normal','native-before-token','native-after-token-gap'].includes(kind))emit('GENERATION_ENDED',{generationId:g,messageId:final,content:raw,swipeId:0});
+   if(kind==='saved-source-rewrite')emit('GENERATION_ENDED',{generationId:g,messageId:final,content:savedRaw,swipeId:0});
    if(kind==='wrong-owner-id-only')emit('GENERATION_ENDED',{generationId:g,swipeId:0});
    if(kind==='idless-ambiguous-two-matches'){rows.push({id:'extra-'+kind,chat_id:chatId,content:raw,role:'assistant',swipe_id:0,swipes:[raw],metadata:{}});emit('GENERATION_ENDED',{generationId:g,swipeId:0});}
    if(kind==='idless-existing-new-swipe')emit('GENERATION_ENDED',{generationId:g,swipeId:1});
@@ -41,7 +42,8 @@ with sync_playwright() as p:
      emit('GENERATION_ENDED',{generationId:g,messageId:final,content:'Actual '+raw,swipeId:0});
    }
    if(kind==='remount-unscoped-stream'){c.destroy();c=create();c.handleTag({chatId,messageId:final,fullMatch:raw,attrs:{request:'generate',slot:g,aspect:'4:3'},content:'harbor at dusk',isStreaming:true})}
-   c.handleTag({chatId,messageId:final,fullMatch:raw,attrs:{request:'generate',slot:g,aspect:'4:3'},content:'harbor at dusk',isStreaming:false,swipeId:kind==='idless-existing-new-swipe'?1:0,...(kind==='explicit-generation-final-remount'?{generationId:g}:{})});
+   c.handleTag({chatId,messageId:final,fullMatch:savedRaw,attrs:{request:'generate',slot:g,aspect:'4:3'},content:kind==='saved-source-rewrite'?'harbor at twilight':'harbor at dusk',isStreaming:false,swipeId:kind==='idless-existing-new-swipe'?1:0,...(kind==='explicit-generation-final-remount'?{generationId:g}:{})});
+   if(kind==='saved-source-rewrite' && (sent.filter(x=>x.type==='tag_generate').length!==2 || !sent.some(x=>x.type==='tag_generate'&&!x.generationId&&!x.isStreaming&&x.fullMatch===savedRaw)))throw Error('Expected the generation-less saved-source callback from the real frontend');
    cases.push({kind,slot:g,rows,early,sent});c.destroy();
  }return cases;
 }''')

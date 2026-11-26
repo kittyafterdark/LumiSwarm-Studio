@@ -149,6 +149,13 @@ class StudioController {
   private stageDirectionScope:'global'|'cast'|'chat'='global'
   private stageDirectionRequest=''
   private stageDirectionTimer=0
+  private diagnosticRequest = ""
+  private diagnosticTimer = 0
+  private diagnosticTimeout = 0
+  private diagnosticCaptureId = ""
+  private diagnosticCursor = -1
+  private diagnosticLines: string[] = []
+  private diagnosticLive = true
   private renderStyles: StudioRenderStyle[] = []
   private studioDefaults: StudioGenerationDefaults | null = null
   private activeRenderStyleId = ""
@@ -365,6 +372,7 @@ class StudioController {
     this.syncFullscreenRoot(false)
     this.syncStudioProfile()
     this.disposed = true
+    this.stopDiagnosticPolling()
     window.clearTimeout(this.stageDirectionTimer);this.stageDirectionRequest=''
     this.pendingLayoutDialog?.removeEventListener("close", this.completeModalLayout)
     this.pendingLayoutDialog = null
@@ -803,6 +811,9 @@ class StudioController {
                     <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="metadata" data-active="false">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/></svg><span>Metadata</span>
                     </button>
+                    <button class="ss-settings-tab" data-action="settings-tab" data-settings-tab="diagnostics" data-active="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>Diagnostics</span>
+                    </button>
                   </nav>
                   <div class="ss-settings-content">
                     <div class="ss-settings-panel" data-settings-panel="general">
@@ -1047,6 +1058,21 @@ are removed when CSS is applied.</pre>
                           <button class="ss-button ss-button-primary" data-action="save-token">Save</button>
                           <button class="ss-button ss-button-danger" data-action="clear-token">Clear</button>
                         </div>
+                      </section>
+                    </div>
+                    <div class="ss-settings-panel ss-provider-diagnostics" data-settings-panel="diagnostics" hidden>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Provider timing</strong><span>Studio's own backend trace · independent of host log files</span></div>
+                        <p class="ss-muted ss-tiny">Capture continues while Studio is closed. Up to 1,000 recent account-scoped events are kept in memory until the extension restarts. Export before restarting. No prompts, preview images or error bodies are captured; raw traces include internal IDs and slot names.</p>
+                        <div class="ss-diagnostic-tools"><button type="button" class="ss-button" data-action="diagnostic-refresh">Refresh</button><button type="button" class="ss-button" data-action="diagnostic-live" aria-pressed="true">Pause live view</button><button type="button" class="ss-button" data-action="diagnostic-copy" disabled>Copy trace</button><button type="button" class="ss-button ss-button-primary" data-action="diagnostic-export" disabled>Save trace</button></div>
+                        <p class="ss-muted ss-tiny" data-role="diagnostic-status" role="status">Open this tab to load the capture.</p>
+                        <p class="ss-muted ss-tiny" data-role="diagnostic-export-status" role="status"></p>
+                        <div class="ss-diagnostic-table-wrap"><table class="ss-diagnostic-table"><thead><tr><th>Attempt</th><th>First progress</th><th>Provider total</th><th>Last step → result</th><th>Latest event</th></tr></thead><tbody data-role="diagnostic-attempts"></tbody></table></div>
+                        <p class="ss-muted ss-tiny">Times are measured at Studio's provider boundary, not the GPU. A dash means that milestone has not been observed. Showing the latest 12 attempts.</p>
+                      </section>
+                      <section class="ss-config-section">
+                        <div class="ss-config-section-head"><strong>Raw event trace</strong><span>Compatible with the timing report script</span></div>
+                        <textarea class="ss-input ss-diagnostic-raw" data-role="diagnostic-raw" aria-label="Captured diagnostic events" readonly spellcheck="false" wrap="off" placeholder="No events captured yet."></textarea>
                       </section>
                     </div>
                   </div>
@@ -2197,6 +2223,17 @@ are removed when CSS is applied.</pre>
       if (action === "toggle-config") this.toggleConfigPopover(button)
       if (action === "close-settings") this.closeConfigPopover()
       if (action === "settings-tab") this.setSettingsTab(button.dataset.settingsTab || "general")
+      if (action === "diagnostic-refresh") this.refreshDiagnostics()
+      if (action === "diagnostic-live") {
+        this.diagnosticLive = !this.diagnosticLive
+        button.setAttribute("aria-pressed", String(this.diagnosticLive))
+        button.textContent = this.diagnosticLive ? "Pause live view" : "Resume live view"
+        this.stopDiagnosticPolling()
+        if (this.diagnosticLive) this.startDiagnosticPolling()
+        else this.diagnosticStatus("Live view paused. Backend capture continues; Refresh loads new events.")
+      }
+      if (action === "diagnostic-copy") void this.copyDiagnosticTrace()
+      if (action === "diagnostic-export") this.saveDiagnosticTrace()
       if (action === "set-request-mode") {
         const requestMode = button.dataset.requestMode === "parser" ? "parser" : "inline"
         this.onBehaviorChange({ ...this.behavior, requestMode })
@@ -2606,6 +2643,15 @@ are removed when CSS is applied.</pre>
 
   onMessage(payload: any): void {
     if (this.disposed) return
+    if (payload?.type === "studio_diagnostics_result" || (payload?.type === "studio_error" && this.diagnosticRequest && payload.requestId === this.diagnosticRequest)) {
+      if (this.diagnosticRequest && payload.requestId === this.diagnosticRequest) {
+        this.diagnosticRequest = ""
+        window.clearTimeout(this.diagnosticTimeout)
+        if (payload.type === "studio_error") this.diagnosticStatus("Could not read Studio's capture. Refresh to retry.")
+        else this.receiveDiagnostics(payload.data)
+      }
+      return
+    }
     if(this.stageDirectionRequest&&payload?.requestId===this.stageDirectionRequest&&(payload.type==='stage_direction_result'||payload.type==='studio_error')){
       window.clearTimeout(this.stageDirectionTimer);this.stageDirectionRequest='';this.stageDirectionBusy(false)
       if(payload.type==='studio_error'){this.stageDirectionStatus(String(payload.error||'Could not load Stage Direction.'));return}
@@ -4312,6 +4358,7 @@ are removed when CSS is applied.</pre>
   private toggleConfigPopover(button: HTMLElement): void {
     const popover = this.get<HTMLElement>('[data-role="config-popover"]')
     popover.hidden = !popover.hidden
+    if (popover.hidden) this.stopDiagnosticPolling()
     button.setAttribute("aria-expanded", String(!popover.hidden))
     if (!popover.hidden) {
       this.setSettingsTab(
@@ -4328,12 +4375,13 @@ are removed when CSS is applied.</pre>
     const popover = this.root.querySelector<HTMLElement>('[data-role="config-popover"]')
     if (!popover) return
     popover.hidden = true
+    this.stopDiagnosticPolling()
     this.root.querySelector<HTMLElement>('[data-action="toggle-config"]')
       ?.setAttribute("aria-expanded", "false")
   }
 
   private setSettingsTab(tab: string): void {
-    const selected = ["general", "generation", "stage-direction", "theme", "metadata"].includes(tab) ? tab : "general"
+    const selected = ["general", "generation", "stage-direction", "theme", "metadata", "diagnostics"].includes(tab) ? tab : "general"
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-action="settings-tab"]')) {
       const active = button.dataset.settingsTab === selected
       button.dataset.active = String(active)
@@ -4342,10 +4390,126 @@ are removed when CSS is applied.</pre>
     for (const panel of this.root.querySelectorAll<HTMLElement>("[data-settings-panel]")) {
       panel.hidden = panel.dataset.settingsPanel !== selected
     }
+    if (selected === "diagnostics") this.startDiagnosticPolling()
+    else this.stopDiagnosticPolling()
     if(selected==='stage-direction'){
       const reload=this.root.querySelector<HTMLButtonElement>('[data-stage-direction-reload]');if(reload)reload.onclick=()=>this.loadStageDirectionSettings()
       if(!this.stageDirectionRequest)this.loadStageDirectionSettings()
     }
+  }
+
+  private diagnosticStatus(text: string): void {
+    const el = this.root.querySelector('[data-role="diagnostic-status"]')
+    if (el && el.textContent !== text) el.textContent = text
+  }
+  private diagnosticExportStatus(text: string): void {
+    const el = this.root.querySelector('[data-role="diagnostic-export-status"]')
+    if (el) el.textContent = text
+  }
+  private diagnosticPanelOpen(): boolean {
+    return !this.disposed && this.root.querySelector<HTMLElement>('[data-role="config-popover"]')?.hidden === false
+      && this.root.querySelector<HTMLElement>('[data-settings-panel="diagnostics"]')?.hidden === false
+  }
+  private stopDiagnosticPolling(): void {
+    window.clearInterval(this.diagnosticTimer); this.diagnosticTimer = 0
+    window.clearTimeout(this.diagnosticTimeout); this.diagnosticTimeout = 0
+    this.diagnosticRequest = ""
+  }
+  private startDiagnosticPolling(): void {
+    this.stopDiagnosticPolling()
+    if (!this.diagnosticPanelOpen()) return
+    this.refreshDiagnostics()
+    if (this.diagnosticLive) this.diagnosticTimer = window.setInterval(() => this.refreshDiagnostics(), 3000)
+  }
+  private refreshDiagnostics(): void {
+    if (!this.diagnosticPanelOpen() || this.diagnosticRequest) return
+    const requestId = createRequestId(); this.diagnosticRequest = requestId
+    this.diagnosticTimeout = window.setTimeout(() => {
+      if (this.diagnosticRequest !== requestId) return
+      this.diagnosticRequest = ""; this.diagnosticStatus("No capture response. Existing trace retained; Refresh to retry.")
+    }, 8000)
+    try {
+      this.ctx.sendToBackend({ type: "read_studio_diagnostics", requestId, captureId: this.diagnosticCaptureId, after: this.diagnosticCursor })
+    } catch {
+      window.clearTimeout(this.diagnosticTimeout); this.diagnosticRequest = ""
+      this.diagnosticStatus("Could not contact the extension. Existing trace retained.")
+    }
+  }
+  private receiveDiagnostics(data: any): void {
+    if (!data || !Array.isArray(data.lines) || !Number.isSafeInteger(data.lastSequence) || typeof data.captureId !== "string") {
+      this.diagnosticStatus("Invalid capture response. Existing trace retained."); return
+    }
+    if (!data.available) {
+      this.diagnosticLines = []; this.diagnosticCaptureId = ""; this.diagnosticCursor = -1
+      this.renderDiagnosticTrace(); this.diagnosticStatus("This host did not supply an account scope. Unscoped events remain console-only."); return
+    }
+    const incoming = data.lines.filter((line: unknown): line is string => typeof line === "string" && line.startsWith("[Swarm Studio "))
+    const reset = data.reset || data.captureId !== this.diagnosticCaptureId
+    const retained = Math.min(1000, Math.max(0, data.lastSequence - (Number(data.dropped) || 0)))
+    const changed = reset || incoming.length > 0 || this.diagnosticLines.length > retained
+    if (changed) this.diagnosticLines = retained ? [...(reset ? [] : this.diagnosticLines), ...incoming].slice(-retained) : []
+    this.diagnosticCaptureId = data.captureId; this.diagnosticCursor = data.lastSequence
+    if (changed) this.renderDiagnosticTrace()
+    const dropped = Number(data.dropped) || 0
+    const state = this.diagnosticLive ? "Live view" : "Paused view"
+    this.diagnosticStatus(`${state} · ${this.diagnosticLines.length} events retained${dropped ? ` · ${dropped} older events rolled off` : ""}${this.diagnosticLines.length ? "" : " · No events captured yet"}`)
+  }
+  private renderDiagnosticTrace(): void {
+    const raw = this.get<HTMLTextAreaElement>('[data-role="diagnostic-raw"]')
+    const nearBottom = raw.scrollHeight - raw.scrollTop - raw.clientHeight < 32
+    const top = raw.scrollTop, start = raw.selectionStart, end = raw.selectionEnd
+    raw.value = this.diagnosticLines.join("\n")
+    if (this.root.contains(raw) && raw.matches(":focus")) raw.setSelectionRange(Math.min(start, raw.value.length), Math.min(end, raw.value.length))
+    raw.scrollTop = nearBottom ? raw.scrollHeight : top
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-action="diagnostic-copy"],[data-action="diagnostic-export"]')) button.disabled = !this.diagnosticLines.length
+    const attempts = new Map<string, { stage: string; first?: number; total?: number; tail?: number; latest: string; at: number }>()
+    for (const line of this.diagnosticLines) {
+      try {
+        const event = JSON.parse(line.slice(line.indexOf("] ") + 2))
+        if (!event.attemptId || typeof event.action !== "string") continue
+        const attemptId = String(event.attemptId)
+        const row = attempts.get(attemptId) || { stage: "", latest: "", at: 0 }
+        row.stage = typeof event.stage === "string" ? event.stage : row.stage || (line.startsWith("[Swarm Studio inline]") ? "inline_illustration" : "")
+        if (event.action === "provider-first-progress" && Number.isFinite(event.sinceDispatchMs)) row.first = event.sinceDispatchMs
+        if (event.action === "provider-summary") {
+          if (Number.isFinite(event.firstProgressMs)) row.first = event.firstProgressMs
+          if (Number.isFinite(event.sinceDispatchMs)) row.total = event.sinceDispatchMs
+          if (Number.isFinite(event.lastProgressToResultMs)) row.tail = event.lastProgressToResultMs
+        }
+        row.latest = event.action + (event.action === "provider-summary" && typeof event.outcome === "string" ? ` · ${event.outcome}` : "")
+        row.at = Number(event.atMs) || row.at
+        attempts.set(attemptId, row)
+      } catch { /* A malformed record must not prevent trace export. */ }
+    }
+    const table = this.get<HTMLElement>('[data-role="diagnostic-attempts"]'); table.replaceChildren()
+    const duration = (ms?: number) => ms === undefined ? "—" : `${(ms / 1000).toFixed(2)} s`
+    for (const [id, row] of [...attempts].sort((a,b) => b[1].at - a[1].at).slice(0,12)) {
+      const tr = document.createElement("tr")
+      for (const value of [`${row.stage || "attempt"} · ${id.slice(0,8)}`, duration(row.first), duration(row.total), duration(row.tail), row.latest]) {
+        const td = document.createElement("td"); td.textContent = value; tr.appendChild(td)
+      }
+      table.appendChild(tr)
+    }
+    if (!attempts.size) { const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan = 5; td.textContent = "No provider attempts captured yet."; tr.appendChild(td); table.appendChild(tr) }
+  }
+  private async copyDiagnosticTrace(): Promise<void> {
+    if (!this.diagnosticLines.length) return
+    try { await navigator.clipboard.writeText(this.diagnosticLines.join("\n") + "\n"); this.diagnosticExportStatus("Trace copied.") }
+    catch {
+      const raw = this.get<HTMLTextAreaElement>('[data-role="diagnostic-raw"]'); raw.focus(); raw.select()
+      this.diagnosticExportStatus("Clipboard unavailable. Trace selected; copy it manually.")
+    }
+  }
+  private saveDiagnosticTrace(): void {
+    if (!this.diagnosticLines.length) return
+    let url = ""
+    try {
+      url = URL.createObjectURL(new Blob([this.diagnosticLines.join("\n") + "\n"], { type: "text/plain;charset=utf-8" }))
+      const anchor = document.createElement("a"); anchor.href = url; anchor.download = `lumiswarm-timing-${new Date().toISOString().replace(/[:.]/g,"-")}.txt`
+      this.get<HTMLElement>('[data-settings-panel="diagnostics"]').appendChild(anchor); try { anchor.click() } finally { anchor.remove() }
+      this.diagnosticExportStatus("Download requested. If your host blocks downloads, use Copy trace.")
+    } catch { this.diagnosticExportStatus("Download unavailable. Use Copy trace or select the raw text.") }
+    finally { if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000) }
   }
 
   private stageDirectionStatus(text:string){const status=this.root.querySelector('[data-stage-direction-status]');if(status)status.textContent=text}

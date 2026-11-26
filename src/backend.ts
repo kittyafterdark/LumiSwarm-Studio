@@ -634,6 +634,9 @@ interface TaggedImageJob {
   aspect: string
   alt: string
   fullMatch: string
+  // The authored streaming packet is immutable. Only verified ownership can
+  // supply a different, exact saved attachment packet.
+  attachmentFullMatch?: string
   status: TaggedImageJobStatus
   clientJobId: string
   imageId: string
@@ -722,7 +725,12 @@ function taggedAdmissionKey(userId: string | undefined, chatId: string): string 
   return JSON.stringify(["tagged-admission", userId || "", chatId])
 }
 const removedTaggedJobs = new Set<string>()
-const settledTaggedSources = new Map<string, { messageId: string; swipeId?: number }>()
+interface TaggedSourceSettlement { messageId: string; swipeId?: number; attachmentFullMatch?: string }
+const settledTaggedSources = new Map<string, TaggedSourceSettlement>()
+function applyTaggedSourceSettlement(job: TaggedImageJob, settled: TaggedSourceSettlement): void {
+  job.awaitingSource = false; job.messageId = settled.messageId; job.swipeId = settled.swipeId
+  if (settled.attachmentFullMatch) job.attachmentFullMatch = settled.attachmentFullMatch
+}
 // A terminal event can arrive before the provisional job is even persisted.
 // Keep bounded, user/chat/generation-scoped proof for delayed attachment.
 interface TaggedTerminalSource { messageId: string; content: string; swipeId?: number; verified?: boolean; authoritative?: boolean }
@@ -745,12 +753,51 @@ function rememberTaggedTerminal(key: string, candidate: TaggedTerminalSource): b
   }
   return true
 }
-function traceTaggedLifecycle(action: string, detail: { chatId: string; messageId?: string; generationId?: string; slot?: string; swipeId?: number; id?: string; clientJobId?: string; imageId?: string }, reason?: string): void {
+// Session-local, bounded, account-scoped trace capture. Never read host log files.
+// The same structured records go to the console and this independent buffer.
+const studioDiagnosticLimit = 1000
+const studioDiagnosticScopeLimit = 8
+const studioDiagnosticCharacterLimit = 512 * 1024
+const studioDiagnosticEpoch = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+let studioDiagnosticScopeSerial = 0
+interface StudioDiagnosticCapture { id: string; next: number; lines: string[]; characters: number }
+const studioDiagnosticCaptures = new Map<string, StudioDiagnosticCapture>()
+function recordStudioDiagnostic(kind: "timing" | "inline", fields: JsonObject, userId?: string): void {
+  let line: string
+  try { line = `[Swarm Studio ${kind}] ${JSON.stringify(fields)}` } catch { return }
+  // Unscoped host callbacks stay console-only; never expose them to an account.
+  try {
+    if (userId && line.length <= 8192) {
+      let capture = studioDiagnosticCaptures.get(userId)
+      if (!capture) capture = { id: `${studioDiagnosticEpoch}-${++studioDiagnosticScopeSerial}`, next: 1, lines: [], characters: 0 }
+      studioDiagnosticCaptures.delete(userId); studioDiagnosticCaptures.set(userId, capture)
+      if (studioDiagnosticCaptures.size > studioDiagnosticScopeLimit) studioDiagnosticCaptures.delete(studioDiagnosticCaptures.keys().next().value!)
+      capture.lines.push(line); capture.next++; capture.characters += line.length
+      while (capture.lines.length > studioDiagnosticLimit || capture.characters > studioDiagnosticCharacterLimit) {
+        capture.characters -= capture.lines.shift()!.length
+      }
+    }
+  } catch { /* Capture cannot affect the provider or attachment. */ }
+  try { spindle.log.info(line) } catch { /* Console failure cannot affect capture. */ }
+}
+function readStudioDiagnostics(userId: string | undefined, captureId: unknown, after: unknown): JsonObject {
+  const capture = userId ? studioDiagnosticCaptures.get(userId) : undefined
+  const last = capture ? capture.next - 1 : 0
+  const first = capture ? capture.next - capture.lines.length : 1
+  const cursor = typeof after === "number" && Number.isSafeInteger(after) ? after : -1
+  const reset = captureId !== (capture?.id || "") || cursor < first - 1 || cursor > last
+  return { available: Boolean(userId), captureId: capture?.id || "", reset, lastSequence: last,
+    dropped: first - 1, limit: studioDiagnosticLimit,
+    lines: capture ? capture.lines.slice(reset ? 0 : cursor - first + 1) : [] }
+}
+function traceTaggedLifecycle(action: string, detail: { chatId: string; messageId?: string; generationId?: string; slot?: string; swipeId?: number; id?: string; clientJobId?: string; imageId?: string; fullMatch?: string; attachmentFullMatch?: string }, reason?: string, userId?: string): void {
   // Never log the authored text, prompt, or image data. IDs are sufficient
   // to correlate a reservation with the provider attempt and saved owner.
   const { chatId, messageId, generationId, slot, swipeId, id, clientJobId, imageId } = detail
-  try { spindle.log.info(`[Swarm Studio inline] ${JSON.stringify({ action, reason, chatId, messageId, generationId, slot, swipeId, jobId: id, attemptId: clientJobId, imageId })}`) }
-  catch { /* Diagnostics must not change admission or attachment. */ }
+  // Only compare packet fingerprints, never capture the packet or prompt.
+  const packetFingerprint = detail.fullMatch ? stableTextHash(taggedPacketIdentity(detail.fullMatch)) : undefined
+  const attachmentPacketFingerprint = detail.attachmentFullMatch ? stableTextHash(taggedPacketIdentity(detail.attachmentFullMatch)) : undefined
+  recordStudioDiagnostic("inline", { action, atMs: Date.now(), reason, chatId, messageId, generationId, slot, swipeId, jobId: id, attemptId: clientJobId, imageId, packetFingerprint, attachmentPacketFingerprint }, userId)
 }
 const taggedTerminalSettlements = new Map<string, Promise<void>>()
 function taggedTerminalKey(userId: string | undefined, chatId: string, generationId: string): string {
@@ -3223,12 +3270,86 @@ function normalizePromptSpaces(value: unknown): string {
 
 type ImageGenerationProgress = { step: number; totalSteps: number; preview: string; nodeId: string }
 
+// Diagnostic instrumentation only: no new timers, provider requests or awaits.
+function traceProviderTiming(action: string, fields: JsonObject, userId?: string): void {
+  recordStudioDiagnostic("timing", { action, atMs: Date.now(), ...fields }, userId)
+}
+function providerClock(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now()
+}
+function providerElapsed(start: number): number { return Math.max(0, Math.round(providerClock() - start)) }
+function createProviderTiming(input: JsonObject, clientJobId: string, userId?: string) {
+  const started = providerClock()
+  const stage = studioGenerationStage(asString(input.studioStage) || "general_generation", asString(input.studioSurface))
+  const identity = { attemptId: clientJobId, stage, parentImageId: asString(input.studioParentImageId) || undefined }
+  let dispatchAt: number | undefined, previousEventAt: number | undefined, firstEventMs: number | undefined
+  let firstProgressMs: number | undefined, lastProgressMs: number | undefined, firstPreviewMs: number | undefined
+  let eventCount = 0, progressCount = 0, previewCount = 0, maxEventGapMs = 0, maxReadWaitMs = 0, maxForwardMs = 0
+  let lastStep = 0, lastTotal = 0, previousStep: number | undefined, previousTotal: number | undefined, previousNode = ""
+  let transport = "not-dispatched", phase = "metadata", nearEndSeen = false
+  const sinceDispatch = () => dispatchAt === undefined ? undefined : providerElapsed(dispatchAt)
+  const emit = (action: string, fields: JsonObject = {}) => traceProviderTiming(action, { ...identity, elapsedMs: providerElapsed(started), sinceDispatchMs: sinceDispatch(), ...fields }, userId)
+  return {
+    emit,
+    dispatch(mode: string) { transport = mode; phase = "provider"; dispatchAt = providerClock(); emit("provider-dispatch", { transport }) },
+    read(waitStarted: number) { maxReadWaitMs = Math.max(maxReadWaitMs, providerElapsed(waitStarted)) },
+    event() {
+      const now = providerClock(); eventCount++
+      if (previousEventAt !== undefined) maxEventGapMs = Math.max(maxEventGapMs, Math.max(0, Math.round(now - previousEventAt)))
+      previousEventAt = now
+      if (firstEventMs === undefined) { firstEventMs = sinceDispatch(); emit("provider-first-event") }
+    },
+    progress(data: ImageGenerationProgress, explicitStep: boolean) {
+      if (data.preview) {
+        previewCount++
+        if (firstPreviewMs === undefined) { firstPreviewMs = sinceDispatch(); emit("provider-first-preview") }
+      }
+      // Preview/status events can inherit lastStep. Do not count those as sampling advances.
+      if (!explicitStep || !Number.isFinite(data.step) || !Number.isFinite(data.totalSteps) || data.totalSteps <= 0) return
+      if (data.step === previousStep && data.totalSteps === previousTotal && data.nodeId === previousNode) return
+      previousStep = data.step; previousTotal = data.totalSteps; previousNode = data.nodeId
+      lastStep = data.step; lastTotal = data.totalSteps; progressCount++; lastProgressMs = sinceDispatch()
+      if (firstProgressMs === undefined) { firstProgressMs = lastProgressMs; emit("provider-first-progress", { step: data.step, totalSteps: data.totalSteps }) }
+      if (!nearEndSeen && data.step / data.totalSteps >= .9) {
+        nearEndSeen = true; emit("provider-near-end", { step: data.step, totalSteps: data.totalSteps })
+      }
+    },
+    forward(start: number) { maxForwardMs = Math.max(maxForwardMs, providerElapsed(start)) },
+    finish(outcome: "returned" | "aborted" | "error", result?: JsonObject) {
+      const lastProgressToResultMs = lastProgressMs === undefined || dispatchAt === undefined ? undefined : Math.max(0, providerElapsed(dispatchAt) - lastProgressMs)
+      emit("provider-summary", { outcome, phase, transport, firstEventMs, firstProgressMs, lastProgressMs, firstPreviewMs,
+        eventCount, progressCount, previewCount, maxEventGapMs, maxReadWaitMs, maxForwardMs, lastStep, lastTotal,
+        lastProgressToResultMs, imageId: asString(result?.imageId) || undefined })
+    },
+  }
+}
+type ProviderTiming = ReturnType<typeof createProviderTiming>
+// Only record numeric times from already-retrieved, asset-matched metadata.
+function traceSwarmReportedTiming(attemptId: string, timing: { source: string; prep: string; generation: string }, imageId: string, userId?: string): void {
+  const seconds = (value: string) => {
+    const match = /^\s*(\d+(?:\.\d+)?)\s*(?:s|sec(?:ond)?s?)?\s*$/i.exec(value)
+    return match && Number.isFinite(Number(match[1])) ? Number(match[1]) : undefined
+  }
+  traceProviderTiming("swarm-reported-timing", { attemptId, imageId, source: timing.source,
+    prepSeconds: timing.source === "swarm" ? seconds(timing.prep) : undefined,
+    generationSeconds: timing.source === "swarm" ? seconds(timing.generation) : undefined }, userId)
+}
+
 async function generateWithProgress(input: JsonObject, controller: AbortController, clientJobId: string, userId?: string,
   onProgress?: (data: ImageGenerationProgress) => void): Promise<JsonObject> {
   controller.signal.throwIfAborted()
-  const studioMetadata = await awaitGenerationTask(controller.signal, () => tagStudioGeneration(input, userId))
-  const result = await executeGenerationWithProgress(input, controller, clientJobId, userId, onProgress)
-  return { ...result, studioMetadata }
+  const timing = createProviderTiming(input, clientJobId, userId)
+  timing.emit("metadata-start")
+  try {
+    const studioMetadata = await awaitGenerationTask(controller.signal, () => tagStudioGeneration(input, userId))
+    timing.emit("metadata-ready", { assetId: studioMetadata.studio_asset_id })
+    const result = await executeGenerationWithProgress(input, controller, clientJobId, userId, onProgress, timing)
+    timing.finish("returned", result)
+    return { ...result, studioMetadata }
+  } catch (error) {
+    timing.finish(controller.signal.aborted || isAbortError(error) ? "aborted" : "error")
+    throw error
+  }
 }
 
 async function executeGenerationWithProgress(
@@ -3237,6 +3358,7 @@ async function executeGenerationWithProgress(
   clientJobId: string,
   userId?: string,
   onProgress?: (data: ImageGenerationProgress) => void,
+  timing: ProviderTiming = createProviderTiming(input, clientJobId, userId),
 ): Promise<JsonObject> {
   input.prompt = normalizePromptSpaces(input.prompt)
   input.negativePrompt = normalizePromptSpaces(input.negativePrompt)
@@ -3252,6 +3374,7 @@ async function executeGenerationWithProgress(
     }
     // AbortSignal cannot cross the Bun/Spindle structured-clone boundary used
     // by the legacy generate API. Only the streaming API accepts it.
+    timing.dispatch("legacy")
     return asRecord(await awaitGenerationTask(controller.signal, () => spindle.imageGen.generate(providerInput)))
   }
 
@@ -3259,7 +3382,9 @@ async function executeGenerationWithProgress(
     ...providerInput,
     signal: controller.signal,
   }
+  timing.dispatch("stream")
   const iterator: any = await awaitGenerationTask(controller.signal, () => streamFactory.call(spindle.imageGen, generationInput))
+  timing.emit("provider-stream-open")
   if (!iterator || typeof iterator.next !== "function") {
     throw new Error("Lumiverse returned an invalid image generation stream.")
   }
@@ -3268,7 +3393,10 @@ async function executeGenerationWithProgress(
   let lastTotalSteps = 0
   let streamedResult: JsonObject | null = null
   while (true) {
+    const readStarted = providerClock()
     const next = await awaitGenerationTask<any>(controller.signal, () => iterator.next())
+    timing.read(readStarted)
+    timing.event()
     if (next.done) {
       const returned = asRecord(next.value)
       if (Object.keys(returned).length) return returned
@@ -3312,8 +3440,11 @@ async function executeGenerationWithProgress(
       nodeId: metadataString(chunk, "nodeId", "node_id")
         || metadataString(chunkData, "nodeId", "node_id"),
     }
+    timing.progress(data, metadataNumber(chunk, "step") !== null || metadataNumber(chunkData, "step") !== null)
+    const forwardStarted = providerClock()
     if (onProgress) onProgress(data)
     else spindle.sendToFrontend({ type: "generation_progress", clientJobId, data }, userId)
+    timing.forward(forwardStarted)
   }
 }
 
@@ -3595,6 +3726,32 @@ function hasTaggedPacket(content: string, fullMatch: string): boolean {
   return matchingTaggedPackets(content, fullMatch).length === 1
 }
 
+// A named slot is a request identity inside one verified reply, not a prompt
+// hash. Post-stream normalization can change the authored packet. Never use
+// this relaxed matcher to find an owner or to replace an unverified tag.
+function taggedSourcePacket(content: string, job: TaggedImageJob, allowRewrite = false): string | undefined {
+  const expected = job.attachmentFullMatch || job.fullMatch
+  if (!allowRewrite || job.attachmentFullMatch) {
+    const exact = matchingTaggedPackets(content, expected)
+    return exact.length === 1 ? exact[0].fullMatch : undefined
+  }
+  const original = parseSwarmImageTags(job.fullMatch)[0]
+  const slot = asString(original?.attrs.slot).trim()
+  if (!slot || cleanTagSlot(slot) !== job.slot) {
+    const exact = matchingTaggedPackets(content, expected)
+    return exact.length === 1 ? exact[0].fullMatch : undefined
+  }
+  // Check the entire reply for duplicate slot names, not just the six
+  // generation-eligible packets. A collision must fail closed.
+  const named = parseSwarmImageTags(content, Infinity).filter(tag => cleanTagSlot(tag.attrs.slot) === job.slot)
+  if (named.length !== 1 || asString(named[0].attrs.slot).trim() !== slot || cleanTaggedImageOutput(named[0].attrs.output) !== job.output) return undefined
+  return named[0].fullMatch
+}
+
+function taggedPacketMatchesJob(job: TaggedImageJob, identity: string): boolean {
+  return taggedPacketIdentity(job.fullMatch) === identity || (!!job.attachmentFullMatch && taggedPacketIdentity(job.attachmentFullMatch) === identity)
+}
+
 // Compare the entire persisted reply, allowing only line endings, outer
 // whitespace and equivalent packet attribute serialization to differ.
 function sameTaggedTerminalText(a: string, b: string): boolean {
@@ -3655,6 +3812,7 @@ function cleanTaggedImageJob(value: unknown): TaggedImageJob | null {
     aspect: cleanAspect(record.aspect) || "4:3",
     alt: asString(record.alt).slice(0, 300),
     fullMatch: asString(record.fullMatch).slice(0, 24_000),
+    attachmentFullMatch: asString(record.attachmentFullMatch).slice(0, 24_000) || undefined,
     swipeId: cleanTaggedSwipeId(record.swipeId),
     awaitingSource: record.awaitingSource === true,
     generationId: asString(record.generationId).slice(0, 200) || undefined,
@@ -3717,7 +3875,7 @@ async function persistTaggedSourceSettlement(jobId: string, userId?: string): Pr
     const jobs = await loadTaggedImageJobs(userId)
     const job = jobs.find(candidate => candidate.id === jobId)
     if (!job || !job.awaitingSource) return job
-    job.awaitingSource = false; job.messageId = settled.messageId; job.swipeId = settled.swipeId
+    applyTaggedSourceSettlement(job, settled)
     job.updatedAt = Date.now()
     await persistTaggedImageJobs(jobs, userId)
     return job
@@ -3732,7 +3890,7 @@ async function adoptTaggedGeneration(jobId: string, generationId: string, userId
     if (!job.generationId) {
       job.generationId = generationId; job.updatedAt = Date.now()
       await persistTaggedImageJobs(rows, userId)
-      traceTaggedLifecycle("generation-adopted", job)
+      traceTaggedLifecycle("generation-adopted", job, undefined, userId)
     }
     return job
   })
@@ -3743,7 +3901,7 @@ async function upsertTaggedImageJob(job: TaggedImageJob, userId?: string): Promi
   // storage read/merge/write, not the provider rendering operations.
   return withTaggedMessageFinalizeLock(`tagged-job-store:${userId || "default"}`, async () => {
     const settled = settledTaggedSources.get(job.id)
-    if (settled) { job.awaitingSource = false; job.messageId = settled.messageId; job.swipeId = settled.swipeId }
+    if (settled) applyTaggedSourceSettlement(job, settled)
     if (removedTaggedJobs.has(job.id)) return job
     job.updatedAt = Date.now()
     const rows = await loadTaggedImageJobs(userId)
@@ -3751,9 +3909,8 @@ async function upsertTaggedImageJob(job: TaggedImageJob, userId?: string): Promi
     // A running legacy worker can hold an older object while a later scoped
     // callback adopts its reservation. Merge identity, not stale render state.
     if (current?.generationId) job.generationId = current.generationId
-    if (current && !current.awaitingSource && job.awaitingSource) {
-      job.awaitingSource = false; job.messageId = current.messageId; job.swipeId = current.swipeId
-    }
+    if (current && !current.awaitingSource && job.awaitingSource) applyTaggedSourceSettlement(job, current)
+    if (current?.attachmentFullMatch) job.attachmentFullMatch = current.attachmentFullMatch
     const jobs = rows.filter(candidate => candidate.id !== job.id)
     jobs.unshift(job)
     await persistTaggedImageJobs(jobs, userId)
@@ -4134,14 +4291,14 @@ function parseTagAttributes(raw: string): Record<string, string> {
   return attrs
 }
 
-function parseSwarmImageTags(content: string): Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> {
+function parseSwarmImageTags(content: string, limit = 6): Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> {
   const tags: Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> = []
   // Match innermost complete requests. A model occasionally mentions a bare
   // <swarm-image> token before emitting the real request; a naive lazy regex
   // then swallows the whole explanation through the real closing tag.
   const pattern = /<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi
   let match: RegExpExecArray | null
-  while ((match = pattern.exec(content)) && tags.length < 6) {
+  while ((match = pattern.exec(content)) && tags.length < limit) {
     const attrs = parseTagAttributes(match[1])
     const strict = attrs.request?.toLowerCase() === "generate"
     const legacy = !attrs.request && Boolean(attrs.slot && (attrs.aspect || attrs.alt))
@@ -5449,8 +5606,8 @@ function taggedJobPublic(job: TaggedImageJob): JsonObject {
   return {
     id: job.id,
     key: job.key,
-    tagFingerprint: stableTextHash(job.fullMatch),
-    packetFingerprint: stableTextHash(taggedPacketIdentity(job.fullMatch)),
+    tagFingerprint: stableTextHash(job.attachmentFullMatch || job.fullMatch),
+    packetFingerprint: stableTextHash(taggedPacketIdentity(job.attachmentFullMatch || job.fullMatch)),
     draftImageId: job.draftImage?.id || "",
     finalImageId: job.finalImage?.id || "",
     swipeId: job.swipeId,
@@ -5532,7 +5689,7 @@ function taggedImageAttachment(message: any, job: TaggedImageJob): JsonObject {
 }
 
 function replaceTaggedImagePlaceholder(content: string, job: TaggedImageJob, markup: string, previousImageUrl = ""): { content: string; replaced: boolean } {
-  const matches = matchingTaggedPackets(content, job.fullMatch)
+  const matches = matchingTaggedPackets(content, job.attachmentFullMatch || job.fullMatch)
   if (matches.length === 1) return { content: content.replace(matches[0].fullMatch, () => markup), replaced: true }
   if (matches.length > 1) return { content, replaced: false }
   return replaceAttachedTaggedImage(content, job, markup, previousImageUrl)
@@ -5602,7 +5759,7 @@ function taggedMessageMatchScore(message: any, job: TaggedImageJob): number {
     if (previousImageUrl && content.includes(previousImageUrl)) return 4
   }
   if (content.includes(`data-swarm-studio-job-id="${job.id}"`)) return 4
-  if (job.fullMatch && hasTaggedPacket(content, job.fullMatch)) return 3
+  if (job.fullMatch && hasTaggedPacket(content, job.attachmentFullMatch || job.fullMatch)) return 3
   return 0
 }
 
@@ -5718,7 +5875,7 @@ async function removeTaggedImageFromChat(
 
 async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string, expectedImageId?: string): Promise<boolean> {
   const settled = settledTaggedSources.get(job.id)
-  if (settled) { job.awaitingSource = false; job.messageId = settled.messageId; job.swipeId = settled.swipeId }
+  if (settled) applyTaggedSourceSettlement(job, settled)
   if (job.awaitingSource || removedTaggedJobs.has(job.id) || !job.imageUrl || !spindle.permissions.has("chat_mutation")) return false
   const initialMessages = await spindle.chat.getMessages(job.chatId)
   const initialTarget = findTaggedMessageTarget(initialMessages, job)
@@ -5769,7 +5926,7 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string, expe
     const previous = Array.isArray(metadata.swarm_studio_tagged_images)
       ? metadata.swarm_studio_tagged_images.filter((item: any) => asString(item?.jobId) !== job.id)
       : []
-    traceTaggedLifecycle("attachment-write-start", job)
+    traceTaggedLifecycle("attachment-write-start", job, undefined, userId)
     await spindle.chat.updateMessage(job.chatId, job.messageId, {
       ...taggedMessagePatch(target, replacement.content),
       metadata: {
@@ -5792,16 +5949,28 @@ async function finalizeTaggedImageJob(job: TaggedImageJob, userId?: string, expe
     await upsertTaggedImageJob(job, userId)
     sendTaggedJobState(job, userId)
     sendTaggedMessageReconciliation(job, replacement.content, content, userId)
-    traceTaggedLifecycle("attached", job)
+    traceTaggedLifecycle("attached", job, undefined, userId)
     return true
   })
 }
 
-async function resolveTaggedTerminalSource(job: TaggedImageJob, userId?: string, sourceMessages?: any[]): Promise<void> {
+interface TaggedSavedSourceEvidence { messageId: string; swipeId?: number; fullMatch: string }
+// A saved-source callback may precede native terminal delivery. Retain only
+// bounded, unverified evidence for that reservation; it cannot bind an owner
+// without the native generation receipt and a fresh persisted-source read.
+const taggedSavedSourceCandidates = new Map<string, TaggedSavedSourceEvidence>()
+async function resolveTaggedTerminalSource(job: TaggedImageJob, userId?: string, sourceMessages?: any[], savedSource?: TaggedSavedSourceEvidence): Promise<void> {
   if (!job.awaitingSource || !job.generationId) return
+  if (savedSource && savedSource.messageId === (job.sourceMessageId || job.messageId)) {
+    taggedSavedSourceCandidates.delete(job.id)
+    taggedSavedSourceCandidates.set(job.id, savedSource)
+    if (taggedSavedSourceCandidates.size > 64) taggedSavedSourceCandidates.delete(taggedSavedSourceCandidates.keys().next().value!)
+  }
+  savedSource = savedSource || taggedSavedSourceCandidates.get(job.id)
   const alreadySettled = settledTaggedSources.get(job.id)
   if (alreadySettled) {
-    job.awaitingSource = false; job.messageId = alreadySettled.messageId; job.swipeId = alreadySettled.swipeId
+    applyTaggedSourceSettlement(job, alreadySettled)
+    taggedSavedSourceCandidates.delete(job.id)
     return
   }
   const key = taggedTerminalKey(userId, job.chatId, job.generationId)
@@ -5816,12 +5985,14 @@ async function resolveTaggedTerminalSource(job: TaggedImageJob, userId?: string,
     if (owners.size === 1) {
       const owner = owners.values().next().value!
       const target = messages.find((item: any) => asString(item.id) === owner.messageId)
-      const matches = taggedMessageSources(target, owner.swipeId).filter(item => (!item.role || item.role === "assistant") && item.is_user !== true && hasTaggedPacket(asString(item.content), job.fullMatch))
+      const matches = taggedMessageSources(target, owner.swipeId).filter(item => (!item.role || item.role === "assistant") && item.is_user !== true && taggedSourcePacket(asString(item.content), job))
       if (matches.length === 1) {
-        const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
-        settledTaggedSources.set(job.id, { messageId: owner.messageId, swipeId })
-        job.awaitingSource = false; job.messageId = owner.messageId; job.swipeId = swipeId
-        traceTaggedLifecycle("owner-verified", job, "durable-sibling")
+        const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId) ?? 0
+        const settlement = { messageId: owner.messageId, swipeId, attachmentFullMatch: taggedSourcePacket(asString(matches[0].content), job) }
+        settledTaggedSources.set(job.id, settlement)
+        applyTaggedSourceSettlement(job, settlement)
+        taggedSavedSourceCandidates.delete(job.id)
+        traceTaggedLifecycle("owner-verified", job, "durable-sibling", userId)
         wakeTaggedAttachment(job.id)
       }
       return
@@ -5832,20 +6003,39 @@ async function resolveTaggedTerminalSource(job: TaggedImageJob, userId?: string,
   const latest = taggedTerminalSources.get(key)
   if (!latest) return
   const candidates = latest.verified ? [latest] : taggedTerminalCandidates.get(key) || [latest]
-  const proofs = new Map<string, { terminal: TaggedTerminalSource; swipeId?: number }>()
+  const proofs = new Map<string, { terminal: TaggedTerminalSource; swipeId?: number; attachmentFullMatch: string; savedContent: string }>()
   for (const terminal of candidates) {
-    if (terminal.content && !hasTaggedPacket(terminal.content, job.fullMatch)) continue
+    const mayRewrite = terminal.verified === true || terminal.authoritative === true
+    const terminalPacket = terminal.content ? taggedSourcePacket(terminal.content, job, mayRewrite) : undefined
+    if (terminal.content && !terminalPacket) continue
     const target = messages.find((item: any) => asString(item.id) === terminal.messageId)
     if (!target || (target.role && target.role !== "assistant") || target.is_user === true) continue
     // The provisional swipe is a hint, not authority. A terminal event can
     // correct it; without a terminal swipe, require a unique whole reply.
     const sources = taggedMessageSources(target, terminal.swipeId)
-    const matches = sources.filter(item => terminal.verified || !terminal.content
-      ? hasTaggedPacket(asString(item.content), job.fullMatch) : sameTaggedTerminalText(asString(item.content), terminal.content))
+    const uniqueSlotSource = sources.filter(item => taggedSourcePacket(asString(item.content), job, mayRewrite)).length === 1
+    const matches = sources.flatMap(item => {
+      const source = asString(item.content)
+      const attachmentFullMatch = terminal.verified && terminalPacket
+        ? matchingTaggedPackets(source, terminalPacket).length === 1 ? matchingTaggedPackets(source, terminalPacket)[0].fullMatch : undefined
+        : taggedSourcePacket(source, job, mayRewrite && !!terminal.content)
+      if (!attachmentFullMatch) return []
+      const swipeId = cleanTaggedSwipeId(item.studioSwipeId) ?? 0
+      // A native terminal may contain pre-save text. Its ID, the original
+      // reservation's exact message/swipe, and the exact persisted callback
+      // packet together prove the corrected source. No slot-only remapping
+      // across messages or alternatives, and no renderer-only rewrite proof.
+      const corrected = !!savedSource && terminal.authoritative === true && !!terminal.content
+        && terminal.messageId === savedSource.messageId && (job.sourceMessageId || job.messageId) === terminal.messageId
+        && uniqueSlotSource && job.swipeId === swipeId && (savedSource.swipeId === undefined || savedSource.swipeId === swipeId)
+        && taggedPacketIdentity(attachmentFullMatch) === taggedPacketIdentity(savedSource.fullMatch)
+      if (!terminal.verified && terminal.content && !sameTaggedTerminalText(source, terminal.content) && !corrected) return []
+      return [{ swipeId, attachmentFullMatch, savedContent: source }]
+    })
     if (matches.length !== 1) continue
-    const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
-    const ownerKey = JSON.stringify([terminal.messageId, swipeId])
-    if (!proofs.get(ownerKey)?.terminal.authoritative || terminal.authoritative) proofs.set(ownerKey, { terminal, swipeId })
+    const proof = matches[0]
+    const ownerKey = JSON.stringify([terminal.messageId, proof.swipeId])
+    if (!proofs.get(ownerKey)?.terminal.authoritative || terminal.authoritative) proofs.set(ownerKey, { terminal, ...proof })
   }
   // A persisted exact match from the native backend end event outranks a
   // conflicting unverified renderer hint. Two competing native proofs still
@@ -5853,12 +6043,16 @@ async function resolveTaggedTerminalSource(job: TaggedImageJob, userId?: string,
   const nativeProofs = [...proofs.values()].filter(proof => proof.terminal.authoritative)
   const eligible = nativeProofs.length ? nativeProofs : [...proofs.values()]
   if (eligible.length !== 1) return
-  const { terminal, swipeId } = eligible[0]
+  const { terminal, swipeId, attachmentFullMatch, savedContent } = eligible[0]
+  const rewritten = taggedPacketIdentity(attachmentFullMatch) !== taggedPacketIdentity(job.fullMatch)
+  if (!terminal.verified) terminal.content = savedContent
   terminal.verified = true; terminal.swipeId = swipeId
   taggedTerminalSources.set(key, terminal); taggedTerminalCandidates.delete(key)
-  settledTaggedSources.set(job.id, { messageId: terminal.messageId, swipeId })
-  job.awaitingSource = false; job.messageId = terminal.messageId; job.swipeId = swipeId
-  traceTaggedLifecycle("owner-verified", job)
+  const settlement = { messageId: terminal.messageId, swipeId, attachmentFullMatch }
+  settledTaggedSources.set(job.id, settlement)
+  applyTaggedSourceSettlement(job, settlement)
+  taggedSavedSourceCandidates.delete(job.id)
+  traceTaggedLifecycle("owner-verified", job, rewritten ? "saved-slot-reconciled" : undefined, userId)
   wakeTaggedAttachment(job.id)
 }
 
@@ -5880,7 +6074,7 @@ async function finalizeTaggedImageJobWithRetry(job: TaggedImageJob, userId?: str
         if (!latest || latest.clientJobId !== job.clientJobId || latest.imageId !== job.imageId || latest.status !== "ready") return false
         if (latest.inserted) { Object.assign(job, latest); return true }
         if (latest.generationId) job.generationId = latest.generationId
-        if (!latest.awaitingSource) { job.awaitingSource = false; job.messageId = latest.messageId; job.swipeId = latest.swipeId }
+        if (!latest.awaitingSource) applyTaggedSourceSettlement(job, latest)
         await resolveTaggedTerminalSource(job, userId)
         if (await finalizeTaggedImageJob(job, userId)) return true
       } catch (error) {
@@ -5889,7 +6083,7 @@ async function finalizeTaggedImageJobWithRetry(job: TaggedImageJob, userId?: str
     }
 
     if (removedTaggedJobs.has(job.id)) return false
-    traceTaggedLifecycle("attachment-pending", job, job.awaitingSource ? "owner-unverified" : lastError ? "host-write-error" : "packet-not-found")
+    traceTaggedLifecycle("attachment-pending", job, job.awaitingSource ? "owner-unverified" : lastError ? "host-write-error" : "packet-not-found", userId)
     // A long text stream is not an attachment failure. Its terminal event or
     // final interceptor pass will resume the saved result without another render.
     if (job.awaitingSource && job.generationId && !taggedTerminalSources.has(taggedTerminalKey(userId, job.chatId, job.generationId))) return false
@@ -5924,6 +6118,7 @@ async function runTaggedImageJob(
 ): Promise<void> {
   if (runningTaggedJobs.has(job.id)) return
   runningTaggedJobs.add(job.id)
+  traceTaggedLifecycle("prepare-start", job, undefined, userId)
   let controller: AbortController | undefined
   let controllerKey = ""
   try {
@@ -6053,6 +6248,7 @@ async function runTaggedImageJob(
     const renderInput = source
       ? await awaitGenerationTask(signal, () => withAnimaReference(input, source, userId))
       : input
+    traceTaggedLifecycle("prepare-complete", job, undefined, userId)
     const result = await generateWithProgress({
       ...renderInput, studioStage: "inline_illustration",
       // The host has already saved the full bitmap; avoid a second large
@@ -6070,7 +6266,7 @@ async function runTaggedImageJob(
     if (!job.imageUrl && job.imageId) job.imageUrl = `/api/v1/image-gen/results/${encodeURIComponent(job.imageId)}`
     if (!job.imageUrl) throw new Error("Lumiverse completed the image job without returning a saved image URL.")
     savedTaggedAttempts.add(controllerKey)
-    traceTaggedLifecycle("provider-returned", job)
+    traceTaggedLifecycle("provider-returned", job, undefined, userId)
     // Rendering is over. Metadata, attachment and optional upscale do not own
     // the original provider's abort controller any longer.
     if (generationControllers.get(controllerKey)?.controller === controller) generationControllers.delete(controllerKey)
@@ -6082,7 +6278,7 @@ async function runTaggedImageJob(
     // can retire its progress UI even if result delivery is delayed or arrives
     // out of order with an earlier progress/list message.
     sendTaggedJobState(job, userId)
-    traceTaggedLifecycle("bitmap-saved", job)
+    traceTaggedLifecycle("bitmap-saved", job, undefined, userId)
     // Draft attachment must not wait on optional library queries.
     const draftResult = { ...result, imageId: job.imageId, imageUrl: job.imageUrl }
     const draftJob = taggedJobPublic(job)
@@ -6102,8 +6298,9 @@ async function runTaggedImageJob(
               catch { /* Measured timing remains available. */ }
             }
             const timing = await loadLatestSwarmGenerationMetadata(connection, token, { ...input, studioMetadata: result.studioMetadata }, totalMs, userId)
+            traceSwarmReportedTiming(job.clientJobId, timing, asString(draftResult.imageId), userId)
             const saved = await saveGenerationRecord(draftResult, input, { ...asRecord(profile?.recordHints), source: "message-tag" }, timing, userId)
-            traceTaggedLifecycle("history-saved", job)
+            traceTaggedLifecycle("history-saved", job, undefined, userId)
             return saved
           })(),
           new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 20000) }),
@@ -6247,16 +6444,16 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
   const config = await loadTagAutomationConfig(userId)
   const jobs = (await loadTaggedImageJobs(userId)).filter(job => job.chatId === chatId && job.slot === slot && !removedTaggedJobs.has(job.id))
   const suppliedGeneration = generationId
-  const messages = !streaming ? await spindle.chat.getMessages(chatId) : []
+  let messages = !streaming ? await spindle.chat.getMessages(chatId) : []
   let message = messages.find((item: any) => asString(item.id) === messageId)
   let matches = taggedMessageSources(message, swipeId).filter(item => (!item.role || item.role === "assistant") && item.is_user !== true && hasTaggedPacket(asString(item?.content), fullMatch))
   const defer = (reason: string, existing?: TaggedImageJob): TaggedImageReservation => {
-    traceTaggedLifecycle("deferred", { chatId, messageId, generationId, slot, swipeId, id: existing?.id }, reason)
+    traceTaggedLifecycle("deferred", { chatId, messageId, generationId, slot, swipeId, id: existing?.id, fullMatch, attachmentFullMatch: existing?.attachmentFullMatch }, reason, userId)
     spindle.sendToFrontend({ type: "tagged_request_deferred", requestId: payload?.requestId, data: { jobId: existing?.id, reason } }, userId)
     return { job: existing }
   }
   if (swipeId === undefined && matches.length === 1) swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId)
-  const samePacket = (job: TaggedImageJob) => taggedPacketIdentity(job.fullMatch) === packet
+  const samePacket = (job: TaggedImageJob) => taggedPacketMatchesJob(job, packet)
   const compatibleSwipe = (job: TaggedImageJob) => job.swipeId === swipeId || job.swipeId === undefined || swipeId === undefined
   // A terminal receipt bridges a late interceptor lacking a generation ID.
   // Never bridge an explicitly different swipe or a different slot.
@@ -6278,6 +6475,26 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
   const exactOwner = ownerMatches.filter(job => job.swipeId === swipeId)
   let job = sameGeneration || (exactOwner.length === 1 ? exactOwner[0] : ownerMatches.length === 1 ? ownerMatches[0] : undefined)
   if (!job && ownerMatches.length > 1) return defer("ambiguous-swipe")
+  // The saved-source path is not a second admission path for a named slot on
+  // the same reply/swipe. Packet text can change between stream and commit.
+  // Select the existing reservation first; exact saved evidence below may
+  // reconcile its attachment packet but can never authorize a new render.
+  if (!job && !generationId && asString(attrs.slot).trim()) {
+    const slotOwners = jobs.filter(candidate => {
+      if ((candidate.messageId === messageId || (candidate.awaitingSource && candidate.sourceMessageId === messageId)) && compatibleSwipe(candidate)) return true
+      if (streaming || !candidate.awaitingSource || !candidate.generationId) return false
+      const terminalKey = taggedTerminalKey(userId, chatId, candidate.generationId)
+      const terminal = taggedTerminalSources.get(terminalKey)
+      return !!terminal && (taggedTerminalCandidates.get(terminalKey) || [terminal]).some(proof => proof.authoritative === true
+        && proof.messageId === messageId && (proof.swipeId === undefined || proof.swipeId === swipeId)
+        && !!proof.content && !!taggedSourcePacket(proof.content, candidate, true))
+    })
+    if (slotOwners.length > 1) return defer("ambiguous-slot-owner")
+    if (slotOwners.length === 1) {
+      if (streaming) return defer("unscoped-slot-replay", slotOwners[0])
+      job = slotOwners[0]
+    }
+  }
   // A generation-less callback is not a new reservation when an existing
   // same-packet job still lacks canonical ownership. This applies equally
   // to streaming replays, conflicting swipe hints, and changed message IDs.
@@ -6301,17 +6518,18 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
   if (!job) {
     const removed = (await loadTaggedRemovedReceipts(userId)).some(receipt => receipt.chatId === chatId && receipt.slot === slot
       && (generationId ? receipt.generationId === generationId
-        : streaming && receipt.packetFingerprint === stableTextHash(packet)))
+        : streaming ? receipt.packetFingerprint === stableTextHash(packet)
+          : receipt.messageId === messageId && (receipt.swipeId === swipeId || receipt.swipeId === undefined || swipeId === undefined)))
     if (removed) return defer("removed-reservation")
   }
-  if (!job && !streaming) {
+  if (!streaming && (!job || (job.awaitingSource && matches.length !== 1))) {
     // Native save can briefly lag the final callback. Bounded rereads of this
     // exact owner are safe; scanning unrelated messages for a tag is not.
     for (const delay of [100, 250, 500]) {
       if (matches.length) break
       await new Promise<void>(resolve => setTimeout(resolve, delay))
-      const next = await spindle.chat.getMessages(chatId)
-      message = next.find((item: any) => asString(item.id) === messageId)
+      messages = await spindle.chat.getMessages(chatId)
+      message = messages.find((item: any) => asString(item.id) === messageId)
       matches = taggedMessageSources(message, swipeId).filter(item => (!item.role || item.role === "assistant") && item.is_user !== true && hasTaggedPacket(asString(item?.content), fullMatch))
     }
     if (matches.length !== 1) return defer("saved-source-not-proven")
@@ -6325,7 +6543,8 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
   if (job) {
     // The slot is reserved for this generation. Conflicting text, attributes,
     // or swipe data are not permission to start another GPU request or rebind it.
-    if (!samePacket(job) || (!compatibleSwipe(job) && (!job.awaitingSource || !suppliedGeneration || streaming))) return defer("conflicting-reservation", job)
+    if ((!samePacket(job) && (streaming || !job.awaitingSource || !job.generationId || matches.length !== 1))
+      || (!compatibleSwipe(job) && (!job.awaitingSource || !job.generationId || streaming))) return defer("conflicting-reservation", job)
     if (generationId && !job.generationId && job.awaitingSource) {
       // Same owner, slot, packet and compatible swipe establish a safe alias.
       // Adopt only identity in the current persisted record; the GPU worker
@@ -6333,7 +6552,7 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
       job = await adoptTaggedGeneration(job.id, generationId, userId) || job
     }
     if (!streaming && !job.inserted && job.awaitingSource) {
-      if (job.generationId) await resolveTaggedTerminalSource(job, userId, messages)
+      if (job.generationId) await resolveTaggedTerminalSource(job, userId, messages, matches.length === 1 ? { messageId, swipeId, fullMatch } : undefined)
       else if (matches.length === 1 && (job.messageId === messageId || !messages.some((item: any) => asString(item.id) === job!.messageId))) {
         settledTaggedSources.set(job.id, { messageId, swipeId })
         job.awaitingSource = false; job.swipeId = swipeId
@@ -6343,17 +6562,19 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
         job = await persistTaggedSourceSettlement(job.id, userId) || job
       }
     }
+    if (!samePacket(job) || !compatibleSwipe(job)) return defer("unverified-saved-slot", job)
     const busy = runningTaggedJobs.has(job.id) || pendingTaggedJobs.has(job.id) || taggedFinalizeRetries.has(job.id)
       || upscalingImages.has(generationKey(userId, job.id))
     // Force on a tag is only approval of a requested job. Regeneration has
     // its own explicit job-ID RPC; replays must never restart ready/failed jobs.
     if (busy || !force || job.status !== "requested") {
       if (!busy && job.status === "ready" && !job.inserted && job.imageUrl && !job.awaitingSource) {
+        traceTaggedLifecycle("reused", job, "attachment-recovery", userId)
         const saved = job
         return { job: saved, work: async () => { await finalizeTaggedImageJobWithRetry(saved, userId) } }
       }
       sendTaggedJobState(job, userId)
-      traceTaggedLifecycle("reused", job)
+      traceTaggedLifecycle("reused", job, undefined, userId)
       return { job }
     }
     job.status = "queued"; job.error = ""
@@ -6373,7 +6594,7 @@ async function requestTaggedImageGenerationUnlocked(payload: any, userId?: strin
     try { await resolveTaggedTerminalSource(reserved, userId) } catch { /* Native save may still be pending. */ }
     await upsertTaggedImageJob(reserved, userId)
     sendTaggedJobState(reserved, userId)
-    traceTaggedLifecycle("reserved", reserved, streaming ? "stream" : "saved-source")
+    traceTaggedLifecycle("reserved", reserved, streaming ? "stream" : "saved-source", userId)
   } catch (error) { pendingTaggedJobs.delete(reserved.id); throw error }
   return { job: reserved, work: async () => {
     try {
@@ -6761,6 +6982,8 @@ async function upscaleOutput(imageId: string, connection: SwarmConnection, userI
   controller = new AbortController(), requestedSettings?: unknown, operation?: "remove-background",
   onProgress?: (data: ImageGenerationProgress) => void, surface = job ? "inline" : "main_studio") {
   const { signal } = controller
+  const upscalePreparationStarted = providerClock()
+  traceProviderTiming("derivative-prepare-start", { parentImageId: imageId, stage: studioGenerationStage(operation === "remove-background" ? "background_removed" : "upscale_result", surface), relatedAttemptId: job?.clientJobId }, userId)
   if (!spindle.permissions.has("images") || !spindle.permissions.has("image_gen")) {
     throw new Error("Grant Images and Image Generation permission to upscale.")
   }
@@ -6805,6 +7028,7 @@ async function upscaleOutput(imageId: string, connection: SwarmConnection, userI
     parameters: { width, height },
   }
   const started = Date.now()
+  traceProviderTiming("derivative-prepare-complete", { parentImageId: imageId, stage: studioGenerationStage(operation === "remove-background" ? "background_removed" : "upscale_result", surface), relatedAttemptId: job?.clientJobId, preparationMs: providerElapsed(upscalePreparationStarted) }, userId)
   const result = await generateWithProgress({
     ...input, userId, studioSurface: surface, studioStage: operation === "remove-background" ? "background_removed" : "upscale_result", studioParentImageId: imageId,
     owner_chat_id: job?.chatId || image.owner_chat_id || undefined,
@@ -7940,6 +8164,10 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
   const requestId = asString(payload?.requestId)
   try {
     switch (type) {
+      case "read_studio_diagnostics": {
+        spindle.sendToFrontend({ type: "studio_diagnostics_result", requestId, data: readStudioDiagnostics(userId, payload.captureId, payload.after) }, userId)
+        return
+      }
       case "load_stage_direction":
       case "save_stage_direction": {
         const data=await stageDirectionSettings(payload,userId)
@@ -9173,6 +9401,8 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           nativeStream: typeof spindle.imageGen?.generateStream === "function",
         }
         generationControllers.set(controllerKey, controllerEntry)
+        const manualPreparationStarted = providerClock()
+        traceProviderTiming("manual-prepare-start", { attemptId: clientJobId }, userId)
         if (stoppedGenerationKeys.has(controllerKey)) controller.abort("Stopped before preparation")
         try {
         if (!inpaint) await awaitGenerationTask(controller.signal, () => saveStudioGenerationProfile(
@@ -9222,6 +9452,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
             : source
             ? await awaitGenerationTask(controller.signal, () => withAnimaReference(input, source, userId))
             : input
+          traceProviderTiming("manual-prepare-complete", { attemptId: clientJobId, preparationMs: providerElapsed(manualPreparationStarted) }, userId)
           result = await generateWithProgress({
             ...renderInput, studioSurface: ["quick_create", "inline"].includes(asString(input.studioSurface)) ? input.studioSurface : "main_studio", studioStage: inpaint ? "inpaint_variant" : "general_generation", studioParentImageId: inpaint?.sourceImageId,
             clientJobId,
@@ -9248,6 +9479,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
           totalMs,
           userId,
         ))
+        traceSwarmReportedTiming(clientJobId, timing, asString(result.imageId), userId)
         let record: GenerationRecord | null = null
         try {
           record = await saveGenerationRecord(
@@ -9290,6 +9522,7 @@ async function handleMessage(payload: any, userId?: string): Promise<void> {
             ...outputPage,
           },
         }, userId)
+        traceProviderTiming("manual-result-published", { attemptId: clientJobId, imageId: asString(result.imageId) }, userId)
         completedGenerationKeys.add(controllerKey)
         if (completedGenerationKeys.size > 256) completedGenerationKeys.delete(completedGenerationKeys.values().next().value!)
         const latestUrl = record?.imageUrl || asString(result.imageUrl)
@@ -9856,7 +10089,7 @@ async function settleTaggedImageSources(payload: any, userId?: string, authorita
   const messageId = asString(payload?.messageId)
   const content = asString(payload?.content)
   const generationId = asString(payload?.generationId).slice(0, 200)
-  if (chatId && generationId) traceTaggedLifecycle("terminal-received", { chatId, messageId, generationId, swipeId: cleanTaggedSwipeId(payload?.swipeId ?? payload?.targetSwipeId) }, `${authoritativeEnd ? "native" : "renderer"}:${!messageId ? "no-message-id" : !content ? "no-content" : "content-present"}`)
+  if (chatId && generationId) traceTaggedLifecycle("terminal-received", { chatId, messageId, generationId, swipeId: cleanTaggedSwipeId(payload?.swipeId ?? payload?.targetSwipeId) }, `${authoritativeEnd ? "native" : "renderer"}:${!messageId ? "no-message-id" : !content ? "no-content" : "content-present"}`, userId)
   // Only the host's actual terminal event can supply an ID-only proof. A
   // renderer's final callback must include the canonical source text.
   if (!chatId || !messageId || content.length > 1_000_000 || (!content && !(authoritativeEnd && generationId))) return
@@ -9880,7 +10113,7 @@ async function settleTaggedImageSources(payload: any, userId?: string, authorita
       if (delay) await new Promise<void>(resolve => setTimeout(resolve, delay))
       const allJobs = (await loadTaggedImageJobs(userId)).filter(job => job.chatId === chatId && !removedTaggedJobs.has(job.id))
       const pending = allJobs.filter(job => job.awaitingSource
-        && (job.generationId ? job.generationId === generationId && (taggedTerminalCandidates.get(key) || [taggedTerminalSources.get(key)]).some(candidate => candidate && (!candidate.content || hasTaggedPacket(candidate.content, job.fullMatch)))
+        && (job.generationId ? job.generationId === generationId && (taggedTerminalCandidates.get(key) || [taggedTerminalSources.get(key)]).some(candidate => candidate && (!candidate.content || taggedSourcePacket(candidate.content, job, candidate.authoritative === true || candidate.verified === true)))
           : hasTaggedPacket(content, job.fullMatch) && !allJobs.some(other => other.generationId === generationId && !!generationId && other.slot === job.slot && taggedPacketIdentity(other.fullMatch) === taggedPacketIdentity(job.fullMatch))))
       if (!pending.length) return
       const messages = await spindle.chat.getMessages(chatId)
