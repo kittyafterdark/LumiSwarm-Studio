@@ -415,7 +415,14 @@ class TaggedImageController {
         const stream = active[0]
         stream.aliases.add(messageId)
         if (!stream.requests.size && !stream.target && payload.isStreaming === true) stream.owner = messageId
-        if (!stream.stopped && (explicitGeneration || inlineStreamTags(stream.source).some(t => inlinePacketIdentity(t) === inlinePacketIdentity(tag)))) this.submitStreamTag(stream, tag)
+        // Native streaming interception is an independent delivery channel.
+        // Once it matches one active generation, do not require the token
+        // buffer to replay the same packet before reserving GPU work. A gap
+        // or delayed token delivery must not postpone a complete native tag.
+        // Still honor protected ranges when the raw packet is already known.
+        const tokenProvesPacket = inlineStreamTags(stream.source).some(t => inlinePacketIdentity(t) === inlinePacketIdentity(tag))
+        const nativeStreamingPacket = payload.isStreaming === true && (!stream.source.includes(match) || tokenProvesPacket)
+        if (!stream.stopped && (explicitGeneration || tokenProvesPacket || nativeStreamingPacket)) this.submitStreamTag(stream, tag)
         // Never use a render-time callback as proof that an in-flight stream
         // ended. The terminal event or a saved reply after it owns settlement.
         return

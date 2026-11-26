@@ -1,3 +1,8 @@
+## 1.1.0-alpha.17.18 - Native streaming dispatch
+
+- Accept complete native streaming callbacks matched to one active generation without waiting for the independent token buffer. Preserve slot reservations, protected source ranges and ambiguous-owner deferral. Backend, attachment, and ribbon rules unchanged.
+- Add compiled browser and backend replay cases for native delivery before tokens and after a token gap, with duplicate delivery, historical callback, protected source and ambiguous generation controls.
+
 ## 1.1.0-alpha.17.17 - Inline reservation and ownership reconciliation
 
 - Separate durable render reservations from provisional and verified attachment ownership. Defer unscoped callbacks that collide with unresolved requests instead of spending a second render; require a unique persisted assistant packet for new non-streaming requests. Native terminal corrections can replace unverified evidence without moving an already verified owner. Recover ID-only terminal events, safely adopted legacy reservations, and proved sibling slots across backend restarts.

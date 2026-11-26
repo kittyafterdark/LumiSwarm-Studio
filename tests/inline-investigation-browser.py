@@ -9,7 +9,7 @@ with sync_playwright() as p:
  cases=page.evaluate('''()=>{
  const tag=slot=>`<swarm-image request="generate" slot="${slot}" aspect="4:3">harbor at dusk</swarm-image>`;
  const cases=[];
- for(const kind of ['normal','wrong-owner-id-only','missing-terminal-wrong-swipe','remount-unscoped-stream','stale-terminal-then-correct','explicit-generation-final-remount','idless-ambiguous-two-matches','idless-existing-new-swipe']){
+ for(const kind of ['normal','wrong-owner-id-only','missing-terminal-wrong-swipe','remount-unscoped-stream','stale-terminal-then-correct','explicit-generation-final-remount','idless-ambiguous-two-matches','idless-existing-new-swipe','native-before-token','native-after-token-gap']){
    let sent=[],rows=[],events=new Map();const chatId='chat-1',g='front-'+kind,raw=tag(g),old='old-'+kind,final='final-'+kind;
    const ctx={getActiveChat:()=>({chatId}),sendToBackend:p=>sent.push(structuredClone(p)),events:{on(n,f){events.set(n,f);return()=>events.delete(n)}},messages:{getRecent:()=>structuredClone(rows),getContent:id=>rows.find(m=>m.id===id)?.content??null,renderWidget:()=>()=>{}}};
    const create=()=>new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});
@@ -18,11 +18,19 @@ with sync_playwright() as p:
    if(kind==='idless-existing-new-swipe') rows.push({id:final,chat_id:chatId,content:'Previous reply',role:'assistant',swipe_id:0,swipes:['Previous reply'],metadata:{}});
    if(kind==='missing-terminal-wrong-swipe') rows.push({id:final,chat_id:chatId,content:raw,role:'assistant',swipe_id:0,swipes:[raw,'Other'],metadata:{}});
    const start=kind==='wrong-owner-id-only'?{targetMessageId:old,targetSwipeId:0}:['missing-terminal-wrong-swipe','idless-existing-new-swipe'].includes(kind)?{targetMessageId:final,targetSwipeId:1}:{};
-   emit('GENERATION_STARTED',{generationId:g,generationType:'normal',...start});emit('STREAM_TOKEN_RECEIVED',{generationId:g,token:raw,offset:0,type:'text'});
+   emit('GENERATION_STARTED',{generationId:g,generationType:'normal',...(['native-before-token','native-after-token-gap'].includes(kind)?{targetMessageId:final,targetSwipeId:0}:start)});
+   if(['native-before-token','native-after-token-gap'].includes(kind)){
+     if(kind==='native-after-token-gap')emit('STREAM_TOKEN_RECEIVED',{generationId:g,token:raw,offset:100,type:'text'});
+     const delivery={chatId,messageId:final,fullMatch:raw,attrs:{request:'generate',slot:g,aspect:'4:3'},content:'harbor at dusk',isStreaming:true};
+     c.handleTag(delivery);c.handleTag(delivery);
+     if(sent.filter(x=>x.type==='tag_generate').length!==1)throw Error(kind+': complete native tag must dispatch once before terminal');
+     if(kind==='native-before-token')emit('STREAM_TOKEN_RECEIVED',{generationId:g,token:raw,offset:0,type:'text'});
+     if(sent.filter(x=>x.type==='tag_generate').length!==1)throw Error(kind+': token replay must not dispatch twice');
+   }else emit('STREAM_TOKEN_RECEIVED',{generationId:g,token:raw,offset:0,type:'text'});
    const early=sent.length;
    if(kind==='idless-existing-new-swipe'){rows[0].swipes.push(raw);rows[0].swipe_id=1;rows[0].content=raw;}
    else if(kind!=='missing-terminal-wrong-swipe')rows.push({id:final,chat_id:chatId,content:raw,role:'assistant',swipe_id:0,swipes:[raw],metadata:{}});
-   if(kind==='normal')emit('GENERATION_ENDED',{generationId:g,messageId:final,content:raw,swipeId:0});
+   if(['normal','native-before-token','native-after-token-gap'].includes(kind))emit('GENERATION_ENDED',{generationId:g,messageId:final,content:raw,swipeId:0});
    if(kind==='wrong-owner-id-only')emit('GENERATION_ENDED',{generationId:g,swipeId:0});
    if(kind==='idless-ambiguous-two-matches'){rows.push({id:'extra-'+kind,chat_id:chatId,content:raw,role:'assistant',swipe_id:0,swipes:[raw],metadata:{}});emit('GENERATION_ENDED',{generationId:g,swipeId:0});}
    if(kind==='idless-existing-new-swipe')emit('GENERATION_ENDED',{generationId:g,swipeId:1});
@@ -39,5 +47,18 @@ with sync_playwright() as p:
 }''')
  for c in cases:
   print(c['kind'],[(x['type'],x.get('messageId'),x.get('generationId'),x.get('swipeId'),x.get('isStreaming')) for x in c['sent']])
+ page.evaluate('''()=>{
+ const chatId='chat-1',raw='<swarm-image request="generate" slot="safe" aspect="4:3">harbor</swarm-image>',events=new Map(),sent=[];
+ const ctx={getActiveChat:()=>({chatId}),sendToBackend:p=>sent.push(p),events:{on(n,f){events.set(n,f);return()=>events.delete(n)}},messages:{getRecent:()=>[],getContent:()=>null,renderWidget:()=>()=>{}}};
+ const start=g=>events.get('GENERATION_STARTED')({chatId,generationId:g,targetMessageId:'known'});
+ const tag=extra=>({chatId,messageId:'known',fullMatch:raw,attrs:{request:'generate',slot:'safe',aspect:'4:3'},content:'harbor',...extra});
+ const c=new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});
+ start('protected');c.handleTag(tag({isStreaming:false}));
+ if(sent.length)throw Error('Historical/final callback cannot start an active stream request without token evidence');
+ events.get('STREAM_TOKEN_RECEIVED')({chatId,generationId:'protected',offset:0,token:'```html\\n'+raw+'\\n```\\n',type:'text'});
+ c.handleTag(tag({isStreaming:true}));if(sent.length)throw Error('Native callback cannot bypass known protected source');
+ start('ambiguous');c.handleTag(tag({isStreaming:true}));if(sent.length)throw Error('Ambiguous active generation must not dispatch');
+ c.destroy();
+ }''')
  b.close()
  Path(__file__).with_name('inline-investigation-traces.json').write_text(json.dumps(cases,indent=2))

@@ -28047,7 +28047,9 @@ class TaggedImageController {
                 const stream = active[0];
                 stream.aliases.add(messageId);
                 if (!stream.requests.size && !stream.target && payload.isStreaming === true) stream.owner = messageId;
-                if (!stream.stopped && (explicitGeneration || inlineStreamTags(stream.source).some((t)=>inlinePacketIdentity(t) === inlinePacketIdentity(tag)))) this.submitStreamTag(stream, tag);
+                const tokenProvesPacket = inlineStreamTags(stream.source).some((t)=>inlinePacketIdentity(t) === inlinePacketIdentity(tag));
+                const nativeStreamingPacket = payload.isStreaming === true && (!stream.source.includes(match) || tokenProvesPacket);
+                if (!stream.stopped && (explicitGeneration || tokenProvesPacket || nativeStreamingPacket)) this.submitStreamTag(stream, tag);
                 return;
             }
             if (active.length > 1) return;
