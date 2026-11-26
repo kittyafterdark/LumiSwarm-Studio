@@ -108,6 +108,7 @@ class StoryTheaterController {
   private liveCache=new Map<string,TheaterFrame[]>()
   private liveMeta=new Map<string,{content:string;swipe?:number}>()
   private liveSettles=new Map<string,TheaterLiveSettle>()
+  private liveInlineTransitions=new Map<string,Array<{before:string;after:string;swipe?:number}>>()
   private liveSuppressed=new Set<string>()
   private liveDeleted=new Set<string>()
   private liveExpectedSwipe:{id:string;swipe:number}|null=null
@@ -122,7 +123,7 @@ class StoryTheaterController {
   private liveRecent:TheaterLiveMessage[]=[]
   private liveOrder:string[]=[]
   constructor(private readonly ctx:FrontendContext,private readonly castMoodSettings:(chatId:string)=>unknown=()=>undefined,private readonly resolveStoryScene:(chatId:string,key:string)=>ReturnType<TheaterSceneResolver>=()=>undefined){
-    try{const off=ctx.onBackendMessage?.((payload:any)=>this.receiveSceneryLibrary(payload));if(typeof off==='function')this.cleanups.push(off)}catch{}
+    try{const off=ctx.onBackendMessage?.((payload:any)=>{this.receiveSceneryLibrary(payload);this.receiveInlineReconciliation(payload)});if(typeof off==='function')this.cleanups.push(off)}catch{}
     this.liveEnabled=typeof ctx.composer?.getState==='function'&&typeof ctx.composer?.send==='function'&&typeof ctx.composer?.setText==='function'&&typeof ctx.messages?.getRecent==='function'
     for(const name of ['CHAT_SWITCHED','MESSAGE_EDITED','MESSAGE_SENT','MESSAGE_SWIPED','SWIPE_EDITED','MESSAGE_DELETED','CHARACTER_MESSAGE_RENDERED','USER_MESSAGE_RENDERED','GENERATION_STARTED','GENERATION_IN_PROGRESS','GENERATION_PHASE_CHANGED','STREAM_TOKEN_RECEIVED','GENERATION_ENDED','GENERATION_STOPPED']){
       try{const off=ctx.events?.on?.(name,(payload:any)=>{
@@ -135,6 +136,28 @@ class StoryTheaterController {
     }
     if(this.liveEnabled)try{const off=ctx.composer.onChange?.((state:any)=>{if(this.dialog&&state?.chatId===this.chatId){const field=this.get<HTMLTextAreaElement>('.live-draft');if(field&&this.root?.activeElement!==field)field.value=String(state.text||'');this.syncLiveChrome()}});if(typeof off==='function')this.cleanups.push(off)}catch{}
   }
+  private receiveInlineReconciliation(payload:any){
+    const p=payload?.data
+    if(payload?.type!=='tagged_message_reconciled'||!this.dialog||!this.liveEnabled||p?.chatId!==this.chatId||!p.messageId||typeof p.previousContent!=='string'||typeof p.content!=='string'||p.previousContent===p.content)return
+    const id=String(p.messageId),swipe=typeof p.swipeId==='number'?p.swipeId:undefined
+    const list=this.liveInlineTransitions.get(id)||[]
+    if(!list.some(x=>x.before===p.previousContent&&x.after===p.content&&x.swipe===swipe))list.push({before:p.previousContent,after:p.content,swipe})
+    this.liveInlineTransitions.set(id,list.slice(-12))
+    if(this.liveInlineTransitions.size>100)this.liveInlineTransitions.delete(this.liveInlineTransitions.keys().next().value!)
+    // The native DOM is still the only content renderer. Accept a confirmed
+    // source transition when its selected swipe actually appears in the host.
+    if(this.liveSuppressed.has(id)){
+      const row=theaterLiveRecent(this.ctx).find(m=>m.id===id)
+      if(row&&row.content===p.content&&(swipe===undefined||row.swipe_id===swipe))this.liveSettle(id,swipe,p.content,true)
+    }
+    this.liveRefresh()
+  }
+  private liveInlineContentMatches(id:string,expected:string,actual:string,swipe?:number):boolean{
+    if(expected===actual)return true
+    const transitions=this.liveInlineTransitions.get(id)||[],reachable=new Set([expected])
+    for(let i=0;i<transitions.length;i++)for(const t of transitions)if((t.swipe===undefined||t.swipe===swipe)&&reachable.has(t.before))reachable.add(t.after)
+    return reachable.has(actual)
+  }
   private liveEvent(name:string,p:any){
     if(name==='CHAT_SWITCHED'){this.liveStream=null;this.liveTerminal=null;this.generationActive=false;this.close();return}
     const chat=this.currentChat(),eventChat=p?.chatId||p?.chat_id||p?.message?.chat_id
@@ -146,7 +169,7 @@ class StoryTheaterController {
       // IN_PROGRESS is also delivered on reconnect. Missing offsets remain gaps.
       this.liveStream={id:p.generationId,chat,target,swipe:typeof p.targetSwipeId==='number'?p.targetSwipeId:undefined,type,background,source:'',reasoning:'',gap:false,reasoningGap:false,phase:'preparing',before:theaterRowStamp(this.liveCache.get(target)||[]),beforeContent:this.liveMeta.get(target)?.content||String(this.ctx.messages?.getContent?.(target)||''),base:type==='continue'?(this.liveMeta.get(target)?.content||String(this.ctx.messages?.getContent?.(target)||'')):''}
       const requested=!!this.livePending;this.generationActive=true;this.livePending='';this.liveExpectedSwipe=null;window.clearTimeout(this.livePendingTimer);this.pause()
-      if(this.dialog){if(target&&!background){this.liveSettles.delete(target);this.liveSuppressed.delete(target);if(type!=='continue')this.liveCache.delete(target)}if(this.liveView==='composer')this.liveView='waiting';if(this.liveView==='waiting'&&!background&&(requested||this.liveFollow==='@assistant'))this.liveFollow=target||'@assistant';this.liveRefresh()}
+      if(this.dialog){if(target&&!background){this.liveInlineTransitions.delete(target);this.liveSettles.delete(target);this.liveSuppressed.delete(target);if(type!=='continue')this.liveCache.delete(target)}if(this.liveView==='composer')this.liveView='waiting';if(this.liveView==='waiting'&&!background&&(requested||this.liveFollow==='@assistant'))this.liveFollow=target||'@assistant';this.liveRefresh()}
       return
     }
     if(name==='STREAM_TOKEN_RECEIVED'){
@@ -163,7 +186,7 @@ class StoryTheaterController {
     }
     if(!this.dialog)return
     const id=String(p?.message?.id||p?.messageId||'')
-    if(name==='MESSAGE_DELETED'){if(!id){this.close();return}this.liveDeleted.add(id);this.liveCache.delete(id);this.liveMeta.delete(id);this.liveSettles.delete(id);this.liveRefresh();return}
+    if(name==='MESSAGE_DELETED'){if(!id){this.close();return}this.liveInlineTransitions.delete(id);this.liveDeleted.add(id);this.liveCache.delete(id);this.liveMeta.delete(id);this.liveSettles.delete(id);this.liveRefresh();return}
     if(['MESSAGE_SWIPED','SWIPE_EDITED','MESSAGE_EDITED'].includes(name)){
       if(!id){this.close();return}
       const g=this.liveStream;if(g?.target===id&&!g.background)return
@@ -208,7 +231,7 @@ class StoryTheaterController {
         const settle=this.liveSettles.get(id)
         if(settle){
           if(settle.swipe!==undefined&&message?.swipe_id!==settle.swipe)continue
-          if(typeof knownContent!=='string'||settle.content!==undefined&&knownContent!==settle.content||settle.priorContent!==undefined&&knownContent===settle.priorContent)continue
+          if(typeof knownContent!=='string'||settle.content!==undefined&&!this.liveInlineContentMatches(id,settle.content,knownContent,message?.swipe_id)||settle.priorContent!==undefined&&knownContent===settle.priorContent)continue
           if(stamp===settle.before&&settle.before)continue
           if(stamp!==settle.stamp){settle.stamp=stamp;settle.passes=1;continue}
           if(++settle.passes<2)continue
@@ -576,6 +599,6 @@ class StoryTheaterController {
   private key=(e:KeyboardEvent)=>{if(e.key!=='Escape'&&e.composedPath().some(n=>n instanceof HTMLElement&&n.dataset.htmlReadOnly==='true'))return;if(e.target instanceof HTMLSelectElement||e.target instanceof HTMLInputElement||e.target instanceof HTMLTextAreaElement)return;if(e.key==='Escape'){e.preventDefault();e.stopPropagation();if(this.panel)this.showPanel(this.panel);else if(this.liveView!=='story')this.liveReturn();else this.close();return}if(this.panel)return;if(e.key.toLowerCase()==='h'&&this.liveView!=='story'){e.preventDefault();this.get<HTMLButtonElement>('[data-action=hide]')?.click();return}if(this.liveView!=='story')return;if(e.key==='ArrowRight'||(e.key===' '&&!(e.target instanceof HTMLButtonElement))){e.preventDefault();e.stopPropagation();this.advance()}else if(e.key==='ArrowLeft'){e.preventDefault();e.stopPropagation();this.go(this.index-1)}else if(e.key.toLowerCase()==='h'){e.preventDefault();this.get<HTMLButtonElement>('[data-action=hide]')?.click()}}
   private cancel=(e:Event)=>{e.preventDefault();if(this.panel)this.showPanel(this.panel);else if(this.liveView!=='story')this.liveReturn();else this.close()}
   private onClose=()=>this.close()
-  close():void{if(!this.dialog)return;this.persist();this.pause();const fx=this.get('.stage-fx-layer');if(fx)theaterFxCancelShake(fx);window.clearTimeout(this.revealTimer);this.revealTimer=0;this.revealParts=[];this.revealKey='';this.revealShown=0;this.resizeObserver?.disconnect();this.resizeObserver=null;cancelAnimationFrame(this.artPreviewFrame);this.artPreviewFrame=0;cancelAnimationFrame(this.fitRequest);this.fitRequest=0;this.projection=null;window.clearTimeout(this.refreshTimer);this.refreshTimer=0;window.clearInterval(this.hydrationTimer);this.hydrationTimer=0;this.mountedIds.clear();this.observer?.disconnect();this.observer=null;const d=this.dialog;this.dialog=null;this.root=null;this.frames=[];this.actorStates=[];this.actorClears.clear();this.resetScenerySession();this.indexExpanded.clear();this.indexAuthors.clear();this.stageActorWorld=null;this.panel='';this.artDraft=null;this.artSavedId='';this.artName='';window.clearInterval(this.liveInterval);window.clearTimeout(this.livePendingTimer);this.liveInterval=0;this.livePendingTimer=0;this.liveAction++;this.livePending='';this.liveCache.clear();this.liveMeta.clear();this.liveSettles.clear();this.liveDeleted.clear();this.liveSuppressed.clear();this.liveExpectedSwipe=null;this.liveRecent=[];this.liveOrder=[];this.liveView='story';this.liveFollow='';this.liveAfter='';this.chatId='';d.removeEventListener('close',this.onClose);d.removeEventListener('cancel',this.cancel);if(d.open)d.close();d.remove();if(this.previousFocus?.isConnected)this.previousFocus.focus({preventScroll:true});this.previousFocus=null}
+  close():void{if(!this.dialog)return;this.persist();this.pause();const fx=this.get('.stage-fx-layer');if(fx)theaterFxCancelShake(fx);window.clearTimeout(this.revealTimer);this.revealTimer=0;this.revealParts=[];this.revealKey='';this.revealShown=0;this.resizeObserver?.disconnect();this.resizeObserver=null;cancelAnimationFrame(this.artPreviewFrame);this.artPreviewFrame=0;cancelAnimationFrame(this.fitRequest);this.fitRequest=0;this.projection=null;window.clearTimeout(this.refreshTimer);this.refreshTimer=0;window.clearInterval(this.hydrationTimer);this.hydrationTimer=0;this.mountedIds.clear();this.observer?.disconnect();this.observer=null;const d=this.dialog;this.dialog=null;this.root=null;this.frames=[];this.actorStates=[];this.actorClears.clear();this.resetScenerySession();this.indexExpanded.clear();this.indexAuthors.clear();this.stageActorWorld=null;this.panel='';this.artDraft=null;this.artSavedId='';this.artName='';window.clearInterval(this.liveInterval);window.clearTimeout(this.livePendingTimer);this.liveInterval=0;this.livePendingTimer=0;this.liveAction++;this.livePending='';this.liveCache.clear();this.liveMeta.clear();this.liveSettles.clear();this.liveInlineTransitions.clear();this.liveDeleted.clear();this.liveSuppressed.clear();this.liveExpectedSwipe=null;this.liveRecent=[];this.liveOrder=[];this.liveView='story';this.liveFollow='';this.liveAfter='';this.chatId='';d.removeEventListener('close',this.onClose);d.removeEventListener('cancel',this.cancel);if(d.open)d.close();d.remove();if(this.previousFocus?.isConnected)this.previousFocus.focus({preventScroll:true});this.previousFocus=null}
   destroy():void{this.close();for(const off of this.cleanups.splice(0))try{off()}catch{}}
 }

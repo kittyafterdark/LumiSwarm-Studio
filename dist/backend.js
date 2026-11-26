@@ -3250,10 +3250,34 @@ const completedGenerationKeys = new Set();
 const taggedImageRequestQueues = new Map();
 const removedTaggedJobs = new Set();
 const settledTaggedSources = new Map();
+const taggedTerminalSources = new Map();
+const taggedTerminalSettlements = new Map();
+function taggedTerminalKey(userId, chatId, generationId) {
+    return JSON.stringify([
+        userId || "scoped",
+        chatId,
+        generationId
+    ]);
+}
 const runningParserCompletions = new Set();
 const completedParserCompletions = new Set();
 const taggedMessageFinalizeLocks = new Map();
 const taggedFinalizeRetries = new Map();
+const taggedAttachmentWakeups = new Map();
+function wakeTaggedAttachment(jobId) {
+    taggedAttachmentWakeups.get(jobId)?.();
+}
+function waitTaggedAttachment(jobId, delay) {
+    return new Promise((resolve)=>{
+        const finish = ()=>{
+            clearTimeout(timer);
+            if (taggedAttachmentWakeups.get(jobId) === finish) taggedAttachmentWakeups.delete(jobId);
+            resolve();
+        };
+        const timer = setTimeout(finish, delay);
+        taggedAttachmentWakeups.set(jobId, finish);
+    });
+}
 const taggedFinalizeMessageTargets = new Map();
 const swarmProtocolContexts = new Map();
 const SWARM_IMAGE_OUTPUT_PROTOCOL = `OUTPUT CONTRACT
@@ -5947,6 +5971,7 @@ function cleanTaggedImageJob(value) {
         fullMatch: asString(record.fullMatch).slice(0, 24_000),
         swipeId: cleanTaggedSwipeId(record.swipeId),
         awaitingSource: record.awaitingSource === true,
+        generationId: asString(record.generationId).slice(0, 200) || undefined,
         output: cleanTaggedImageOutput(record.output ?? parseSwarmImageTags(asString(record.fullMatch))[0]?.attrs.output),
         status,
         clientJobId: asString(record.clientJobId).slice(0, 120),
@@ -5982,18 +6007,36 @@ async function persistTaggedImageJobs(jobs, userId) {
         userId
     });
 }
-async function upsertTaggedImageJob(job, userId) {
-    const settled = settledTaggedSources.get(job.id);
-    if (settled) {
+async function persistTaggedSourceSettlement(jobId, userId) {
+    return withTaggedMessageFinalizeLock(`tagged-job-store:${userId || "default"}`, async ()=>{
+        const settled = settledTaggedSources.get(jobId);
+        if (!settled || removedTaggedJobs.has(jobId)) return undefined;
+        const jobs = await loadTaggedImageJobs(userId);
+        const job = jobs.find((candidate)=>candidate.id === jobId);
+        if (!job || !job.awaitingSource) return job;
         job.awaitingSource = false;
         job.messageId = settled.messageId;
         job.swipeId = settled.swipeId;
-    }
-    job.updatedAt = Date.now();
-    const jobs = (await loadTaggedImageJobs(userId)).filter((candidate)=>candidate.id !== job.id);
-    jobs.unshift(job);
-    await persistTaggedImageJobs(jobs, userId);
-    return job;
+        job.updatedAt = Date.now();
+        await persistTaggedImageJobs(jobs, userId);
+        return job;
+    });
+}
+async function upsertTaggedImageJob(job, userId) {
+    return withTaggedMessageFinalizeLock(`tagged-job-store:${userId || "default"}`, async ()=>{
+        const settled = settledTaggedSources.get(job.id);
+        if (settled) {
+            job.awaitingSource = false;
+            job.messageId = settled.messageId;
+            job.swipeId = settled.swipeId;
+        }
+        if (removedTaggedJobs.has(job.id)) return job;
+        job.updatedAt = Date.now();
+        const jobs = (await loadTaggedImageJobs(userId)).filter((candidate)=>candidate.id !== job.id);
+        jobs.unshift(job);
+        await persistTaggedImageJobs(jobs, userId);
+        return job;
+    });
 }
 function sanitizeRawOverrideForProfile(value) {
     if (typeof value !== "string" || !value.trim()) return "";
@@ -7916,6 +7959,7 @@ function taggedJobPublic(job) {
         finalImageId: job.finalImage?.id || "",
         swipeId: job.swipeId,
         awaitingSource: job.awaitingSource,
+        generationId: job.generationId,
         output: job.output,
         chatId: job.chatId,
         messageId: job.messageId,
@@ -7945,7 +7989,7 @@ function sendTaggedJobState(job, userId) {
         data: taggedJobPublic(job)
     }, userId);
 }
-function sendTaggedMessageReconciliation(job, content, userId) {
+function sendTaggedMessageReconciliation(job, content, previousContent, userId) {
     spindle.sendToFrontend({
         type: "tagged_message_reconciled",
         data: {
@@ -7954,7 +7998,10 @@ function sendTaggedMessageReconciliation(job, content, userId) {
             swipeId: job.swipeId,
             chatId: job.chatId,
             messageId: job.messageId,
-            content
+            content,
+            previousContent,
+            imageUrl: job.imageUrl,
+            output: job.output
         }
     }, userId);
 }
@@ -8074,7 +8121,7 @@ function taggedMessagePatch(target, content) {
 }
 function taggedMessageMatchScore(message, job) {
     const role = asString(message?.role).trim().toLowerCase();
-    if (role && role !== "assistant") return 0;
+    if (role && role !== "assistant" || message?.is_user === true) return 0;
     const content = asString(message?.content);
     if (!content) return 0;
     if (job.output === "url") {
@@ -8087,6 +8134,7 @@ function taggedMessageMatchScore(message, job) {
 }
 function findTaggedMessageTarget(messages, job) {
     const direct = messages.find((message)=>asString(message?.id) === job.messageId);
+    if (!direct && job.generationId) return null;
     const sources = (direct ? [
         direct
     ] : messages).flatMap((message)=>taggedMessageSources(message, job.swipeId));
@@ -8172,8 +8220,11 @@ async function removeTaggedImageFromChat(job, userId) {
         removedTaggedJobs.add(job.id);
         settledTaggedSources.delete(job.id);
         job.status = "cancelled";
-        await persistTaggedImageJobs((await loadTaggedImageJobs(userId)).filter((candidate)=>candidate.id !== job.id), userId);
+        await withTaggedMessageFinalizeLock(`tagged-job-store:${userId || "default"}`, async ()=>{
+            await persistTaggedImageJobs((await loadTaggedImageJobs(userId)).filter((candidate)=>candidate.id !== job.id), userId);
+        });
         taggedFinalizeRetries.delete(job.id);
+        wakeTaggedAttachment(job.id);
         taggedFinalizeMessageTargets.delete(job.id);
         return {
             messageId,
@@ -8245,11 +8296,40 @@ async function finalizeTaggedImageJob(job, userId, expectedImageId) {
         job.error = "";
         await upsertTaggedImageJob(job, userId);
         sendTaggedJobState(job, userId);
-        sendTaggedMessageReconciliation(job, replacement.content, userId);
+        sendTaggedMessageReconciliation(job, replacement.content, content, userId);
         return true;
     });
 }
+async function resolveTaggedTerminalSource(job, userId, sourceMessages) {
+    if (!job.awaitingSource || !job.generationId) return;
+    const terminal = taggedTerminalSources.get(taggedTerminalKey(userId, job.chatId, job.generationId));
+    if (!terminal || !terminal.content.includes(job.fullMatch)) return;
+    if (terminal.swipeId !== undefined && job.swipeId !== undefined && terminal.swipeId !== job.swipeId) return;
+    const messages = sourceMessages ?? await spindle.chat.getMessages(job.chatId);
+    const target = messages.find((item)=>asString(item.id) === terminal.messageId);
+    if (!target || target.role && target.role !== "assistant" || target.is_user === true) return;
+    const expectedSwipe = terminal.swipeId ?? job.swipeId;
+    const activeSwipe = cleanTaggedSwipeId(target.swipe_id);
+    const singleSource = !target.swipes?.length && (expectedSwipe === undefined || expectedSwipe === (activeSwipe ?? 0));
+    const sources = singleSource ? [
+        target
+    ] : taggedMessageSources(target, expectedSwipe);
+    const matches = sources.filter((item)=>terminal.verified ? asString(item.content).includes(job.fullMatch) : asString(item.content) === terminal.content);
+    if (matches.length !== 1) return;
+    const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId);
+    terminal.verified = true;
+    terminal.swipeId = swipeId;
+    settledTaggedSources.set(job.id, {
+        messageId: terminal.messageId,
+        swipeId
+    });
+    job.awaitingSource = false;
+    job.messageId = terminal.messageId;
+    job.swipeId = swipeId;
+    wakeTaggedAttachment(job.id);
+}
 async function finalizeTaggedImageJobWithRetry(job, userId) {
+    if (job.inserted) return true;
     const active = taggedFinalizeRetries.get(job.id);
     if (active) return active;
     const task = (async ()=>{
@@ -8257,10 +8337,11 @@ async function finalizeTaggedImageJobWithRetry(job, userId) {
         job.error = "";
         for (const delayMs of TAGGED_FINALIZE_RETRY_DELAYS_MS){
             if (delayMs > 0) {
-                await new Promise((resolve)=>setTimeout(resolve, delayMs));
+                await waitTaggedAttachment(job.id, delayMs);
             }
             if (removedTaggedJobs.has(job.id) || job.status !== "ready" || !job.imageUrl) return false;
             try {
+                await resolveTaggedTerminalSource(job, userId);
                 const targetMessageId = taggedFinalizeMessageTargets.get(job.id);
                 if (targetMessageId && targetMessageId !== job.messageId) {
                     job.messageId = targetMessageId;
@@ -8275,6 +8356,7 @@ async function finalizeTaggedImageJobWithRetry(job, userId) {
             }
         }
         if (removedTaggedJobs.has(job.id)) return false;
+        if (job.awaitingSource && job.generationId && !taggedTerminalSources.has(taggedTerminalKey(userId, job.chatId, job.generationId))) return false;
         job.inserted = false;
         job.error = lastError ? `Image generated, but Lumiverse could not attach it to the chat yet: ${lastError}` : "Image generated, but the chat message was not ready for attachment. Use Attach image to try again.";
         const recovered = await recoverCommittedInlineImage(job);
@@ -8560,10 +8642,11 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
 }
 async function requestTaggedImageGeneration(payload, userId) {
     const attrs = asRecord(payload?.attrs);
+    const generationId = asString(payload?.generationId).slice(0, 200);
     const key = [
         userId || "scoped",
         asString(payload?.chatId),
-        asString(payload?.messageId),
+        generationId ? `generation:${generationId}` : `message:${asString(payload?.messageId)}`,
         asString(attrs.slot),
         stableTextHash(asString(payload?.fullMatch))
     ].join("\0");
@@ -8582,6 +8665,7 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
     const chatId = asString(payload?.chatId).trim();
     const messageId = asString(payload?.messageId).trim();
     const fullMatch = asString(payload?.fullMatch).slice(0, 24_000);
+    const generationId = asString(payload?.generationId).slice(0, 200) || undefined;
     const attrs = asRecord(payload?.attrs);
     const scenePrompt = normalizePromptSpaces(payload?.content).trim().slice(0, 12_000);
     const strictRequest = asString(attrs.request).toLowerCase() === "generate";
@@ -8611,19 +8695,27 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
         if (existing.length === 1) swipeId = existing[0].swipeId;
     }
     const key = `${chatId}:${messageId}:${slot}:${stableTextHash(fullMatch)}:${swipeId ?? ""}`;
-    let job = jobs.find((candidate)=>!removedTaggedJobs.has(candidate.id) && (candidate.swipeId === swipeId || candidate.swipeId === undefined) && (candidate.key === key || candidate.chatId === chatId && candidate.messageId === messageId && candidate.slot === slot && candidate.fullMatch === fullMatch));
+    let job = jobs.find((candidate)=>!removedTaggedJobs.has(candidate.id) && !!generationId && candidate.generationId === generationId && candidate.chatId === chatId && candidate.slot === slot && candidate.fullMatch === fullMatch) || jobs.find((candidate)=>!removedTaggedJobs.has(candidate.id) && (!generationId || candidate.generationId === generationId || !candidate.generationId && candidate.awaitingSource) && (candidate.swipeId === swipeId || candidate.swipeId === undefined) && (candidate.key === key || candidate.chatId === chatId && candidate.messageId === messageId && candidate.slot === slot && candidate.fullMatch === fullMatch));
     if (job) {
         job.fullMatch = fullMatch;
-        if (payload?.isStreaming !== true) {
-            settledTaggedSources.set(job.id, {
-                messageId,
-                swipeId
-            });
-            job.awaitingSource = false;
-            if (swipeId !== undefined) job.swipeId = swipeId;
+        if (generationId && !job.generationId && job.awaitingSource) {
+            job.generationId = generationId;
             await upsertTaggedImageJob(job, userId);
         }
-        if (job.status === "ready") await finalizeTaggedImageJobWithRetry(job, userId);
+        if (payload?.isStreaming !== true && !job.inserted) {
+            if (generationId) {
+                await resolveTaggedTerminalSource(job, userId);
+            } else {
+                settledTaggedSources.set(job.id, {
+                    messageId,
+                    swipeId
+                });
+                job.awaitingSource = false;
+                if (swipeId !== undefined) job.swipeId = swipeId;
+            }
+            await upsertTaggedImageJob(job, userId);
+        }
+        if (job.status === "ready" && !job.inserted) await finalizeTaggedImageJobWithRetry(job, userId);
         if (!force || job.status === "generating") {
             sendTaggedJobState(job, userId);
             return job;
@@ -8643,7 +8735,8 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
             prompt: scenePrompt,
             sourcePrompt: scenePrompt,
             swipeId,
-            awaitingSource: payload?.isStreaming === true,
+            awaitingSource: payload?.isStreaming === true || !!generationId,
+            generationId,
             output: cleanTaggedImageOutput(attrs.output),
             negativePrompt: "",
             aspect: cleanAspect(attrs.aspect) || "4:3",
@@ -8662,9 +8755,20 @@ async function requestTaggedImageGenerationUnlocked(payload, userId) {
     }
     pendingTaggedJobs.add(job.id);
     try {
+        try {
+            await resolveTaggedTerminalSource(job, userId);
+        } catch  {}
         await upsertTaggedImageJob(job, userId);
         sendTaggedJobState(job, userId);
         if (config.autoGenerate || force) await runTaggedImageJob(job, useOriginalProfile, userId);
+        else if (job.awaitingSource && job.generationId) {
+            const terminal = taggedTerminalSources.get(taggedTerminalKey(userId, job.chatId, job.generationId));
+            if (terminal) void settleTaggedImageSources({
+                chatId: job.chatId,
+                generationId: job.generationId,
+                ...terminal
+            }, userId).catch((error)=>reportBackendError("Settling requested image", error));
+        }
         return job;
     } finally{
         pendingTaggedJobs.delete(job.id);
@@ -11513,6 +11617,12 @@ async function handleMessage(payload, userId) {
                     await requestTaggedImageGeneration(payload, userId);
                     return;
                 }
+            case "settle_tagged_generation":
+                {
+                    if (!spindle.permissions.has("chat_mutation")) return;
+                    await settleTaggedImageSources(payload, userId);
+                    return;
+                }
             case "list_tagged_jobs":
                 {
                     const snapshotAt = Date.now();
@@ -12812,6 +12922,7 @@ async function handleMessage(payload, userId) {
                     }
                     const finalMessageId = asString(payload?.messageId).trim();
                     if (finalMessageId && finalMessageId !== job.messageId) {
+                        if (job.generationId && settledTaggedSources.get(job.id)?.messageId !== finalMessageId) throw new Error("This streamed illustration is still waiting for its verified final message.");
                         const messages = await spindle.chat.getMessages(job.chatId);
                         const original = messages.find((message)=>asString(message.id) === job.messageId);
                         if (original && findTaggedMessageTarget([
@@ -13752,24 +13863,73 @@ async function settleTaggedImageSources(payload, userId) {
     const chatId = asString(payload?.chatId);
     const messageId = asString(payload?.messageId);
     const content = asString(payload?.content);
-    if (!chatId || !messageId || !content) return;
-    const pending = (await loadTaggedImageJobs(userId)).filter((job)=>job.chatId === chatId && job.awaitingSource && content.includes(job.fullMatch));
-    if (!pending.length) return;
-    const messages = await spindle.chat.getMessages(chatId);
-    const jobs = pending.filter((job)=>job.messageId === messageId || !messages.some((item)=>asString(item.id) === job.messageId));
-    const message = messages.find((item)=>asString(item.id) === messageId);
-    const matches = taggedMessageSources(message).filter((item)=>asString(item?.content) === content);
-    if (matches.length !== 1) return;
-    const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId);
-    for (const job of jobs){
-        if (removedTaggedJobs.has(job.id)) continue;
-        if (job.messageId !== messageId && jobs.filter((candidate)=>candidate.fullMatch === job.fullMatch).length !== 1) continue;
-        settledTaggedSources.set(job.id, {
-            messageId,
-            swipeId
-        });
-        await upsertTaggedImageJob(job, userId);
-        if (job.status === "ready") void finalizeTaggedImageJobWithRetry(job, userId).catch((error)=>reportBackendError("Attaching saved reply image", error));
+    if (!chatId || !messageId || !content || content.length > 1_000_000) return;
+    const generationId = asString(payload?.generationId).slice(0, 200);
+    const key = taggedTerminalKey(userId, chatId, generationId);
+    if (generationId && parseSwarmImageTags(content).length) {
+        const previous = taggedTerminalSources.get(key);
+        if (previous && (previous.messageId !== messageId || previous.content !== content)) return;
+        if (!previous) {
+            taggedTerminalSources.set(key, {
+                messageId,
+                content,
+                swipeId: cleanTaggedSwipeId(payload?.swipeId ?? payload?.targetSwipeId)
+            });
+            if (taggedTerminalSources.size > 160) taggedTerminalSources.delete(taggedTerminalSources.keys().next().value);
+        } else if (previous.swipeId === undefined && !previous.verified) previous.swipeId = cleanTaggedSwipeId(payload?.swipeId ?? payload?.targetSwipeId);
+    }
+    const settlementKey = generationId ? key : taggedTerminalKey(userId, chatId, `legacy:${messageId}`);
+    const existing = taggedTerminalSettlements.get(settlementKey);
+    if (existing) return existing;
+    const task = (async ()=>{
+        for (const delay of [
+            0,
+            250,
+            750,
+            1500,
+            3000,
+            5000
+        ]){
+            if (delay) await new Promise((resolve)=>setTimeout(resolve, delay));
+            const pending = (await loadTaggedImageJobs(userId)).filter((job)=>job.chatId === chatId && job.awaitingSource && !removedTaggedJobs.has(job.id) && content.includes(job.fullMatch) && (!job.generationId || job.generationId === generationId));
+            if (!pending.length) return;
+            const messages = await spindle.chat.getMessages(chatId);
+            const message = messages.find((item)=>asString(item.id) === messageId);
+            const legacyMatches = taggedMessageSources(message).filter((item)=>asString(item?.content) === content);
+            let retry = false;
+            for (const job of pending){
+                if (job.generationId) await resolveTaggedTerminalSource(job, userId, messages);
+                else {
+                    if (job.messageId !== messageId && messages.some((item)=>asString(item.id) === job.messageId)) continue;
+                    if (job.messageId !== messageId && pending.filter((candidate)=>candidate.fullMatch === job.fullMatch).length !== 1) continue;
+                    if (legacyMatches.length === 1 && (!message?.role || message.role === "assistant") && message?.is_user !== true) {
+                        settledTaggedSources.set(job.id, {
+                            messageId,
+                            swipeId: cleanTaggedSwipeId(legacyMatches[0].studioSwipeId)
+                        });
+                        job.awaitingSource = false;
+                    }
+                }
+                if (job.awaitingSource) {
+                    if (!job.generationId || !runningTaggedJobs.has(job.id) || job.status === "ready") retry = true;
+                    continue;
+                }
+                wakeTaggedAttachment(job.id);
+                const latest = await persistTaggedSourceSettlement(job.id, userId);
+                if (!latest) continue;
+                sendTaggedJobState(latest, userId);
+                if (latest.status === "ready" && !latest.inserted && !runningTaggedJobs.has(job.id)) {
+                    void finalizeTaggedImageJobWithRetry(latest, userId).catch((error)=>reportBackendError("Attaching saved reply image", error));
+                }
+            }
+            if (!retry) return;
+        }
+    })();
+    taggedTerminalSettlements.set(settlementKey, task);
+    try {
+        await task;
+    } finally{
+        if (taggedTerminalSettlements.get(settlementKey) === task) taggedTerminalSettlements.delete(settlementKey);
     }
 }
 if (spindle.permissions.has("generation")) {

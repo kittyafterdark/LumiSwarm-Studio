@@ -2444,6 +2444,76 @@ assert.equal(streamedMessage.swipes[1],streamedJob.imageUrl)
 const beforeStreamedReplay=swipeSequence
 await submitUrl(streamedMessage,streamedTag,{force:false})
 assert.equal(swipeSequence,beforeStreamedReplay,'Replaying a completed swipe request without a visible source tag never regenerates')
+// Streaming fallback uses generation identity before the native reply exists.
+// Two completed images must survive concurrent writes and attach to the exact
+// saved alternative, even when the terminal event precedes the native read.
+await request('set_tag_automation',{config:{requestMode:'inline',autoGenerate:true,autoFinalizeInline:false}})
+const gRace='two-cg-stream', tempOwner={id:'inline-stream:'+gRace}
+const raceTagA=swipeTag.replace('swipe-source','race-first')
+const raceTagB=inlineTag.replace('ordinary','race-second')
+const raceContent='Before. '+raceTagA+' Between. '+raceTagB+' After.'
+const raceStart=swipeSequence
+const raceRuns=Promise.all([submitUrl(tempOwner,raceTagA,{force:false,isStreaming:true,generationId:gRace,swipeId:1}),submitUrl(tempOwner,raceTagB,{force:false,isStreaming:true,generationId:gRace,swipeId:1})])
+const raceJobs=()=>userFiles.get('tagged-image-jobs.json').filter(job=>job.generationId===gRace)
+async function waitRace(predicate,label){for(let i=0;i<500;i++){if(predicate())return;await new Promise(r=>setTimeout(r,10))}assert.fail(label)}
+await waitRace(()=>raceJobs().length===2&&raceJobs().every(j=>j.status==='ready'),'Both images generated while the LLM was still streaming')
+assert.equal(swipeSequence,raceStart+2)
+assert.ok(raceJobs().every(j=>!j.inserted&&j.awaitingSource))
+const raceTerminal={generationId:gRace,chatId:'chat-1',messageId:'race-final',content:raceContent,swipeId:1}
+eventHandlers.get('GENERATION_ENDED')(raceTerminal,'user-1')
+const raceSettlement=frontendHandler({type:'settle_tagged_generation',requestId:'race-settle',...raceTerminal},'user-1')
+await new Promise(r=>setTimeout(r,50))
+const raceMessage={id:'race-final',role:'assistant',content:otherSwipe,swipe_id:0,swipes:[otherSwipe,raceContent],metadata:{keep:'yes'}}
+taggedMessages.push(raceMessage)
+await waitRace(()=>raceJobs().length===2&&raceJobs().every(j=>j.inserted),'Both CGs attached after delayed native save')
+await raceRuns;await raceSettlement
+const [raceA,raceB]=[raceTagA,raceTagB].map(tag=>raceJobs().find(j=>j.fullMatch===tag))
+assert.equal(raceMessage.content,otherSwipe)
+assert.ok(raceMessage.swipes[1].startsWith('Before. '+raceA.imageUrl+' Between. <figure'))
+assert.ok(raceMessage.swipes[1].includes(raceB.imageUrl)&&raceMessage.swipes[1].endsWith(' After.'))
+assert.equal(raceMessage.metadata.swarm_studio_tagged_images.length,2)
+assert.equal(raceMessage.metadata.keep,'yes')
+assert.ok(raceJobs().every(j=>j.messageId===raceMessage.id&&j.swipeId===1))
+assert.ok(sent.some(e=>e.payload.type==='tagged_message_reconciled'&&e.payload.data.messageId===raceMessage.id&&e.payload.data.previousContent===raceContent))
+await submitUrl(raceMessage,raceTagA,{force:false,generationId:gRace,swipeId:1})
+assert.equal(swipeSequence,raceStart+2,'Native interceptor replay cannot launch a third image')
+// Terminal proof can arrive before the queued job is persisted at all.
+const earlyTag=swipeTag.replace('swipe-source','early-proof'),earlyGen='early-proof-stream'
+const earlyMessage={id:'early-proof-final',role:'assistant',content:earlyTag,swipe_id:0,swipes:[earlyTag],metadata:{}}
+taggedMessages.push(earlyMessage)
+await frontendHandler({type:'settle_tagged_generation',requestId:'early-proof',generationId:earlyGen,chatId:'chat-1',messageId:earlyMessage.id,content:earlyTag,swipeId:0},'user-1')
+await submitUrl({id:'inline-stream:'+earlyGen},earlyTag,{force:false,isStreaming:true,generationId:earlyGen,swipeId:0})
+assert.ok(userFiles.get('tagged-image-jobs.json').some(j=>j.generationId===earlyGen&&j.inserted&&j.messageId===earlyMessage.id))
+assert.match(earlyMessage.content,/swipe-result-/)
+// A long reply can outlive the whole ordinary attachment retry budget.
+const longGen='long-reply-stream',longTag=swipeTag.replace('swipe-source','long-reply'),longOwner={id:'inline-stream:'+longGen}
+const longTimeout=globalThis.setTimeout
+let longJob
+try {
+ globalThis.setTimeout=(fn,delay,...args)=>longTimeout(fn,delay>=250&&delay!==1000?0:delay,...args)
+ longJob=await bounded(submitUrl(longOwner,longTag,{force:false,isStreaming:true,generationId:longGen,swipeId:0}))
+} finally {globalThis.setTimeout=longTimeout}
+assert.equal(longJob.status,'ready');assert.equal(longJob.inserted,false);assert.equal(longJob.error,'')
+// The first alternative may be represented by content alone, without swipes.
+const longMessage={id:'long-reply-final',role:'assistant',content:longTag,metadata:{}}
+taggedMessages.push(longMessage)
+const beforeLongAttach=swipeSequence
+await frontendHandler({type:'settle_tagged_generation',requestId:'long-proof',generationId:longGen,chatId:'chat-1',messageId:longMessage.id,content:longTag,swipeId:0},'user-1')
+await waitRace(()=>userFiles.get('tagged-image-jobs.json').some(j=>j.generationId===longGen&&j.inserted),'Late terminal event resumes saved image')
+assert.equal(longMessage.content,longJob.imageUrl);assert.equal(swipeSequence,beforeLongAttach)
+// A second owner notification carrying the same generation cannot dispatch a
+// duplicate while the first request is still being stored.
+const repeatGen='parallel-replay',repeatTag=swipeTag.replace('swipe-source','parallel-replay')
+const repeatMessage={id:'repeat-final',role:'assistant',content:repeatTag,swipe_id:0,swipes:[repeatTag],metadata:{}}
+taggedMessages.push(repeatMessage)
+const repeatBefore=swipeSequence
+const repeatRuns=Promise.all([submitUrl({id:'inline-stream:'+repeatGen},repeatTag,{force:false,isStreaming:true,generationId:repeatGen}),submitUrl(repeatMessage,repeatTag,{force:false,isStreaming:true,generationId:repeatGen})])
+await waitRace(()=>userFiles.get('tagged-image-jobs.json').some(j=>j.generationId===repeatGen&&j.status==='ready'),'First replay request ready')
+await frontendHandler({type:'settle_tagged_generation',requestId:'repeat-proof',generationId:repeatGen,chatId:'chat-1',messageId:repeatMessage.id,content:repeatTag,swipeId:0},'user-1')
+await repeatRuns
+assert.equal(swipeSequence,repeatBefore+1)
+assert.equal(userFiles.get('tagged-image-jobs.json').filter(j=>j.generationId===repeatGen).length,1)
+console.log('inline stream: concurrent provider results, delayed native commit, generation remapping, replay, early terminal proof: ok')
 spindle.imageGen.generateStream=beforeSwipeStream
 console.log('swipe ownership: background generation/parser/removal, identical alternatives, edited requests, and ambiguous message remapping: ok')
 const originalInpaintStream = spindle.imageGen.generateStream

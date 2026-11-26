@@ -1,4 +1,6 @@
 interface TaggedImageJobView {
+  generationId?: string
+  awaitingSource?: boolean
   draftImageId?: string
   finalImageId?: string
   swipeId?: number
@@ -61,6 +63,31 @@ function widgetKeyHash(value: string): string {
   return (hash >>> 0).toString(36)
 }
 
+interface InlineTagStream {
+  id: string; chatId: string; owner: string; target: string; swipeId?: number
+  source: string; gap: boolean; stopped: boolean; background: boolean; seq?: number; seqGap?: boolean; settlementContent?: string
+  requests: Map<string, { fullMatch: string; attrs: Record<string, string>; content: string }>
+}
+
+// Scan only completed explicit generation packets. The host interceptor is
+// still responsible for legacy requests and display removal; parser packets
+// deliberately remain completion-only.
+function inlineStreamTags(source: string): Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> {
+  const tags: Array<{ fullMatch: string; attrs: Record<string, string>; content: string }> = []
+  // Examples in fenced/inline code, HTML comments, and hidden reasoning are
+  // not authored image requests. Keep exact source offsets for attachment.
+  const protectedRanges = [...source.matchAll(/(?:^|\n)[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]{0,3}\1[ \t]*(?=\n|$)|$)|<!--(?:[\s\S]*?-->|[\s\S]*$)|<(think|thinking|reasoning|code|pre)\b[^>]*>[\s\S]*?(?:<\/\2\s*>|$)|(`+)[^\n]*?\3/gi)]
+    .map(match => [match.index!, match.index! + match[0].length])
+  for (const match of source.matchAll(/<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi)) {
+    if (protectedRanges.some(([start, end]) => match.index! >= start && match.index! < end)) continue
+    const attrs: Record<string, string> = {}
+    for (const attr of match[1].matchAll(/([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g)) attrs[attr[1].toLowerCase()] = attr[2] ?? attr[3] ?? attr[4] ?? ""
+    if (attrs.request?.toLowerCase() === "generate" && match[2].trim() && match[0].length <= 24_000) tags.push({ fullMatch: match[0], attrs, content: match[2] })
+    if (tags.length >= 6) break
+  }
+  return tags
+}
+
 class TaggedImageController {
   private readonly ctx: FrontendContext
   private readonly openStudioWithPrompt: (prompt: string, negativePrompt: string) => void
@@ -95,6 +122,9 @@ class TaggedImageController {
   private readonly urlActions = new Map<string, { image: HTMLImageElement; button: HTMLButtonElement; events: AbortController; resize?: ResizeObserver }>()
   private urlActionFrame = 0
   private closeImageMenu: (() => void) | null = null
+  private readonly streams = new Map<string, InlineTagStream>()
+  private readonly terminalStreams = new Map<string, InlineTagStream>()
+  private hydrationTimers = new Map<string, number>()
   private destroyed = false
   private promptDiagnostics: HTMLDialogElement | null = null
 
@@ -191,6 +221,90 @@ class TaggedImageController {
         if (typeof cleanup === "function") this.selectionCleanups.push(cleanup)
       } catch { /* Older hosts may not expose all selection events. */ }
     }
+    for (const name of ["GENERATION_STARTED", "GENERATION_IN_PROGRESS", "STREAM_TOKEN_RECEIVED", "GENERATION_ENDED", "GENERATION_STOPPED"]) {
+      try {
+        const cleanup = this.ctx.events?.on?.(name, (payload: any) => this.onStreamEvent(name, payload))
+        if (typeof cleanup === "function") this.selectionCleanups.push(cleanup)
+      } catch { /* Interceptor remains the compatibility path. */ }
+    }
+  }
+
+  private submitStreamTag(stream: InlineTagStream, tag: { fullMatch: string; attrs: Record<string, string>; content: string }): void {
+    if (stream.requests.has(tag.fullMatch) || stream.requests.size >= 6) return
+    // Stable generation identity bridges the provisional and committed IDs.
+    // No optimistic widget is mounted against a synthetic message ID.
+    stream.requests.set(tag.fullMatch, tag)
+    try {
+      this.ctx.sendToBackend({ type: "tag_generate", requestId: createRequestId(), chatId: stream.chatId,
+        messageId: stream.owner, generationId: stream.id, swipeId: stream.swipeId, ...tag, isStreaming: true })
+    } catch { stream.requests.delete(tag.fullMatch) }
+  }
+
+  private onStreamEvent(name: string, payload: any): void {
+    if (this.destroyed) return
+    const chatId = String(payload?.chatId || payload?.chat_id || "")
+    const id = String(payload?.generationId || "")
+    if (!id || !chatId || chatId !== this.ctx.getActiveChat?.()?.chatId) return
+    if (name === "GENERATION_STARTED" || name === "GENERATION_IN_PROGRESS") {
+      if (this.terminalStreams.has(id)) return
+      const target = String(payload.targetMessageId || "")
+      const current = this.streams.get(id)
+      if (current && current.chatId === chatId) {
+        if (target) current.target = target
+        if (this.swipeIndex(payload.targetSwipeId) !== undefined) current.swipeId = payload.targetSwipeId
+        return
+      }
+      // Background alternatives are valid image owners if their message and
+      // swipe are known; quiet parser and impersonation streams are not.
+      const background = /^(impersonate|quiet)/i.test(String(payload.generationType || "")) || payload.isUser === true
+        || (!!payload.backgroundSwipe && (!target || this.swipeIndex(payload.targetSwipeId) === undefined))
+      this.streams.set(id, { id, chatId, target, owner: target || `inline-stream:${id}`, swipeId: this.swipeIndex(payload.targetSwipeId),
+        source: "", gap: false, stopped: false, background, requests: new Map() })
+      if (this.streams.size > 16) this.streams.delete(this.streams.keys().next().value!)
+      return
+    }
+    const stream = this.streams.get(id) || this.terminalStreams.get(id)
+    if (!stream || stream.chatId !== chatId || stream.background) return
+    if (name === "STREAM_TOKEN_RECEIVED") {
+      if (stream.stopped || stream.gap || typeof payload.token !== "string") return
+      // Current hosts expose text offsets; older hosts expose a monotonic
+      // sequence instead. Never concatenate replays or a known missing prefix.
+      const seq = typeof payload.seq === "number" && Number.isSafeInteger(payload.seq) && payload.seq >= 0 ? payload.seq : undefined
+      const replay = seq !== undefined && stream.seq !== undefined && seq <= stream.seq
+      if (seq !== undefined && !replay) {
+        if (stream.seq === undefined ? seq > 1 : seq !== stream.seq + 1) stream.seqGap = true
+        stream.seq = seq
+      }
+      if (payload.type === "reasoning") return
+      if (payload.offset === undefined && replay) return
+      const offset = payload.offset !== undefined ? payload.offset : seq !== undefined && !stream.seqGap ? stream.source.length : undefined
+      const previousLength = stream.source.length
+      const next = theaterLiveAppend(stream.source, payload.token, offset)
+      stream.source = next.value; stream.gap = next.gap
+      // Do not rescan an ever-growing reply on every ordinary prose token.
+      if (!next.gap && next.value.slice(previousLength).includes(">")) for (const tag of inlineStreamTags(stream.source)) this.submitStreamTag(stream, tag)
+      return
+    }
+    if (name === "GENERATION_STOPPED") { stream.stopped = true; return }
+    if (name !== "GENERATION_ENDED" || this.terminalStreams.has(id)) return
+    stream.stopped = true
+    stream.target = String(payload.messageId || stream.target || "")
+    this.streams.delete(id); this.terminalStreams.set(id, stream)
+    if (this.terminalStreams.size > 16) this.terminalStreams.delete(this.terminalStreams.keys().next().value!)
+    // A separate settlement message does not queue behind the GPU request.
+    // The backend also consumes its own terminal event and validates both
+    // paths against the persisted assistant reply before writing anything.
+    const finalContent = typeof payload.content === "string" ? payload.content : ""
+    if (stream.target && finalContent && stream.requests.size) this.submitStreamSettlement(stream, finalContent)
+  }
+
+  private submitStreamSettlement(stream: InlineTagStream, content: string): void {
+    if (!stream.target || !content || stream.settlementContent || ![...stream.requests.keys()].some(tag => content.includes(tag))) return
+    try {
+      this.ctx.sendToBackend({ type: "settle_tagged_generation", requestId: createRequestId(), chatId: stream.chatId,
+        messageId: stream.target, generationId: stream.id, swipeId: stream.swipeId, content })
+      stream.settlementContent = content
+    } catch { /* Backend terminal event remains available. */ }
   }
 
   setBehavior(behavior: StudioBehavior): void {
@@ -200,6 +314,36 @@ class TaggedImageController {
   handleTag(payload: any): void {
     if (this.destroyed || !payload?.chatId || !payload?.messageId || payload?.isUser) return
     this.sourceSnapshot = null
+    const match = String(payload.fullMatch || "")
+    const candidates = [...this.streams.values()].filter(s => !s.background && (!s.stopped || s.requests.has(match)) && s.chatId === String(payload.chatId)
+      && (payload.generationId ? payload.generationId === s.id : s.target === String(payload.messageId) ||
+        (payload.isStreaming === true && (!s.target || s.source.includes(match)))))
+    const stream = candidates.length === 1 ? candidates[0] : undefined
+    // Some hosts intercept the same packet in parallel with token delivery.
+    // Only adopt a packet from a known stream, not a historical render.
+    if (stream && String(payload.attrs?.request || "").toLowerCase() === "generate" && match) {
+      const tag = inlineStreamTags(match)[0]
+      if (tag && (payload.isStreaming === true || stream.requests.has(match))) {
+        if (!stream.requests.size && !stream.target && payload.isStreaming === true) stream.owner = String(payload.messageId)
+        this.submitStreamTag(stream, tag)
+        if (stream.stopped && payload.isStreaming !== true && stream.target === String(payload.messageId)) {
+          const selected = this.selectedMessage(stream.chatId, stream.target)
+          if ((stream.swipeId === undefined || stream.swipeId === this.swipeIndex(selected?.swipe_id)) && typeof selected?.content === "string") this.submitStreamSettlement(stream, selected.content)
+        }
+        return
+      }
+    }
+    const terminal = [...this.terminalStreams.values()].reverse().find(s => s.chatId === String(payload.chatId) && s.target === String(payload.messageId)
+      && s.requests.has(match) && (!payload.generationId || payload.generationId === s.id))
+    if (terminal && (payload.isStreaming !== true || payload.generationId === terminal.id)) {
+      // If the terminal event lacked content, a later native interceptor can
+      // supply it, but only from the matching currently selected swipe.
+      const selected = this.selectedMessage(terminal.chatId, terminal.target)
+      if (terminal.swipeId === undefined || terminal.swipeId === this.swipeIndex(selected?.swipe_id)) {
+        if (typeof selected?.content === "string" && selected.content.includes(match)) this.submitStreamSettlement(terminal, selected.content)
+        return
+      }
+    }
     const slot = String(payload?.attrs?.slot || `image-${widgetKeyHash(String(payload.fullMatch || payload.content)).slice(0, 6)}`)
       .replace(/[^a-z0-9_-]+/gi, "-")
       .slice(0, 80)
@@ -335,6 +479,8 @@ class TaggedImageController {
             this.remove(candidate); this.jobs.delete(id); this.acknowledgeJob(id)
           }
         }
+        const previous = this.jobs.get(job.id)
+        if (previous && previous.messageId !== job.messageId) this.remove(previous)
         this.jobs.set(job.id, job)
         this.acknowledgeJob(job.id)
         this.settledAttachmentRequests.delete(job.id)
@@ -359,6 +505,7 @@ class TaggedImageController {
       const previous = this.jobs.get(job.id)
       if (Number(previous?.updatedAt || 0) > Number(job.updatedAt || 0)) return
       const next = { ...previous, ...this.latestJobState(job) }
+      if (previous && previous.messageId !== next.messageId) this.remove(previous)
       this.jobs.set(job.id, next)
       if (next.inserted) {
         this.settledAttachmentRequests.delete(next.id)
@@ -373,6 +520,8 @@ class TaggedImageController {
 
   destroy(): void {
     this.destroyed = true
+    this.streams.clear(); this.terminalStreams.clear()
+    this.clearHydrationTimers()
     this.promptDiagnostics?.remove(); this.promptDiagnostics = null
     this.closeImageMenu?.()
     this.urlActionJobs.clear()
@@ -693,7 +842,37 @@ class TaggedImageController {
     // could overwrite a newer swipe or a user edit.
     job.inserted = true
     job.error = ""
+    if (value?.messageId && value?.chatId === job.chatId && value.messageId !== job.messageId) {
+      this.remove(job)
+      job.messageId = String(value.messageId)
+    }
+    if (this.swipeIndex(value?.swipeId) !== undefined) job.swipeId = value.swipeId
     this.refreshJobWidget(job)
+    this.scheduleHydration(job)
+  }
+
+  private clearHydrationTimers(): void {
+    for (const timer of this.hydrationTimers.values()) window.clearTimeout(timer)
+    this.hydrationTimers.clear()
+  }
+
+  private scheduleHydration(job: TaggedImageJobView): void {
+    const old = this.hydrationTimers.get(job.id)
+    if (old !== undefined) window.clearTimeout(old)
+    this.hydrationTimers.delete(job.id)
+    const delays = [150, 450, 1000, 2000, 4000]
+    // A native commit can precede the host's selected-source projection and
+    // virtualized DOM. Recheck only the committed image; never re-save text
+    // or re-render the GPU job to repair a stale view.
+    const check = (index: number) => {
+      this.hydrationTimers.delete(job.id)
+      const current = this.jobs.get(job.id)
+      if (this.destroyed || !current?.inserted || current.status !== "ready" || current.chatId !== this.ctx.getActiveChat?.()?.chatId) return
+      this.sourceSnapshot = null
+      this.refreshJobWidget(current)
+      if (index < delays.length && !this.inlineFigureForJob(job.id)) this.hydrationTimers.set(job.id, window.setTimeout(() => check(index + 1), delays[index]))
+    }
+    this.hydrationTimers.set(job.id, window.setTimeout(() => check(1), delays[0]))
   }
 
   private acknowledgeJob(jobId: string): void {
@@ -727,7 +906,7 @@ class TaggedImageController {
   }
 
   private isSelected(job: TaggedImageJobView): boolean {
-    if (this.destroyed || this.removedJobs.has(job.id)) return false
+    if (this.destroyed || this.removedJobs.has(job.id) || (job.awaitingSource && job.messageId.startsWith("inline-stream:"))) return false
     const active = this.selectedChatId !== undefined ? this.selectedChatId : this.ctx.getActiveChat?.()?.chatId
     if (active !== undefined && active !== job.chatId) return false
     const message = this.selectedMessage(job.chatId, job.messageId)
@@ -749,6 +928,8 @@ class TaggedImageController {
     if (name === "CHAT_SWITCHED") {
       this.selectedChatId = typeof payload?.chatId === "string" ? payload.chatId : null
       this.selectedMessages.clear()
+      this.streams.clear(); this.terminalStreams.clear()
+      this.clearHydrationTimers()
     }
     const message = payload?.message
     const chatId = String(payload?.chatId || message?.chat_id || "")
@@ -865,6 +1046,8 @@ class TaggedImageController {
         type: "retry_tagged_attachment",
         requestId: createRequestId(),
         jobId: job.id,
+        messageId: job.messageId,
+        swipeId: job.swipeId,
       })
       return
     }

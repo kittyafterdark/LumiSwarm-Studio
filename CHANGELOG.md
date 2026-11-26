@@ -1,3 +1,9 @@
+## 1.1.0-alpha.17.13 - Inline streaming and attachment recovery
+
+- Dispatch explicit complete inline generation tags from generation-scoped token events, independent of native interceptor timing. Deduplicate stream/interceptor replays and provisional/final message IDs; leave incomplete tags, code examples, reasoning and parser requests out of this path.
+- Separate provider completion from canonical reply settlement. Retry delayed native saves, retain completed bitmaps through long text streams, attach only to a proved assistant message/swipe, and serialize concurrent job-store updates.
+- Recheck late native hydration after confirmed attachment without rewriting stale frontend content. Theater accepts verified image-attachment transitions instead of waiting indefinitely for the original unmodified terminal text.
+- Add backend races and a compiled Chromium regression at 1440, 390 and 320 px. No presentation, generation-profile or provider changes.
 
 ## 1.1.0-alpha.17.12 - OVA subtitle restoration
 

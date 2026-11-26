@@ -27632,6 +27632,27 @@ function widgetKeyHash(value) {
     }
     return (hash >>> 0).toString(36);
 }
+function inlineStreamTags(source) {
+    const tags = [];
+    const protectedRanges = [
+        ...source.matchAll(/(?:^|\n)[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]{0,3}\1[ \t]*(?=\n|$)|$)|<!--(?:[\s\S]*?-->|[\s\S]*$)|<(think|thinking|reasoning|code|pre)\b[^>]*>[\s\S]*?(?:<\/\2\s*>|$)|(`+)[^\n]*?\3/gi)
+    ].map((match)=>[
+            match.index,
+            match.index + match[0].length
+        ]);
+    for (const match of source.matchAll(/<swarm-image\b([^>]*)>((?:(?!<swarm-image\b)[\s\S])*?)<\/swarm-image\s*>/gi)){
+        if (protectedRanges.some(([start, end])=>match.index >= start && match.index < end)) continue;
+        const attrs = {};
+        for (const attr of match[1].matchAll(/([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g))attrs[attr[1].toLowerCase()] = attr[2] ?? attr[3] ?? attr[4] ?? "";
+        if (attrs.request?.toLowerCase() === "generate" && match[2].trim() && match[0].length <= 24_000) tags.push({
+            fullMatch: match[0],
+            attrs,
+            content: match[2]
+        });
+        if (tags.length >= 6) break;
+    }
+    return tags;
+}
 class TaggedImageController {
     editInlineImage;
     ctx;
@@ -27663,6 +27684,9 @@ class TaggedImageController {
     urlActions = new Map();
     urlActionFrame = 0;
     closeImageMenu = null;
+    streams = new Map();
+    terminalStreams = new Map();
+    hydrationTimers = new Map();
     destroyed = false;
     promptDiagnostics = null;
     eventClosest(event, selector) {
@@ -27731,6 +27755,116 @@ class TaggedImageController {
                 if (typeof cleanup === "function") this.selectionCleanups.push(cleanup);
             } catch  {}
         }
+        for (const name of [
+            "GENERATION_STARTED",
+            "GENERATION_IN_PROGRESS",
+            "STREAM_TOKEN_RECEIVED",
+            "GENERATION_ENDED",
+            "GENERATION_STOPPED"
+        ]){
+            try {
+                const cleanup = this.ctx.events?.on?.(name, (payload)=>this.onStreamEvent(name, payload));
+                if (typeof cleanup === "function") this.selectionCleanups.push(cleanup);
+            } catch  {}
+        }
+    }
+    submitStreamTag(stream, tag) {
+        if (stream.requests.has(tag.fullMatch) || stream.requests.size >= 6) return;
+        stream.requests.set(tag.fullMatch, tag);
+        try {
+            this.ctx.sendToBackend({
+                type: "tag_generate",
+                requestId: createRequestId(),
+                chatId: stream.chatId,
+                messageId: stream.owner,
+                generationId: stream.id,
+                swipeId: stream.swipeId,
+                ...tag,
+                isStreaming: true
+            });
+        } catch  {
+            stream.requests.delete(tag.fullMatch);
+        }
+    }
+    onStreamEvent(name, payload) {
+        if (this.destroyed) return;
+        const chatId = String(payload?.chatId || payload?.chat_id || "");
+        const id = String(payload?.generationId || "");
+        if (!id || !chatId || chatId !== this.ctx.getActiveChat?.()?.chatId) return;
+        if (name === "GENERATION_STARTED" || name === "GENERATION_IN_PROGRESS") {
+            if (this.terminalStreams.has(id)) return;
+            const target = String(payload.targetMessageId || "");
+            const current = this.streams.get(id);
+            if (current && current.chatId === chatId) {
+                if (target) current.target = target;
+                if (this.swipeIndex(payload.targetSwipeId) !== undefined) current.swipeId = payload.targetSwipeId;
+                return;
+            }
+            const background = /^(impersonate|quiet)/i.test(String(payload.generationType || "")) || payload.isUser === true || !!payload.backgroundSwipe && (!target || this.swipeIndex(payload.targetSwipeId) === undefined);
+            this.streams.set(id, {
+                id,
+                chatId,
+                target,
+                owner: target || `inline-stream:${id}`,
+                swipeId: this.swipeIndex(payload.targetSwipeId),
+                source: "",
+                gap: false,
+                stopped: false,
+                background,
+                requests: new Map()
+            });
+            if (this.streams.size > 16) this.streams.delete(this.streams.keys().next().value);
+            return;
+        }
+        const stream = this.streams.get(id) || this.terminalStreams.get(id);
+        if (!stream || stream.chatId !== chatId || stream.background) return;
+        if (name === "STREAM_TOKEN_RECEIVED") {
+            if (stream.stopped || stream.gap || typeof payload.token !== "string") return;
+            const seq = typeof payload.seq === "number" && Number.isSafeInteger(payload.seq) && payload.seq >= 0 ? payload.seq : undefined;
+            const replay = seq !== undefined && stream.seq !== undefined && seq <= stream.seq;
+            if (seq !== undefined && !replay) {
+                if (stream.seq === undefined ? seq > 1 : seq !== stream.seq + 1) stream.seqGap = true;
+                stream.seq = seq;
+            }
+            if (payload.type === "reasoning") return;
+            if (payload.offset === undefined && replay) return;
+            const offset = payload.offset !== undefined ? payload.offset : seq !== undefined && !stream.seqGap ? stream.source.length : undefined;
+            const previousLength = stream.source.length;
+            const next = theaterLiveAppend(stream.source, payload.token, offset);
+            stream.source = next.value;
+            stream.gap = next.gap;
+            if (!next.gap && next.value.slice(previousLength).includes(">")) for (const tag of inlineStreamTags(stream.source))this.submitStreamTag(stream, tag);
+            return;
+        }
+        if (name === "GENERATION_STOPPED") {
+            stream.stopped = true;
+            return;
+        }
+        if (name !== "GENERATION_ENDED" || this.terminalStreams.has(id)) return;
+        stream.stopped = true;
+        stream.target = String(payload.messageId || stream.target || "");
+        this.streams.delete(id);
+        this.terminalStreams.set(id, stream);
+        if (this.terminalStreams.size > 16) this.terminalStreams.delete(this.terminalStreams.keys().next().value);
+        const finalContent = typeof payload.content === "string" ? payload.content : "";
+        if (stream.target && finalContent && stream.requests.size) this.submitStreamSettlement(stream, finalContent);
+    }
+    submitStreamSettlement(stream, content) {
+        if (!stream.target || !content || stream.settlementContent || ![
+            ...stream.requests.keys()
+        ].some((tag)=>content.includes(tag))) return;
+        try {
+            this.ctx.sendToBackend({
+                type: "settle_tagged_generation",
+                requestId: createRequestId(),
+                chatId: stream.chatId,
+                messageId: stream.target,
+                generationId: stream.id,
+                swipeId: stream.swipeId,
+                content
+            });
+            stream.settlementContent = content;
+        } catch  {}
     }
     setBehavior(behavior) {
         this.behavior = {
@@ -27740,6 +27874,33 @@ class TaggedImageController {
     handleTag(payload) {
         if (this.destroyed || !payload?.chatId || !payload?.messageId || payload?.isUser) return;
         this.sourceSnapshot = null;
+        const match = String(payload.fullMatch || "");
+        const candidates = [
+            ...this.streams.values()
+        ].filter((s)=>!s.background && (!s.stopped || s.requests.has(match)) && s.chatId === String(payload.chatId) && (payload.generationId ? payload.generationId === s.id : s.target === String(payload.messageId) || payload.isStreaming === true && (!s.target || s.source.includes(match))));
+        const stream = candidates.length === 1 ? candidates[0] : undefined;
+        if (stream && String(payload.attrs?.request || "").toLowerCase() === "generate" && match) {
+            const tag = inlineStreamTags(match)[0];
+            if (tag && (payload.isStreaming === true || stream.requests.has(match))) {
+                if (!stream.requests.size && !stream.target && payload.isStreaming === true) stream.owner = String(payload.messageId);
+                this.submitStreamTag(stream, tag);
+                if (stream.stopped && payload.isStreaming !== true && stream.target === String(payload.messageId)) {
+                    const selected = this.selectedMessage(stream.chatId, stream.target);
+                    if ((stream.swipeId === undefined || stream.swipeId === this.swipeIndex(selected?.swipe_id)) && typeof selected?.content === "string") this.submitStreamSettlement(stream, selected.content);
+                }
+                return;
+            }
+        }
+        const terminal = [
+            ...this.terminalStreams.values()
+        ].reverse().find((s)=>s.chatId === String(payload.chatId) && s.target === String(payload.messageId) && s.requests.has(match) && (!payload.generationId || payload.generationId === s.id));
+        if (terminal && (payload.isStreaming !== true || payload.generationId === terminal.id)) {
+            const selected = this.selectedMessage(terminal.chatId, terminal.target);
+            if (terminal.swipeId === undefined || terminal.swipeId === this.swipeIndex(selected?.swipe_id)) {
+                if (typeof selected?.content === "string" && selected.content.includes(match)) this.submitStreamSettlement(terminal, selected.content);
+                return;
+            }
+        }
         const slot = String(payload?.attrs?.slot || `image-${widgetKeyHash(String(payload.fullMatch || payload.content)).slice(0, 6)}`).replace(/[^a-z0-9_-]+/gi, "-").slice(0, 80);
         const fingerprint = widgetKeyHash(String(payload.fullMatch || payload.content || ""));
         const selected = this.selectedMessage(String(payload.chatId), String(payload.messageId));
@@ -27869,6 +28030,8 @@ class TaggedImageController {
                         this.acknowledgeJob(id);
                     }
                 }
+                const previous = this.jobs.get(job.id);
+                if (previous && previous.messageId !== job.messageId) this.remove(previous);
                 this.jobs.set(job.id, job);
                 this.acknowledgeJob(job.id);
                 this.settledAttachmentRequests.delete(job.id);
@@ -27894,6 +28057,7 @@ class TaggedImageController {
                 ...previous,
                 ...this.latestJobState(job)
             };
+            if (previous && previous.messageId !== next.messageId) this.remove(previous);
             this.jobs.set(job.id, next);
             if (next.inserted) {
                 this.settledAttachmentRequests.delete(next.id);
@@ -27907,6 +28071,9 @@ class TaggedImageController {
     }
     destroy() {
         this.destroyed = true;
+        this.streams.clear();
+        this.terminalStreams.clear();
+        this.clearHydrationTimers();
         this.promptDiagnostics?.remove();
         this.promptDiagnostics = null;
         this.closeImageMenu?.();
@@ -28273,7 +28440,38 @@ class TaggedImageController {
         if (value?.clientJobId && value.clientJobId !== job.clientJobId) return;
         job.inserted = true;
         job.error = "";
+        if (value?.messageId && value?.chatId === job.chatId && value.messageId !== job.messageId) {
+            this.remove(job);
+            job.messageId = String(value.messageId);
+        }
+        if (this.swipeIndex(value?.swipeId) !== undefined) job.swipeId = value.swipeId;
         this.refreshJobWidget(job);
+        this.scheduleHydration(job);
+    }
+    clearHydrationTimers() {
+        for (const timer of this.hydrationTimers.values())window.clearTimeout(timer);
+        this.hydrationTimers.clear();
+    }
+    scheduleHydration(job) {
+        const old = this.hydrationTimers.get(job.id);
+        if (old !== undefined) window.clearTimeout(old);
+        this.hydrationTimers.delete(job.id);
+        const delays = [
+            150,
+            450,
+            1000,
+            2000,
+            4000
+        ];
+        const check = (index)=>{
+            this.hydrationTimers.delete(job.id);
+            const current = this.jobs.get(job.id);
+            if (this.destroyed || !current?.inserted || current.status !== "ready" || current.chatId !== this.ctx.getActiveChat?.()?.chatId) return;
+            this.sourceSnapshot = null;
+            this.refreshJobWidget(current);
+            if (index < delays.length && !this.inlineFigureForJob(job.id)) this.hydrationTimers.set(job.id, window.setTimeout(()=>check(index + 1), delays[index]));
+        };
+        this.hydrationTimers.set(job.id, window.setTimeout(()=>check(1), delays[0]));
     }
     acknowledgeJob(jobId) {
         for (const [requestId, id] of this.jobRequests)if (id === jobId) this.jobRequests.delete(requestId);
@@ -28312,7 +28510,7 @@ class TaggedImageController {
         return cached;
     }
     isSelected(job) {
-        if (this.destroyed || this.removedJobs.has(job.id)) return false;
+        if (this.destroyed || this.removedJobs.has(job.id) || job.awaitingSource && job.messageId.startsWith("inline-stream:")) return false;
         const active = this.selectedChatId !== undefined ? this.selectedChatId : this.ctx.getActiveChat?.()?.chatId;
         if (active !== undefined && active !== job.chatId) return false;
         const message = this.selectedMessage(job.chatId, job.messageId);
@@ -28333,6 +28531,9 @@ class TaggedImageController {
         if (name === "CHAT_SWITCHED") {
             this.selectedChatId = typeof payload?.chatId === "string" ? payload.chatId : null;
             this.selectedMessages.clear();
+            this.streams.clear();
+            this.terminalStreams.clear();
+            this.clearHydrationTimers();
         }
         const message = payload?.message;
         const chatId = String(payload?.chatId || message?.chat_id || "");
@@ -28452,7 +28653,9 @@ class TaggedImageController {
             this.sendJobRequest(job, {
                 type: "retry_tagged_attachment",
                 requestId: createRequestId(),
-                jobId: job.id
+                jobId: job.id,
+                messageId: job.messageId,
+                swipeId: job.swipeId
             });
             return;
         }
@@ -36022,6 +36225,7 @@ class StoryTheaterController {
     liveCache = new Map();
     liveMeta = new Map();
     liveSettles = new Map();
+    liveInlineTransitions = new Map();
     liveSuppressed = new Set();
     liveDeleted = new Set();
     liveExpectedSwipe = null;
@@ -36040,7 +36244,10 @@ class StoryTheaterController {
         this.castMoodSettings = castMoodSettings;
         this.resolveStoryScene = resolveStoryScene;
         try {
-            const off = ctx.onBackendMessage?.((payload)=>this.receiveSceneryLibrary(payload));
+            const off = ctx.onBackendMessage?.((payload)=>{
+                this.receiveSceneryLibrary(payload);
+                this.receiveInlineReconciliation(payload);
+            });
             if (typeof off === 'function') this.cleanups.push(off);
         } catch  {}
         this.liveEnabled = typeof ctx.composer?.getState === 'function' && typeof ctx.composer?.send === 'function' && typeof ctx.composer?.setText === 'function' && typeof ctx.messages?.getRecent === 'function';
@@ -36100,6 +36307,32 @@ class StoryTheaterController {
             if (typeof off === 'function') this.cleanups.push(off);
         } catch  {}
     }
+    receiveInlineReconciliation(payload) {
+        const p = payload?.data;
+        if (payload?.type !== 'tagged_message_reconciled' || !this.dialog || !this.liveEnabled || p?.chatId !== this.chatId || !p.messageId || typeof p.previousContent !== 'string' || typeof p.content !== 'string' || p.previousContent === p.content) return;
+        const id = String(p.messageId), swipe = typeof p.swipeId === 'number' ? p.swipeId : undefined;
+        const list = this.liveInlineTransitions.get(id) || [];
+        if (!list.some((x)=>x.before === p.previousContent && x.after === p.content && x.swipe === swipe)) list.push({
+            before: p.previousContent,
+            after: p.content,
+            swipe
+        });
+        this.liveInlineTransitions.set(id, list.slice(-12));
+        if (this.liveInlineTransitions.size > 100) this.liveInlineTransitions.delete(this.liveInlineTransitions.keys().next().value);
+        if (this.liveSuppressed.has(id)) {
+            const row = theaterLiveRecent(this.ctx).find((m)=>m.id === id);
+            if (row && row.content === p.content && (swipe === undefined || row.swipe_id === swipe)) this.liveSettle(id, swipe, p.content, true);
+        }
+        this.liveRefresh();
+    }
+    liveInlineContentMatches(id, expected, actual, swipe) {
+        if (expected === actual) return true;
+        const transitions = this.liveInlineTransitions.get(id) || [], reachable = new Set([
+            expected
+        ]);
+        for(let i = 0; i < transitions.length; i++)for (const t of transitions)if ((t.swipe === undefined || t.swipe === swipe) && reachable.has(t.before)) reachable.add(t.after);
+        return reachable.has(actual);
+    }
     liveEvent(name, p) {
         if (name === 'CHAT_SWITCHED') {
             this.liveStream = null;
@@ -36153,6 +36386,7 @@ class StoryTheaterController {
             this.pause();
             if (this.dialog) {
                 if (target && !background) {
+                    this.liveInlineTransitions.delete(target);
                     this.liveSettles.delete(target);
                     this.liveSuppressed.delete(target);
                     if (type !== 'continue') this.liveCache.delete(target);
@@ -36216,6 +36450,7 @@ class StoryTheaterController {
                 this.close();
                 return;
             }
+            this.liveInlineTransitions.delete(id);
             this.liveDeleted.add(id);
             this.liveCache.delete(id);
             this.liveMeta.delete(id);
@@ -36319,7 +36554,7 @@ class StoryTheaterController {
                 const settle = this.liveSettles.get(id);
                 if (settle) {
                     if (settle.swipe !== undefined && message?.swipe_id !== settle.swipe) continue;
-                    if (typeof knownContent !== 'string' || settle.content !== undefined && knownContent !== settle.content || settle.priorContent !== undefined && knownContent === settle.priorContent) continue;
+                    if (typeof knownContent !== 'string' || settle.content !== undefined && !this.liveInlineContentMatches(id, settle.content, knownContent, message?.swipe_id) || settle.priorContent !== undefined && knownContent === settle.priorContent) continue;
                     if (stamp === settle.before && settle.before) continue;
                     if (stamp !== settle.stamp) {
                         settle.stamp = stamp;
@@ -39386,6 +39621,7 @@ class StoryTheaterController {
         this.liveCache.clear();
         this.liveMeta.clear();
         this.liveSettles.clear();
+        this.liveInlineTransitions.clear();
         this.liveDeleted.clear();
         this.liveSuppressed.clear();
         this.liveExpectedSwipe = null;

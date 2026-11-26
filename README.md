@@ -3,7 +3,7 @@
   <h1>LumiSwarm Studio</h1>
   <p><strong>Make the art. Build the cast. Bring your stories to life.</strong></p>
   <p>A complete SwarmUI creative workspace inside Lumiverse.</p>
-  <p><img src="https://img.shields.io/badge/version-1.1.0--alpha.17.12-9b91d5" alt="Version 1.1.0-alpha.17.12" /> <img src="https://img.shields.io/badge/Lumiverse-0.15.8%2B-565c73" alt="Lumiverse 0.15.8 or newer" /> <img src="https://img.shields.io/badge/license-MIT-687e70" alt="MIT license" /></p>
+  <p><img src="https://img.shields.io/badge/version-1.1.0--alpha.17.13-9b91d5" alt="Version 1.1.0-alpha.17.13" /> <img src="https://img.shields.io/badge/Lumiverse-0.15.8%2B-565c73" alt="Lumiverse 0.15.8 or newer" /> <img src="https://img.shields.io/badge/license-MIT-687e70" alt="MIT license" /></p>
   <img src="docs/readme/cover.webp" alt="A sunlit library illustration alongside three Shoto expression sprites, artwork made using Studio" width="100%" />
   <p><a href="#installation"><b>Install</b></a> · <a href="#the-studio"><b>Explore Studio</b></a> · <a href="#cast-your-story"><b>Cast</b></a> · <a href="#story-theater"><b>Theater</b></a> · <a href="#postproduction"><b>Finalize & Edit</b></a> · <a href="#documentation"><b>Guides</b></a></p>
 </div>
@@ -12,7 +12,7 @@ LumiSwarm is a Spindle extension for [Lumiverse](https://github.com/prolix-oc/Lu
 
 It does not replace Lumiverse's native image generation tools. It works alongside them, with existing connection credentials and account-owned images.
 
-> **Current release: 1.1.0-alpha.17.12 (prerelease).** Optional capabilities depend on the installed Lumiverse runtime, SwarmUI backend, models and node packs. [Release history](CHANGELOG.md) · [Theater validation](docs/story-theater-validation.md)
+> **Current release: 1.1.0-alpha.17.13 (prerelease).** Optional capabilities depend on the installed Lumiverse runtime, SwarmUI backend, models and node packs. [Release history](CHANGELOG.md) · [Theater validation](docs/story-theater-validation.md)
 
 **Prompt caching:** Studio settings / Generation / Inline images / History image markers lets you keep compact captions indefinitely or strip them immediately from outgoing context. Neither mode ages out captions mid-history. Saved illustrations remain intact.
 
@@ -73,7 +73,7 @@ Studio adapts to phones, with persistent workspace tabs, a compact generation to
 
 ## Art that belongs to the story
 
-<table><tr><td width="48%"><img src="docs/readme/illustration.webp" alt="Green-haired character reading beside a sunlit library window, generated in Studio" /></td><td><strong>Generate directly in the conversation.</strong><p>Optional image-tag protocols let the roleplay model request an illustration of the current moment. Use a complete inline prompt or let a separate parser model translate the scene into an image request. Keep the roleplay model focused on writing while Studio handles render settings and prompt compilation.</p><p>Choose whether completed requests generate automatically or wait for a manual action.</p></td></tr></table>
+<table><tr><td width="48%"><img src="docs/readme/illustration.webp" alt="Green-haired character reading beside a sunlit library window, generated in Studio" /></td><td><strong>Generate directly in the conversation.</strong><p>Optional image-tag protocols let the roleplay model request an illustration of the current moment. Use a complete inline prompt or let a separate parser model translate the scene into an image request. Keep the roleplay model focused on writing while Studio handles render settings and prompt compilation.</p><p>Choose whether completed requests generate automatically or wait for a manual action. Inline generation starts in the background as soon as a complete request arrives during the text stream; the finished image attaches to the correct saved reply or swipe after the native commit.</p></td></tr></table>
 
 ### Real inline CGs
 
@@ -400,6 +400,7 @@ npm run test:theater
 npm run test:theater:art
 npm run test:theater:stagecraft
 npm run test:theater:live
+npm run test:inline:stream
 npm run test:theater:scenery
 npm run test:stage-direction
 ```
