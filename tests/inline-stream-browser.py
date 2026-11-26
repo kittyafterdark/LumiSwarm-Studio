@@ -60,6 +60,14 @@ with sync_playwright() as p:
    start('mixed-new',{targetMessageId:msg.id,targetSwipeId:1});push('mixed-new',one,0);check(genCalls().length===3&&genCalls()[2].swipeId===1,'New generation owns its separate swipe');
    inline.destroy();rows.length=0;sent.length=0;
   }''')
+  # ID-only terminal events settle existing reservations from contiguous text.
+  page.evaluate('''()=>{
+   window.inline=new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});
+   const raw=tag('id-only');start('id-only',{targetMessageId:'id-only-reply',targetSwipeId:0});push('id-only',raw,0);
+   emit('GENERATION_ENDED',{generationId:'id-only',messageId:'id-only-reply',swipeId:0});
+   if(genCalls().length!==1||settles().length!==1||settles()[0].content!==raw)throw Error('ID-only terminal lost reservation');
+   inline.destroy();sent.length=0;
+  }''')
   # Actual compiled Studio and Locket controllers: queued render previews must
   # survive repeated announcements, concurrent GPU streams, and late results.
   page.evaluate('''()=>{
@@ -133,6 +141,20 @@ with sync_playwright() as p:
   page.wait_for_function("widgets.some(w=>w.messageId==='hydrate-reply'&&w.html.includes(hydrateUrl))")
   page.evaluate('''()=>{render('hydrate-reply',hydrateFig)}''')
   page.wait_for_function('inline.cleanups.size===0')
+  page.evaluate('''()=>{inline.destroy();rows.length=0;document.querySelector('#chat').replaceChildren()}''')
+  # A committed job alone must recover delayed native source and DOM, even
+  # when the separate reconciliation event was missed entirely.
+  page.evaluate('''()=>{
+   window.inline=new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});widgets.length=0;
+   const raw=tag('missed'),url='https://studio.test/api/v1/image-gen/results/missed',fig=`<figure data-swarm-studio-image="true" data-swarm-studio-job-id="missed"><img src="${url}"></figure>`;
+   add('missed-reply','Stale snapshot');render('missed-reply','<p>Stale snapshot</p>');
+   const job={id:'missed',key:'missed',chatId,messageId:'missed-reply',slot:'missed',status:'ready',inserted:true,output:'inline',imageUrl:url,imageId:'missed',clientJobId:'attempt',swipeId:0,error:'',updatedAt:1};
+   inline.onMessage({type:'tagged_image_job',data:job});
+   setTimeout(()=>{rows[0].content=fig;rows[0].swipes=[fig]},250);
+   window.missedFig=fig;
+  }''')
+  page.wait_for_function("widgets.some(w=>w.messageId==='missed-reply'&&w.html.includes('/missed'))")
+  page.evaluate("render('missed-reply',missedFig)");page.wait_for_function('inline.cleanups.size===0')
   page.evaluate('''()=>{inline.destroy();rows.length=0;document.querySelector('#chat').replaceChildren()}''')
   # Two confirmed attachments arrive before the original terminal text.
   page.evaluate('''asset=>{

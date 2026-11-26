@@ -2995,7 +2995,8 @@ are removed when CSS is applied.</pre>
         const taggedJobId = String(data?.taggedJob?.clientJobId || "")
         const idle = this.settleTaggedJob(taggedJobId, String(data?.taggedJob?.id || ""))
         if (idle) this.preGenerationImage = null
-        this.acceptOutputPage(data)
+        // Optional library refresh may be absent; preserve existing outputs.
+        if (Array.isArray(data.outputs)) this.acceptOutputPage(data)
         if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders
         const imageSrc = String(data.result?.imageDataUrl || data.result?.imageUrl || data.record?.imageUrl || "")
         if (imageSrc && !this.generating) {

@@ -319,11 +319,14 @@ class TaggedImageController {
     // A separate settlement message does not queue behind the GPU request.
     // The backend also consumes its own terminal event and validates both
     // paths against the persisted assistant reply before writing anything.
-    const finalContent = typeof payload.content === "string" ? payload.content : ""
+    const suppliedContent = typeof payload.content === "string" ? payload.content : ""
+    // A terminal ID-only event can use the contiguous stream as proof for
+    // reserved jobs. The backend still verifies the entire saved reply.
+    const finalContent = suppliedContent || (!wasStopped && !stream.gap && !stream.seqGap ? stream.source : "")
     if (stream.target && finalContent) {
       // A missing token prefix is not a new owner. Recover only complete
       // terminal packets in this same generation and preserve reserved slots.
-      if (!wasStopped) for (const tag of inlineStreamTags(finalContent)) this.submitStreamTag(stream, tag)
+      if (!wasStopped && suppliedContent) for (const tag of inlineStreamTags(finalContent)) this.submitStreamTag(stream, tag)
       if (stream.requests.size) this.submitStreamSettlement(stream, finalContent)
     }
   }
@@ -534,6 +537,7 @@ class TaggedImageController {
         this.settledAttachmentRequests.delete(job.id)
         this.retrySettledAttachment(job)
         this.refreshJobWidget(job)
+        if (job.inserted && job.status === "ready" && job.imageUrl && (!previous?.inserted || previous.imageUrl !== job.imageUrl || previous.messageId !== job.messageId)) this.scheduleHydration(job)
       }
       return
     }
@@ -562,6 +566,8 @@ class TaggedImageController {
         this.retrySettledAttachment(next)
       }
       this.refreshJobWidget(next)
+      // Recover even if the separate reconciliation notification is lost.
+      if (next.inserted && next.status === "ready" && next.imageUrl && (!previous?.inserted || previous.imageUrl !== next.imageUrl || previous.messageId !== next.messageId)) this.scheduleHydration(next)
       return
     }
   }

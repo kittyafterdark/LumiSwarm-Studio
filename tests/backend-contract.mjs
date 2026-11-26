@@ -2564,6 +2564,47 @@ assert.equal(userFiles.get('tagged-image-jobs.json').filter(j=>j.generationId===
  await frontendHandler(retry,'user-1');assert.equal(swipeSequence,before+4,'Completed retry receipt cannot regenerate again')
  await submitUrl(msg,tagOne,{force:false,generationId:newGen,swipeId:2});assert.equal(swipeSequence,before+4,'Original packet receipt remains valid after regeneration')
 }
+// Optional library failure or delay must never strand an already saved image.
+{
+ const savedList=spindle.images.list, savedSet=spindle.userStorage.setJson
+ const entered=deferred(),release=deferred()
+ const raw=inlineTag.replace('ordinary','library-stall')
+ const msg={id:'library-stall-reply',role:'assistant',content:raw,metadata:{}}
+ taggedMessages.push(msg)
+ const before=swipeSequence
+ spindle.images.list=async function(options){if(options.chatId==='chat-1'&&options.limit===12){entered.resolve();await release.promise}return savedList.call(this,options)}
+ try {
+  const run=submitUrl(msg,raw,{force:false})
+  await bounded(entered.promise)
+  await waitRace(()=>userFiles.get('tagged-image-jobs.json').some(j=>j.messageId===msg.id&&j.inserted),'Draft attaches while output library is still blocked')
+  assert.match(msg.content,/data-swarm-studio-image="true"/);assert.equal(swipeSequence,before+1)
+  release.resolve();await bounded(run)
+ } finally {release.resolve();spindle.images.list=savedList}
+ const raw2=inlineTag.replace('ordinary','library-error'),msg2={id:'library-error-reply',role:'assistant',content:raw2,metadata:{}}
+ taggedMessages.push(msg2)
+ spindle.images.list=async function(options){if(options.chatId==='chat-1'&&options.limit===12)throw Error('Fixture library unavailable');return savedList.call(this,options)}
+ spindle.userStorage.setJson=async function(path,...args){if(path==='generation-records.json')throw Error('Fixture history unavailable');return savedSet.call(this,path,...args)}
+ try {
+  const job=await bounded(submitUrl(msg2,raw2,{force:false}))
+  assert.equal(job.status,'ready');assert.equal(job.inserted,true);assert.equal(job.error,'');assert.equal(swipeSequence,before+2)
+  assert.match(msg2.content,/data-swarm-studio-image="true"/)
+  const publication=sent.filter(e=>e.payload.type==='tagged_generation_result'&&e.payload.clientJobId===job.clientJobId).at(-1).payload.data
+  assert.equal(publication.result.imageId,job.imageId);assert.equal(publication.record,null);assert.equal(publication.outputs,undefined)
+ } finally {spindle.images.list=savedList;spindle.userStorage.setJson=savedSet}
+}
+// The full persisted reply can differ by harmless transport formatting only.
+{
+ const gen='normalized-terminal',raw=swipeTag.replace('swipe-source','normalized-terminal')
+ const text='Before.\r\n'+raw+'\r\nAfter.'
+ const saved='  Before.\n'+raw.replace('request="generate" output="url"','output="url"   request="generate"')+'\nAfter.  '
+ const msg={id:'normalized-terminal-reply',role:'assistant',content:otherSwipe,swipe_id:0,swipes:[otherSwipe,saved],metadata:{}}
+ taggedMessages.push(msg)
+ const before=swipeSequence, run=submitUrl({id:'inline-stream:'+gen},raw,{force:false,isStreaming:true,generationId:gen,swipeId:1})
+ await waitRace(()=>userFiles.get('tagged-image-jobs.json').some(j=>j.generationId===gen&&j.status==='ready'),'Normalized terminal render ready')
+ await frontendHandler({type:'settle_tagged_generation',generationId:gen,chatId:'chat-1',messageId:msg.id,content:text,swipeId:1},'user-1')
+ await bounded(run);assert.equal(swipeSequence,before+1);assert.equal(msg.content,otherSwipe);assert.match(msg.swipes[1],/swipe-result-/)
+}
+console.log('attachment independence: stalled library, failed history/list, normalized terminal and preserved swipe: ok')
 console.log('inline authority: mixed transport, format variants, distinct slots, conflicting slot replay, idempotent attachment and new swipe: ok')
 console.log('inline stream: concurrent provider results, delayed native commit, generation remapping, replay, early terminal proof: ok')
 spindle.imageGen.generateStream=beforeSwipeStream
@@ -2727,6 +2768,45 @@ try {
   spindle.images.readBinary = previousUpscaleRead
 }
 console.log("upscale graph, draft/final round trip and swipe-safe completion: ok")
+// Automatic upscale is a derivative, not the gate for the initial mount.
+{
+ const savedConfig=structuredClone(userFiles.get('tag-automation-config.json')),savedSettings=structuredClone(userFiles.get('studio-upscale-settings.json'))
+ const original={stream:spindle.imageGen.generateStream,get:spindle.images.get,read:spindle.images.readBinary}
+ await request('set_tag_automation',{config:{...savedConfig,autoGenerate:true,autoFinalizeInline:true,deleteDrafts:false}})
+ userFiles.set('studio-upscale-settings.json',{'swarm-1':{mode:'model',factor:2,model:'RealESRGAN_x4plus_anime_6B.pth'}})
+ let calls=0
+ spindle.images.get=async(id,options)=>id.startsWith('auto-draft-')?{id,mime_type:'image/png',width:512,height:384}:original.get(id,options)
+ spindle.images.readBinary=async(id,...args)=>id.startsWith('auto-draft-')?Uint8Array.of(1,2,3):original.read(id,...args)
+ try {
+  for (const failure of [false,true]) {
+   const raw=inlineTag.replace('ordinary',failure?'auto-final-failure':'auto-final-success')
+   const msg={id:failure?'auto-final-failure':'auto-final-success',role:'assistant',content:raw,metadata:{}}
+   taggedMessages.push(msg)
+   const suffix=failure?'fail':'ok', draftId='auto-draft-'+suffix, finalId='auto-final-'+suffix
+   const entered=deferred(),release=deferred()
+   spindle.imageGen.generateStream=async function* (input){
+    calls++
+    if(input.parameters.referenceImages?.length){entered.resolve();await release.promise;if(failure)throw Error('Fixture upscale failed');return {imageId:finalId,imageUrl:'/api/v1/image-gen/results/'+finalId}}
+    return {imageId:draftId,imageUrl:'/api/v1/image-gen/results/'+draftId}
+   }
+   const running=submitUrl(msg,raw,{force:false})
+   try {
+    await bounded(entered.promise)
+    assert.ok(msg.content.includes(draftId),'The draft is mounted before upscale finishes')
+    assert.ok(userFiles.get('tagged-image-jobs.json').some(j=>j.messageId===msg.id&&j.inserted&&j.imageId===draftId))
+   } finally {release.resolve()}
+   const job=await bounded(running)
+   assert.equal(job.status,'ready');assert.equal(job.inserted,true);assert.equal(job.imageId,failure?draftId:finalId)
+   assert.ok(msg.content.includes(failure?draftId:finalId))
+  }
+  assert.equal(calls,4,'Each request has one draft and one upscale, no extra renders')
+ } finally {
+  spindle.imageGen.generateStream=original.stream;spindle.images.get=original.get;spindle.images.readBinary=original.read
+  userFiles.set('tag-automation-config.json',savedConfig);userFiles.set('studio-upscale-settings.json',savedSettings)
+ }
+}
+console.log('automatic upscale: draft mounted before derivative, failed derivative retains draft: ok')
+
 
 
 // V28 regression: one clientJobId can cross the provider boundary only once.

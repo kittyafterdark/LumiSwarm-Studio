@@ -21528,7 +21528,7 @@ are removed when CSS is applied.</pre>
                     const taggedJobId = String(data?.taggedJob?.clientJobId || "");
                     const idle = this.settleTaggedJob(taggedJobId, String(data?.taggedJob?.id || ""));
                     if (idle) this.preGenerationImage = null;
-                    this.acceptOutputPage(data);
+                    if (Array.isArray(data.outputs)) this.acceptOutputPage(data);
                     if (Array.isArray(data.outputFolders)) this.state.outputFolders = data.outputFolders;
                     const imageSrc = String(data.result?.imageDataUrl || data.result?.imageUrl || data.record?.imageUrl || "");
                     if (imageSrc && !this.generating) {
@@ -27950,9 +27950,10 @@ class TaggedImageController {
         this.streams.delete(id);
         this.terminalStreams.set(id, stream);
         if (this.terminalStreams.size > 16) this.terminalStreams.delete(this.terminalStreams.keys().next().value);
-        const finalContent = typeof payload.content === "string" ? payload.content : "";
+        const suppliedContent = typeof payload.content === "string" ? payload.content : "";
+        const finalContent = suppliedContent || (!wasStopped && !stream.gap && !stream.seqGap ? stream.source : "");
         if (stream.target && finalContent) {
-            if (!wasStopped) for (const tag of inlineStreamTags(finalContent))this.submitStreamTag(stream, tag);
+            if (!wasStopped && suppliedContent) for (const tag of inlineStreamTags(finalContent))this.submitStreamTag(stream, tag);
             if (stream.requests.size) this.submitStreamSettlement(stream, finalContent);
         }
     }
@@ -28166,6 +28167,7 @@ class TaggedImageController {
                 this.settledAttachmentRequests.delete(job.id);
                 this.retrySettledAttachment(job);
                 this.refreshJobWidget(job);
+                if (job.inserted && job.status === "ready" && job.imageUrl && (!previous?.inserted || previous.imageUrl !== job.imageUrl || previous.messageId !== job.messageId)) this.scheduleHydration(job);
             }
             return;
         }
@@ -28195,6 +28197,7 @@ class TaggedImageController {
                 this.retrySettledAttachment(next);
             }
             this.refreshJobWidget(next);
+            if (next.inserted && next.status === "ready" && next.imageUrl && (!previous?.inserted || previous.imageUrl !== next.imageUrl || previous.messageId !== next.messageId)) this.scheduleHydration(next);
             return;
         }
     }

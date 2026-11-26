@@ -5947,6 +5947,24 @@ function matchingTaggedPackets(content, fullMatch) {
 function hasTaggedPacket(content, fullMatch) {
     return matchingTaggedPackets(content, fullMatch).length === 1;
 }
+function sameTaggedTerminalText(a, b) {
+    const canonical = (value)=>{
+        const source = value.replace(/\r\n/g, "\n").trim();
+        const parts = [];
+        let offset = 0;
+        for (const tag of parseSwarmImageTags(source)){
+            const index = source.indexOf(tag.fullMatch, offset);
+            if (index < 0) return JSON.stringify([
+                source
+            ]);
+            parts.push(source.slice(offset, index), taggedPacketIdentity(tag.fullMatch));
+            offset = index + tag.fullMatch.length;
+        }
+        parts.push(source.slice(offset));
+        return JSON.stringify(parts);
+    };
+    return a === b || canonical(a) === canonical(b);
+}
 function cleanTaggedSwipeId(value) {
     return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
@@ -8342,7 +8360,7 @@ async function resolveTaggedTerminalSource(job, userId, sourceMessages) {
     const sources = singleSource ? [
         target
     ] : taggedMessageSources(target, expectedSwipe);
-    const matches = sources.filter((item)=>terminal.verified ? hasTaggedPacket(asString(item.content), job.fullMatch) : asString(item.content) === terminal.content);
+    const matches = sources.filter((item)=>terminal.verified ? hasTaggedPacket(asString(item.content), job.fullMatch) : sameTaggedTerminalText(asString(item.content), terminal.content));
     if (matches.length !== 1) return;
     const swipeId = cleanTaggedSwipeId(matches[0].studioSwipeId);
     terminal.verified = true;
@@ -8556,39 +8574,78 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
                 ...input,
                 studioMetadata: result.studioMetadata
             }, Date.now() - startedAt, userId));
-        const record = await awaitGenerationTask(signal, ()=>saveGenerationRecord(result, input, {
-                ...asRecord(profile?.recordHints),
-                source: "message-tag"
-            }, timing, userId));
+        let record = null;
+        try {
+            record = await awaitGenerationTask(signal, ()=>saveGenerationRecord(result, input, {
+                    ...asRecord(profile?.recordHints),
+                    source: "message-tag"
+                }, timing, userId));
+        } catch (error) {
+            if (signal.aborted || isAbortError(error)) throw error;
+            spindle.log.warn(`Could not save illustration history ${job.id}: ${String(error)}`);
+        }
         signal.throwIfAborted();
         job.draftImage = undefined;
         job.finalImage = undefined;
-        job.imageId = record.imageId || asString(result.imageId);
-        job.imageUrl = record.imageUrl || asString(result.imageUrl);
+        job.imageId = record?.imageId || asString(result.imageId);
+        job.imageUrl = record?.imageUrl || asString(result.imageUrl);
         if (!job.imageUrl && job.imageId) job.imageUrl = `/api/v1/image-gen/results/${encodeURIComponent(job.imageId)}`;
         if (!job.imageUrl) throw new Error("Lumiverse completed the image job without returning a saved image URL.");
         job.status = "ready";
         job.error = "";
         await upsertTaggedImageJob(job, userId);
         sendTaggedJobState(job, userId);
-        spindle.updateMacroValue("last_genned", job.imageUrl);
-        await ensureCharacterOutputFolder(characterLayer.characterId, characterLayer.characterName, job.imageId, userId);
-        const taggedChat = spindle.permissions.has("chats") ? await spindle.chats.get(job.chatId, userId) : {
-            id: job.chatId
+        const draftResult = {
+            ...result,
+            imageId: job.imageId,
+            imageUrl: job.imageUrl
         };
-        const outputPage = await listOutputs(userId, taggedChat);
-        spindle.sendToFrontend({
-            type: "tagged_generation_result",
-            clientJobId: job.clientJobId,
-            data: {
-                result,
-                record,
-                taggedJob: taggedJobPublic(job),
-                outputFolders: await loadOutputFolders(userId),
-                ...outputPage
+        const draftJob = taggedJobPublic(job);
+        let filingFinished = false;
+        const publication = (async ()=>{
+            let timer;
+            let library = {};
+            try {
+                spindle.updateMacroValue("last_genned", asString(draftResult.imageUrl));
+                library = await Promise.race([
+                    (async ()=>{
+                        try {
+                            await ensureCharacterOutputFolder(characterLayer.characterId, characterLayer.characterName, asString(draftResult.imageId), userId);
+                        } catch (error) {
+                            spindle.log.warn(`Could not file illustration ${job.id}: ${String(error)}`);
+                        } finally{
+                            filingFinished = true;
+                        }
+                        const taggedChat = spindle.permissions.has("chats") ? await spindle.chats.get(job.chatId, userId) : {
+                            id: job.chatId
+                        };
+                        return {
+                            ...await listOutputs(userId, taggedChat),
+                            outputFolders: await loadOutputFolders(userId)
+                        };
+                    })(),
+                    new Promise((resolve)=>{
+                        timer = setTimeout(()=>resolve({}), 4000);
+                    })
+                ]);
+            } catch (error) {
+                spindle.log.warn(`Could not refresh illustration library ${job.id}: ${String(error)}`);
+            } finally{
+                if (timer !== undefined) clearTimeout(timer);
             }
-        }, userId);
+            spindle.sendToFrontend({
+                type: "tagged_generation_result",
+                clientJobId: job.clientJobId,
+                data: {
+                    result: draftResult,
+                    record,
+                    taggedJob: draftJob,
+                    ...library
+                }
+            }, userId);
+        })().catch((error)=>spindle.log.warn(`Could not publish illustration ${job.id}: ${String(error)}`));
         const inserted = await finalizeTaggedImageJobWithRetry(job, userId);
+        await publication;
         let autoFinalized = false;
         if (inserted && job.output === "inline" && automation.autoFinalizeInline && !removedTaggedJobs.has(job.id)) {
             try {
@@ -8604,7 +8661,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
                         url: job.imageUrl
                     };
                     const final = await upscaleOutput(job.imageId, connection, userId, job, undefined, savedUpscale);
-                    const deleteDraft = automation.deleteDrafts === true && spindle.permissions.has("images");
+                    const deleteDraft = filingFinished && automation.deleteDrafts === true && spindle.permissions.has("images");
                     const updated = {
                         ...job,
                         draftImage: deleteDraft ? undefined : draftImage,
@@ -13965,7 +14022,7 @@ async function settleTaggedImageSources(payload, userId) {
     const key = taggedTerminalKey(userId, chatId, generationId);
     if (generationId && parseSwarmImageTags(content).length) {
         const previous = taggedTerminalSources.get(key);
-        if (previous && (previous.messageId !== messageId || previous.content !== content)) return;
+        if (previous && (previous.messageId !== messageId || !sameTaggedTerminalText(previous.content, content))) return;
         if (!previous) {
             taggedTerminalSources.set(key, {
                 messageId,

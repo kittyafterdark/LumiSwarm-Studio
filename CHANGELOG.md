@@ -1,3 +1,10 @@
+## 1.1.0-alpha.17.16 - Draft attachment independence
+
+- Start native draft attachment independently of character filing and Output Library refresh. Bound optional library publication to four seconds, preserve existing gallery data on failure, and retain a saved bitmap if generation-history persistence fails. Keep draft publication ahead of automatic upscale; retain a draft rather than racing deletion against unfinished filing.
+- Accept ID-only terminal events using contiguous reserved stream text, with whole-reply verification on the backend. Allow harmless line-ending, outer-whitespace and equivalent tag-attribute normalization in terminal proof without relaxing message/swipe ownership.
+- Recover delayed native rendering from committed job notifications even when a separate reconciliation notification is missing. Keep automatic status ribbons hidden and generation reservations unchanged.
+- Add mocked backend regressions for blocked library reads, failed history/library storage, normalized saved swipe, draft-first automatic upscale and failed upscale retention; extend compiled-browser coverage for ID-only terminal events and missed reconciliation.
+
 ## 1.1.0-alpha.17.15 - Silent automatic inline generation
 
 - Keep queued, generating and normally attaching inline images free of temporary chat status ribbons for both inline and URL-only output. Preserve manual Generate, Retry and failed-attachment recovery controls, actual image hydration, and Studio/Locket previews.
