@@ -28550,7 +28550,7 @@ class TaggedImageController {
     }
     shouldRenderPlaceholder(job) {
         if (job.inserted) return false;
-        return job.status === "requested" || job.output !== "url" && (job.status === "queued" || job.status === "generating") || job.status === "failed" || job.status === "cancelled" || job.status === "ready" && Boolean(job.error || job.output !== "url" && job.awaitingSource);
+        return job.status === "requested" || job.status === "failed" || job.status === "cancelled" || job.status === "ready" && Boolean(job.error);
     }
     reconcileMessage(value) {
         const jobId = String(value?.jobId || "");

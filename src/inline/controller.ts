@@ -864,11 +864,13 @@ class TaggedImageController {
 
   private shouldRenderPlaceholder(job: TaggedImageJobView): boolean {
     if (job.inserted) return false
+    // Automatic rendering and normal attachment are background activity.
+    // Studio/Locket own live previews; only actionable recovery or manual
+    // approval belongs in the conversation as a status widget.
     return job.status === "requested"
-      || (job.output !== "url" && (job.status === "queued" || job.status === "generating"))
       || job.status === "failed"
       || job.status === "cancelled"
-      || (job.status === "ready" && Boolean(job.error || (job.output !== "url" && job.awaitingSource)))
+      || (job.status === "ready" && Boolean(job.error))
   }
 
   private reconcileMessage(value: any): void {

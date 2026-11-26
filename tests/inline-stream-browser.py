@@ -90,17 +90,33 @@ with sync_playwright() as p:
    check(!mini.snapshot().active&&!studio.generating&&studioPreview()===c,'Final completion settles both surfaces');
    studio.dispose();studioRoot.remove();mini.destroy();
   }''')
-  # A normal inline request may show its active strip; URL-only requests keep
-  # authored HTML free of transient widgets. Repeated states are stable.
+  # Automatic rendering and attachment are silent for both output modes.
+  # Manual approval and genuine failures still have actionable widgets.
   page.evaluate('''()=>{
-   window.inline=new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});widgets.length=0;
-   const raw=tag('active');add('active-reply',raw);render('active-reply',raw);
-   const job={id:'active',key:'active',chatId,messageId:'active-reply',slot:'active',status:'queued',inserted:false,output:'inline',tagFingerprint:(()=>{let h=2166136261;for(const v of raw){h=Math.imul(h^v.charCodeAt(0),16777619)}return (h>>>0).toString(36)})(),clientJobId:'attempt',swipeId:0,error:''};
-   inline.onMessage({type:'tagged_image_job',data:job});inline.onMessage({type:'tagged_image_job',data:job});
-   if(widgets.length!==1||!widgets[0].html.includes('Queued for SwarmUI'))throw Error('Active placeholder missing or churned');
-   inline.onMessage({type:'tagged_image_job',data:{...job,status:'generating'}});if(!widgets.at(-1).html.includes('Rendering in SwarmUI'))throw Error('Generating strip missing');
-   inline.onMessage({type:'tagged_image_job',data:{...job,id:'url-active',output:'url'}});if(widgets.length!==2)throw Error('URL-only active widget polluted authored HTML');
-   inline.destroy();rows.length=0;widgets.length=0;document.querySelector('#chat').replaceChildren();
+   const check=(b,m)=>{if(!b)throw Error(m)};
+   for(const output of ['inline','url']){
+    window.inline=new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});widgets.length=0;
+    const raw=tag('active');add('active-reply',raw);render('active-reply',raw);
+    const job={id:'active',key:'active',chatId,messageId:'active-reply',slot:'active',status:'queued',inserted:false,output,tagFingerprint:(()=>{let h=2166136261;for(const v of raw){h=Math.imul(h^v.charCodeAt(0),16777619)}return (h>>>0).toString(36)})(),clientJobId:'attempt',swipeId:0,error:''};
+    const state=(status,extra={})=>inline.onMessage({type:'tagged_image_job',data:{...job,status,...extra}});
+    state('queued');state('queued');state('generating');
+    state('ready',{awaitingSource:true,imageUrl:'/api/v1/images/draft'});
+    state('ready',{awaitingSource:false,imageUrl:'/api/v1/images/draft'});
+    emit('CHARACTER_MESSAGE_RENDERED',{messageId:job.messageId});
+    inline.onMessage({type:'tagged_image_jobs_result',data:[{...job,status:'ready',awaitingSource:true}]});
+    check(widgets.length===0&&inline.cleanups.size===0,output+' automatic lifecycle mounted a ribbon');
+    state('ready',{error:'Attachment retries exhausted'});
+    check(widgets.length===1&&widgets.at(-1).html.includes('Attach image'),output+' attachment recovery missing');
+    state('ready',{error:''});check(inline.cleanups.size===0,'Recovered attachment still has ribbon');
+    state('failed',{clientJobId:'attempt-two',error:'Provider failed'});
+    check(widgets.at(-1).html.includes('Retry'),output+' failure recovery missing');
+    inline.destroy();rows.length=0;widgets.length=0;document.querySelector('#chat').replaceChildren();
+    window.inline=new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});
+    add('active-reply',raw);render('active-reply',raw);
+    state('requested',{clientJobId:''});check(widgets.length===1&&widgets.at(-1).html.includes('Generate image'),'Manual approval missing');
+    state('queued');check(inline.cleanups.size===0,'Manual approval ribbon should retire after submission');
+    inline.destroy();rows.length=0;widgets.length=0;document.querySelector('#chat').replaceChildren();
+   }
   }''')
   # A confirmed native attachment arrives before the selected-source API and
   # native message DOM hydrate. The fallback must appear without another LLM

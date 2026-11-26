@@ -1,3 +1,8 @@
+## 1.1.0-alpha.17.15 - Silent automatic inline generation
+
+- Keep queued, generating and normally attaching inline images free of temporary chat status ribbons for both inline and URL-only output. Preserve manual Generate, Retry and failed-attachment recovery controls, actual image hydration, and Studio/Locket previews.
+- Extend the compiled browser regression to check silent lifecycle events and snapshots in both output modes, while retaining manual approval and recovery controls. No backend or generation-authority changes.
+
 ## 1.1.0-alpha.17.14 - Inline request authority and preview handoff
 
 - Reserve each generation/slot before provider work starts. Serialize admission across provisional and canonical message IDs without blocking independent renders. Recognize equivalent packet formatting without merging distinct slots or swipes; conflicting or ambiguous deliveries wait for verified ownership rather than creating another render.
