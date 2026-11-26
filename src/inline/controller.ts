@@ -333,8 +333,10 @@ class TaggedImageController {
       if (!next.gap && next.value.slice(previousLength).includes(">")) for (const tag of inlineStreamTags(stream.source)) this.submitStreamTag(stream, tag)
       return
     }
-    if (name === "GENERATION_STOPPED") { stream.stopped = true; return }
-    if (name !== "GENERATION_ENDED") return
+    // Stop can persist a partial assistant reply. Retire the stream without
+    // dispatching any new packets, but retain its exact saved-text evidence
+    // so a later native callback can settle already-rendered illustrations.
+    if (name !== "GENERATION_ENDED" && name !== "GENERATION_STOPPED") return
     if (this.terminalStreams.has(id)) {
       // A corrected terminal event is evidence, not a new generation. The
       // backend decides which snapshot matches the persisted reply.
@@ -347,7 +349,7 @@ class TaggedImageController {
       else if (correctedId && stream.terminalContent) this.submitStreamSettlement(stream, stream.terminalContent)
       return
     }
-    const wasStopped = stream.stopped
+    const wasStopped = stream.stopped || name === "GENERATION_STOPPED"
     stream.stopped = true
     stream.terminalMessageId = String(payload.messageId || "") || undefined
     stream.target = stream.terminalMessageId || stream.target || ""

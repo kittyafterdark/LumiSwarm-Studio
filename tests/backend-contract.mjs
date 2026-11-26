@@ -2056,17 +2056,20 @@ const metadataRun=frontendHandler({type:'tag_generate',requestId:'metadata-race'
 await bounded(metadataEntered.promise)
 const metadataJob=userFiles.get('tagged-image-jobs.json').find(job=>job.slot==='metadata-race')
 const activeSnapshot=await request('list_tagged_jobs')
-assert.equal(activeSnapshot.data.find(job=>job.id===metadataJob.id).status,'generating','Recovery preserves a live worker')
+assert.equal(activeSnapshot.data.find(job=>job.id===metadataJob.id).status,'ready','Provider result becomes ready before optional metadata')
+assert.equal(metadataJob.imageId,'metadata-stopped')
 const metadataAck=await request('interrupt_generation',{clientJobId:metadataJob.clientJobId})
-assert.equal(metadataAck.data.interrupted,true,'Abort controller remains registered through postprocessing')
-await bounded(metadataRun)
-metadataLate.resolve();await new Promise(resolve=>setTimeout(resolve,0))
-const cancelledSnapshot=await request('list_tagged_jobs')
-assert.equal(cancelledSnapshot.data.find(job=>job.id===metadataJob.id).status,'cancelled','Late metadata cannot revive cancelled job')
-assert.ok(!sent.some(entry=>entry.payload.type==='tagged_generation_result' && entry.payload.clientJobId===metadataJob.clientJobId))
+assert.equal(metadataAck.data.alreadySaved,true,'Stop cannot cancel a saved result')
+assert.equal(metadataAck.data.waitingStopped,false)
+await waitRace(()=>taggedMessage.content.includes('metadata-stopped'),'Saved image attaches while metadata is blocked')
+metadataLate.resolve();await bounded(metadataRun)
+const completedSnapshot=await request('list_tagged_jobs')
+assert.equal(completedSnapshot.data.find(job=>job.id===metadataJob.id).status,'ready')
+assert.equal(completedSnapshot.data.find(job=>job.id===metadataJob.id).inserted,true)
+assert.ok(sent.some(entry=>entry.payload.type==='tagged_generation_result' && entry.payload.clientJobId===metadataJob.clientJobId))
 taggedMessage.content=metadataOriginalContent
 spindle.cors=savedCors;spindle.imageGen.generateStream=originalStream
-console.log('post-bitmap metadata Stop and late completion race: ok')
+console.log('post-bitmap metadata Stop preserves the saved image and attachment: ok')
 
 // Optional metadata cannot hold an otherwise finished generation indefinitely.
 const normalTimeout=globalThis.setTimeout,timeoutCors=spindle.cors
@@ -2572,6 +2575,34 @@ assert.equal(userFiles.get('tagged-image-jobs.json').filter(j=>j.generationId===
  await frontendHandler(retry,'user-1');assert.equal(swipeSequence,before+4,'Explicit regeneration remains available')
  await frontendHandler(retry,'user-1');assert.equal(swipeSequence,before+4,'Completed retry receipt cannot regenerate again')
  await submitUrl(msg,tagOne,{force:false,generationId:newGen,swipeId:2});assert.equal(swipeSequence,before+4,'Original packet receipt remains valid after regeneration')
+}
+// Three persisted provider results, one stalled optional store and a late stop.
+// Model the public host done chunk without requiring the iterator to close.
+{
+ const gen='three-saved-stopped', owner={id:'inline-stream:'+gen}
+ const tags=[1,2,3].map(n=>inlineTag.replace('ordinary','stop-saved-'+n))
+ const text=tags.join(' Between. '), msg={id:'three-saved-stopped-reply',role:'assistant',content:text,swipe_id:0,swipes:[text],metadata:{}}
+ const savedSet=spindle.userStorage.setJson,savedStream=spindle.imageGen.generateStream
+ const entered=deferred(),release=deferred();let renders=0
+ spindle.userStorage.setJson=async function(path,...args){if(path==='generation-records.json'){entered.resolve();await release.promise}return savedSet.call(this,path,...args)}
+ spindle.imageGen.generateStream=function(input){assert.equal(input.includeDataUrl,false);const imageId='three-saved-bitmap-'+(++renders);let delivered=false;return {next(){if(delivered) return new Promise(()=>{});delivered=true;return Promise.resolve({done:false,value:{type:'done',result:{imageId,imageUrl:'/api/v1/image-gen/results/'+imageId}}})}}}
+ const jobs=()=>userFiles.get('tagged-image-jobs.json').filter(j=>j.generationId===gen)
+ const runs=Promise.all(tags.map(raw=>submitUrl(owner,raw,{force:false,isStreaming:true,generationId:gen,swipeId:0})))
+ try {
+  await waitRace(()=>jobs().length===3&&jobs().every(j=>j.status==='ready'&&j.imageId),'All three durable before history or terminal')
+  await bounded(entered.promise);assert.equal(renders,3)
+  const attempt=jobs().at(-1).clientJobId
+  await frontendHandler({type:'interrupt_generation',requestId:'three-saved-stop',clientJobId:attempt},'user-1')
+  assert.ok(sent.some(e=>e.payload.requestId==='three-saved-stop'&&e.payload.data?.alreadySaved===true))
+  assert.ok(jobs().every(j=>j.status==='ready'&&!j.inserted))
+  taggedMessages.push(msg)
+  eventHandlers.get('GENERATION_STOPPED')({chatId:'chat-1',generationId:gen,messageId:msg.id,content:text},'user-1')
+  await waitRace(()=>jobs().length===3&&jobs().every(j=>j.inserted),'All three attach during stalled history after stop')
+  assert.equal(msg.metadata.swarm_studio_tagged_images.length,3);assert.ok(jobs().every(j=>msg.content.includes(j.imageUrl)))
+  assert.equal(renders,3)
+ } finally {release.resolve();spindle.userStorage.setJson=savedSet;spindle.imageGen.generateStream=savedStream;await runs}
+ assert.ok(jobs().every(j=>userFiles.get('generation-records.json').some(r=>r.imageId===j.imageId)))
+ console.log('three saved bitmaps: terminal chunk, stopped partial reply, blocked history, three attachments and no duplicate renders: ok')
 }
 // Optional library failure or delay must never strand an already saved image.
 {

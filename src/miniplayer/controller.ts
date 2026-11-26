@@ -759,6 +759,7 @@ class MiniPlayerController {
       return
     }
     if (payload?.type === "generation_interrupt_requested" && payload.clientJobId === this.snapshotValue.jobId) {
+      if (data.alreadySaved === true) { this.settleTaggedJob(String(payload.clientJobId || "")); return }
       if (data.waitingStopped === true || data.interrupted === false) {
         this.fail(String(payload.clientJobId || ""), "Stopped waiting · SwarmUI stop not confirmed")
       } else {

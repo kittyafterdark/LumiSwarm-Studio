@@ -68,6 +68,18 @@ with sync_playwright() as p:
    if(genCalls().length!==1||settles().length!==1||settles()[0].content!==raw)throw Error('ID-only terminal lost reservation');
    inline.destroy();sent.length=0;
   }''')
+  # A STOP event without an ID (current host shape) can later settle a
+  # reserved packet against its newly saved partial reply. No new dispatch.
+  page.evaluate('''()=>{
+   window.inline=new T.TaggedImageController(ctx,T.defaultStudioBehavior(),()=>{},()=>false,()=>{});
+   const raw=tag('stopped-reserved'),unreserved=tag('stopped-not-reserved');start('stopped-idless');push('stopped-idless',raw,0);
+   const final=raw+unreserved;const msg=add('stopped-partial-reply',final);
+   emit('GENERATION_STOPPED',{generationId:'stopped-idless',content:final});
+   if(genCalls().length!==1)throw Error('Stop dispatched new packet');
+   inline.handleTag({chatId,messageId:msg.id,fullMatch:raw,attrs:{request:'generate',slot:'stopped-reserved'},content:'a garden',isStreaming:false});
+   if(genCalls().length!==1||settles().length!==1||settles()[0].messageId!==msg.id)throw Error('Stopped partial reply lost original reservation');
+   inline.destroy();rows.length=0;sent.length=0;
+  }''')
   # Actual compiled Studio and Locket controllers: queued render previews must
   # survive repeated announcements, concurrent GPU streams, and late results.
   page.evaluate('''()=>{

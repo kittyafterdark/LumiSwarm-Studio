@@ -14095,6 +14095,10 @@ class MiniPlayerController {
             return;
         }
         if (payload?.type === "generation_interrupt_requested" && payload.clientJobId === this.snapshotValue.jobId) {
+            if (data.alreadySaved === true) {
+                this.settleTaggedJob(String(payload.clientJobId || ""));
+                return;
+            }
             if (data.waitingStopped === true || data.interrupted === false) {
                 this.fail(String(payload.clientJobId || ""), "Stopped waiting · SwarmUI stop not confirmed");
             } else {
@@ -21563,6 +21567,10 @@ are removed when CSS is applied.</pre>
                 }
             case "generation_interrupt_requested":
                 if (payload.clientJobId === this.currentJobId) {
+                    if (data.alreadySaved === true) {
+                        this.settleTaggedJob(String(payload.clientJobId || ""));
+                        break;
+                    }
                     if (data.waitingStopped === true || data.interrupted === false) {
                         this.onMessage({
                             type: "generation_interrupted",
@@ -27959,11 +27967,7 @@ class TaggedImageController {
             if (!next.gap && next.value.slice(previousLength).includes(">")) for (const tag of inlineStreamTags(stream.source))this.submitStreamTag(stream, tag);
             return;
         }
-        if (name === "GENERATION_STOPPED") {
-            stream.stopped = true;
-            return;
-        }
-        if (name !== "GENERATION_ENDED") return;
+        if (name !== "GENERATION_ENDED" && name !== "GENERATION_STOPPED") return;
         if (this.terminalStreams.has(id)) {
             const correctedId = String(payload.messageId || "");
             const correctedContent = typeof payload.content === "string" ? payload.content : "";
@@ -27980,7 +27984,7 @@ class TaggedImageController {
             } else if (correctedId && stream.terminalContent) this.submitStreamSettlement(stream, stream.terminalContent);
             return;
         }
-        const wasStopped = stream.stopped;
+        const wasStopped = stream.stopped || name === "GENERATION_STOPPED";
         stream.stopped = true;
         stream.terminalMessageId = String(payload.messageId || "") || undefined;
         stream.target = stream.terminalMessageId || stream.target || "";

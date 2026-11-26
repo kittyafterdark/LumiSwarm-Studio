@@ -2626,9 +2626,9 @@ function studioGenerationStage(stage, surface) {
     return stage;
 }
 async function tagStudioGeneration(input, userId) {
-    await studioAssetWrites.get(userId || "");
-    const assetId = await backendUuid();
     const parentImageId = asString(input.studioParentImageId);
+    if (parentImageId) await studioAssetWrites.get(userId || "");
+    const assetId = await backendUuid();
     const registry = await spindle.userStorage.getJson(STUDIO_ASSETS_FILE, {
         fallback: [],
         userId
@@ -2675,15 +2675,15 @@ async function rememberStudioAsset(result, record, input, userId) {
     if (!metadata?.studio_asset_id || !record.imageId) return;
     const key = userId || "";
     const task = (studioAssetWrites.get(key) || Promise.resolve()).catch(()=>{}).then(async ()=>{
+        const local = metadata.studio_stage === "local_edit";
+        const connection = local ? null : await boundedStudioRead(()=>getConnection(asString(input.connection_id), userId));
+        const token = connection && spindle.permissions.has("cors_proxy") ? await boundedStudioRead(()=>getMetadataToken(connection.id, userId)) : null;
+        const outputScope = connection ? sessions.get(sessionKey(userId, connection.id, Boolean(token)))?.outputScope || "" : "";
         const stored = await spindle.userStorage.getJson(STUDIO_ASSETS_FILE, {
             fallback: [],
             userId
         });
         if (!Array.isArray(stored)) throw new Error("Studio asset registry is corrupt; refusing to overwrite it.");
-        const local = metadata.studio_stage === "local_edit";
-        const connection = local ? null : await getConnection(asString(input.connection_id), userId);
-        const token = connection && spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null;
-        const outputScope = connection ? sessions.get(sessionKey(userId, connection.id, Boolean(token)))?.outputScope || "" : "";
         const claim = {
             metadata,
             assetId: metadata.studio_asset_id,
@@ -3242,6 +3242,7 @@ const loraDownloadJobs = new Map();
 const generationControllers = new Map();
 let legacyGenerationFallbackLogged = false;
 const runningTaggedJobs = new Set();
+const savedTaggedAttempts = new Set();
 const upscalingImages = new Set();
 const folderExpressionControllers = new Map();
 const inlineUpscaleControllers = new Map();
@@ -5322,8 +5323,8 @@ function sanitizeRawOverrideForRecord(value) {
 async function saveGenerationRecord(result, input, hints, timing, userId) {
     if (result?.studioMetadata && result.studioMetadata.studio_storage !== "lumi_only" && !timing.swarmPathVerified && spindle.permissions.has("cors_proxy")) {
         try {
-            const connection = await getConnection(asString(input.connection_id), userId);
-            const verified = await loadLatestSwarmGenerationMetadata(connection, await getMetadataToken(connection.id, userId), {
+            const connection = await boundedStudioRead(()=>getConnection(asString(input.connection_id), userId));
+            const verified = await loadLatestSwarmGenerationMetadata(connection, await boundedStudioRead(()=>getMetadataToken(connection.id, userId)), {
                 ...input,
                 studioMetadata: result.studioMetadata
             }, timing.totalMs, userId);
@@ -5379,11 +5380,13 @@ async function saveGenerationRecord(result, input, hints, timing, userId) {
         record.swarmPathVerified = false;
     }
     await rememberStudioAsset(result, record, input, userId);
-    const records = await loadGenerationRecords(userId);
-    const deduped = records.filter((item)=>!record.imageId || item.imageId !== record.imageId);
-    deduped.unshift(record);
-    await spindle.userStorage.setJson(GENERATION_RECORDS_FILE, deduped.slice(0, GENERATION_RECORD_LIMIT), {
-        userId
+    await withTaggedMessageFinalizeLock(`generation-record-store:${userId || "default"}`, async ()=>{
+        const records = await loadGenerationRecords(userId);
+        const deduped = records.filter((item)=>!record.imageId || item.imageId !== record.imageId);
+        deduped.unshift(record);
+        await spindle.userStorage.setJson(GENERATION_RECORDS_FILE, deduped.slice(0, GENERATION_RECORD_LIMIT), {
+            userId
+        });
     });
     return record;
 }
@@ -5394,9 +5397,11 @@ async function deleteGenerationRecord(imageId, userId) {
 }
 async function deleteGenerationRecords(imageIds, userId) {
     const deleted = new Set(imageIds);
-    const records = (await loadGenerationRecords(userId)).filter((record)=>!deleted.has(record.imageId));
-    await spindle.userStorage.setJson(GENERATION_RECORDS_FILE, records, {
-        userId
+    await withTaggedMessageFinalizeLock(`generation-record-store:${userId || "default"}`, async ()=>{
+        const records = (await loadGenerationRecords(userId)).filter((record)=>!deleted.has(record.imageId));
+        await spindle.userStorage.setJson(GENERATION_RECORDS_FILE, records, {
+            userId
+        });
     });
 }
 function parseSwarmImageMetadata(value) {
@@ -8409,6 +8414,7 @@ async function finalizeTaggedImageJob(job, userId, expectedImageId) {
         }
         const metadata = asRecord(target.metadata);
         const previous = Array.isArray(metadata.swarm_studio_tagged_images) ? metadata.swarm_studio_tagged_images.filter((item)=>asString(item?.jobId) !== job.id) : [];
+        traceTaggedLifecycle("attachment-write-start", job);
         await spindle.chat.updateMessage(job.chatId, job.messageId, {
             ...taggedMessagePatch(target, replacement.content),
             metadata: {
@@ -8558,6 +8564,7 @@ async function finalizeTaggedImageJobWithRetry(job, userId) {
             }
         }
         if (removedTaggedJobs.has(job.id)) return false;
+        traceTaggedLifecycle("attachment-pending", job, job.awaitingSource ? "owner-unverified" : lastError ? "host-write-error" : "packet-not-found");
         if (job.awaitingSource && job.generationId && !taggedTerminalSources.has(taggedTerminalKey(userId, job.chatId, job.generationId))) return false;
         job.inserted = false;
         job.error = lastError ? `Image generated, but Lumiverse could not attach it to the chat yet: ${lastError}` : "Image generated, but the chat message was not ready for attachment. Use Attach image to try again.";
@@ -8722,31 +8729,21 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         const result = await generateWithProgress({
             ...renderInput,
             studioStage: "inline_illustration",
+            includeDataUrl: false,
             owner_chat_id: job.chatId,
             owner_character_id: characterLayer.characterId || undefined,
             userId
         }, controller, job.clientJobId, userId);
-        const timing = await awaitGenerationTask(signal, async ()=>loadLatestSwarmGenerationMetadata(connection, spindle.permissions.has("cors_proxy") ? await getMetadataToken(connection.id, userId) : null, {
-                ...input,
-                studioMetadata: result.studioMetadata
-            }, Date.now() - startedAt, userId));
-        let record = null;
-        try {
-            record = await awaitGenerationTask(signal, ()=>saveGenerationRecord(result, input, {
-                    ...asRecord(profile?.recordHints),
-                    source: "message-tag"
-                }, timing, userId));
-        } catch (error) {
-            if (signal.aborted || isAbortError(error)) throw error;
-            spindle.log.warn(`Could not save illustration history ${job.id}: ${String(error)}`);
-        }
-        signal.throwIfAborted();
+        const totalMs = Date.now() - startedAt;
         job.draftImage = undefined;
         job.finalImage = undefined;
-        job.imageId = record?.imageId || asString(result.imageId);
-        job.imageUrl = record?.imageUrl || asString(result.imageUrl);
+        job.imageId = asString(result.imageId);
+        job.imageUrl = asString(result.imageUrl);
         if (!job.imageUrl && job.imageId) job.imageUrl = `/api/v1/image-gen/results/${encodeURIComponent(job.imageId)}`;
         if (!job.imageUrl) throw new Error("Lumiverse completed the image job without returning a saved image URL.");
+        savedTaggedAttempts.add(controllerKey);
+        traceTaggedLifecycle("provider-returned", job);
+        if (generationControllers.get(controllerKey)?.controller === controller) generationControllers.delete(controllerKey);
         job.status = "ready";
         job.error = "";
         await upsertTaggedImageJob(job, userId);
@@ -8759,6 +8756,40 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         };
         const draftJob = taggedJobPublic(job);
         let filingFinished = false;
+        let record = null;
+        const history = (async ()=>{
+            let timer;
+            try {
+                return await Promise.race([
+                    (async ()=>{
+                        let token = null;
+                        if (spindle.permissions.has("cors_proxy")) {
+                            try {
+                                token = await boundedStudioRead(()=>getMetadataToken(connection.id, userId));
+                            } catch  {}
+                        }
+                        const timing = await loadLatestSwarmGenerationMetadata(connection, token, {
+                            ...input,
+                            studioMetadata: result.studioMetadata
+                        }, totalMs, userId);
+                        const saved = await saveGenerationRecord(draftResult, input, {
+                            ...asRecord(profile?.recordHints),
+                            source: "message-tag"
+                        }, timing, userId);
+                        traceTaggedLifecycle("history-saved", job);
+                        return saved;
+                    })(),
+                    new Promise((resolve)=>{
+                        timer = setTimeout(()=>resolve(null), 20000);
+                    })
+                ]);
+            } catch (error) {
+                spindle.log.warn(`Could not save illustration history ${job.id}: ${String(error)}`);
+                return null;
+            } finally{
+                if (timer !== undefined) clearTimeout(timer);
+            }
+        })();
         const publication = (async ()=>{
             let timer;
             let library = {};
@@ -8773,6 +8804,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
                         } finally{
                             filingFinished = true;
                         }
+                        await history;
                         const taggedChat = spindle.permissions.has("chats") ? await spindle.chats.get(job.chatId, userId) : {
                             id: job.chatId
                         };
@@ -8790,6 +8822,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
             } finally{
                 if (timer !== undefined) clearTimeout(timer);
             }
+            record = await history;
             spindle.sendToFrontend({
                 type: "tagged_generation_result",
                 clientJobId: job.clientJobId,
@@ -8804,7 +8837,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         const inserted = await finalizeTaggedImageJobWithRetry(job, userId);
         await publication;
         let autoFinalized = false;
-        if (inserted && job.output === "inline" && automation.autoFinalizeInline && !removedTaggedJobs.has(job.id)) {
+        if (inserted && job.output === "inline" && automation.autoFinalizeInline && record !== null && !removedTaggedJobs.has(job.id)) {
             try {
                 const connection = await connectionForTaggedProfile(job.generationInput ? {
                     input: job.generationInput,
@@ -8863,6 +8896,17 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
             spindle.toast.success(autoFinalized ? `Swarm Studio finalized and attached ${job.alt || "an illustration"}.` : `Swarm Studio attached ${job.alt || "an illustration"}.`);
         }
     } catch (error) {
+        if (savedTaggedAttempts.has(controllerKey) && job.imageUrl) {
+            job.status = "ready";
+            if (!job.inserted) job.error = "Image saved; attachment recovery is still needed.";
+            reportBackendError("Saved inline image follow-up failed", error, {
+                jobId: job.id,
+                messageId: job.messageId
+            });
+            await upsertTaggedImageJob(job, userId);
+            sendTaggedJobState(job, userId);
+            return;
+        }
         job.status = isAbortError(error) ? "cancelled" : "failed";
         job.error = error instanceof Error ? error.message : String(error);
         reportBackendError("Tagged image generation failed", error, {
@@ -8876,6 +8920,7 @@ async function runTaggedImageJob(job, useOriginalProfile, userId, overrides = {}
         sendTaggedJobState(job, userId);
     } finally{
         if (controller && generationControllers.get(controllerKey)?.controller === controller) generationControllers.delete(controllerKey);
+        savedTaggedAttempts.delete(controllerKey);
         runningTaggedJobs.delete(job.id);
     }
 }
@@ -11975,7 +12020,9 @@ async function handleMessage(payload, userId) {
                                 const rows = await loadTaggedImageJobs(userId);
                                 const current = rows.find((item)=>item.id === job.id);
                                 if (!current || current.clientJobId !== job.clientJobId || current.status !== job.status || current.updatedAt !== job.updatedAt || removedTaggedJobs.has(job.id)) return;
-                                const stopped = stoppedGenerationKeys.has(generationKey(userId, current.clientJobId));
+                                const attempt = generationKey(userId, current.clientJobId);
+                                const stopped = stoppedGenerationKeys.has(attempt);
+                                if (savedTaggedAttempts.has(attempt)) return;
                                 if (!stopped && (runningTaggedJobs.has(job.id) || pendingTaggedJobs.has(job.id))) return;
                                 current.status = stopped ? "cancelled" : "failed";
                                 current.error = stopped ? "Generation wait stopped. SwarmUI cancellation is not confirmed." : "The generation worker is no longer running. Retry to generate this illustration again.";
@@ -13693,6 +13740,19 @@ async function handleMessage(payload, userId) {
                     const clientJobId = asString(payload?.clientJobId).trim();
                     if (!clientJobId) throw new Error("No active generation was supplied.");
                     const key = generationKey(userId, clientJobId);
+                    if (savedTaggedAttempts.has(key) || !generationControllers.has(key) && (await loadTaggedImageJobs(userId)).some((job)=>job.clientJobId === clientJobId && job.status === "ready" && !!job.imageUrl) || savedTaggedAttempts.has(key)) {
+                        spindle.sendToFrontend({
+                            type: "generation_interrupt_requested",
+                            requestId,
+                            clientJobId,
+                            data: {
+                                interrupted: false,
+                                waitingStopped: false,
+                                alreadySaved: true
+                            }
+                        }, userId);
+                        return;
+                    }
                     rememberStoppedGeneration(key);
                     const controllerEntry = generationControllers.get(key);
                     controllerEntry?.controller.abort("Interrupted from Swarm Studio");
@@ -13705,13 +13765,19 @@ async function handleMessage(payload, userId) {
                             waitingStopped: true
                         }
                     }, userId);
-                    for (const job of (await loadTaggedImageJobs(userId))){
-                        if (job.clientJobId !== clientJobId || job.status !== "queued" && job.status !== "generating") continue;
-                        job.status = "cancelled";
-                        job.error = "Generation wait stopped. SwarmUI cancellation is not confirmed.";
-                        await upsertTaggedImageJob(job, userId);
-                        sendTaggedJobState(job, userId);
-                    }
+                    await withTaggedMessageFinalizeLock(`tagged-job-store:${userId || "default"}`, async ()=>{
+                        const rows = await loadTaggedImageJobs(userId);
+                        if (savedTaggedAttempts.has(key)) return;
+                        const cancelled = rows.filter((job)=>job.clientJobId === clientJobId && (job.status === "queued" || job.status === "generating"));
+                        if (!cancelled.length) return;
+                        for (const job of cancelled){
+                            job.status = "cancelled";
+                            job.error = "Generation wait stopped. SwarmUI cancellation is not confirmed.";
+                            job.updatedAt = Date.now();
+                        }
+                        await persistTaggedImageJobs(rows, userId);
+                        for (const job of cancelled)sendTaggedJobState(job, userId);
+                    });
                     const connectionId = asString(payload?.connectionId);
                     if (connectionId && controllerEntry && !controllerEntry.nativeStream) {
                         const connection = await getConnection(connectionId, userId);
@@ -14220,6 +14286,12 @@ async function settleTaggedImageSources(payload, userId, authoritativeEnd = fals
     const messageId = asString(payload?.messageId);
     const content = asString(payload?.content);
     const generationId = asString(payload?.generationId).slice(0, 200);
+    if (chatId && generationId) traceTaggedLifecycle("terminal-received", {
+        chatId,
+        messageId,
+        generationId,
+        swipeId: cleanTaggedSwipeId(payload?.swipeId ?? payload?.targetSwipeId)
+    }, `${authoritativeEnd ? "native" : "renderer"}:${!messageId ? "no-message-id" : !content ? "no-content" : "content-present"}`);
     if (!chatId || !messageId || content.length > 1_000_000 || !content && !(authoritativeEnd && generationId)) return;
     const key = taggedTerminalKey(userId, chatId, generationId);
     const changed = !!generationId && (!content || !!parseSwarmImageTags(content).length) && rememberTaggedTerminal(key, {
@@ -14290,6 +14362,11 @@ async function settleTaggedImageSources(payload, userId, authoritativeEnd = fals
     }
 }
 if (spindle.permissions.has("generation")) {
+    spindle.on("GENERATION_STOPPED", (payload, userId)=>{
+        if (typeof payload?.content === "string" && payload.content) {
+            void settleTaggedImageSources(payload, userId, true).catch((error)=>reportBackendError("Resolving stopped image source", error));
+        }
+    });
     spindle.on("GENERATION_ENDED", async (payload, userId)=>{
         const resolved = payload;
         void settleTaggedImageSources(resolved, userId, true).catch((error)=>reportBackendError("Resolving image source swipe", error));

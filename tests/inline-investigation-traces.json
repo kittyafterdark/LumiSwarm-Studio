@@ -19,7 +19,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "30f55b38-bfb6-4671-a1a9-e47963b32651",
+        "requestId": "7c09569e-0d2d-4ef8-aea6-ab6a09403f36",
         "chatId": "chat-1",
         "messageId": "inline-stream:front-normal",
         "generationId": "front-normal",
@@ -35,7 +35,7 @@
       },
       {
         "type": "settle_tagged_generation",
-        "requestId": "e8c35c79-5293-4103-9743-6a53c4df5bb7",
+        "requestId": "36d749da-0768-4cc8-b3d9-454d377c25bc",
         "chatId": "chat-1",
         "messageId": "final-normal",
         "generationId": "front-normal",
@@ -75,7 +75,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "3e460adc-3a75-42b5-b91a-8d3fa0d92197",
+        "requestId": "6ab9f98e-0dfa-4376-ae0f-965e4017a22c",
         "chatId": "chat-1",
         "messageId": "old-wrong-owner-id-only",
         "generationId": "front-wrong-owner-id-only",
@@ -91,7 +91,7 @@
       },
       {
         "type": "settle_tagged_generation",
-        "requestId": "1fcaac1c-8c38-41d9-aaec-2fcd7283fb5c",
+        "requestId": "b9a9b73d-7388-4278-b794-d96affbf3609",
         "chatId": "chat-1",
         "messageId": "final-wrong-owner-id-only",
         "generationId": "front-wrong-owner-id-only",
@@ -121,7 +121,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "76db7120-98de-4d0b-b1ef-7d01f80fce38",
+        "requestId": "9597dcde-984e-4725-bc32-3aee78120709",
         "chatId": "chat-1",
         "messageId": "final-missing-terminal-wrong-swipe",
         "generationId": "front-missing-terminal-wrong-swipe",
@@ -137,7 +137,7 @@
       },
       {
         "type": "tag_generate",
-        "requestId": "5262c628-69e3-45ea-9b62-f79f6a91eb96",
+        "requestId": "c64c8d09-818a-4e8b-bc83-9e90a2ce1416",
         "chatId": "chat-1",
         "messageId": "final-missing-terminal-wrong-swipe",
         "fullMatch": "<swarm-image request=\"generate\" slot=\"front-missing-terminal-wrong-swipe\" aspect=\"4:3\">harbor at dusk</swarm-image>",
@@ -173,7 +173,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "ca1a8fab-a851-4f34-ae5a-04eda6e57525",
+        "requestId": "40655c8c-0ffe-483b-8ab5-083c18caf9da",
         "chatId": "chat-1",
         "messageId": "inline-stream:front-remount-unscoped-stream",
         "generationId": "front-remount-unscoped-stream",
@@ -189,7 +189,7 @@
       },
       {
         "type": "tag_generate",
-        "requestId": "abec7f0b-727c-4aa7-92a0-60ca1db7f2d8",
+        "requestId": "9afaa0fe-72ce-4bcd-912f-163ab4a78dad",
         "chatId": "chat-1",
         "messageId": "final-remount-unscoped-stream",
         "fullMatch": "<swarm-image request=\"generate\" slot=\"front-remount-unscoped-stream\" aspect=\"4:3\">harbor at dusk</swarm-image>",
@@ -205,7 +205,7 @@
       },
       {
         "type": "tag_generate",
-        "requestId": "7f622cfb-5e64-43e4-98d4-e596f24cf8d3",
+        "requestId": "c611833d-aea6-4bea-8cd7-3121539ae5f8",
         "chatId": "chat-1",
         "messageId": "final-remount-unscoped-stream",
         "fullMatch": "<swarm-image request=\"generate\" slot=\"front-remount-unscoped-stream\" aspect=\"4:3\">harbor at dusk</swarm-image>",
@@ -241,7 +241,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "4f585947-04a4-414b-a171-d59a5f87a727",
+        "requestId": "378ec896-a35d-477e-bf9f-c9295e5508bb",
         "chatId": "chat-1",
         "messageId": "inline-stream:front-stale-terminal-then-correct",
         "generationId": "front-stale-terminal-then-correct",
@@ -257,7 +257,7 @@
       },
       {
         "type": "settle_tagged_generation",
-        "requestId": "d5a13496-d33d-4e82-84e1-7a088b942b43",
+        "requestId": "abcb30a0-8d80-439f-992f-74e4a71c9bf3",
         "chatId": "chat-1",
         "messageId": "final-stale-terminal-then-correct",
         "generationId": "front-stale-terminal-then-correct",
@@ -266,7 +266,7 @@
       },
       {
         "type": "settle_tagged_generation",
-        "requestId": "bdeceb6a-4212-486e-9f65-66e3d1f59003",
+        "requestId": "2dcb8d64-56b8-4143-9226-c6c4a1a0135e",
         "chatId": "chat-1",
         "messageId": "final-stale-terminal-then-correct",
         "generationId": "front-stale-terminal-then-correct",
@@ -295,7 +295,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "7506a0b3-8b6c-4d73-a5e8-553395c806f0",
+        "requestId": "e93fcc71-e621-495e-8451-db51609fc005",
         "chatId": "chat-1",
         "messageId": "inline-stream:front-explicit-generation-final-remount",
         "generationId": "front-explicit-generation-final-remount",
@@ -311,7 +311,7 @@
       },
       {
         "type": "settle_tagged_generation",
-        "requestId": "a3727fc0-7f4c-4c18-abc6-a710b9dc5942",
+        "requestId": "8447a7c1-a23e-4231-9df1-6dcf5dc9ee70",
         "chatId": "chat-1",
         "messageId": "final-explicit-generation-final-remount",
         "generationId": "front-explicit-generation-final-remount",
@@ -351,7 +351,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "09fc709c-8cfe-4302-82af-ccd2fbe82821",
+        "requestId": "368f1169-f7da-49f0-8230-f957f19e915e",
         "chatId": "chat-1",
         "messageId": "inline-stream:front-idless-ambiguous-two-matches",
         "generationId": "front-idless-ambiguous-two-matches",
@@ -367,7 +367,7 @@
       },
       {
         "type": "tag_generate",
-        "requestId": "a8aa527c-bc59-46f6-84b4-fe66c1ca0170",
+        "requestId": "b719e9a0-2cd9-44f4-8baa-0a6aa30849bf",
         "chatId": "chat-1",
         "messageId": "final-idless-ambiguous-two-matches",
         "fullMatch": "<swarm-image request=\"generate\" slot=\"front-idless-ambiguous-two-matches\" aspect=\"4:3\">harbor at dusk</swarm-image>",
@@ -404,7 +404,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "f17b61c5-d3c9-4d99-81a3-f45cf6762ba7",
+        "requestId": "9619d9cb-a0bf-4723-bef0-ee289d55a43f",
         "chatId": "chat-1",
         "messageId": "final-idless-existing-new-swipe",
         "generationId": "front-idless-existing-new-swipe",
@@ -420,7 +420,7 @@
       },
       {
         "type": "settle_tagged_generation",
-        "requestId": "d7eed9df-171a-4246-9d34-b17e68691197",
+        "requestId": "f76e68dc-d830-44bb-bf83-b399ce801876",
         "chatId": "chat-1",
         "messageId": "final-idless-existing-new-swipe",
         "generationId": "front-idless-existing-new-swipe",
@@ -449,7 +449,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "305c7bd3-88c9-4219-9bf2-7076e1a23bee",
+        "requestId": "6e443b20-5685-4305-ba08-4779dab93bcf",
         "chatId": "chat-1",
         "messageId": "final-native-before-token",
         "generationId": "front-native-before-token",
@@ -465,7 +465,7 @@
       },
       {
         "type": "settle_tagged_generation",
-        "requestId": "e35b997c-0e81-427f-8e75-3578233b0d5f",
+        "requestId": "f9a3627d-6524-425b-9cb1-130e4ca356db",
         "chatId": "chat-1",
         "messageId": "final-native-before-token",
         "generationId": "front-native-before-token",
@@ -494,7 +494,7 @@
     "sent": [
       {
         "type": "tag_generate",
-        "requestId": "e055cf2f-173c-4091-9940-5aa9570ba9fd",
+        "requestId": "91952862-161d-400c-8c38-bb28e682c8dd",
         "chatId": "chat-1",
         "messageId": "final-native-after-token-gap",
         "generationId": "front-native-after-token-gap",
@@ -510,7 +510,7 @@
       },
       {
         "type": "settle_tagged_generation",
-        "requestId": "471d218f-a765-458c-86ca-44557a53998d",
+        "requestId": "18010bb2-92cd-43d6-ba02-2505819896e1",
         "chatId": "chat-1",
         "messageId": "final-native-after-token-gap",
         "generationId": "front-native-after-token-gap",

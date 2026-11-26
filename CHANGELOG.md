@@ -1,3 +1,10 @@
+## 1.1.0-alpha.17.19 - Saved bitmap settlement
+
+- Persist completed inline provider results as ready before optional metadata, provenance/history, or library synchronization; attach independently of those operations. Request saved image references without transferring the final bitmap again.
+- Stop only the active render attempt, never a durably saved bitmap. Use verified partial-reply terminal evidence after generation stops; do not dispatch new packets from Stop. Preserve generation reservations, swipe ownership, early dispatch and hidden automatic ribbons.
+- Serialize history updates, bound optional history publication, and skip automatic upscale if history/provenance could not be confirmed. Add prompt-free provider-return, terminal, attachment-write and pending-reason diagnostics.
+- Add three concurrent saved-result/blocked-history/Stop regression, plus ID-less partial-reply settlement browser coverage. Existing ownership replay fixtures retained.
+
 ## 1.1.0-alpha.17.18 - Native streaming dispatch
 
 - Accept complete native streaming callbacks matched to one active generation without waiting for the independent token buffer. Preserve slot reservations, protected source ranges and ambiguous-owner deferral. Backend, attachment, and ribbon rules unchanged.

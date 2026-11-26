@@ -3033,6 +3033,7 @@ are removed when CSS is applied.</pre>
       }
       case "generation_interrupt_requested":
         if (payload.clientJobId === this.currentJobId) {
+          if (data.alreadySaved === true) { this.settleTaggedJob(String(payload.clientJobId || "")); break }
           if (data.waitingStopped === true || data.interrupted === false) {
             this.onMessage({ type: "generation_interrupted", clientJobId: payload.clientJobId })
             this.setRunStatus("Stopped waiting. SwarmUI cancellation is not confirmed; your previous output is safe.")
